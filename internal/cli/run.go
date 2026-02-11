@@ -30,7 +30,6 @@ func init() {
 	runCmd.Flags().String("prompt", "", "Prompt to send to the agent (default: built from project context)")
 	runCmd.Flags().Int("max-turns", 0, "Maximum number of agent turns (0 = unlimited)")
 	runCmd.Flags().String("model", "", "Model override for the agent")
-	runCmd.Flags().Bool("auto-approve", true, "Auto-approve agent actions without confirmation")
 	runCmd.Flags().String("command", "", "Custom command path (for generic agent)")
 	rootCmd.AddCommand(runCmd)
 }
@@ -45,7 +44,6 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	prompt, _ := cmd.Flags().GetString("prompt")
 	maxTurns, _ := cmd.Flags().GetInt("max-turns")
 	modelFlag, _ := cmd.Flags().GetString("model")
-	autoApprove, _ := cmd.Flags().GetBool("auto-approve")
 	customCmd, _ := cmd.Flags().GetString("command")
 	modelFlag = strings.TrimSpace(modelFlag)
 
@@ -98,25 +96,22 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		prompt = built
 	}
 
-	// Build agent args based on agent type and flags.
+	// Build agent args based on agent type.
 	// NOTE: Each agent's Run() method reads cfg.Prompt directly, so do NOT
 	// add the prompt to agentArgs here — that would duplicate it.
+	// All agents always run in full-auto / auto-approve mode.
 	var agentArgs []string
 	switch agentName {
 	case "claude":
 		if modelOverride != "" {
 			agentArgs = append(agentArgs, "--model", modelOverride)
 		}
-		if autoApprove {
-			agentArgs = append(agentArgs, "--dangerously-skip-permissions")
-		}
+		agentArgs = append(agentArgs, "--dangerously-skip-permissions")
 	case "codex":
 		if modelOverride != "" {
 			agentArgs = append(agentArgs, "--model", modelOverride)
 		}
-		if autoApprove {
-			agentArgs = append(agentArgs, "--full-auto")
-		}
+		agentArgs = append(agentArgs, "--full-auto")
 	case "vibe":
 		// vibe reads prompt from cfg.Prompt via stdin, no extra args needed.
 	case "opencode":
@@ -152,7 +147,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	} else {
 		printField("Max Turns", "unlimited")
 	}
-	printField("Auto-Approve", fmt.Sprintf("%v", autoApprove))
+	printField("Auto-Approve", "true")
 	printField("Started", time.Now().Format("2006-01-02 15:04:05"))
 	fmt.Println()
 	fmt.Println(colorDim + "  " + strings.Repeat("-", 46) + colorReset)
