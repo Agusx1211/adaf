@@ -1,6 +1,11 @@
 package agent
 
-import "sync"
+import (
+	"strings"
+	"sync"
+
+	"github.com/agusx1211/adaf/internal/detect"
+)
 
 var (
 	registryMu sync.RWMutex
@@ -9,16 +14,18 @@ var (
 
 func init() {
 	registry = DefaultRegistry()
+	autoPopulateFromDetection(registry)
 }
 
 // DefaultRegistry returns a map of all built-in agent implementations
 // keyed by their canonical names.
 func DefaultRegistry() map[string]Agent {
 	return map[string]Agent{
-		"claude":  NewClaudeAgent(),
-		"codex":   NewCodexAgent(),
-		"vibe":    NewVibeAgent(),
-		"generic": NewGenericAgent("generic"),
+		"claude":   NewClaudeAgent(),
+		"codex":    NewCodexAgent(),
+		"vibe":     NewVibeAgent(),
+		"opencode": NewOpencodeAgent(),
+		"generic":  NewGenericAgent("generic"),
 	}
 }
 
@@ -47,4 +54,21 @@ func All() map[string]Agent {
 		cp[k] = v
 	}
 	return cp
+}
+
+func autoPopulateFromDetection(reg map[string]Agent) {
+	detected, err := detect.Scan()
+	if err != nil {
+		return
+	}
+	for _, item := range detected {
+		name := strings.ToLower(strings.TrimSpace(item.Name))
+		if name == "" {
+			continue
+		}
+		if _, exists := reg[name]; exists {
+			continue
+		}
+		reg[name] = NewGenericAgent(name)
+	}
 }

@@ -1,10 +1,8 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -30,6 +28,11 @@ func (c *CodexAgent) Name() string {
 //
 // The prompt is passed as a positional argument to codex. Additional flags
 // (e.g. --model, --approval-mode) can be supplied via cfg.Args.
+//
+// Codex requires stdin, stdout, and stderr to be real TTYs (it performs isatty
+// checks on all three). We therefore pass the real terminal file descriptors
+// through instead of wrapping them with io.MultiWriter. Output capture in
+// Result.Output/Error will be empty; metadata and exit code are still recorded.
 func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Recorder) (*Result, error) {
 	cmdName := cfg.Command
 	if cmdName == "" {
@@ -48,16 +51,16 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
 
+	// Pass real terminal FDs so codex sees TTYs on all three streams.
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
 	// Environment: inherit + overlay.
 	cmd.Env = os.Environ()
 	for k, v := range cfg.Env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
-
-	// Capture output.
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = io.MultiWriter(&stdoutBuf, recorder.WrapWriter(os.Stdout, "stdout"))
-	cmd.Stderr = io.MultiWriter(&stderrBuf, recorder.WrapWriter(os.Stderr, "stderr"))
 
 	recorder.RecordMeta("agent", "codex")
 	recorder.RecordMeta("command", cmdName+" "+strings.Join(args, " "))
@@ -79,7 +82,5 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 	return &Result{
 		ExitCode: exitCode,
 		Duration: duration,
-		Output:   stdoutBuf.String(),
-		Error:    stderrBuf.String(),
 	}, nil
 }

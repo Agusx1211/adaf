@@ -21,12 +21,12 @@ var runCmd = &cobra.Command{
 	Long: `Run an AI agent in a loop against the project. The agent will work on the
 current plan, resolve issues, and log its progress.
 
-Supported agents: claude, codex, vibe, generic`,
+Supported agents: claude, codex, vibe, opencode, generic`,
 	RunE: runAgent,
 }
 
 func init() {
-	runCmd.Flags().String("agent", "claude", "Agent to run (claude, codex, vibe, generic)")
+	runCmd.Flags().String("agent", "claude", "Agent to run (claude, codex, vibe, opencode, generic)")
 	runCmd.Flags().String("prompt", "", "Prompt to send to the agent (default: built from project context)")
 	runCmd.Flags().Int("max-turns", 1, "Maximum number of agent turns (0 = unlimited)")
 	runCmd.Flags().String("model", "", "Model override for the agent")
@@ -48,10 +48,30 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	autoApprove, _ := cmd.Flags().GetBool("auto-approve")
 	customCmd, _ := cmd.Flags().GetString("command")
 
-	// Look up agent from registry
+	// Look up agent from registry.
 	agentInstance, ok := agent.Get(agentName)
 	if !ok {
 		return fmt.Errorf("unknown agent %q (valid: %s)", agentName, strings.Join(agentNames(), ", "))
+	}
+
+	agentsCfg, err := agent.LoadAndSyncAgentsConfig(s.Root())
+	if err != nil {
+		return fmt.Errorf("loading agent configuration: %w", err)
+	}
+	if rec, ok := agentsCfg.Agents[agentName]; ok {
+		if customCmd == "" && rec.Path != "" {
+			customCmd = rec.Path
+		}
+	}
+	if model == "" {
+		model = agent.ResolveDefaultModel(agentsCfg, agentName)
+	}
+	if customCmd == "" {
+		switch agentName {
+		case "claude", "codex", "vibe", "opencode", "generic":
+		default:
+			customCmd = agentName
+		}
 	}
 
 	// Load project config
@@ -75,9 +95,8 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build agent args based on agent type and flags.
-	// NOTE: For agents where the Run() method appends the prompt from
-	// cfg.Prompt (e.g. claude), do NOT add it to agentArgs here to
-	// avoid duplicating the -p flag.
+	// NOTE: Each agent's Run() method reads cfg.Prompt directly, so do NOT
+	// add the prompt to agentArgs here — that would duplicate it.
 	var agentArgs []string
 	switch agentName {
 	case "claude":
@@ -88,7 +107,6 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			agentArgs = append(agentArgs, "--dangerously-skip-permissions")
 		}
 	case "codex":
-		agentArgs = append(agentArgs, prompt)
 		if model != "" {
 			agentArgs = append(agentArgs, "--model", model)
 		}
@@ -96,7 +114,11 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			agentArgs = append(agentArgs, "--full-auto")
 		}
 	case "vibe":
-		agentArgs = append(agentArgs, prompt)
+		// vibe reads prompt from cfg.Prompt via stdin, no extra args needed.
+	case "opencode":
+		if model != "" {
+			agentArgs = append(agentArgs, "--model", model)
+		}
 	}
 
 	agentCfg := agent.Config{
