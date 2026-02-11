@@ -180,10 +180,11 @@ func (m Model) renderEventBreakdown(events []store.RecordingEvent, width int) st
 	header := DetailLabelStyle.Render("Event Breakdown:")
 	var parts []string
 	typeColors := map[string]lipgloss.Color{
-		"stdout": ColorGreen,
-		"stderr": ColorRed,
-		"stdin":  ColorBlue,
-		"meta":   ColorMauve,
+		"stdout":       ColorGreen,
+		"stderr":       ColorRed,
+		"stdin":        ColorBlue,
+		"meta":         ColorMauve,
+		"claude_stream": ColorTeal,
 	}
 
 	for t, c := range counts {
@@ -216,10 +217,11 @@ func (m Model) renderRecentEvents(events []store.RecordingEvent, width int) stri
 	lines = append(lines, header)
 
 	typeColors := map[string]lipgloss.Color{
-		"stdout": ColorGreen,
-		"stderr": ColorRed,
-		"stdin":  ColorBlue,
-		"meta":   ColorMauve,
+		"stdout":       ColorGreen,
+		"stderr":       ColorRed,
+		"stdin":        ColorBlue,
+		"meta":         ColorMauve,
+		"claude_stream": ColorTeal,
 	}
 
 	for i := start; i < len(events); i++ {

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -158,10 +159,17 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 				typeColor = colorYellow
 			case "meta":
 				typeColor = colorCyan
+			case "claude_stream":
+				typeColor = styleBoldCyan
 			}
 
 			timestamp := ev.Timestamp.Format("15:04:05")
 			data := truncate(firstLine(ev.Data), 70)
+
+			// For claude_stream events, show a formatted summary instead of raw JSON.
+			if ev.Type == "claude_stream" {
+				data = summarizeStreamEvent(ev.Data)
+			}
 
 			fmt.Printf("  %s%s%s %s%-6s%s %s\n",
 				colorDim, timestamp, colorReset,
@@ -187,4 +195,116 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 
 	fmt.Println()
 	return nil
+}
+
+// summarizeStreamEvent returns a short human-readable summary of a claude_stream
+// JSON event, suitable for display in the event timeline.
+func summarizeStreamEvent(rawJSON string) string {
+	var obj struct {
+		Type      string `json:"type"`
+		Subtype   string `json:"subtype,omitempty"`
+		SessionID string `json:"session_id,omitempty"`
+		Model     string `json:"model,omitempty"`
+
+		// assistant events
+		Message *struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text,omitempty"`
+				Name string `json:"name,omitempty"`
+			} `json:"content,omitempty"`
+		} `json:"message,omitempty"`
+
+		// content_block_start/delta/stop (streaming mode)
+		ContentBlock *struct {
+			Type string `json:"type"`
+			Name string `json:"name,omitempty"`
+		} `json:"content_block,omitempty"`
+		Delta *struct {
+			Type string `json:"type,omitempty"`
+			Text string `json:"text,omitempty"`
+		} `json:"delta,omitempty"`
+
+		// result events (top-level fields in Claude stream-json)
+		TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
+		DurationMS   float64 `json:"duration_ms,omitempty"`
+		NumTurns     int     `json:"num_turns,omitempty"`
+		ResultText   string  `json:"result,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(rawJSON), &obj); err != nil {
+		return truncate(firstLine(rawJSON), 70)
+	}
+
+	switch obj.Type {
+	case "system":
+		return fmt.Sprintf("[init] session=%s model=%s", obj.SessionID, obj.Model)
+	case "assistant":
+		if obj.Message != nil {
+			var parts []string
+			for _, block := range obj.Message.Content {
+				switch block.Type {
+				case "text":
+					text := block.Text
+					if len(text) > 50 {
+						text = text[:47] + "..."
+					}
+					parts = append(parts, text)
+				case "tool_use":
+					parts = append(parts, fmt.Sprintf("[tool:%s]", block.Name))
+				case "thinking":
+					parts = append(parts, "[thinking]")
+				}
+			}
+			if len(parts) > 0 {
+				return strings.Join(parts, " ")
+			}
+		}
+		return "[assistant]"
+	case "content_block_start":
+		if obj.ContentBlock != nil {
+			switch obj.ContentBlock.Type {
+			case "tool_use":
+				return fmt.Sprintf("[tool:%s] start", obj.ContentBlock.Name)
+			case "thinking":
+				return "[thinking] start"
+			case "text":
+				return "[text] start"
+			}
+			return fmt.Sprintf("[%s] start", obj.ContentBlock.Type)
+		}
+	case "content_block_delta":
+		if obj.Delta != nil {
+			text := obj.Delta.Text
+			if len(text) > 60 {
+				text = text[:57] + "..."
+			}
+			switch obj.Delta.Type {
+			case "text_delta":
+				return fmt.Sprintf("[text] %s", text)
+			case "thinking_delta":
+				return fmt.Sprintf("[thinking] %s", text)
+			case "input_json_delta":
+				return "[tool] input delta"
+			}
+		}
+	case "content_block_stop":
+		return "[block] stop"
+	case "result":
+		var parts []string
+		if obj.TotalCostUSD > 0 {
+			parts = append(parts, fmt.Sprintf("cost=$%.4f", obj.TotalCostUSD))
+		}
+		if obj.DurationMS > 0 {
+			parts = append(parts, fmt.Sprintf("duration=%.1fs", obj.DurationMS/1000))
+		}
+		if obj.NumTurns > 0 {
+			parts = append(parts, fmt.Sprintf("turns=%d", obj.NumTurns))
+		}
+		if len(parts) > 0 {
+			return "[result] " + strings.Join(parts, " ")
+		}
+		return "[result]"
+	}
+
+	return fmt.Sprintf("[%s]", obj.Type)
 }

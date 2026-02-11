@@ -46,6 +46,11 @@ func (r *Recorder) RecordMeta(key, value string) {
 	r.record("meta", key+"="+value)
 }
 
+// RecordStream records a raw NDJSON line from Claude's stream-json output.
+func (r *Recorder) RecordStream(rawJSON string) {
+	r.record("claude_stream", rawJSON)
+}
+
 // record appends an event both to the in-memory buffer and to the store
 // (via AppendRecordingEvent for streaming persistence).
 func (r *Recorder) record(eventType, data string) {
