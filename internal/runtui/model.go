@@ -57,6 +57,9 @@ type Model struct {
 	currentBlockType string
 	currentToolName  string
 
+	// Hierarchy: active spawns for this session.
+	spawns []SpawnInfo
+
 	// Event channel and lifecycle state.
 	eventCh    chan any
 	cancelFunc context.CancelFunc
@@ -127,6 +130,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case AgentRawOutputMsg:
 		m.addLine(msg.Data)
+		return m, waitForEvent(m.eventCh)
+
+	case SpawnStatusMsg:
+		m.spawns = msg.Spawns
 		return m, waitForEvent(m.eventCh)
 
 	case AgentStartedMsg:
@@ -677,6 +684,27 @@ func (m Model) renderLeftPanel(outerW, outerH int) string {
 		lines = append(lines, fieldLine("Turns", fmt.Sprintf("%d", m.numTurns)))
 	}
 	lines = append(lines, "")
+
+	// Hierarchy section.
+	if len(m.spawns) > 0 {
+		lines = append(lines, sectionTitleStyle.Render("Hierarchy"))
+		for _, sp := range m.spawns {
+			var statusStyle lipgloss.Style
+			switch sp.Status {
+			case "running":
+				statusStyle = lipgloss.NewStyle().Foreground(theme.ColorYellow)
+			case "completed", "merged":
+				statusStyle = lipgloss.NewStyle().Foreground(theme.ColorGreen)
+			case "failed", "rejected":
+				statusStyle = lipgloss.NewStyle().Foreground(theme.ColorRed)
+			default:
+				statusStyle = lipgloss.NewStyle().Foreground(theme.ColorOverlay0)
+			}
+			line := fmt.Sprintf("  [%d] %s (%s)", sp.ID, sp.Profile, statusStyle.Render(sp.Status))
+			lines = append(lines, line)
+		}
+		lines = append(lines, "")
+	}
 
 	// Plan section.
 	if m.plan != nil && len(m.plan.Phases) > 0 {

@@ -36,5 +36,17 @@ type AgentLoopDoneMsg struct {
 // BackToSelectorMsg signals that the user wants to return to the agent selector.
 type BackToSelectorMsg struct{}
 
+// SpawnStatusMsg carries hierarchical spawn status for the left panel.
+type SpawnStatusMsg struct {
+	Spawns []SpawnInfo
+}
+
+// SpawnInfo describes a spawn entry for the hierarchy view.
+type SpawnInfo struct {
+	ID      int
+	Profile string
+	Status  string // "queued", "running", "completed", "failed", "merged", "rejected"
+}
+
 // tickMsg is sent every second to update the elapsed time display.
 type tickMsg struct{}

@@ -2,9 +2,7 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,6 +11,7 @@ import (
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/agentmeta"
 	"github.com/agusx1211/adaf/internal/config"
+	promptpkg "github.com/agusx1211/adaf/internal/prompt"
 	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/store"
 )
@@ -21,12 +20,19 @@ import (
 type appState int
 
 const (
-	stateSelector        appState = iota
+	stateSelector         appState = iota
 	stateRunning
-	stateProfileName     // text input for new profile name
-	stateProfileAgent    // pick agent for new profile
-	stateProfileModel    // pick model for new profile
+	stateProfileName      // text input for new profile name
+	stateProfileAgent     // pick agent for new profile
+	stateProfileModel     // pick model for new profile
 	stateProfileReasoning // pick reasoning level for new profile
+	stateProfileRole      // pick role for new profile
+	stateProfileIntel     // input intelligence rating (1-10)
+	stateProfileDesc      // input description text
+	stateProfileMaxInst   // input max concurrent instances
+	stateProfileSpawnable // multi-select spawnable profiles
+	stateProfileMaxPar    // input max parallel
+	stateProfileMenu      // edit profile: field picker menu
 )
 
 // AppModel is the top-level bubbletea model for the unified adaf TUI.
@@ -44,7 +50,9 @@ type AppModel struct {
 	profiles []profileEntry
 	selected int
 
-	// Profile creation wizard state.
+	// Profile creation/editing wizard state.
+	profileEditing         bool   // true = editing existing, false = creating new
+	profileEditName        string // original name of profile being edited
 	profileNameInput       string
 	profileAgents          []string
 	profileAgentSel        int
@@ -55,6 +63,16 @@ type AppModel struct {
 	profileSelectedModel   string
 	profileReasoningLevels    []agentmeta.ReasoningLevel
 	profileReasoningLevelSel  int
+	profileSelectedReasoning  string
+	profileRoleSel            int
+	profileIntelInput         string
+	profileDescInput          string
+	profileMenuSel            int
+	profileMaxInstInput       string
+	profileSpawnableOptions   []string // profile names available for selection
+	profileSpawnableSelected  map[int]bool
+	profileSpawnableSel       int
+	profileMaxParInput        string
 
 	// Cached project data for the selector.
 	project *store.ProjectConfig
@@ -130,6 +148,20 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateProfileModel(msg)
 	case stateProfileReasoning:
 		return m.updateProfileReasoning(msg)
+	case stateProfileRole:
+		return m.updateProfileRole(msg)
+	case stateProfileIntel:
+		return m.updateProfileIntel(msg)
+	case stateProfileDesc:
+		return m.updateProfileDesc(msg)
+	case stateProfileMaxInst:
+		return m.updateProfileMaxInst(msg)
+	case stateProfileSpawnable:
+		return m.updateProfileSpawnable(msg)
+	case stateProfileMaxPar:
+		return m.updateProfileMaxPar(msg)
+	case stateProfileMenu:
+		return m.updateProfileMenu(msg)
 	}
 	return m, nil
 }
@@ -154,8 +186,16 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "n":
 			// Start new profile creation.
+			m.profileEditing = false
+			m.profileEditName = ""
 			m.profileNameInput = ""
 			m.state = stateProfileName
+			return m, nil
+		case "e":
+			// Edit selected profile.
+			if m.selected >= 0 && m.selected < len(m.profiles) && !m.profiles[m.selected].IsNew {
+				return m.startEditProfile()
+			}
 			return m, nil
 		case "d":
 			// Delete selected profile (unless it's the sentinel).
@@ -272,7 +312,12 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 		workDir, _ = os.Getwd()
 	}
 
-	prompt, _ := buildPrompt(m.store, m.project)
+	// Look up the full profile for role-aware prompt building.
+	var prof *config.Profile
+	if found := m.globalCfg.FindProfile(p.Name); found != nil {
+		prof = found
+	}
+	prompt, _ := buildPrompt(m.store, m.project, prof, m.globalCfg)
 
 	agentCfg := agent.Config{
 		Name:    p.Agent,
@@ -323,6 +368,20 @@ func (m AppModel) View() string {
 		return m.viewProfileModel()
 	case stateProfileReasoning:
 		return m.viewProfileReasoning()
+	case stateProfileRole:
+		return m.viewProfileRole()
+	case stateProfileIntel:
+		return m.viewProfileIntel()
+	case stateProfileDesc:
+		return m.viewProfileDesc()
+	case stateProfileMaxInst:
+		return m.viewProfileMaxInst()
+	case stateProfileSpawnable:
+		return m.viewProfileSpawnable()
+	case stateProfileMaxPar:
+		return m.viewProfileMaxPar()
+	case stateProfileMenu:
+		return m.viewProfileMenu()
 	default:
 		return m.viewSelector()
 	}
@@ -369,6 +428,7 @@ func (m AppModel) renderStatusBar() string {
 	add("enter", "start")
 	if m.state == stateSelector {
 		add("n", "new profile")
+		add("e", "edit")
 		add("d", "delete")
 	}
 	add("q", "quit")
@@ -391,122 +451,12 @@ func RunApp(s *store.Store) error {
 	return err
 }
 
-// buildPrompt constructs a default prompt from project context.
-// This mirrors the logic from cli/run.go's buildDefaultPrompt.
-func buildPrompt(s *store.Store, project *store.ProjectConfig) (string, error) {
-	if project == nil {
-		return "Explore the codebase and address any open issues.", nil
-	}
-
-	var b strings.Builder
-
-	plan, _ := s.LoadPlan()
-	latest, _ := s.LatestLog()
-
-	b.WriteString("# Objective\n\n")
-	b.WriteString("Project: " + project.Name + "\n\n")
-
-	var currentPhase *store.PlanPhase
-	if plan != nil && len(plan.Phases) > 0 {
-		for i := range plan.Phases {
-			p := &plan.Phases[i]
-			if p.Status == "not_started" || p.Status == "in_progress" {
-				currentPhase = p
-				break
-			}
-		}
-	}
-
-	if currentPhase != nil {
-		fmt.Fprintf(&b, "Your task is to work on phase **%s: %s**.\n\n", currentPhase.ID, currentPhase.Title)
-		if currentPhase.Description != "" {
-			b.WriteString(currentPhase.Description + "\n\n")
-		}
-	} else if plan != nil && plan.Title != "" {
-		b.WriteString("All planned phases are complete. Look for remaining open issues or improvements.\n\n")
-	} else {
-		b.WriteString("No plan is set. Explore the codebase and address any open issues.\n\n")
-	}
-
-	b.WriteString("# Rules\n\n")
-	b.WriteString("- Write code, run tests, and ensure everything compiles before finishing.\n")
-	b.WriteString("- Focus on one coherent unit of work. Stop when the current phase (or a meaningful increment of it) is complete.\n")
-	b.WriteString("- Do NOT read or write files inside the `.adaf/` directory directly. " +
-		"Use `adaf` CLI commands instead (`adaf issues`, `adaf log`, `adaf plan`, etc.). " +
-		"The `.adaf/` directory structure may change and direct access will be restricted in the future.\n")
-	b.WriteString("\n")
-
-	b.WriteString("# Context\n\n")
-
-	if latest != nil {
-		b.WriteString("## Last Session\n")
-		if latest.Objective != "" {
-			fmt.Fprintf(&b, "- Objective: %s\n", latest.Objective)
-		}
-		if latest.WhatWasBuilt != "" {
-			fmt.Fprintf(&b, "- Built: %s\n", latest.WhatWasBuilt)
-		}
-		if latest.NextSteps != "" {
-			fmt.Fprintf(&b, "- Next steps: %s\n", latest.NextSteps)
-		}
-		if latest.KnownIssues != "" {
-			fmt.Fprintf(&b, "- Known issues: %s\n", latest.KnownIssues)
-		}
-		b.WriteString("\n")
-	}
-
-	issues, _ := s.ListIssues()
-	var relevant []store.Issue
-	for _, iss := range issues {
-		if iss.Status == "open" || iss.Status == "in_progress" {
-			relevant = append(relevant, iss)
-		}
-	}
-	if len(relevant) > 0 {
-		b.WriteString("## Open Issues\n")
-		for _, iss := range relevant {
-			fmt.Fprintf(&b, "- #%d [%s] %s: %s\n", iss.ID, iss.Priority, iss.Title, iss.Description)
-		}
-		b.WriteString("\n")
-	}
-
-	if currentPhase != nil && plan != nil && len(plan.Phases) > 1 {
-		b.WriteString("## Neighboring Phases\n")
-		for i, p := range plan.Phases {
-			if p.ID == currentPhase.ID {
-				if i > 0 {
-					prev := plan.Phases[i-1]
-					fmt.Fprintf(&b, "- Previous: [%s] %s: %s\n", prev.Status, prev.ID, prev.Title)
-				}
-				fmt.Fprintf(&b, "- **Current: [%s] %s: %s**\n", p.Status, p.ID, p.Title)
-				if i < len(plan.Phases)-1 {
-					next := plan.Phases[i+1]
-					fmt.Fprintf(&b, "- Next: [%s] %s: %s\n", next.Status, next.ID, next.Title)
-				}
-				break
-			}
-		}
-		b.WriteString("\n")
-	}
-
-	workDir := project.RepoPath
-	if workDir != "" {
-		agentsMD := filepath.Join(workDir, "AGENTS.md")
-		if info, err := os.Stat(agentsMD); err == nil {
-			const maxSize = 16 * 1024
-			if info.Size() <= maxSize {
-				if data, err := os.ReadFile(agentsMD); err == nil {
-					b.WriteString("# AGENTS.md\n\n")
-					b.WriteString("The repository includes an AGENTS.md with instructions for AI agents. Follow these:\n\n")
-					b.WriteString(string(data))
-					b.WriteString("\n\n")
-				}
-			} else {
-				b.WriteString("# AGENTS.md\n\n")
-				fmt.Fprintf(&b, "The repository includes an AGENTS.md file at `%s`. Read it before starting work — it contains important instructions for AI agents.\n\n", agentsMD)
-			}
-		}
-	}
-
-	return b.String(), nil
+// buildPrompt constructs a default prompt from project context using the shared builder.
+func buildPrompt(s *store.Store, project *store.ProjectConfig, profile *config.Profile, globalCfg *config.GlobalConfig) (string, error) {
+	return promptpkg.Build(promptpkg.BuildOpts{
+		Store:     s,
+		Project:   project,
+		Profile:   profile,
+		GlobalCfg: globalCfg,
+	})
 }

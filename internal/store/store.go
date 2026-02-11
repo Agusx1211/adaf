@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -32,6 +33,8 @@ func (s *Store) Init(config ProjectConfig) error {
 		filepath.Join(s.root, "docs"),
 		filepath.Join(s.root, "issues"),
 		filepath.Join(s.root, "decisions"),
+		filepath.Join(s.root, "spawns"),
+		filepath.Join(s.root, "notes"),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {
@@ -383,4 +386,196 @@ func (s *Store) nextID(dir string) int {
 		}
 	}
 	return maxID + 1
+}
+
+// --- File-level locking helpers for multi-process safety ---
+
+// lockFile acquires an exclusive flock on path+".lock". Returns the lock file
+// which must be closed (via unlockFile) after the operation completes.
+func lockFile(path string) (*os.File, error) {
+	lf, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX); err != nil {
+		lf.Close()
+		return nil, err
+	}
+	return lf, nil
+}
+
+// unlockFile releases the flock and closes the lock file.
+func unlockFile(lf *os.File) {
+	if lf == nil {
+		return
+	}
+	syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
+	lf.Close()
+}
+
+// writeJSONLocked writes JSON to path while holding an flock.
+func (s *Store) writeJSONLocked(path string, v any) error {
+	lf, err := lockFile(path)
+	if err != nil {
+		return fmt.Errorf("lock %s: %w", path, err)
+	}
+	defer unlockFile(lf)
+	return s.writeJSON(path, v)
+}
+
+// readJSONLocked reads JSON from path while holding a shared flock.
+func (s *Store) readJSONLocked(path string, v any) error {
+	lf, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return s.readJSON(path, v) // fallback to unlocked
+	}
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_SH); err != nil {
+		lf.Close()
+		return s.readJSON(path, v) // fallback
+	}
+	defer unlockFile(lf)
+	return s.readJSON(path, v)
+}
+
+// --- Spawns ---
+
+// ListSpawns returns all spawn records.
+func (s *Store) ListSpawns() ([]SpawnRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	dir := filepath.Join(s.root, "spawns")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var records []SpawnRecord
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		var rec SpawnRecord
+		if err := s.readJSONLocked(filepath.Join(dir, e.Name()), &rec); err != nil {
+			continue
+		}
+		records = append(records, rec)
+	}
+	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
+	return records, nil
+}
+
+// CreateSpawn persists a new spawn record with an auto-assigned ID.
+func (s *Store) CreateSpawn(rec *SpawnRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dir := filepath.Join(s.root, "spawns")
+	os.MkdirAll(dir, 0755)
+	rec.ID = s.nextID(dir)
+	rec.StartedAt = time.Now().UTC()
+	if rec.Status == "" {
+		rec.Status = "queued"
+	}
+	return s.writeJSONLocked(filepath.Join(dir, fmt.Sprintf("%d.json", rec.ID)), rec)
+}
+
+// GetSpawn loads a single spawn record by ID.
+func (s *Store) GetSpawn(id int) (*SpawnRecord, error) {
+	var rec SpawnRecord
+	if err := s.readJSONLocked(filepath.Join(s.root, "spawns", fmt.Sprintf("%d.json", id)), &rec); err != nil {
+		return nil, err
+	}
+	return &rec, nil
+}
+
+// UpdateSpawn persists changes to a spawn record.
+func (s *Store) UpdateSpawn(rec *SpawnRecord) error {
+	return s.writeJSONLocked(filepath.Join(s.root, "spawns", fmt.Sprintf("%d.json", rec.ID)), rec)
+}
+
+// SpawnsByParent returns spawn records created by a given parent session.
+func (s *Store) SpawnsByParent(parentSessionID int) ([]SpawnRecord, error) {
+	all, err := s.ListSpawns()
+	if err != nil {
+		return nil, err
+	}
+	var filtered []SpawnRecord
+	for _, r := range all {
+		if r.ParentSessionID == parentSessionID {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered, nil
+}
+
+// --- Supervisor Notes ---
+
+// ListNotes returns all supervisor notes.
+func (s *Store) ListNotes() ([]SupervisorNote, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	dir := filepath.Join(s.root, "notes")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var notes []SupervisorNote
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		var note SupervisorNote
+		if err := s.readJSONLocked(filepath.Join(dir, e.Name()), &note); err != nil {
+			continue
+		}
+		notes = append(notes, note)
+	}
+	sort.Slice(notes, func(i, j int) bool { return notes[i].ID < notes[j].ID })
+	return notes, nil
+}
+
+// CreateNote persists a new supervisor note with an auto-assigned ID.
+func (s *Store) CreateNote(note *SupervisorNote) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dir := filepath.Join(s.root, "notes")
+	os.MkdirAll(dir, 0755)
+	note.ID = s.nextID(dir)
+	note.CreatedAt = time.Now().UTC()
+	return s.writeJSONLocked(filepath.Join(dir, fmt.Sprintf("%d.json", note.ID)), note)
+}
+
+// NotesBySession returns notes targeting a given session.
+func (s *Store) NotesBySession(sessionID int) ([]SupervisorNote, error) {
+	all, err := s.ListNotes()
+	if err != nil {
+		return nil, err
+	}
+	var filtered []SupervisorNote
+	for _, n := range all {
+		if n.SessionID == sessionID {
+			filtered = append(filtered, n)
+		}
+	}
+	return filtered, nil
+}
+
+// EnsureDirs creates directories that may be missing from older projects.
+func (s *Store) EnsureDirs() error {
+	for _, sub := range []string{"spawns", "notes"} {
+		if err := os.MkdirAll(filepath.Join(s.root, sub), 0755); err != nil {
+			return err
+		}
+	}
+	return nil
 }

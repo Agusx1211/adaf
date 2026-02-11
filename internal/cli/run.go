@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/loop"
+	promptpkg "github.com/agusx1211/adaf/internal/prompt"
 	"github.com/agusx1211/adaf/internal/store"
 )
 
@@ -103,7 +103,10 @@ func runAgent(cmd *cobra.Command, args []string) error {
 
 	// If no explicit prompt was provided, build one from project context.
 	if prompt == "" {
-		built, err := buildDefaultPrompt(s, projCfg)
+		built, err := promptpkg.Build(promptpkg.BuildOpts{
+			Store:   s,
+			Project: projCfg,
+		})
 		if err != nil {
 			return fmt.Errorf("building default prompt: %w", err)
 		}
@@ -225,132 +228,4 @@ func agentNames() []string {
 		names = append(names, name)
 	}
 	return names
-}
-
-// maxAgentsMDSize is the upper bound (in bytes) for embedding AGENTS.md into
-// the prompt. Files larger than this are referenced instead of inlined.
-const maxAgentsMDSize = 16 * 1024
-
-// buildDefaultPrompt constructs a prompt from the project's plan and open
-// issues so the agent has meaningful context when no --prompt is given.
-//
-// The prompt is structured in priority order:
-//  1. Objective — what to do right now (single phase)
-//  2. Rules     — constraints the agent must follow
-//  3. Context   — last session, neighboring phases, relevant issues
-//  4. Reference — AGENTS.md, full plan overview (only when useful)
-func buildDefaultPrompt(s *store.Store, projCfg *store.ProjectConfig) (string, error) {
-	var b strings.Builder
-
-	workDir := projCfg.RepoPath
-	plan, _ := s.LoadPlan()
-	latest, _ := s.LatestLog()
-
-	b.WriteString("# Objective\n\n")
-	b.WriteString("Project: " + projCfg.Name + "\n\n")
-
-	var currentPhase *store.PlanPhase
-	if plan != nil && len(plan.Phases) > 0 {
-		for i := range plan.Phases {
-			p := &plan.Phases[i]
-			if p.Status == "not_started" || p.Status == "in_progress" {
-				currentPhase = p
-				break
-			}
-		}
-	}
-
-	if currentPhase != nil {
-		fmt.Fprintf(&b, "Your task is to work on phase **%s: %s**.\n\n", currentPhase.ID, currentPhase.Title)
-		if currentPhase.Description != "" {
-			b.WriteString(currentPhase.Description + "\n\n")
-		}
-	} else if plan != nil && plan.Title != "" {
-		b.WriteString("All planned phases are complete. Look for remaining open issues or improvements.\n\n")
-	} else {
-		b.WriteString("No plan is set. Explore the codebase and address any open issues.\n\n")
-	}
-
-	b.WriteString("# Rules\n\n")
-	b.WriteString("- Write code, run tests, and ensure everything compiles before finishing.\n")
-	b.WriteString("- Focus on one coherent unit of work. Stop when the current phase (or a meaningful increment of it) is complete.\n")
-	b.WriteString("- Do NOT read or write files inside the `.adaf/` directory directly. " +
-		"Use `adaf` CLI commands instead (`adaf issues`, `adaf log`, `adaf plan`, etc.). " +
-		"The `.adaf/` directory structure may change and direct access will be restricted in the future.\n")
-	b.WriteString("\n")
-
-	b.WriteString("# Context\n\n")
-
-	if latest != nil {
-		b.WriteString("## Last Session\n")
-		if latest.Objective != "" {
-			fmt.Fprintf(&b, "- Objective: %s\n", latest.Objective)
-		}
-		if latest.WhatWasBuilt != "" {
-			fmt.Fprintf(&b, "- Built: %s\n", latest.WhatWasBuilt)
-		}
-		if latest.NextSteps != "" {
-			fmt.Fprintf(&b, "- Next steps: %s\n", latest.NextSteps)
-		}
-		if latest.KnownIssues != "" {
-			fmt.Fprintf(&b, "- Known issues: %s\n", latest.KnownIssues)
-		}
-		b.WriteString("\n")
-	}
-
-	issues, err := s.ListIssues()
-	if err == nil && len(issues) > 0 {
-		var relevant []store.Issue
-		for _, iss := range issues {
-			if iss.Status != "open" && iss.Status != "in_progress" {
-				continue
-			}
-			relevant = append(relevant, iss)
-		}
-		if len(relevant) > 0 {
-			b.WriteString("## Open Issues\n")
-			for _, iss := range relevant {
-				fmt.Fprintf(&b, "- #%d [%s] %s: %s\n", iss.ID, iss.Priority, iss.Title, iss.Description)
-			}
-			b.WriteString("\n")
-		}
-	}
-
-	if currentPhase != nil && plan != nil && len(plan.Phases) > 1 {
-		b.WriteString("## Neighboring Phases\n")
-		for i, p := range plan.Phases {
-			if p.ID == currentPhase.ID {
-				if i > 0 {
-					prev := plan.Phases[i-1]
-					fmt.Fprintf(&b, "- Previous: [%s] %s: %s\n", prev.Status, prev.ID, prev.Title)
-				}
-				fmt.Fprintf(&b, "- **Current: [%s] %s: %s**\n", p.Status, p.ID, p.Title)
-				if i < len(plan.Phases)-1 {
-					next := plan.Phases[i+1]
-					fmt.Fprintf(&b, "- Next: [%s] %s: %s\n", next.Status, next.ID, next.Title)
-				}
-				break
-			}
-		}
-		b.WriteString("\n")
-	}
-
-	if workDir != "" {
-		agentsMD := filepath.Join(workDir, "AGENTS.md")
-		if info, err := os.Stat(agentsMD); err == nil {
-			if info.Size() <= maxAgentsMDSize {
-				if data, err := os.ReadFile(agentsMD); err == nil {
-					b.WriteString("# AGENTS.md\n\n")
-					b.WriteString("The repository includes an AGENTS.md with instructions for AI agents. Follow these:\n\n")
-					b.WriteString(string(data))
-					b.WriteString("\n\n")
-				}
-			} else {
-				b.WriteString("# AGENTS.md\n\n")
-				fmt.Fprintf(&b, "The repository includes an AGENTS.md file at `%s`. Read it before starting work — it contains important instructions for AI agents.\n\n", agentsMD)
-			}
-		}
-	}
-
-	return b.String(), nil
 }

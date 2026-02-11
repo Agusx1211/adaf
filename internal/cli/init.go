@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
@@ -22,6 +23,26 @@ func init() {
 	initCmd.Flags().String("name", "", "Project name (defaults to directory name)")
 	initCmd.Flags().String("repo", ".", "Path to the target repository")
 	rootCmd.AddCommand(initCmd)
+}
+
+// ensureGitignoreEntry adds an entry to a .gitignore file if not already present.
+func ensureGitignoreEntry(path, entry string) {
+	data, _ := os.ReadFile(path)
+	content := string(data)
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) == entry {
+			return // already present
+		}
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
+		f.WriteString("\n")
+	}
+	f.WriteString(entry + "\n")
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
@@ -71,7 +92,15 @@ agents.json
 
 # Session logs (ephemeral per-run artifacts)
 logs/
+
+# Orchestration state
+spawns/
+notes/
 `
+
+	// Ensure .adaf-worktrees/ is in the repo-level .gitignore.
+	repoGitignore := filepath.Join(absRepo, ".gitignore")
+	ensureGitignoreEntry(repoGitignore, ".adaf-worktrees/")
 	if err := os.WriteFile(gitignorePath, []byte(gitignoreContent), 0644); err != nil {
 		return fmt.Errorf("writing .adaf/.gitignore: %w", err)
 	}

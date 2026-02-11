@@ -49,6 +49,22 @@ You have access to the ` + "`adaf`" + ` CLI for managing project state. Use it t
 - ` + "`adaf doc list`" + ` — List project documents
 - ` + "`adaf doc show <id>`" + ` — Read a document
 
+### Agent Orchestration (for manager/senior roles)
+- ` + "`adaf spawn --profile <name> --task \"...\" [--read-only] [--wait]`" + ` — Spawn a sub-agent
+- ` + "`adaf spawn-status [--spawn-id N]`" + ` — Check spawn status
+- ` + "`adaf spawn-wait [--spawn-id N]`" + ` — Wait for spawn(s) to complete
+- ` + "`adaf spawn-diff --spawn-id N`" + ` — View diff of spawn's changes
+- ` + "`adaf spawn-merge --spawn-id N [--squash]`" + ` — Merge spawn's changes
+- ` + "`adaf spawn-reject --spawn-id N`" + ` — Reject spawn's changes
+
+### Supervisor Notes
+- ` + "`adaf note add --session N --note \"guidance text\"`" + ` — Send a note to a running session
+- ` + "`adaf note list [--session N]`" + ` — List supervisor notes
+
+### Worktree Management
+- ` + "`adaf worktree list`" + ` — List active adaf-managed worktrees
+- ` + "`adaf worktree cleanup`" + ` — Remove all adaf-managed worktrees (crash recovery)
+
 ## Session Protocol
 
 1. **Orient**: Run ` + "`adaf status`" + ` and ` + "`adaf log latest`" + ` to understand current state

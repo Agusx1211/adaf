@@ -25,6 +25,10 @@ type Loop struct {
 	// OnEnd is called after each iteration completes (successfully or not).
 	// The sessionID and the result (which may be nil on error) are passed.
 	OnEnd func(sessionID int, result *agent.Result)
+
+	// PromptFunc, if set, is called before each turn to dynamically refresh the
+	// prompt (e.g. to inject supervisor notes). If nil, Config.Prompt is used.
+	PromptFunc func(sessionID int) string
 }
 
 // Run executes the agent loop. It will run the agent up to Config.MaxTurns times
@@ -60,6 +64,9 @@ func (l *Loop) Run(ctx context.Context) error {
 		// Update config with the current session ID.
 		cfg := l.Config
 		cfg.SessionID = sessionID
+		if l.PromptFunc != nil {
+			cfg.Prompt = l.PromptFunc(sessionID)
+		}
 
 		// Notify listener.
 		if l.OnStart != nil {

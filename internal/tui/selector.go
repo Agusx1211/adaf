@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/agusx1211/adaf/internal/agent"
-	"github.com/agusx1211/adaf/internal/config"
+	cfgpkg "github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/store"
 )
 
@@ -19,20 +19,28 @@ type profileEntry struct {
 	Agent         string
 	Model         string
 	ReasoningLevel string // thinking budget value from profile
+	Role          string // "manager", "senior", "junior", "supervisor"
+	Intelligence  int
+	Description   string
+	MaxInstances  int    // max concurrent instances (0 = unlimited)
 	Detected      bool
 	IsNew         bool // sentinel "+ New Profile" entry
 	Caps          []string
 }
 
 // buildProfileList builds a list from saved profiles + a "New Profile" sentinel.
-func buildProfileList(globalCfg *config.GlobalConfig, agentsCfg *agent.AgentsConfig) []profileEntry {
+func buildProfileList(globalCfg *cfgpkg.GlobalConfig, agentsCfg *agent.AgentsConfig) []profileEntry {
 	entries := make([]profileEntry, 0, len(globalCfg.Profiles)+1)
 	for _, p := range globalCfg.Profiles {
 		e := profileEntry{
-			Name:          p.Name,
-			Agent:         p.Agent,
-			Model:         p.Model,
+			Name:           p.Name,
+			Agent:          p.Agent,
+			Model:          p.Model,
 			ReasoningLevel: p.ReasoningLevel,
+			Role:           cfgpkg.EffectiveRole(p.Role),
+			Intelligence:   p.Intelligence,
+			Description:    p.Description,
+			MaxInstances:   p.MaxInstances,
 		}
 		if e.Model == "" {
 			e.Model = agent.DefaultModel(p.Agent)
@@ -94,7 +102,7 @@ func renderProfileList(profiles []profileEntry, selected int, outerW, outerH int
 
 	for i, p := range profiles {
 		name := p.Name
-		maxW := cw - 4
+		maxW := cw - 10 // leave room for role badge
 		if maxW > 0 && len(name) > maxW {
 			name = name[:maxW]
 		}
@@ -112,20 +120,15 @@ func renderProfileList(profiles []profileEntry, selected int, outerW, outerH int
 			continue
 		}
 
-		var indicator string
-		if p.Detected {
-			indicator = lipgloss.NewStyle().Foreground(ColorGreen).Render("  ")
-		} else {
-			indicator = lipgloss.NewStyle().Foreground(ColorOverlay0).Render("  ")
-		}
+		badge := roleBadge(p.Role)
 
 		if i == selected {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			nameStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(name)
-			lines = append(lines, cursor+nameStyled+" "+indicator)
+			lines = append(lines, cursor+nameStyled+" "+badge)
 		} else {
 			nameStyled := lipgloss.NewStyle().Foreground(ColorText).Render(name)
-			lines = append(lines, "  "+nameStyled+" "+indicator)
+			lines = append(lines, "  "+nameStyled+" "+badge)
 		}
 	}
 
@@ -219,6 +222,23 @@ func renderProjectPanel(profiles []profileEntry, selected int, project *store.Pr
 			if p.ReasoningLevel != "" {
 				lines = append(lines, labelStyle.Render("Reasoning")+valueStyle.Render(p.ReasoningLevel))
 			}
+			lines = append(lines, labelStyle.Render("Role")+valueStyle.Render(p.Role)+" "+roleBadge(p.Role))
+			if p.Intelligence > 0 {
+				lines = append(lines, labelStyle.Render("Intelligence")+valueStyle.Render(fmt.Sprintf("%d/10", p.Intelligence)))
+			}
+			if p.MaxInstances > 0 {
+				lines = append(lines, labelStyle.Render("Max Instances")+valueStyle.Render(fmt.Sprintf("%d", p.MaxInstances)))
+			} else {
+				lines = append(lines, labelStyle.Render("Max Instances")+dimStyle.Render("unlimited"))
+			}
+			if p.Description != "" {
+				desc := p.Description
+				maxDescW := cw - 14
+				if maxDescW > 0 && len(desc) > maxDescW {
+					desc = desc[:maxDescW-3] + "..."
+				}
+				lines = append(lines, labelStyle.Render("Description")+dimStyle.Render(desc))
+			}
 			if p.Detected {
 				lines = append(lines, labelStyle.Render("Status")+
 					lipgloss.NewStyle().Foreground(ColorGreen).Render("detected"))
@@ -233,6 +253,30 @@ func renderProjectPanel(profiles []profileEntry, selected int, project *store.Pr
 
 	content := fitLines(lines, cw, ch)
 	return style.Render(content)
+}
+
+// roleBadge returns a styled role badge like [MGR], [SR], [JR], [SUP].
+func roleBadge(role string) string {
+	var tag string
+	var color lipgloss.TerminalColor
+	switch role {
+	case "manager":
+		tag = "MGR"
+		color = ColorPeach
+	case "senior":
+		tag = "SR"
+		color = ColorBlue
+	case "junior":
+		tag = "JR"
+		color = ColorGreen
+	case "supervisor":
+		tag = "SUP"
+		color = ColorYellow
+	default:
+		tag = "JR"
+		color = ColorOverlay0
+	}
+	return lipgloss.NewStyle().Foreground(color).Render("[" + tag + "]")
 }
 
 // fitLines is equivalent to runtui's fitToSize: exactly w cols and h lines.
