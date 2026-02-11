@@ -11,6 +11,7 @@ import (
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/agentmeta"
 	"github.com/agusx1211/adaf/internal/config"
+	"github.com/agusx1211/adaf/internal/looprun"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
 	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/store"
@@ -33,6 +34,14 @@ const (
 	stateProfileSpawnable // multi-select spawnable profiles
 	stateProfileMaxPar    // input max parallel
 	stateProfileMenu      // edit profile: field picker menu
+	stateLoopName         // text input for loop name
+	stateLoopStepList     // list of steps, add/edit/remove/reorder
+	stateLoopStepProfile  // pick profile for a step
+	stateLoopStepTurns    // input turns for a step
+	stateLoopStepInstr    // input custom instructions for a step
+	stateLoopStepCanStop  // toggle can_stop
+	stateLoopStepCanMsg   // toggle can_message
+	stateLoopMenu         // edit loop: field picker menu
 )
 
 // AppModel is the top-level bubbletea model for the unified adaf TUI.
@@ -73,6 +82,21 @@ type AppModel struct {
 	profileSpawnableSelected  map[int]bool
 	profileSpawnableSel       int
 	profileMaxParInput        string
+
+	// Loop creation/editing wizard state.
+	loopEditing         bool
+	loopEditName        string
+	loopNameInput       string
+	loopSteps           []config.LoopStep
+	loopStepSel         int
+	loopStepEditIdx     int    // which step is being edited (-1 = adding new)
+	loopStepProfileOpts []string
+	loopStepProfileSel  int
+	loopStepTurnsInput  string
+	loopStepInstrInput  string
+	loopStepCanStop     bool
+	loopStepCanMsg      bool
+	loopMenuSel         int
 
 	// Cached project data for the selector.
 	project *store.ProjectConfig
@@ -162,6 +186,22 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateProfileMaxPar(msg)
 	case stateProfileMenu:
 		return m.updateProfileMenu(msg)
+	case stateLoopName:
+		return m.updateLoopName(msg)
+	case stateLoopStepList:
+		return m.updateLoopStepList(msg)
+	case stateLoopStepProfile:
+		return m.updateLoopStepProfile(msg)
+	case stateLoopStepTurns:
+		return m.updateLoopStepTurns(msg)
+	case stateLoopStepInstr:
+		return m.updateLoopStepInstr(msg)
+	case stateLoopStepCanStop:
+		return m.updateLoopStepCanStop(msg)
+	case stateLoopStepCanMsg:
+		return m.updateLoopStepCanMsg(msg)
+	case stateLoopMenu:
+		return m.updateLoopMenu(msg)
 	}
 	return m, nil
 }
@@ -175,10 +215,18 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "j", "down":
 			if len(m.profiles) > 0 {
 				m.selected = (m.selected + 1) % len(m.profiles)
+				// Skip separators.
+				if m.profiles[m.selected].IsSeparator {
+					m.selected = (m.selected + 1) % len(m.profiles)
+				}
 			}
 		case "k", "up":
 			if len(m.profiles) > 0 {
 				m.selected = (m.selected - 1 + len(m.profiles)) % len(m.profiles)
+				// Skip separators.
+				if m.profiles[m.selected].IsSeparator {
+					m.selected = (m.selected - 1 + len(m.profiles)) % len(m.profiles)
+				}
 			}
 		case "enter":
 			if len(m.profiles) > 0 {
@@ -191,29 +239,130 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.profileNameInput = ""
 			m.state = stateProfileName
 			return m, nil
+		case "l":
+			// Start new loop creation.
+			m.loopEditing = false
+			m.loopEditName = ""
+			m.loopNameInput = ""
+			m.loopSteps = nil
+			m.state = stateLoopName
+			return m, nil
 		case "e":
-			// Edit selected profile.
-			if m.selected >= 0 && m.selected < len(m.profiles) && !m.profiles[m.selected].IsNew {
-				return m.startEditProfile()
+			// Edit selected profile or loop.
+			if m.selected >= 0 && m.selected < len(m.profiles) {
+				p := m.profiles[m.selected]
+				if p.IsLoop {
+					return m.startEditLoop()
+				}
+				if !p.IsNew && !p.IsNewLoop && !p.IsSeparator {
+					return m.startEditProfile()
+				}
 			}
 			return m, nil
 		case "d":
-			// Delete selected profile (unless it's the sentinel).
-			if m.selected >= 0 && m.selected < len(m.profiles) && !m.profiles[m.selected].IsNew {
-				name := m.profiles[m.selected].Name
-				m.globalCfg.RemoveProfile(name)
-				config.Save(m.globalCfg)
-				m.rebuildProfiles()
-				if m.selected >= len(m.profiles) {
-					m.selected = len(m.profiles) - 1
-				}
-				if m.selected < 0 {
-					m.selected = 0
+			// Delete selected profile or loop (unless sentinel/separator).
+			if m.selected >= 0 && m.selected < len(m.profiles) {
+				p := m.profiles[m.selected]
+				if p.IsLoop {
+					m.globalCfg.RemoveLoop(p.LoopName)
+					config.Save(m.globalCfg)
+					m.rebuildProfiles()
+					m.clampSelected()
+				} else if !p.IsNew && !p.IsNewLoop && !p.IsSeparator {
+					m.globalCfg.RemoveProfile(p.Name)
+					config.Save(m.globalCfg)
+					m.rebuildProfiles()
+					m.clampSelected()
 				}
 			}
 			return m, nil
 		}
 	}
+	return m, nil
+}
+
+// clampSelected ensures the selected index is valid after list changes.
+func (m *AppModel) clampSelected() {
+	if m.selected >= len(m.profiles) {
+		m.selected = len(m.profiles) - 1
+	}
+	if m.selected < 0 {
+		m.selected = 0
+	}
+	// Skip separators.
+	if m.selected < len(m.profiles) && m.profiles[m.selected].IsSeparator {
+		if m.selected > 0 {
+			m.selected--
+		} else {
+			m.selected++
+		}
+	}
+}
+
+// startLoop transitions from selector to running a loop.
+func (m AppModel) startLoop(loopName string) (tea.Model, tea.Cmd) {
+	loopDef := m.globalCfg.FindLoop(loopName)
+	if loopDef == nil || len(loopDef.Steps) == 0 {
+		return m, nil
+	}
+
+	m.store.EnsureDirs()
+
+	agentsCfg, _ := agent.LoadAgentsConfig(m.store.Root())
+	agent.PopulateFromConfig(agentsCfg)
+
+	workDir := ""
+	if m.project != nil {
+		workDir = m.project.RepoPath
+	}
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+
+	projectName := ""
+	if m.project != nil {
+		projectName = m.project.Name
+	}
+
+	eventCh := make(chan any, 256)
+	cfg := looprun.RunConfig{
+		Store:     m.store,
+		GlobalCfg: m.globalCfg,
+		LoopDef:   loopDef,
+		Project:   m.project,
+		AgentsCfg: agentsCfg,
+		WorkDir:   workDir,
+	}
+
+	cancel := looprun.StartLoopRun(cfg, eventCh)
+
+	m.state = stateRunning
+	m.runCancel = cancel
+	m.runEventCh = eventCh
+	m.runModel = runtui.NewModel(projectName, m.plan, "", "", eventCh, cancel)
+	m.runModel.SetSize(m.width, m.height)
+	m.runModel.SetLoopInfo(loopDef.Name, len(loopDef.Steps))
+
+	return m, m.runModel.Init()
+}
+
+// startEditLoop pre-populates the loop wizard fields from an existing loop
+// and opens the loop edit menu.
+func (m AppModel) startEditLoop() (tea.Model, tea.Cmd) {
+	p := m.profiles[m.selected]
+	loopDef := m.globalCfg.FindLoop(p.LoopName)
+	if loopDef == nil {
+		return m, nil
+	}
+
+	m.loopEditing = true
+	m.loopEditName = loopDef.Name
+	m.loopNameInput = loopDef.Name
+	m.loopSteps = make([]config.LoopStep, len(loopDef.Steps))
+	copy(m.loopSteps, loopDef.Steps)
+	m.loopStepSel = 0
+	m.loopMenuSel = 0
+	m.state = stateLoopMenu
 	return m, nil
 }
 
@@ -240,11 +389,31 @@ func (m AppModel) updateRunning(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 	p := m.profiles[m.selected]
 
+	// Skip separators.
+	if p.IsSeparator {
+		return m, nil
+	}
+
+	// If it's the "new loop" sentinel, start loop creation.
+	if p.IsNewLoop {
+		m.loopEditing = false
+		m.loopEditName = ""
+		m.loopNameInput = ""
+		m.loopSteps = nil
+		m.state = stateLoopName
+		return m, nil
+	}
+
 	// If it's the sentinel entry, start profile creation.
 	if p.IsNew {
 		m.profileNameInput = ""
 		m.state = stateProfileName
 		return m, nil
+	}
+
+	// If it's a loop, start the loop runner.
+	if p.IsLoop {
+		return m.startLoop(p.LoopName)
 	}
 
 	agentInstance, ok := agent.Get(p.Agent)
@@ -382,6 +551,22 @@ func (m AppModel) View() string {
 		return m.viewProfileMaxPar()
 	case stateProfileMenu:
 		return m.viewProfileMenu()
+	case stateLoopName:
+		return m.viewLoopName()
+	case stateLoopStepList:
+		return m.viewLoopStepList()
+	case stateLoopStepProfile:
+		return m.viewLoopStepProfile()
+	case stateLoopStepTurns:
+		return m.viewLoopStepTurns()
+	case stateLoopStepInstr:
+		return m.viewLoopStepInstr()
+	case stateLoopStepCanStop:
+		return m.viewLoopStepCanStop()
+	case stateLoopStepCanMsg:
+		return m.viewLoopStepCanMsg()
+	case stateLoopMenu:
+		return m.viewLoopMenu()
 	default:
 		return m.viewSelector()
 	}
@@ -428,6 +613,7 @@ func (m AppModel) renderStatusBar() string {
 	add("enter", "start")
 	if m.state == stateSelector {
 		add("n", "new profile")
+		add("l", "new loop")
 		add("e", "edit")
 		add("d", "delete")
 	}

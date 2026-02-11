@@ -15,6 +15,19 @@ import (
 // the prompt. Files larger than this are referenced instead of inlined.
 const maxAgentsMDSize = 16 * 1024
 
+// LoopPromptContext provides loop-specific context for prompt generation.
+type LoopPromptContext struct {
+	LoopName     string
+	Cycle        int
+	StepIndex    int
+	TotalSteps   int
+	Instructions string             // step-specific custom instructions
+	CanStop      bool
+	CanMessage   bool
+	Messages     []store.LoopMessage // unseen messages from other steps
+	RunID        int
+}
+
 // BuildOpts configures prompt generation.
 type BuildOpts struct {
 	Store   *store.Store
@@ -40,6 +53,9 @@ type BuildOpts struct {
 
 	// Messages from parent agent (for child prompts).
 	Messages []store.SpawnMessage
+
+	// LoopContext provides loop-specific context (nil if not in a loop).
+	LoopContext *LoopPromptContext
 }
 
 // Build constructs a prompt from project context and role configuration.
@@ -181,6 +197,38 @@ func Build(opts BuildOpts) (string, error) {
 			fmt.Fprintf(&b, "- [%s] %s\n", msg.CreatedAt.Format("15:04:05"), msg.Content)
 		}
 		b.WriteString("\n")
+	}
+
+	// Loop context.
+	if lc := opts.LoopContext; lc != nil {
+		b.WriteString("# Loop Context\n\n")
+		fmt.Fprintf(&b, "You are running in loop %q, cycle %d, step %d of %d",
+			lc.LoopName, lc.Cycle+1, lc.StepIndex+1, lc.TotalSteps)
+		if opts.Profile != nil {
+			fmt.Fprintf(&b, " (profile %q)", opts.Profile.Name)
+		}
+		b.WriteString(".\n")
+
+		if lc.Instructions != "" {
+			b.WriteString("\n" + lc.Instructions + "\n")
+		}
+
+		b.WriteString("\n")
+
+		if lc.CanStop {
+			b.WriteString("You can stop this loop when objectives are met by running: `adaf loop stop`\n\n")
+		}
+		if lc.CanMessage {
+			b.WriteString("You can send a message to subsequent steps by running: `adaf loop message \"your message\"`\n\n")
+		}
+
+		if len(lc.Messages) > 0 {
+			b.WriteString("## Messages from Previous Steps\n\n")
+			for _, msg := range lc.Messages {
+				fmt.Fprintf(&b, "- [step %d, %s]: %s\n", msg.StepIndex, msg.CreatedAt.Format("15:04:05"), msg.Content)
+			}
+			b.WriteString("\n")
+		}
 	}
 
 	// AGENTS.md.

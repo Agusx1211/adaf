@@ -13,7 +13,7 @@ import (
 
 const selectorLeftWidth = 28
 
-// profileEntry holds display info for a profile in the selector list.
+// profileEntry holds display info for a profile or loop in the selector list.
 type profileEntry struct {
 	Name          string
 	Agent         string
@@ -24,13 +24,18 @@ type profileEntry struct {
 	Description   string
 	MaxInstances  int    // max concurrent instances (0 = unlimited)
 	Detected      bool
-	IsNew         bool // sentinel "+ New Profile" entry
+	IsNew         bool   // sentinel "+ New Profile" entry
+	IsNewLoop     bool   // sentinel "+ New Loop" entry
+	IsLoop        bool   // true if this represents a loop definition
+	LoopName      string // loop name (when IsLoop)
+	LoopSteps     int    // number of steps (when IsLoop)
+	IsSeparator   bool   // separator line between sections
 	Caps          []string
 }
 
-// buildProfileList builds a list from saved profiles + a "New Profile" sentinel.
+// buildProfileList builds a list from saved profiles, loops, and sentinel entries.
 func buildProfileList(globalCfg *cfgpkg.GlobalConfig, agentsCfg *agent.AgentsConfig) []profileEntry {
-	entries := make([]profileEntry, 0, len(globalCfg.Profiles)+1)
+	entries := make([]profileEntry, 0, len(globalCfg.Profiles)+len(globalCfg.Loops)+4)
 	for _, p := range globalCfg.Profiles {
 		e := profileEntry{
 			Name:           p.Name,
@@ -53,7 +58,23 @@ func buildProfileList(globalCfg *cfgpkg.GlobalConfig, agentsCfg *agent.AgentsCon
 		}
 		entries = append(entries, e)
 	}
+
+	// Add loops if any exist.
+	if len(globalCfg.Loops) > 0 {
+		entries = append(entries, profileEntry{IsSeparator: true, Name: "───"})
+		for _, l := range globalCfg.Loops {
+			entries = append(entries, profileEntry{
+				IsLoop:    true,
+				LoopName:  l.Name,
+				Name:      l.Name,
+				LoopSteps: len(l.Steps),
+			})
+		}
+	}
+
+	entries = append(entries, profileEntry{IsSeparator: true, Name: "───"})
 	entries = append(entries, profileEntry{IsNew: true, Name: "+ New Profile"})
+	entries = append(entries, profileEntry{IsNewLoop: true, Name: "+ New Loop"})
 	return entries
 }
 
@@ -101,13 +122,19 @@ func renderProfileList(profiles []profileEntry, selected int, outerW, outerH int
 	lines = append(lines, "")
 
 	for i, p := range profiles {
+		// Separator line.
+		if p.IsSeparator {
+			lines = append(lines, lipgloss.NewStyle().Foreground(ColorOverlay0).Render("  "+p.Name))
+			continue
+		}
+
 		name := p.Name
-		maxW := cw - 10 // leave room for role badge
+		maxW := cw - 10 // leave room for role/loop badge
 		if maxW > 0 && len(name) > maxW {
 			name = name[:maxW]
 		}
 
-		if p.IsNew {
+		if p.IsNew || p.IsNewLoop {
 			// Sentinel entry styled differently.
 			if i == selected {
 				cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render("> ")
@@ -116,6 +143,19 @@ func renderProfileList(profiles []profileEntry, selected int, outerW, outerH int
 			} else {
 				nameStyled := lipgloss.NewStyle().Foreground(ColorOverlay0).Render(name)
 				lines = append(lines, "  "+nameStyled)
+			}
+			continue
+		}
+
+		if p.IsLoop {
+			badge := lipgloss.NewStyle().Foreground(ColorTeal).Render("[LOOP]")
+			if i == selected {
+				cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorTeal).Render("> ")
+				nameStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorTeal).Render(name)
+				lines = append(lines, cursor+nameStyled+" "+badge)
+			} else {
+				nameStyled := lipgloss.NewStyle().Foreground(ColorText).Render(name)
+				lines = append(lines, "  "+nameStyled+" "+badge)
 			}
 			continue
 		}
@@ -204,14 +244,25 @@ func renderProjectPanel(profiles []profileEntry, selected int, project *store.Pr
 
 	lines = append(lines, "")
 
-	// Selected profile detail
+	// Selected profile/loop detail
 	if selected >= 0 && selected < len(profiles) {
 		p := profiles[selected]
-		if p.IsNew {
+		if p.IsSeparator {
+			// No detail for separator.
+		} else if p.IsNewLoop {
+			lines = append(lines, sectionStyle.Render("New Loop"))
+			lines = append(lines, "")
+			lines = append(lines, dimStyle.Render("Press enter or l to create"))
+			lines = append(lines, dimStyle.Render("a new loop definition."))
+		} else if p.IsNew {
 			lines = append(lines, sectionStyle.Render("New Profile"))
 			lines = append(lines, "")
 			lines = append(lines, dimStyle.Render("Press enter or n to create"))
 			lines = append(lines, dimStyle.Render("a new agent profile."))
+		} else if p.IsLoop {
+			lines = append(lines, sectionStyle.Render("Selected Loop"))
+			lines = append(lines, labelStyle.Render("Loop")+valueStyle.Render(p.LoopName))
+			lines = append(lines, labelStyle.Render("Steps")+valueStyle.Render(fmt.Sprintf("%d", p.LoopSteps)))
 		} else {
 			lines = append(lines, sectionStyle.Render("Selected Profile"))
 			lines = append(lines, labelStyle.Render("Profile")+valueStyle.Render(p.Name))

@@ -24,10 +24,26 @@ type Profile struct {
 	MaxInstances      int      `json:"max_instances,omitempty"`      // max concurrent instances of this profile (0 = unlimited)
 }
 
+// LoopStep defines one step in a loop cycle.
+type LoopStep struct {
+	Profile      string `json:"profile"`                  // profile name reference
+	Turns        int    `json:"turns,omitempty"`           // turns per step (0 = 1 turn)
+	Instructions string `json:"instructions,omitempty"`    // custom instructions appended to prompt
+	CanStop      bool   `json:"can_stop,omitempty"`        // can this step signal loop stop?
+	CanMessage   bool   `json:"can_message,omitempty"`     // can this step send messages to subsequent steps?
+}
+
+// LoopDef defines a loop as a cyclic template of profile steps.
+type LoopDef struct {
+	Name  string     `json:"name"`
+	Steps []LoopStep `json:"steps"`
+}
+
 // GlobalConfig holds user-level preferences stored in ~/.adaf/config.json.
 type GlobalConfig struct {
 	Agents   map[string]GlobalAgentConfig `json:"agents,omitempty"`
 	Profiles []Profile                    `json:"profiles,omitempty"`
+	Loops    []LoopDef                    `json:"loops,omitempty"`
 }
 
 // GlobalAgentConfig holds per-agent overrides at the global (user) level.
@@ -115,6 +131,38 @@ func (c *GlobalConfig) FindProfile(name string) *Profile {
 	for i := range c.Profiles {
 		if strings.EqualFold(c.Profiles[i].Name, name) {
 			return &c.Profiles[i]
+		}
+	}
+	return nil
+}
+
+// AddLoop appends a loop definition. Returns an error if the name already exists.
+func (c *GlobalConfig) AddLoop(l LoopDef) error {
+	for _, existing := range c.Loops {
+		if strings.EqualFold(existing.Name, l.Name) {
+			return errors.New("loop already exists: " + l.Name)
+		}
+	}
+	c.Loops = append(c.Loops, l)
+	return nil
+}
+
+// RemoveLoop removes a loop by name (case-insensitive).
+func (c *GlobalConfig) RemoveLoop(name string) {
+	out := c.Loops[:0]
+	for _, l := range c.Loops {
+		if !strings.EqualFold(l.Name, name) {
+			out = append(out, l)
+		}
+	}
+	c.Loops = out
+}
+
+// FindLoop returns a pointer to a loop definition by name, or nil if not found.
+func (c *GlobalConfig) FindLoop(name string) *LoopDef {
+	for i := range c.Loops {
+		if strings.EqualFold(c.Loops[i].Name, name) {
+			return &c.Loops[i]
 		}
 	}
 	return nil

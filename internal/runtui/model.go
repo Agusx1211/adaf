@@ -60,6 +60,13 @@ type Model struct {
 	// Hierarchy: active spawns for this session.
 	spawns []SpawnInfo
 
+	// Loop state.
+	loopName        string
+	loopCycle       int
+	loopStep        int
+	loopTotalSteps  int
+	loopStepProfile string
+
 	// Event channel and lifecycle state.
 	eventCh    chan any
 	cancelFunc context.CancelFunc
@@ -87,6 +94,12 @@ func NewModel(projectName string, plan *store.Plan, agentName, modelName string,
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+}
+
+// SetLoopInfo configures loop display information on the model.
+func (m *Model) SetLoopInfo(name string, totalSteps int) {
+	m.loopName = name
+	m.loopTotalSteps = totalSteps
 }
 
 // Init implements tea.Model.
@@ -160,6 +173,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.addLine("")
 			m.addLine(resultLabelStyle.Render("Agent loop finished."))
+		}
+		return m, nil
+
+	case LoopStepStartMsg:
+		m.loopName = ""  // set from outside via SetLoopInfo
+		m.loopCycle = msg.Cycle
+		m.loopStep = msg.StepIndex
+		m.loopStepProfile = msg.Profile
+		m.addLine("")
+		m.addLine(initLabelStyle.Render(fmt.Sprintf("[loop] Cycle %d, Step %d/%d: %s (x%d)",
+			msg.Cycle+1, msg.StepIndex+1, m.loopTotalSteps, msg.Profile, msg.Turns)))
+		return m, waitForEvent(m.eventCh)
+
+	case LoopStepEndMsg:
+		m.addLine(dimStyle.Render(fmt.Sprintf("[loop] Step %d/%d: %s completed",
+			msg.StepIndex+1, m.loopTotalSteps, msg.Profile)))
+		return m, waitForEvent(m.eventCh)
+
+	case LoopDoneMsg:
+		m.done = true
+		m.exitErr = msg.Err
+		if msg.Err != nil && msg.Reason != "cancelled" {
+			m.addLine(lipgloss.NewStyle().Foreground(theme.ColorRed).Render(
+				fmt.Sprintf("Loop error: %v", msg.Err)))
+		} else {
+			m.addLine("")
+			m.addLine(resultLabelStyle.Render(fmt.Sprintf("Loop finished (%s).", msg.Reason)))
 		}
 		return m, nil
 
@@ -605,7 +645,12 @@ func (m Model) View() string {
 }
 
 func (m Model) renderHeader() string {
-	title := fmt.Sprintf(" adaf run — %s ", m.projectName)
+	var title string
+	if m.loopName != "" {
+		title = fmt.Sprintf(" adaf loop — %s — %s ", m.projectName, m.loopName)
+	} else {
+		title = fmt.Sprintf(" adaf run — %s ", m.projectName)
+	}
 	return headerStyle.
 		Width(m.width).
 		MaxWidth(m.width).
@@ -670,6 +715,18 @@ func (m Model) renderLeftPanel(outerW, outerH int) string {
 	}
 	lines = append(lines, fieldLine("Elapsed", m.elapsed.Round(time.Second).String()))
 	lines = append(lines, "")
+
+	// Loop section.
+	if m.loopName != "" {
+		lines = append(lines, sectionTitleStyle.Render("Loop"))
+		lines = append(lines, fieldLine("Name", m.loopName))
+		lines = append(lines, fieldLine("Cycle", fmt.Sprintf("%d", m.loopCycle+1)))
+		if m.loopStepProfile != "" {
+			lines = append(lines, fieldLine("Step", fmt.Sprintf("%d/%d %s",
+				m.loopStep+1, m.loopTotalSteps, m.loopStepProfile)))
+		}
+		lines = append(lines, "")
+	}
 
 	// Usage section.
 	lines = append(lines, sectionTitleStyle.Render("Usage"))

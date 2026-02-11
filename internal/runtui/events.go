@@ -49,5 +49,29 @@ type SpawnInfo struct {
 	Question string // pending question when status is "awaiting_input"
 }
 
+// LoopStepStartMsg signals that a loop step has started.
+type LoopStepStartMsg struct {
+	RunID     int
+	Cycle     int
+	StepIndex int
+	Profile   string
+	Turns     int
+}
+
+// LoopStepEndMsg signals that a loop step has ended.
+type LoopStepEndMsg struct {
+	RunID     int
+	Cycle     int
+	StepIndex int
+	Profile   string
+}
+
+// LoopDoneMsg signals that the entire loop has finished.
+type LoopDoneMsg struct {
+	RunID  int
+	Reason string // "stopped", "cancelled", "error"
+	Err    error
+}
+
 // tickMsg is sent every second to update the elapsed time display.
 type tickMsg struct{}
