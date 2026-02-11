@@ -10,21 +10,22 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/loop"
-	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/store"
 )
 
 var runCmd = &cobra.Command{
 	Use:   "run",
-	Short: "Run an agent loop against the project",
+	Short: "Run an agent loop against the project (inline output for CI/scripts)",
 	Long: `Run an AI agent in a loop against the project. The agent will work on the
 current plan, resolve issues, and log its progress.
+
+Output is printed inline (suitable for CI/pipes). For the interactive TUI,
+run 'adaf' with no subcommand.
 
 Supported agents: claude, codex, vibe, opencode, generic`,
 	RunE: runAgent,
@@ -36,7 +37,6 @@ func init() {
 	runCmd.Flags().Int("max-turns", 0, "Maximum number of agent turns (0 = unlimited)")
 	runCmd.Flags().String("model", "", "Model override for the agent")
 	runCmd.Flags().String("command", "", "Custom command path (for generic agent)")
-	runCmd.Flags().Bool("no-tui", false, "Disable TUI and use plain inline output (for CI/pipes)")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -51,7 +51,6 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	maxTurns, _ := cmd.Flags().GetInt("max-turns")
 	modelFlag, _ := cmd.Flags().GetString("model")
 	customCmd, _ := cmd.Flags().GetString("command")
-	noTUI, _ := cmd.Flags().GetBool("no-tui")
 	modelFlag = strings.TrimSpace(modelFlag)
 
 	// Look up agent from registry.
@@ -65,7 +64,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading global config: %w", err)
 	}
 
-	agentsCfg, err := agent.LoadAndSyncAgentsConfig(s.Root(), globalCfg)
+	agentsCfg, err := agent.LoadAgentsConfig(s.Root())
 	if err != nil {
 		return fmt.Errorf("loading agent configuration: %w", err)
 	}
@@ -89,19 +88,19 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load project config
-	config, err := s.LoadProject()
+	projCfg, err := s.LoadProject()
 	if err != nil {
 		return fmt.Errorf("loading project: %w", err)
 	}
 
-	workDir := config.RepoPath
+	workDir := projCfg.RepoPath
 	if workDir == "" {
 		workDir, _ = os.Getwd()
 	}
 
 	// If no explicit prompt was provided, build one from project context.
 	if prompt == "" {
-		built, err := buildDefaultPrompt(s, config)
+		built, err := buildDefaultPrompt(s, projCfg)
 		if err != nil {
 			return fmt.Errorf("building default prompt: %w", err)
 		}
@@ -138,30 +137,12 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		MaxTurns: maxTurns,
 	}
 
-	// Determine whether to use TUI or inline output.
-	useTUI := !noTUI && isatty.IsTerminal(os.Stdout.Fd())
-
-	if useTUI {
-		return runWithTUI(s, agentInstance, agentCfg, config)
-	}
-	return runInline(cmd, s, agentInstance, agentCfg, config, defaultModel, maxTurns)
+	// Always inline output.
+	return runInline(cmd, s, agentInstance, agentCfg, projCfg, defaultModel, maxTurns)
 }
 
-// runWithTUI launches the two-column bubbletea TUI.
-func runWithTUI(s *store.Store, agentInstance agent.Agent, agentCfg agent.Config, config *store.ProjectConfig) error {
-	plan, _ := s.LoadPlan()
-
-	return runtui.Run(runtui.RunConfig{
-		Store:       s,
-		Agent:       agentInstance,
-		AgentCfg:    agentCfg,
-		Plan:        plan,
-		ProjectName: config.Name,
-	})
-}
-
-// runInline preserves the original inline output behavior for CI/pipes.
-func runInline(cmd *cobra.Command, s *store.Store, agentInstance agent.Agent, agentCfg agent.Config, config *store.ProjectConfig, defaultModel string, maxTurns int) error {
+// runInline prints inline output suitable for CI/pipes.
+func runInline(cmd *cobra.Command, s *store.Store, agentInstance agent.Agent, agentCfg agent.Config, projCfg *store.ProjectConfig, defaultModel string, maxTurns int) error {
 	workDir := agentCfg.WorkDir
 
 	// Print run header
@@ -170,7 +151,7 @@ func runInline(cmd *cobra.Command, s *store.Store, agentInstance agent.Agent, ag
 	fmt.Println(styleBoldCyan + "   adaf agent run" + colorReset)
 	fmt.Println(styleBoldCyan + "  ==============================================" + colorReset)
 	fmt.Println()
-	printField("Project", config.Name)
+	printField("Project", projCfg.Name)
 	printField("Repo", workDir)
 	printField("Agent", agentCfg.Name)
 	if defaultModel != "" {
@@ -243,20 +224,19 @@ const maxAgentsMDSize = 16 * 1024
 // issues so the agent has meaningful context when no --prompt is given.
 //
 // The prompt is structured in priority order:
-//   1. Objective — what to do right now (single phase)
-//   2. Rules     — constraints the agent must follow
-//   3. Context   — last session, neighboring phases, relevant issues
-//   4. Reference — AGENTS.md, full plan overview (only when useful)
-func buildDefaultPrompt(s *store.Store, config *store.ProjectConfig) (string, error) {
+//  1. Objective — what to do right now (single phase)
+//  2. Rules     — constraints the agent must follow
+//  3. Context   — last session, neighboring phases, relevant issues
+//  4. Reference — AGENTS.md, full plan overview (only when useful)
+func buildDefaultPrompt(s *store.Store, projCfg *store.ProjectConfig) (string, error) {
 	var b strings.Builder
 
-	workDir := config.RepoPath
+	workDir := projCfg.RepoPath
 	plan, _ := s.LoadPlan()
 	latest, _ := s.LatestLog()
 
-	// ── 1. Objective ────────────────────────────────────────────────
 	b.WriteString("# Objective\n\n")
-	b.WriteString("Project: " + config.Name + "\n\n")
+	b.WriteString("Project: " + projCfg.Name + "\n\n")
 
 	var currentPhase *store.PlanPhase
 	if plan != nil && len(plan.Phases) > 0 {
@@ -280,7 +260,6 @@ func buildDefaultPrompt(s *store.Store, config *store.ProjectConfig) (string, er
 		b.WriteString("No plan is set. Explore the codebase and address any open issues.\n\n")
 	}
 
-	// ── 2. Rules ────────────────────────────────────────────────────
 	b.WriteString("# Rules\n\n")
 	b.WriteString("- Write code, run tests, and ensure everything compiles before finishing.\n")
 	b.WriteString("- Focus on one coherent unit of work. Stop when the current phase (or a meaningful increment of it) is complete.\n")
@@ -289,10 +268,8 @@ func buildDefaultPrompt(s *store.Store, config *store.ProjectConfig) (string, er
 		"The `.adaf/` directory structure may change and direct access will be restricted in the future.\n")
 	b.WriteString("\n")
 
-	// ── 3. Context ──────────────────────────────────────────────────
 	b.WriteString("# Context\n\n")
 
-	// Last session — what happened right before this run.
 	if latest != nil {
 		b.WriteString("## Last Session\n")
 		if latest.Objective != "" {
@@ -310,7 +287,6 @@ func buildDefaultPrompt(s *store.Store, config *store.ProjectConfig) (string, er
 		b.WriteString("\n")
 	}
 
-	// Open issues — only critical/high, or all if few.
 	issues, err := s.ListIssues()
 	if err == nil && len(issues) > 0 {
 		var relevant []store.Issue
@@ -329,8 +305,6 @@ func buildDefaultPrompt(s *store.Store, config *store.ProjectConfig) (string, er
 		}
 	}
 
-	// Neighboring phases — just the immediately previous and next phases
-	// so the agent understands where it sits without seeing the full list.
 	if currentPhase != nil && plan != nil && len(plan.Phases) > 1 {
 		b.WriteString("## Neighboring Phases\n")
 		for i, p := range plan.Phases {
@@ -350,8 +324,6 @@ func buildDefaultPrompt(s *store.Store, config *store.ProjectConfig) (string, er
 		b.WriteString("\n")
 	}
 
-	// ── 4. Reference ────────────────────────────────────────────────
-	// AGENTS.md — embed if present and small, otherwise instruct to read it.
 	if workDir != "" {
 		agentsMD := filepath.Join(workDir, "AGENTS.md")
 		if info, err := os.Stat(agentsMD); err == nil {

@@ -161,7 +161,7 @@ func LoadAndSyncAgentsConfig(adafRoot string, globalCfg *config.GlobalConfig) (*
 
 // SetModelOverride sets a user's default-model override for an agent.
 func SetModelOverride(adafRoot, agentName, model string, globalCfg *config.GlobalConfig) (*AgentsConfig, error) {
-	cfg, err := LoadAndSyncAgentsConfig(adafRoot, globalCfg)
+	cfg, err := LoadAgentsConfig(adafRoot)
 	if err != nil {
 		return nil, err
 	}

@@ -33,5 +33,8 @@ type AgentLoopDoneMsg struct {
 	Err error
 }
 
+// BackToSelectorMsg signals that the user wants to return to the agent selector.
+type BackToSelectorMsg struct{}
+
 // tickMsg is sent every second to update the elapsed time display.
 type tickMsg struct{}

@@ -3,19 +3,19 @@ package runtui
 import (
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/agusx1211/adaf/internal/tui"
+	"github.com/agusx1211/adaf/internal/theme"
 )
 
 // Panel border styles.
 var (
 	leftPanelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(tui.ColorSurface2).
+			BorderForeground(theme.ColorSurface2).
 			Padding(1, 1)
 
 	rightPanelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(tui.ColorSurface2).
+			BorderForeground(theme.ColorSurface2).
 			Padding(0, 1)
 )
 
@@ -23,75 +23,75 @@ var (
 var (
 	headerStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(tui.ColorBase).
-			Background(tui.ColorBlue).
+			Foreground(theme.ColorBase).
+			Background(theme.ColorBlue).
 			Padding(0, 2)
 
 	statusBarStyle = lipgloss.NewStyle().
-			Foreground(tui.ColorSubtext0).
-			Background(tui.ColorSurface0).
+			Foreground(theme.ColorSubtext0).
+			Background(theme.ColorSurface0).
 			Padding(0, 1)
 
 	statusKeyStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(tui.ColorLavender).
-			Background(tui.ColorSurface0)
+			Foreground(theme.ColorLavender).
+			Background(theme.ColorSurface0)
 
 	statusValueStyle = lipgloss.NewStyle().
-				Foreground(tui.ColorSubtext0).
-				Background(tui.ColorSurface0)
+				Foreground(theme.ColorSubtext0).
+				Background(theme.ColorSurface0)
 )
 
 // Left panel section styles.
 var (
 	sectionTitleStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(tui.ColorLavender)
+				Foreground(theme.ColorLavender)
 
 	labelStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(tui.ColorMauve).
+			Foreground(theme.ColorMauve).
 			Width(12)
 
 	valueStyle = lipgloss.NewStyle().
-			Foreground(tui.ColorText)
+			Foreground(theme.ColorText)
 
 	dimStyle = lipgloss.NewStyle().
-			Foreground(tui.ColorOverlay0)
+			Foreground(theme.ColorOverlay0)
 )
 
 // Right panel event styles.
 var (
 	initLabelStyle = lipgloss.NewStyle().
-			Foreground(tui.ColorOverlay0).
+			Foreground(theme.ColorOverlay0).
 			Italic(true)
 
 	thinkingLabelStyle = lipgloss.NewStyle().
-				Foreground(tui.ColorOverlay0).
+				Foreground(theme.ColorOverlay0).
 				Italic(true)
 
 	thinkingTextStyle = lipgloss.NewStyle().
-				Foreground(tui.ColorOverlay0).
+				Foreground(theme.ColorOverlay0).
 				Italic(true)
 
 	textLabelStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(tui.ColorBlue)
+			Foreground(theme.ColorBlue)
 
 	textStyle = lipgloss.NewStyle().
-			Foreground(tui.ColorText)
+			Foreground(theme.ColorText)
 
 	toolLabelStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(tui.ColorYellow)
+			Foreground(theme.ColorYellow)
 
 	toolInputStyle = lipgloss.NewStyle().
-			Foreground(tui.ColorPeach)
+			Foreground(theme.ColorPeach)
 
 	toolResultStyle = lipgloss.NewStyle().
-			Foreground(tui.ColorGreen)
+			Foreground(theme.ColorGreen)
 
 	resultLabelStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(tui.ColorGreen)
+				Foreground(theme.ColorGreen)
 )

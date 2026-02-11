@@ -56,36 +56,66 @@ func Run(cfg RunConfig) error {
 
 	// Agent goroutine: runs the loop and sends lifecycle events.
 	go func() {
-		// Set up agent config for TUI mode.
-		agentCfg := cfg.AgentCfg
-		agentCfg.EventSink = streamCh
-
-		// Suppress direct stdout/stderr from the agent process.
-		agentCfg.Stdout = io.Discard
-		agentCfg.Stderr = io.Discard
-
-		l := &loop.Loop{
-			Store:  cfg.Store,
-			Agent:  cfg.Agent,
-			Config: agentCfg,
-			OnStart: func(sessionID int) {
-				eventCh <- AgentStartedMsg{SessionID: sessionID}
-			},
-			OnEnd: func(sessionID int, result *agent.Result) {
-				eventCh <- AgentFinishedMsg{
-					SessionID: sessionID,
-					Result:    result,
-				}
-			},
-		}
-
-		err := l.Run(ctx)
-		close(streamCh) // signals bridge to stop
-		eventCh <- AgentLoopDoneMsg{Err: err}
-		close(eventCh)
+		runAgentLoop(ctx, cfg, eventCh, streamCh)
 	}()
 
 	_, err := p.Run()
 	cancel() // ensure agent stops if TUI exits first
 	return err
+}
+
+// StartAgentLoop launches the agent loop in a goroutine, sending events to
+// eventCh. It returns the context cancel function. This is used by the unified
+// TUI's AppModel to start an agent run without owning the tea.Program.
+func StartAgentLoop(cfg RunConfig, eventCh chan any) context.CancelFunc {
+	streamCh := make(chan stream.RawEvent, 64)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Bridge goroutine: converts stream.RawEvent to AgentEventMsg.
+	go func() {
+		for ev := range streamCh {
+			if ev.Err != nil {
+				continue
+			}
+			eventCh <- AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw}
+		}
+	}()
+
+	// Agent goroutine: runs the loop and sends lifecycle events.
+	go func() {
+		runAgentLoop(ctx, cfg, eventCh, streamCh)
+	}()
+
+	return cancel
+}
+
+// runAgentLoop is the shared implementation that drives the loop.Loop and
+// sends lifecycle messages through eventCh.
+func runAgentLoop(ctx context.Context, cfg RunConfig, eventCh chan any, streamCh chan stream.RawEvent) {
+	agentCfg := cfg.AgentCfg
+	agentCfg.EventSink = streamCh
+
+	// Suppress direct stdout/stderr from the agent process.
+	agentCfg.Stdout = io.Discard
+	agentCfg.Stderr = io.Discard
+
+	l := &loop.Loop{
+		Store:  cfg.Store,
+		Agent:  cfg.Agent,
+		Config: agentCfg,
+		OnStart: func(sessionID int) {
+			eventCh <- AgentStartedMsg{SessionID: sessionID}
+		},
+		OnEnd: func(sessionID int, result *agent.Result) {
+			eventCh <- AgentFinishedMsg{
+				SessionID: sessionID,
+				Result:    result,
+			}
+		},
+	}
+
+	err := l.Run(ctx)
+	close(streamCh)
+	eventCh <- AgentLoopDoneMsg{Err: err}
+	close(eventCh)
 }

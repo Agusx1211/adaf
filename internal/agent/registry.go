@@ -1,10 +1,7 @@
 package agent
 
 import (
-	"strings"
 	"sync"
-
-	"github.com/agusx1211/adaf/internal/detect"
 )
 
 var (
@@ -14,7 +11,6 @@ var (
 
 func init() {
 	registry = DefaultRegistry()
-	autoPopulateFromDetection(registry)
 }
 
 // DefaultRegistry returns a map of all built-in agent implementations
@@ -56,19 +52,22 @@ func All() map[string]Agent {
 	return cp
 }
 
-func autoPopulateFromDetection(reg map[string]Agent) {
-	detected, err := detect.Scan()
-	if err != nil {
+// PopulateFromConfig adds agents found in the persisted config to the registry
+// as generic agents (if not already registered). This avoids running PATH
+// detection — it only uses the previously cached agents.json.
+func PopulateFromConfig(cfg *AgentsConfig) {
+	if cfg == nil {
 		return
 	}
-	for _, item := range detected {
-		name := strings.ToLower(strings.TrimSpace(item.Name))
-		if name == "" {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	for name, rec := range cfg.Agents {
+		if name == "" || !rec.Detected {
 			continue
 		}
-		if _, exists := reg[name]; exists {
+		if _, exists := registry[name]; exists {
 			continue
 		}
-		reg[name] = NewGenericAgent(name)
+		registry[name] = NewGenericAgent(name)
 	}
 }

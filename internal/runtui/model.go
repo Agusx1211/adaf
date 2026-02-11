@@ -12,7 +12,7 @@ import (
 
 	"github.com/agusx1211/adaf/internal/store"
 	"github.com/agusx1211/adaf/internal/stream"
-	"github.com/agusx1211/adaf/internal/tui"
+	"github.com/agusx1211/adaf/internal/theme"
 )
 
 const leftPanelOuterWidth = 32
@@ -79,6 +79,13 @@ func NewModel(projectName string, plan *store.Plan, agentName, modelName string,
 	}
 }
 
+// SetSize sets the terminal dimensions on the model. This is used when
+// embedding the Model inside a parent so the first render has correct sizing.
+func (m *Model) SetSize(w, h int) {
+	m.width = w
+	m.height = h
+}
+
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
@@ -132,7 +139,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addLine(dimStyle.Render(fmt.Sprintf("<<< Session #%d finished (exit=%d, %s)",
 				msg.SessionID, msg.Result.ExitCode, msg.Result.Duration.Round(time.Second))))
 		} else if msg.Err != nil {
-			m.addLine(lipgloss.NewStyle().Foreground(tui.ColorRed).Render(
+			m.addLine(lipgloss.NewStyle().Foreground(theme.ColorRed).Render(
 				fmt.Sprintf("<<< Session #%d error: %v", msg.SessionID, msg.Err)))
 		}
 		return m, waitForEvent(m.eventCh)
@@ -141,7 +148,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.done = true
 		m.exitErr = msg.Err
 		if msg.Err != nil {
-			m.addLine(lipgloss.NewStyle().Foreground(tui.ColorRed).Render(
+			m.addLine(lipgloss.NewStyle().Foreground(theme.ColorRed).Render(
 				fmt.Sprintf("Loop error: %v", msg.Err)))
 		} else {
 			m.addLine("")
@@ -160,11 +167,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// Done returns whether the agent loop has finished.
+func (m Model) Done() bool {
+	return m.done
+}
+
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q":
 		if m.done {
 			return m, tea.Quit
+		}
+		return m, nil
+	case "esc", "backspace":
+		if m.done {
+			return m, func() tea.Msg { return BackToSelectorMsg{} }
 		}
 		return m, nil
 	case "ctrl+c":
@@ -181,7 +198,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cancelFunc()
 		}
 		m.addLine("")
-		m.addLine(lipgloss.NewStyle().Foreground(tui.ColorYellow).Bold(true).Render(
+		m.addLine(lipgloss.NewStyle().Foreground(theme.ColorYellow).Bold(true).Render(
 			"Stopping agent... (press Ctrl+C again to force quit)"))
 		return m, nil
 	case "j", "down":
@@ -457,7 +474,7 @@ func (m *Model) handleEvent(ev stream.ClaudeEvent) {
 					} else {
 						label := toolResultStyle.Render("[result]")
 						if block.IsError {
-							label = lipgloss.NewStyle().Foreground(tui.ColorRed).Render("[error]")
+							label = lipgloss.NewStyle().Foreground(theme.ColorRed).Render("[error]")
 						}
 						m.addLine(label)
 						// Show first few lines of result, truncated.
@@ -605,6 +622,7 @@ func (m Model) renderStatusBar() string {
 	}
 
 	if m.done {
+		parts = append(parts, shortcut("esc", "back"))
 		parts = append(parts, shortcut("q", "quit"))
 	} else {
 		parts = append(parts, shortcut("ctrl+c", "stop"))
@@ -664,7 +682,7 @@ func (m Model) renderLeftPanel(outerW, outerH int) string {
 	if m.plan != nil && len(m.plan.Phases) > 0 {
 		lines = append(lines, sectionTitleStyle.Render("Plan"))
 		for _, phase := range m.plan.Phases {
-			indicator := tui.PhaseStatusIndicator(phase.Status)
+			indicator := theme.PhaseStatusIndicator(phase.Status)
 			title := phase.Title
 			maxTitleW := cw - 4
 			if maxTitleW > 0 && len(title) > maxTitleW {

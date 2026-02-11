@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/agusx1211/adaf/internal/agent"
+	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -47,14 +49,14 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("adaf project already exists at %s", absRepo)
 	}
 
-	config := store.ProjectConfig{
+	projCfg := store.ProjectConfig{
 		Name:        name,
 		RepoPath:    absRepo,
 		AgentConfig: make(map[string]string),
 		Metadata:    make(map[string]any),
 	}
 
-	if err := s.Init(config); err != nil {
+	if err := s.Init(projCfg); err != nil {
 		return fmt.Errorf("initializing project: %w", err)
 	}
 
@@ -74,6 +76,13 @@ logs/
 		return fmt.Errorf("writing .adaf/.gitignore: %w", err)
 	}
 
+	// Run initial agent detection so the cache is populated.
+	globalCfg, _ := config.Load()
+	agentsCfg, scanErr := agent.LoadAndSyncAgentsConfig(s.Root(), globalCfg)
+	if scanErr == nil {
+		agent.PopulateFromConfig(agentsCfg)
+	}
+
 	fmt.Println()
 	fmt.Printf("  %s adaf project initialized!%s\n", styleBoldGreen, colorReset)
 	fmt.Println()
@@ -88,6 +97,15 @@ logs/
 	fmt.Printf("    %s/.adaf/docs/\n", absRepo)
 	fmt.Printf("    %s/.adaf/decisions/\n", absRepo)
 	fmt.Printf("    %s/.adaf/recordings/\n", absRepo)
+	if agentsCfg != nil {
+		detected := 0
+		for _, rec := range agentsCfg.Agents {
+			if rec.Detected {
+				detected++
+			}
+		}
+		printField("Agents found", fmt.Sprintf("%d (run 'adaf agents' to list)", detected))
+	}
 	fmt.Println()
 	fmt.Printf("  Next: run %sadaf plan set <plan-file>%s to set your project plan.\n", styleBoldWhite, colorReset)
 

@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
+
+	"github.com/agusx1211/adaf/internal/tui"
 )
 
 const (
@@ -60,7 +63,11 @@ var rootCmd = &cobra.Command{
 			fmt.Println("Run " + styleBoldWhite + "adaf init" + colorReset + " to create one.")
 			return nil
 		}
-		// Show brief status
+		// If running in a terminal, launch the unified TUI.
+		if isatty.IsTerminal(os.Stdout.Fd()) {
+			return tui.RunApp(s)
+		}
+		// Non-interactive: show brief status.
 		return runStatusBrief(s)
 	},
 	SilenceUsage:  true,

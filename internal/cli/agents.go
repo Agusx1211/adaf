@@ -17,14 +17,20 @@ import (
 
 var agentsCmd = &cobra.Command{
 	Use:   "agents",
-	Short: "Detect and manage agent tool configuration",
+	Short: "Manage agent tool configuration",
 	RunE:  runAgentsList,
 }
 
 var agentsListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List detected agent tools",
+	Short: "List known agent tools (from cache)",
 	RunE:  runAgentsList,
+}
+
+var agentsDetectCmd = &cobra.Command{
+	Use:   "detect",
+	Short: "Scan PATH for agent tools and update the cache",
+	RunE:  runAgentsDetect,
 }
 
 var agentsSetModelCmd = &cobra.Command{
@@ -46,6 +52,7 @@ func init() {
 	agentsSetModelCmd.Flags().Bool("global", false, "Write override to global config (~/.adaf/config.json) instead of project")
 
 	agentsCmd.AddCommand(agentsListCmd)
+	agentsCmd.AddCommand(agentsDetectCmd)
 	agentsCmd.AddCommand(agentsSetModelCmd)
 	agentsCmd.AddCommand(agentsTestCmd)
 	rootCmd.AddCommand(agentsCmd)
@@ -62,9 +69,9 @@ func runAgentsList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading global config: %w", err)
 	}
 
-	cfg, err := agent.LoadAndSyncAgentsConfig(adafRoot, globalCfg)
+	cfg, err := agent.LoadAgentsConfig(adafRoot)
 	if err != nil {
-		return fmt.Errorf("scanning agents: %w", err)
+		return fmt.Errorf("loading agents config: %w", err)
 	}
 
 	rows := make([][]string, 0, len(cfg.Agents))
@@ -110,13 +117,65 @@ func runAgentsList(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	printHeader("Detected Agents")
-	printTable([]string{"NAME", "VERSION", "PATH", "DEFAULT MODEL", "AVAILABLE MODELS"}, rows)
+	printHeader("Agents")
+	if len(rows) == 0 {
+		fmt.Printf("  %sNo agents detected. Run %sadaf agents detect%s to scan.%s\n",
+			colorDim, styleBoldWhite, colorDim, colorReset)
+	} else {
+		printTable([]string{"NAME", "VERSION", "PATH", "DEFAULT MODEL", "AVAILABLE MODELS"}, rows)
+	}
 	fmt.Println()
 	printField("Config (project)", agent.AgentsConfigPath(adafRoot))
 	printField("Config (global)", config.Dir()+"/config.json")
 	printField("Detected", fmt.Sprintf("%d", len(rows)))
 
+	return nil
+}
+
+func runAgentsDetect(cmd *cobra.Command, args []string) error {
+	adafRoot, err := agentsRoot()
+	if err != nil {
+		return err
+	}
+
+	globalCfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading global config: %w", err)
+	}
+
+	fmt.Printf("\n  %sScanning for agent tools...%s\n\n", styleBoldCyan, colorReset)
+
+	cfg, err := agent.LoadAndSyncAgentsConfig(adafRoot, globalCfg)
+	if err != nil {
+		return fmt.Errorf("scanning agents: %w", err)
+	}
+
+	// Also update the in-process registry.
+	agent.PopulateFromConfig(cfg)
+
+	count := 0
+	names := make([]string, 0, len(cfg.Agents))
+	for name, rec := range cfg.Agents {
+		if rec.Detected {
+			names = append(names, name)
+			count++
+		}
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		rec := cfg.Agents[name]
+		version := rec.Version
+		if version == "" {
+			version = "unknown"
+		}
+		fmt.Printf("  %s%s%s  %s  %s\n",
+			styleBoldGreen, name, colorReset,
+			colorDim+version+colorReset,
+			colorDim+rec.Path+colorReset)
+	}
+
+	fmt.Printf("\n  %s%d agent(s) detected and cached.%s\n\n", styleBoldGreen, count, colorReset)
 	return nil
 }
 
@@ -161,9 +220,9 @@ func runAgentsSetModel(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	cfg, err := agent.LoadAndSyncAgentsConfig(adafRoot, globalCfg)
+	cfg, err := agent.LoadAgentsConfig(adafRoot)
 	if err != nil {
-		return fmt.Errorf("scanning agents: %w", err)
+		return fmt.Errorf("loading agents config: %w", err)
 	}
 
 	rec, exists := cfg.Agents[agentName]
@@ -204,9 +263,9 @@ func runAgentsTest(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading global config: %w", err)
 	}
 
-	cfg, err := agent.LoadAndSyncAgentsConfig(adafRoot, globalCfg)
+	cfg, err := agent.LoadAgentsConfig(adafRoot)
 	if err != nil {
-		return fmt.Errorf("scanning agents: %w", err)
+		return fmt.Errorf("loading agents config: %w", err)
 	}
 
 	runner, ok := agent.Get(agentName)
