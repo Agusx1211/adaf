@@ -13,6 +13,7 @@ import (
 	"github.com/agusx1211/adaf/internal/config"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
 	"github.com/agusx1211/adaf/internal/runtui"
+	"github.com/agusx1211/adaf/internal/session"
 	"github.com/agusx1211/adaf/internal/store"
 )
 
@@ -84,6 +85,10 @@ type AppModel struct {
 	runModel   runtui.Model
 	runCancel  context.CancelFunc
 	runEventCh chan any
+
+	// Session mode: when non-nil, the agent is running via a session daemon.
+	sessionClient *session.Client
+	sessionID     int
 }
 
 // NewApp creates the unified TUI app model.
@@ -212,9 +217,57 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
+		case "s":
+			// Show and attach to active sessions.
+			return m.showSessions()
 		}
 	}
 	return m, nil
+}
+
+// showSessions lists active sessions and attaches to the first one found, or
+// shows a message if none are active.
+func (m AppModel) showSessions() (tea.Model, tea.Cmd) {
+	if session.IsAgentContext() {
+		return m, nil
+	}
+
+	active, err := session.ListActiveSessions()
+	if err != nil || len(active) == 0 {
+		return m, nil
+	}
+
+	// If there's exactly one active session, attach to it directly.
+	// If multiple, attach to the most recent (first in list, which is sorted by ID desc).
+	target := active[0]
+
+	client, err := session.ConnectToSession(target.ID)
+	if err != nil {
+		return m, nil
+	}
+
+	eventCh := make(chan any, 256)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancelFunc := func() {
+		client.Cancel()
+		cancel()
+	}
+
+	go func() {
+		client.StreamEvents(eventCh, nil)
+	}()
+
+	m.state = stateRunning
+	m.runCancel = cancelFunc
+	m.runEventCh = eventCh
+	m.sessionClient = client
+	m.sessionID = target.ID
+	m.runModel = runtui.NewModel(target.ProjectName, m.plan, target.AgentName, "", eventCh, cancelFunc)
+	m.runModel.SetSessionMode(target.ID)
+	m.runModel.SetSize(m.width, m.height)
+
+	_ = ctx
+	return m, m.runModel.Init()
 }
 
 func (m AppModel) updateRunning(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -225,9 +278,29 @@ func (m AppModel) updateRunning(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.runCancel()
 			m.runCancel = nil
 		}
+		if m.sessionClient != nil {
+			m.sessionClient.Close()
+			m.sessionClient = nil
+		}
 		m.state = stateSelector
 		m.runEventCh = nil
+		m.sessionID = 0
 		m.loadProjectData()
+		return m, tea.SetWindowTitle("adaf")
+	}
+
+	// Intercept DetachMsg to detach from the session without stopping the agent.
+	if detach, ok := msg.(runtui.DetachMsg); ok {
+		if m.sessionClient != nil {
+			m.sessionClient.Close()
+			m.sessionClient = nil
+		}
+		m.state = stateSelector
+		m.runEventCh = nil
+		m.runCancel = nil
+		m.sessionID = 0
+		m.loadProjectData()
+		_ = detach // session continues in background
 		return m, tea.SetWindowTitle("adaf")
 	}
 
@@ -237,6 +310,7 @@ func (m AppModel) updateRunning(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // startAgent transitions from selector to running state.
+// It launches the agent via a session daemon for detach/reattach support.
 func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 	p := m.profiles[m.selected]
 
@@ -244,11 +318,6 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 	if p.IsNew {
 		m.profileNameInput = ""
 		m.state = stateProfileName
-		return m, nil
-	}
-
-	agentInstance, ok := agent.Get(p.Agent)
-	if !ok {
 		return m, nil
 	}
 
@@ -319,6 +388,139 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 	}
 	prompt, _ := buildPrompt(m.store, m.project, prof, m.globalCfg)
 
+	projectName := ""
+	if m.project != nil {
+		projectName = m.project.Name
+	}
+
+	// Create a session daemon config.
+	dcfg := session.DaemonConfig{
+		AgentName:    p.Agent,
+		AgentCommand: customCmd,
+		AgentArgs:    agentArgs,
+		AgentEnv:     agentEnv,
+		WorkDir:      workDir,
+		Prompt:       prompt,
+		ProjectDir:   workDir,
+		ProfileName:  p.Name,
+		ProjectName:  projectName,
+	}
+
+	// Allocate a session and start the daemon.
+	sessionID, err := session.CreateSession(dcfg)
+	if err != nil {
+		// Fallback: run inline without session support.
+		return m.startAgentInline(p, projectName)
+	}
+
+	if err := session.StartDaemon(sessionID); err != nil {
+		// Fallback: run inline without session support.
+		return m.startAgentInline(p, projectName)
+	}
+
+	// Connect to the daemon.
+	client, err := session.ConnectToSession(sessionID)
+	if err != nil {
+		// Fallback: run inline without session support.
+		return m.startAgentInline(p, projectName)
+	}
+
+	// Set up the event channel.
+	eventCh := make(chan any, 256)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancelFunc := func() {
+		client.Cancel()
+		cancel()
+	}
+
+	// Stream events from the daemon.
+	go func() {
+		client.StreamEvents(eventCh, nil)
+	}()
+
+	m.state = stateRunning
+	m.runCancel = cancelFunc
+	m.runEventCh = eventCh
+	m.sessionClient = client
+	m.sessionID = sessionID
+	m.runModel = runtui.NewModel(projectName, m.plan, p.Agent, "", eventCh, cancelFunc)
+	m.runModel.SetSessionMode(sessionID)
+	m.runModel.SetSize(m.width, m.height)
+
+	_ = ctx // cancel is wrapped in cancelFunc
+	return m, m.runModel.Init()
+}
+
+// startAgentInline is the fallback: runs the agent in-process without session
+// daemon support (no detach/reattach). Used when session creation fails.
+func (m AppModel) startAgentInline(p profileEntry, projectName string) (tea.Model, tea.Cmd) {
+	agentInstance, ok := agent.Get(p.Agent)
+	if !ok {
+		return m, nil
+	}
+
+	agentsCfg, _ := agent.LoadAgentsConfig(m.store.Root())
+	var customCmd string
+	if agentsCfg != nil {
+		if rec, ok := agentsCfg.Agents[p.Agent]; ok && rec.Path != "" {
+			customCmd = rec.Path
+		}
+	}
+
+	modelOverride := p.Model
+	reasoningLevel := ""
+	if prof := m.globalCfg.FindProfile(p.Name); prof != nil {
+		reasoningLevel = prof.ReasoningLevel
+	}
+
+	var agentArgs []string
+	agentEnv := make(map[string]string)
+	switch p.Agent {
+	case "claude":
+		if modelOverride != "" {
+			agentArgs = append(agentArgs, "--model", modelOverride)
+		}
+		if reasoningLevel != "" {
+			agentEnv["CLAUDE_CODE_EFFORT_LEVEL"] = reasoningLevel
+		}
+		agentArgs = append(agentArgs, "--dangerously-skip-permissions")
+	case "codex":
+		if modelOverride != "" {
+			agentArgs = append(agentArgs, "--model", modelOverride)
+		}
+		if reasoningLevel != "" {
+			agentArgs = append(agentArgs, "-c", `model_reasoning_effort="`+reasoningLevel+`"`)
+		}
+		agentArgs = append(agentArgs, "--full-auto")
+	case "opencode":
+		if modelOverride != "" {
+			agentArgs = append(agentArgs, "--model", modelOverride)
+		}
+	}
+
+	if customCmd == "" {
+		switch p.Agent {
+		case "claude", "codex", "vibe", "opencode", "generic":
+		default:
+			customCmd = p.Agent
+		}
+	}
+
+	workDir := ""
+	if m.project != nil {
+		workDir = m.project.RepoPath
+	}
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+
+	var prof *config.Profile
+	if found := m.globalCfg.FindProfile(p.Name); found != nil {
+		prof = found
+	}
+	prompt, _ := buildPrompt(m.store, m.project, prof, m.globalCfg)
+
 	agentCfg := agent.Config{
 		Name:    p.Agent,
 		Command: customCmd,
@@ -326,11 +528,6 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 		Env:     agentEnv,
 		WorkDir: workDir,
 		Prompt:  prompt,
-	}
-
-	projectName := ""
-	if m.project != nil {
-		projectName = m.project.Name
 	}
 
 	eventCh := make(chan any, 256)
@@ -430,6 +627,7 @@ func (m AppModel) renderStatusBar() string {
 		add("n", "new profile")
 		add("e", "edit")
 		add("d", "delete")
+		add("s", "sessions")
 	}
 	add("q", "quit")
 

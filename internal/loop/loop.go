@@ -64,6 +64,13 @@ func (l *Loop) Run(ctx context.Context) error {
 		// Update config with the current session ID.
 		cfg := l.Config
 		cfg.SessionID = sessionID
+
+		// Set ADAF_AGENT=1 so the agent process knows it's running under adaf
+		// and session management commands are blocked.
+		if cfg.Env == nil {
+			cfg.Env = make(map[string]string)
+		}
+		cfg.Env["ADAF_AGENT"] = "1"
 		if l.PromptFunc != nil {
 			cfg.Prompt = l.PromptFunc(sessionID)
 		}

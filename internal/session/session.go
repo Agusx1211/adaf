@@ -1,0 +1,340 @@
+package session
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+)
+
+// SessionMeta describes a running or completed session daemon.
+type SessionMeta struct {
+	ID          int       `json:"id"`
+	ProfileName string    `json:"profile_name"`
+	AgentName   string    `json:"agent_name"`
+	ProjectDir  string    `json:"project_dir"`
+	ProjectName string    `json:"project_name"`
+	PID         int       `json:"pid"`
+	Status      string    `json:"status"` // "starting", "running", "done", "error"
+	StartedAt   time.Time `json:"started_at"`
+	EndedAt     time.Time `json:"ended_at,omitempty"`
+	Error       string    `json:"error,omitempty"`
+}
+
+// DaemonConfig holds everything the daemon process needs to reconstruct and
+// run the agent loop. Written to disk by the parent before starting the daemon.
+type DaemonConfig struct {
+	AgentName    string            `json:"agent_name"`
+	AgentCommand string            `json:"agent_command"`
+	AgentArgs    []string          `json:"agent_args"`
+	AgentEnv     map[string]string `json:"agent_env"`
+	WorkDir      string            `json:"work_dir"`
+	Prompt       string            `json:"prompt"`
+	MaxTurns     int               `json:"max_turns"`
+	ProjectDir   string            `json:"project_dir"`
+	ProfileName  string            `json:"profile_name"`
+	ProjectName  string            `json:"project_name"`
+}
+
+// Dir returns the global sessions directory (~/.adaf/sessions/), creating it if needed.
+func Dir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = os.TempDir()
+	}
+	dir := filepath.Join(home, ".adaf", "sessions")
+	os.MkdirAll(dir, 0755)
+	return dir
+}
+
+// SessionDir returns the directory for a specific session.
+func SessionDir(id int) string {
+	return filepath.Join(Dir(), fmt.Sprintf("%d", id))
+}
+
+// SocketPath returns the Unix socket path for a session.
+func SocketPath(id int) string {
+	return filepath.Join(SessionDir(id), "sock")
+}
+
+// MetaPath returns the metadata JSON path for a session.
+func MetaPath(id int) string {
+	return filepath.Join(SessionDir(id), "meta.json")
+}
+
+// ConfigPath returns the daemon config JSON path for a session.
+func ConfigPath(id int) string {
+	return filepath.Join(SessionDir(id), "config.json")
+}
+
+// EventsPath returns the events JSONL path for a session.
+func EventsPath(id int) string {
+	return filepath.Join(SessionDir(id), "events.jsonl")
+}
+
+// nextID returns the next available session ID.
+func nextID() int {
+	dir := Dir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 1
+	}
+	maxID := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if id, err := strconv.Atoi(e.Name()); err == nil && id > maxID {
+			maxID = id
+		}
+	}
+	return maxID + 1
+}
+
+// CreateSession allocates a new session ID, writes the DaemonConfig and initial
+// SessionMeta to disk, and returns the session ID.
+func CreateSession(dcfg DaemonConfig) (int, error) {
+	id := nextID()
+	dir := SessionDir(id)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return 0, fmt.Errorf("creating session dir: %w", err)
+	}
+
+	// Write daemon config.
+	data, err := json.MarshalIndent(dcfg, "", "  ")
+	if err != nil {
+		return 0, err
+	}
+	if err := os.WriteFile(ConfigPath(id), data, 0644); err != nil {
+		return 0, err
+	}
+
+	// Write initial metadata.
+	meta := SessionMeta{
+		ID:          id,
+		ProfileName: dcfg.ProfileName,
+		AgentName:   dcfg.AgentName,
+		ProjectDir:  dcfg.ProjectDir,
+		ProjectName: dcfg.ProjectName,
+		Status:      "starting",
+		StartedAt:   time.Now().UTC(),
+	}
+	return id, SaveMeta(id, &meta)
+}
+
+// SaveMeta writes session metadata to disk.
+func SaveMeta(id int, meta *SessionMeta) error {
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(MetaPath(id), data, 0644)
+}
+
+// LoadMeta reads session metadata from disk.
+func LoadMeta(id int) (*SessionMeta, error) {
+	data, err := os.ReadFile(MetaPath(id))
+	if err != nil {
+		return nil, err
+	}
+	var meta SessionMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return nil, err
+	}
+	return &meta, nil
+}
+
+// LoadConfig reads the daemon config from disk.
+func LoadConfig(id int) (*DaemonConfig, error) {
+	data, err := os.ReadFile(ConfigPath(id))
+	if err != nil {
+		return nil, err
+	}
+	var cfg DaemonConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+// ListSessions returns all sessions, sorted by ID descending (newest first).
+// Stale sessions (where the PID is dead) are automatically cleaned up.
+func ListSessions() ([]SessionMeta, error) {
+	dir := Dir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var sessions []SessionMeta
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, err := strconv.Atoi(e.Name()); err != nil {
+			continue
+		}
+
+		metaPath := filepath.Join(dir, e.Name(), "meta.json")
+		data, err := os.ReadFile(metaPath)
+		if err != nil {
+			continue
+		}
+
+		var meta SessionMeta
+		if err := json.Unmarshal(data, &meta); err != nil {
+			continue
+		}
+
+		// Check if the daemon is still alive for running sessions.
+		if meta.Status == "running" || meta.Status == "starting" {
+			if !isProcessAlive(meta.PID) {
+				meta.Status = "dead"
+				meta.EndedAt = time.Now().UTC()
+				meta.Error = "daemon process died unexpectedly"
+				SaveMeta(meta.ID, &meta)
+			}
+		}
+
+		sessions = append(sessions, meta)
+	}
+
+	sort.Slice(sessions, func(i, j int) bool { return sessions[i].ID > sessions[j].ID })
+	return sessions, nil
+}
+
+// ListActiveSessions returns only sessions that are currently running.
+func ListActiveSessions() ([]SessionMeta, error) {
+	all, err := ListSessions()
+	if err != nil {
+		return nil, err
+	}
+	var active []SessionMeta
+	for _, s := range all {
+		if s.Status == "running" || s.Status == "starting" {
+			active = append(active, s)
+		}
+	}
+	return active, nil
+}
+
+// CleanupOld removes session directories older than the given duration
+// that are not currently running.
+func CleanupOld(maxAge time.Duration) error {
+	sessions, err := ListSessions()
+	if err != nil {
+		return err
+	}
+	cutoff := time.Now().Add(-maxAge)
+	for _, s := range sessions {
+		if s.Status == "running" || s.Status == "starting" {
+			continue
+		}
+		if s.EndedAt.Before(cutoff) || (s.EndedAt.IsZero() && s.StartedAt.Before(cutoff)) {
+			os.RemoveAll(SessionDir(s.ID))
+		}
+	}
+	return nil
+}
+
+// IsAgentContext returns true if the current process is running inside an
+// adaf agent session (spawned by the orchestrator or launched as an agent).
+// Session management commands should refuse to run in this context.
+func IsAgentContext() bool {
+	return os.Getenv("ADAF_SESSION_ID") != "" || os.Getenv("ADAF_AGENT") == "1"
+}
+
+// isProcessAlive checks if a process with the given PID is still running.
+func isProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	// On Unix, FindProcess always succeeds. Send signal 0 to check liveness.
+	err = proc.Signal(syscall.Signal(0))
+	return err == nil
+}
+
+// FormatElapsed returns a human-readable elapsed time string.
+func FormatElapsed(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+}
+
+// FormatTimeAgo returns a human-readable "time ago" string.
+func FormatTimeAgo(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		m := int(d.Minutes())
+		if m == 1 {
+			return "1 minute ago"
+		}
+		return fmt.Sprintf("%d minutes ago", m)
+	case d < 24*time.Hour:
+		h := int(d.Hours())
+		if h == 1 {
+			return "1 hour ago"
+		}
+		return fmt.Sprintf("%d hours ago", h)
+	default:
+		return t.Format("Jan 2 15:04")
+	}
+}
+
+// FindSessionByPartial finds a session by numeric ID or partial profile name match.
+func FindSessionByPartial(query string) (*SessionMeta, error) {
+	// Try numeric ID first.
+	if id, err := strconv.Atoi(query); err == nil {
+		meta, err := LoadMeta(id)
+		if err == nil {
+			return meta, nil
+		}
+	}
+
+	// Try profile name match.
+	sessions, err := ListSessions()
+	if err != nil {
+		return nil, err
+	}
+
+	query = strings.ToLower(query)
+	var matches []SessionMeta
+	for _, s := range sessions {
+		if strings.Contains(strings.ToLower(s.ProfileName), query) {
+			matches = append(matches, s)
+		}
+	}
+
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("no session matching %q", query)
+	}
+	if len(matches) > 1 {
+		// Prefer running sessions.
+		for _, m := range matches {
+			if m.Status == "running" {
+				return &m, nil
+			}
+		}
+		return nil, fmt.Errorf("multiple sessions match %q, specify the numeric ID", query)
+	}
+	return &matches[0], nil
+}
