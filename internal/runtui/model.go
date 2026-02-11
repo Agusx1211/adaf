@@ -73,6 +73,10 @@ type Model struct {
 	done       bool
 	stopping   bool
 	exitErr    error
+
+	// Session mode: when non-zero, this model is attached to a session daemon
+	// and supports detach (Ctrl+D).
+	sessionModeID int
 }
 
 // NewModel creates a new Model with the given configuration.
@@ -100,6 +104,17 @@ func (m *Model) SetSize(w, h int) {
 func (m *Model) SetLoopInfo(name string, totalSteps int) {
 	m.loopName = name
 	m.loopTotalSteps = totalSteps
+}
+
+// SetSessionMode marks this model as attached to a session daemon.
+// When in session mode, Ctrl+D detaches instead of scrolling.
+func (m *Model) SetSessionMode(sessionID int) {
+	m.sessionModeID = sessionID
+}
+
+// SessionMode returns the session ID if in session mode, or 0.
+func (m Model) SessionMode() int {
+	return m.sessionModeID
 }
 
 // Init implements tea.Model.
@@ -231,6 +246,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return BackToSelectorMsg{} }
 		}
 		return m, nil
+	case "ctrl+d":
+		if m.sessionModeID > 0 && !m.done {
+			// Detach from the session without stopping the agent.
+			return m, func() tea.Msg {
+				return DetachMsg{SessionID: m.sessionModeID}
+			}
+		}
+		// Not in session mode: page down.
+		m.scrollDown(m.rcHeight() / 2)
 	case "ctrl+c":
 		if m.done {
 			return m, tea.Quit
@@ -252,7 +276,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.scrollDown(1)
 	case "k", "up":
 		m.scrollUp(1)
-	case "pgdown", "ctrl+d":
+	case "pgdown":
 		m.scrollDown(m.rcHeight() / 2)
 	case "pgup", "ctrl+u":
 		m.scrollUp(m.rcHeight() / 2)
@@ -677,6 +701,9 @@ func (m Model) renderStatusBar() string {
 		parts = append(parts, shortcut("esc", "back"))
 		parts = append(parts, shortcut("q", "quit"))
 	} else {
+		if m.sessionModeID > 0 {
+			parts = append(parts, shortcut("ctrl+d", "detach"))
+		}
 		parts = append(parts, shortcut("ctrl+c", "stop"))
 	}
 

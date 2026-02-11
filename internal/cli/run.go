@@ -15,6 +15,7 @@ import (
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/loop"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
+	"github.com/agusx1211/adaf/internal/session"
 	"github.com/agusx1211/adaf/internal/store"
 )
 
@@ -38,6 +39,7 @@ func init() {
 	runCmd.Flags().String("model", "", "Model override for the agent")
 	runCmd.Flags().String("command", "", "Custom command path (for generic agent)")
 	runCmd.Flags().String("reasoning-level", "", "Reasoning level (e.g. low, medium, high, xhigh)")
+	runCmd.Flags().BoolP("session", "s", false, "Run as a detachable session (use 'adaf attach' to reattach)")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -151,8 +153,48 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		MaxTurns: maxTurns,
 	}
 
-	// Always inline output.
+	sessionMode, _ := cmd.Flags().GetBool("session")
+	if sessionMode {
+		if session.IsAgentContext() {
+			return fmt.Errorf("session mode is not available inside an agent context")
+		}
+		return runAsSession(agentName, agentCfg, projCfg, workDir)
+	}
+
+	// Default: inline output.
 	return runInline(cmd, s, agentInstance, agentCfg, projCfg, defaultModel, maxTurns)
+}
+
+// runAsSession starts the agent as a background session daemon and prints the session ID.
+func runAsSession(agentName string, agentCfg agent.Config, projCfg *store.ProjectConfig, workDir string) error {
+	dcfg := session.DaemonConfig{
+		AgentName:    agentName,
+		AgentCommand: agentCfg.Command,
+		AgentArgs:    agentCfg.Args,
+		AgentEnv:     agentCfg.Env,
+		WorkDir:      workDir,
+		Prompt:       agentCfg.Prompt,
+		MaxTurns:     agentCfg.MaxTurns,
+		ProjectDir:   workDir,
+		ProfileName:  agentName,
+		ProjectName:  projCfg.Name,
+	}
+
+	sessionID, err := session.CreateSession(dcfg)
+	if err != nil {
+		return fmt.Errorf("creating session: %w", err)
+	}
+
+	if err := session.StartDaemon(sessionID); err != nil {
+		return fmt.Errorf("starting session daemon: %w", err)
+	}
+
+	fmt.Printf("\n  %sSession #%d started%s (agent=%s, project=%s)\n",
+		styleBoldGreen, sessionID, colorReset, agentName, projCfg.Name)
+	fmt.Printf("  Use %sadaf attach %d%s to connect.\n", styleBoldWhite, sessionID, colorReset)
+	fmt.Printf("  Use %sadaf sessions%s to list all sessions.\n\n", styleBoldWhite, colorReset)
+
+	return nil
 }
 
 // runInline prints inline output suitable for CI/pipes.

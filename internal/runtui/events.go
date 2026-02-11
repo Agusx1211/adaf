@@ -36,6 +36,12 @@ type AgentLoopDoneMsg struct {
 // BackToSelectorMsg signals that the user wants to return to the agent selector.
 type BackToSelectorMsg struct{}
 
+// DetachMsg signals that the user wants to detach from the session without
+// stopping the agent. The session continues running in the background.
+type DetachMsg struct {
+	SessionID int
+}
+
 // SpawnStatusMsg carries hierarchical spawn status for the left panel.
 type SpawnStatusMsg struct {
 	Spawns []SpawnInfo
