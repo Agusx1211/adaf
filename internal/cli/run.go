@@ -28,9 +28,9 @@ Supported agents: claude, codex, vibe, opencode, generic`,
 func init() {
 	runCmd.Flags().String("agent", "claude", "Agent to run (claude, codex, vibe, opencode, generic)")
 	runCmd.Flags().String("prompt", "", "Prompt to send to the agent (default: built from project context)")
-	runCmd.Flags().Int("max-turns", 1, "Maximum number of agent turns (0 = unlimited)")
+	runCmd.Flags().Int("max-turns", 0, "Maximum number of agent turns (0 = unlimited)")
 	runCmd.Flags().String("model", "", "Model override for the agent")
-	runCmd.Flags().Bool("auto-approve", false, "Auto-approve agent actions without confirmation")
+	runCmd.Flags().Bool("auto-approve", true, "Auto-approve agent actions without confirmation")
 	runCmd.Flags().String("command", "", "Custom command path (for generic agent)")
 	rootCmd.AddCommand(runCmd)
 }
