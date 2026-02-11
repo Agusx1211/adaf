@@ -2,59 +2,55 @@ package tui
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/agusx1211/adaf/internal/agent"
+	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/store"
 )
 
-const selectorLeftWidth = 24
+const selectorLeftWidth = 28
 
-// agentEntry holds display info for an agent in the selector list.
-type agentEntry struct {
-	Name     string
-	Detected bool
-	Path     string
-	Model    string
-	Caps     []string
+// profileEntry holds display info for a profile in the selector list.
+type profileEntry struct {
+	Name          string
+	Agent         string
+	Model         string
+	ReasoningLevel string // thinking budget value from profile
+	Detected      bool
+	IsNew         bool // sentinel "+ New Profile" entry
+	Caps          []string
 }
 
-// buildAgentList builds a sorted list of agents from the registry and config.
-func buildAgentList(agentsCfg *agent.AgentsConfig) []agentEntry {
-	all := agent.All()
-	names := make([]string, 0, len(all))
-	for name := range all {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	entries := make([]agentEntry, 0, len(names))
-	for _, name := range names {
-		e := agentEntry{Name: name}
-		if agentsCfg != nil {
-			if rec, ok := agentsCfg.Agents[name]; ok {
-				e.Detected = rec.Detected
-				e.Path = rec.Path
-				e.Model = rec.DefaultModel
-				e.Caps = rec.Capabilities
-			}
+// buildProfileList builds a list from saved profiles + a "New Profile" sentinel.
+func buildProfileList(globalCfg *config.GlobalConfig, agentsCfg *agent.AgentsConfig) []profileEntry {
+	entries := make([]profileEntry, 0, len(globalCfg.Profiles)+1)
+	for _, p := range globalCfg.Profiles {
+		e := profileEntry{
+			Name:          p.Name,
+			Agent:         p.Agent,
+			Model:         p.Model,
+			ReasoningLevel: p.ReasoningLevel,
 		}
 		if e.Model == "" {
-			e.Model = agent.DefaultModel(name)
+			e.Model = agent.DefaultModel(p.Agent)
 		}
-		if len(e.Caps) == 0 {
-			e.Caps = agent.Capabilities(name)
+		e.Caps = agent.Capabilities(p.Agent)
+		if agentsCfg != nil {
+			if rec, ok := agentsCfg.Agents[p.Agent]; ok {
+				e.Detected = rec.Detected
+			}
 		}
 		entries = append(entries, e)
 	}
+	entries = append(entries, profileEntry{IsNew: true, Name: "+ New Profile"})
 	return entries
 }
 
 // renderSelector renders the selector view as two columns.
-func renderSelector(agents []agentEntry, selected int, project *store.ProjectConfig, plan *store.Plan, issues []store.Issue, logs []store.SessionLog, width, height int) string {
+func renderSelector(profiles []profileEntry, selected int, project *store.ProjectConfig, plan *store.Plan, issues []store.Issue, logs []store.SessionLog, width, height int) string {
 	panelH := height - 2 // header + status bar
 	if panelH < 1 {
 		panelH = 1
@@ -67,8 +63,8 @@ func renderSelector(agents []agentEntry, selected int, project *store.ProjectCon
 		leftOuter = 0
 	}
 
-	left := renderAgentList(agents, selected, leftOuter, panelH)
-	right := renderProjectPanel(agents, selected, project, plan, issues, logs, rightOuter, panelH)
+	left := renderProfileList(profiles, selected, leftOuter, panelH)
+	right := renderProjectPanel(profiles, selected, project, plan, issues, logs, rightOuter, panelH)
 
 	if leftOuter == 0 {
 		return right
@@ -76,7 +72,7 @@ func renderSelector(agents []agentEntry, selected int, project *store.ProjectCon
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 }
 
-func renderAgentList(agents []agentEntry, selected int, outerW, outerH int) string {
+func renderProfileList(profiles []profileEntry, selected int, outerW, outerH int) string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorSurface2).
@@ -93,18 +89,31 @@ func renderAgentList(agents []agentEntry, selected int, outerW, outerH int) stri
 	}
 
 	var lines []string
-	lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(ColorLavender).Render("Agents"))
+	lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(ColorLavender).Render("Profiles"))
 	lines = append(lines, "")
 
-	for i, a := range agents {
-		name := a.Name
+	for i, p := range profiles {
+		name := p.Name
 		maxW := cw - 4
 		if maxW > 0 && len(name) > maxW {
 			name = name[:maxW]
 		}
 
+		if p.IsNew {
+			// Sentinel entry styled differently.
+			if i == selected {
+				cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render("> ")
+				nameStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render(name)
+				lines = append(lines, cursor+nameStyled)
+			} else {
+				nameStyled := lipgloss.NewStyle().Foreground(ColorOverlay0).Render(name)
+				lines = append(lines, "  "+nameStyled)
+			}
+			continue
+		}
+
 		var indicator string
-		if a.Detected {
+		if p.Detected {
 			indicator = lipgloss.NewStyle().Foreground(ColorGreen).Render("  ")
 		} else {
 			indicator = lipgloss.NewStyle().Foreground(ColorOverlay0).Render("  ")
@@ -124,7 +133,7 @@ func renderAgentList(agents []agentEntry, selected int, outerW, outerH int) stri
 	return style.Render(content)
 }
 
-func renderProjectPanel(agents []agentEntry, selected int, project *store.ProjectConfig, plan *store.Plan, issues []store.Issue, logs []store.SessionLog, outerW, outerH int) string {
+func renderProjectPanel(profiles []profileEntry, selected int, project *store.ProjectConfig, plan *store.Plan, issues []store.Issue, logs []store.SessionLog, outerW, outerH int) string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorSurface2).
@@ -192,30 +201,33 @@ func renderProjectPanel(agents []agentEntry, selected int, project *store.Projec
 
 	lines = append(lines, "")
 
-	// Selected agent detail
-	if selected >= 0 && selected < len(agents) {
-		a := agents[selected]
-		lines = append(lines, sectionStyle.Render("Selected Agent"))
-		lines = append(lines, labelStyle.Render("Name")+valueStyle.Render(a.Name))
-		if a.Model != "" {
-			lines = append(lines, labelStyle.Render("Model")+valueStyle.Render(a.Model))
-		}
-		if a.Path != "" {
-			path := a.Path
-			maxPathW := cw - 14
-			if maxPathW > 0 && len(path) > maxPathW {
-				path = "..." + path[len(path)-maxPathW+3:]
-			}
-			lines = append(lines, labelStyle.Render("Path")+valueStyle.Render(path))
-		}
-		if a.Detected {
-			lines = append(lines, labelStyle.Render("Status")+
-				lipgloss.NewStyle().Foreground(ColorGreen).Render("detected"))
+	// Selected profile detail
+	if selected >= 0 && selected < len(profiles) {
+		p := profiles[selected]
+		if p.IsNew {
+			lines = append(lines, sectionStyle.Render("New Profile"))
+			lines = append(lines, "")
+			lines = append(lines, dimStyle.Render("Press enter or n to create"))
+			lines = append(lines, dimStyle.Render("a new agent profile."))
 		} else {
-			lines = append(lines, labelStyle.Render("Status")+dimStyle.Render("not found"))
-		}
-		if len(a.Caps) > 0 {
-			lines = append(lines, labelStyle.Render("Capabilities")+dimStyle.Render(strings.Join(a.Caps, ", ")))
+			lines = append(lines, sectionStyle.Render("Selected Profile"))
+			lines = append(lines, labelStyle.Render("Profile")+valueStyle.Render(p.Name))
+			lines = append(lines, labelStyle.Render("Agent")+valueStyle.Render(p.Agent))
+			if p.Model != "" {
+				lines = append(lines, labelStyle.Render("Model")+valueStyle.Render(p.Model))
+			}
+			if p.ReasoningLevel != "" {
+				lines = append(lines, labelStyle.Render("Reasoning")+valueStyle.Render(p.ReasoningLevel))
+			}
+			if p.Detected {
+				lines = append(lines, labelStyle.Render("Status")+
+					lipgloss.NewStyle().Foreground(ColorGreen).Render("detected"))
+			} else {
+				lines = append(lines, labelStyle.Render("Status")+dimStyle.Render("not found"))
+			}
+			if len(p.Caps) > 0 {
+				lines = append(lines, labelStyle.Render("Capabilities")+dimStyle.Render(strings.Join(p.Caps, ", ")))
+			}
 		}
 	}
 

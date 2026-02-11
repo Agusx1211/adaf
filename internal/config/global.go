@@ -5,11 +5,21 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// Profile is a named agent+model combo stored in the global config.
+type Profile struct {
+	Name          string `json:"name"`                      // Display name, e.g. "codex 5.2"
+	Agent         string `json:"agent"`                     // Agent key: "claude", "codex", etc.
+	Model         string `json:"model,omitempty"`           // Model override (empty = agent default)
+	ReasoningLevel string `json:"reasoning_level,omitempty"` // Reasoning level (e.g. "low", "medium", "high", "xhigh")
+}
 
 // GlobalConfig holds user-level preferences stored in ~/.adaf/config.json.
 type GlobalConfig struct {
-	Agents map[string]GlobalAgentConfig `json:"agents,omitempty"`
+	Agents   map[string]GlobalAgentConfig `json:"agents,omitempty"`
+	Profiles []Profile                    `json:"profiles,omitempty"`
 }
 
 // GlobalAgentConfig holds per-agent overrides at the global (user) level.
@@ -68,4 +78,36 @@ func Save(cfg *GlobalConfig) error {
 		return err
 	}
 	return os.WriteFile(configPath(), data, 0644)
+}
+
+// AddProfile appends a profile. Returns an error if the name already exists.
+func (c *GlobalConfig) AddProfile(p Profile) error {
+	for _, existing := range c.Profiles {
+		if strings.EqualFold(existing.Name, p.Name) {
+			return errors.New("profile already exists: " + p.Name)
+		}
+	}
+	c.Profiles = append(c.Profiles, p)
+	return nil
+}
+
+// RemoveProfile removes a profile by name (case-insensitive).
+func (c *GlobalConfig) RemoveProfile(name string) {
+	out := c.Profiles[:0]
+	for _, p := range c.Profiles {
+		if !strings.EqualFold(p.Name, name) {
+			out = append(out, p)
+		}
+	}
+	c.Profiles = out
+}
+
+// FindProfile returns a pointer to a profile by name, or nil if not found.
+func (c *GlobalConfig) FindProfile(name string) *Profile {
+	for i := range c.Profiles {
+		if strings.EqualFold(c.Profiles[i].Name, name) {
+			return &c.Profiles[i]
+		}
+	}
+	return nil
 }

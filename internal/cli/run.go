@@ -37,6 +37,7 @@ func init() {
 	runCmd.Flags().Int("max-turns", 0, "Maximum number of agent turns (0 = unlimited)")
 	runCmd.Flags().String("model", "", "Model override for the agent")
 	runCmd.Flags().String("command", "", "Custom command path (for generic agent)")
+	runCmd.Flags().String("reasoning-level", "", "Reasoning level (e.g. low, medium, high, xhigh)")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -51,7 +52,9 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	maxTurns, _ := cmd.Flags().GetInt("max-turns")
 	modelFlag, _ := cmd.Flags().GetString("model")
 	customCmd, _ := cmd.Flags().GetString("command")
+	reasoningLevel, _ := cmd.Flags().GetString("reasoning-level")
 	modelFlag = strings.TrimSpace(modelFlag)
+	reasoningLevel = strings.TrimSpace(reasoningLevel)
 
 	// Look up agent from registry.
 	agentInstance, ok := agent.Get(agentName)
@@ -109,15 +112,22 @@ func runAgent(cmd *cobra.Command, args []string) error {
 
 	// Build agent args based on agent type.
 	var agentArgs []string
+	agentEnv := make(map[string]string)
 	switch agentName {
 	case "claude":
 		if modelOverride != "" {
 			agentArgs = append(agentArgs, "--model", modelOverride)
 		}
+		if reasoningLevel != "" {
+			agentEnv["CLAUDE_CODE_EFFORT_LEVEL"] = reasoningLevel
+		}
 		agentArgs = append(agentArgs, "--dangerously-skip-permissions")
 	case "codex":
 		if modelOverride != "" {
 			agentArgs = append(agentArgs, "--model", modelOverride)
+		}
+		if reasoningLevel != "" {
+			agentArgs = append(agentArgs, "-c", `model_reasoning_effort="`+reasoningLevel+`"`)
 		}
 		agentArgs = append(agentArgs, "--full-auto")
 	case "vibe":
@@ -132,6 +142,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		Name:     agentName,
 		Command:  customCmd,
 		Args:     agentArgs,
+		Env:      agentEnv,
 		WorkDir:  workDir,
 		Prompt:   prompt,
 		MaxTurns: maxTurns,

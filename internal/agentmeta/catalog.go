@@ -5,29 +5,44 @@ import (
 	"strings"
 )
 
+// ReasoningLevel represents a named reasoning effort option for an agent.
+type ReasoningLevel struct {
+	Name string `json:"name"` // e.g. "low", "medium", "high", "xhigh"
+}
+
 // Info describes built-in metadata for an agent tool.
 type Info struct {
 	Name            string
 	Binary          string
 	DefaultModel    string
 	SupportedModels []string
+	ReasoningLevels []ReasoningLevel
 	Capabilities    []string
 }
 
 var builtin = map[string]Info{
 	"claude": {
-		Name:            "claude",
-		Binary:          "claude",
-		DefaultModel:    "sonnet-4.5",
-		SupportedModels: []string{"opus-4", "sonnet-4.5", "haiku-4.5"},
-		Capabilities:    []string{"prompt-arg", "model-select", "auto-approve", "stream-output"},
+		Name:         "claude",
+		Binary:       "claude",
+		DefaultModel: "sonnet",
+		SupportedModels: []string{
+			"opus",
+			"sonnet",
+			"haiku",
+		},
+		Capabilities: []string{"prompt-arg", "model-select", "auto-approve", "stream-output"},
 	},
 	"codex": {
-		Name:            "codex",
-		Binary:          "codex",
-		DefaultModel:    "o4-mini",
-		SupportedModels: []string{"o3", "o4-mini", "gpt-4.1"},
-		Capabilities:    []string{"prompt-arg", "model-select", "auto-approve", "tty-required"},
+		Name:         "codex",
+		Binary:       "codex",
+		DefaultModel: "",
+		SupportedModels: []string{},
+		ReasoningLevels: []ReasoningLevel{
+			{Name: "low"},
+			{Name: "medium"},
+			{Name: "high"},
+		},
+		Capabilities: []string{"prompt-arg", "model-select", "auto-approve", "tty-required"},
 	},
 	"vibe": {
 		Name:            "vibe",
@@ -37,11 +52,16 @@ var builtin = map[string]Info{
 		Capabilities:    []string{"stdin-prompt", "stream-output"},
 	},
 	"opencode": {
-		Name:            "opencode",
-		Binary:          "opencode",
-		DefaultModel:    "openai/gpt-4.1",
-		SupportedModels: []string{"openai/gpt-4.1", "anthropic/claude-sonnet-4.5", "google/gemini-2.5-pro"},
-		Capabilities:    []string{"stdin-prompt", "model-select", "multi-provider", "stream-output"},
+		Name:         "opencode",
+		Binary:       "opencode",
+		DefaultModel: "openai/gpt-4.1",
+		SupportedModels: []string{
+			"openai/gpt-4.1",
+			"anthropic/claude-sonnet-4.5",
+			"anthropic/claude-opus-4",
+			"google/gemini-2.5-pro",
+		},
+		Capabilities: []string{"stdin-prompt", "model-select", "multi-provider", "stream-output"},
 	},
 	"generic": {
 		Name:         "generic",
@@ -87,5 +107,6 @@ func clone(info Info) Info {
 	cp := info
 	cp.SupportedModels = append([]string(nil), info.SupportedModels...)
 	cp.Capabilities = append([]string(nil), info.Capabilities...)
+	cp.ReasoningLevels = append([]ReasoningLevel(nil), info.ReasoningLevels...)
 	return cp
 }

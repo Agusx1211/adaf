@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agusx1211/adaf/internal/agentmeta"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/detect"
 )
@@ -20,15 +21,16 @@ type AgentsConfig struct {
 
 // AgentRecord holds merged detection metadata and user model overrides.
 type AgentRecord struct {
-	Name            string    `json:"name"`
-	Path            string    `json:"path,omitempty"`
-	Version         string    `json:"version,omitempty"`
-	Capabilities    []string  `json:"capabilities,omitempty"`
-	SupportedModels []string  `json:"supported_models,omitempty"`
-	DefaultModel    string    `json:"default_model,omitempty"`
-	ModelOverride   string    `json:"model_override,omitempty"`
-	Detected        bool      `json:"detected"`
-	DetectedAt      time.Time `json:"detected_at,omitempty"`
+	Name            string                     `json:"name"`
+	Path            string                     `json:"path,omitempty"`
+	Version         string                     `json:"version,omitempty"`
+	Capabilities    []string                   `json:"capabilities,omitempty"`
+	SupportedModels []string                   `json:"supported_models,omitempty"`
+	ReasoningLevels []agentmeta.ReasoningLevel `json:"reasoning_levels,omitempty"`
+	DefaultModel    string                     `json:"default_model,omitempty"`
+	ModelOverride   string                     `json:"model_override,omitempty"`
+	Detected        bool                       `json:"detected"`
+	DetectedAt      time.Time                  `json:"detected_at,omitempty"`
 }
 
 // AgentsConfigPath returns the full path to .adaf/agents.json.
@@ -106,6 +108,7 @@ func SyncDetectedAgents(adafRoot string, detected []detect.DetectedAgent, global
 		rec.Version = d.Version
 		rec.Capabilities = append([]string(nil), d.Capabilities...)
 		rec.SupportedModels = append([]string(nil), d.SupportedModels...)
+		rec.ReasoningLevels = append([]agentmeta.ReasoningLevel(nil), d.ReasoningLevels...)
 		rec.Detected = true
 		rec.DetectedAt = now
 		rec.DefaultModel = effectiveDefaultModel(name, rec.ModelOverride)

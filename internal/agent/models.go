@@ -56,6 +56,15 @@ func IsModelSupported(agentName, model string) bool {
 	return false
 }
 
+// ReasoningLevels returns the available reasoning levels for an agent.
+func ReasoningLevels(name string) []agentmeta.ReasoningLevel {
+	info, ok := agentmeta.InfoFor(strings.ToLower(strings.TrimSpace(name)))
+	if !ok {
+		return nil
+	}
+	return append([]agentmeta.ReasoningLevel(nil), info.ReasoningLevels...)
+}
+
 // KnownModelAgents returns agent names that have a model registry entry.
 func KnownModelAgents() []string {
 	names := agentmeta.Names()

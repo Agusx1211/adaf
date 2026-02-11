@@ -2,6 +2,7 @@ package detect
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -23,11 +24,12 @@ var semverRE = regexp.MustCompile(`(?i)\bv?(\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.
 
 // DetectedAgent describes an installed agent tool discovered on the machine.
 type DetectedAgent struct {
-	Name            string   `json:"name"`
-	Path            string   `json:"path"`
-	Version         string   `json:"version"`
-	Capabilities    []string `json:"capabilities,omitempty"`
-	SupportedModels []string `json:"supported_models,omitempty"`
+	Name            string                   `json:"name"`
+	Path            string                   `json:"path"`
+	Version         string                   `json:"version"`
+	Capabilities    []string                 `json:"capabilities,omitempty"`
+	SupportedModels []string                 `json:"supported_models,omitempty"`
+	ReasoningLevels []agentmeta.ReasoningLevel `json:"reasoning_levels,omitempty"`
 }
 
 // Scan discovers installed agent CLIs from PATH and known install locations.
@@ -92,14 +94,290 @@ func buildDetected(name, path string) DetectedAgent {
 		meta, _ = agentmeta.InfoFor("generic")
 	}
 
+	caps := append([]string(nil), meta.Capabilities...)
+	models := append([]string(nil), meta.SupportedModels...)
+	levels := append([]agentmeta.ReasoningLevel(nil), meta.ReasoningLevels...)
+
+	// Probe for dynamic models and reasoning levels.
+	probeModels, probeLevels := probeModelDiscovery(name, path)
+	if len(probeModels) > 0 {
+		// Dynamic results are authoritative — replace catalog models.
+		models = probeModels
+	}
+	if len(probeLevels) > 0 {
+		levels = probeLevels
+	}
+
 	return DetectedAgent{
 		Name:            name,
 		Path:            path,
 		Version:         detectVersion(path),
-		Capabilities:    append([]string(nil), meta.Capabilities...),
-		SupportedModels: append([]string(nil), meta.SupportedModels...),
+		Capabilities:    caps,
+		SupportedModels: models,
+		ReasoningLevels: levels,
 	}
 }
+
+// probeModelDiscovery dispatches per-agent dynamic model discovery.
+func probeModelDiscovery(name, path string) (models []string, levels []agentmeta.ReasoningLevel) {
+	switch name {
+	case "codex":
+		return probeCodexModels()
+	case "claude":
+		return probeClaudeModels(path)
+	case "vibe":
+		return probeVibeModels(), nil
+	case "opencode":
+		return probeOpencodeModels(), nil
+	default:
+		return nil, nil
+	}
+}
+
+// --- Codex model discovery ---
+
+// codexModelsCachePath returns ~/.codex/models_cache.json.
+func codexModelsCachePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".codex", "models_cache.json")
+}
+
+// codexCacheFile represents the top-level structure of models_cache.json.
+type codexCacheFile struct {
+	Models []codexCacheModel `json:"models"`
+}
+
+// codexCacheModel represents an entry in the codex models_cache.json.
+type codexCacheModel struct {
+	Slug                     string                `json:"slug"`
+	Visibility               string                `json:"visibility"`
+	SupportedReasoningLevels []codexReasoningLevel `json:"supported_reasoning_levels"`
+}
+
+type codexReasoningLevel struct {
+	Effort string `json:"effort"`
+}
+
+func probeCodexModels() ([]string, []agentmeta.ReasoningLevel) {
+	cachePath := codexModelsCachePath()
+	if cachePath == "" {
+		return nil, nil
+	}
+
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		return nil, nil
+	}
+
+	var cacheFile codexCacheFile
+	if err := json.Unmarshal(data, &cacheFile); err != nil {
+		return nil, nil
+	}
+	entries := cacheFile.Models
+
+	var models []string
+	var levels []agentmeta.ReasoningLevel
+	seenModels := make(map[string]struct{})
+	levelsExtracted := false
+
+	for _, e := range entries {
+		if e.Visibility != "list" {
+			continue
+		}
+		slug := strings.TrimSpace(e.Slug)
+		if slug == "" {
+			continue
+		}
+		lower := strings.ToLower(slug)
+		if _, dup := seenModels[lower]; dup {
+			continue
+		}
+		seenModels[lower] = struct{}{}
+		models = append(models, slug)
+
+		// Extract reasoning levels from the first visible model that has them.
+		if !levelsExtracted && len(e.SupportedReasoningLevels) > 0 {
+			for _, l := range e.SupportedReasoningLevels {
+				effort := strings.TrimSpace(l.Effort)
+				if effort != "" {
+					levels = append(levels, agentmeta.ReasoningLevel{Name: effort})
+				}
+			}
+			levelsExtracted = true
+		}
+	}
+
+	return models, levels
+}
+
+// --- Claude model discovery ---
+
+// claudeModelRE matches model aliases like "opus-4-6", "sonnet-4.5", "haiku-4-5" etc.
+var claudeModelRE = regexp.MustCompile(`"((?:opus|sonnet|haiku)[-0-9.]*)"`)
+
+// claudeEffortRE matches the effort levels array, e.g. ["low","medium","high","max"]
+var claudeEffortRE = regexp.MustCompile(`\["low","medium","high"(?:,"max")?\]`)
+
+func probeClaudeModels(binPath string) ([]string, []agentmeta.ReasoningLevel) {
+	// The claude binary is typically a symlink into an npm package containing cli.js.
+	// Follow symlinks to find the package directory.
+	cliJS := resolveClaudeCLIJS(binPath)
+	if cliJS == "" {
+		return nil, nil
+	}
+
+	data, err := os.ReadFile(cliJS)
+	if err != nil {
+		return nil, nil
+	}
+
+	// Extract model aliases.
+	matches := claudeModelRE.FindAllSubmatch(data, -1)
+	seen := make(map[string]struct{})
+	var models []string
+	for _, m := range matches {
+		name := string(m[1])
+		lower := strings.ToLower(name)
+		if _, dup := seen[lower]; dup {
+			continue
+		}
+		seen[lower] = struct{}{}
+		models = append(models, name)
+	}
+
+	// Extract effort/reasoning levels from the bundle.
+	var levels []agentmeta.ReasoningLevel
+	if effortMatch := claudeEffortRE.Find(data); effortMatch != nil {
+		var raw []string
+		if json.Unmarshal(effortMatch, &raw) == nil {
+			for _, l := range raw {
+				levels = append(levels, agentmeta.ReasoningLevel{Name: l})
+			}
+		}
+	}
+
+	return models, levels
+}
+
+// resolveClaudeCLIJS attempts to find the cli.js file from the claude binary path.
+func resolveClaudeCLIJS(binPath string) string {
+	// Resolve symlinks to find the real binary location.
+	resolved, err := filepath.EvalSymlinks(binPath)
+	if err != nil {
+		resolved = binPath
+	}
+
+	// The claude npm package typically has cli.js in the same directory or parent.
+	dir := filepath.Dir(resolved)
+
+	// Try common locations relative to the resolved binary.
+	candidates := []string{
+		filepath.Join(dir, "cli.js"),
+		filepath.Join(dir, "..", "lib", "cli.js"),
+		filepath.Join(dir, "..", "dist", "cli.js"),
+	}
+
+	for _, c := range candidates {
+		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+			return c
+		}
+	}
+
+	return ""
+}
+
+// --- Vibe model discovery ---
+
+// vibeModelAliasRE extracts alias values from [[models]] sections in config.toml.
+var vibeModelAliasRE = regexp.MustCompile(`(?m)^alias\s*=\s*"([^"]+)"`)
+
+func probeVibeModels() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".vibe", "config.toml"))
+	if err != nil {
+		return nil
+	}
+
+	matches := vibeModelAliasRE.FindAllSubmatch(data, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	var models []string
+	for _, m := range matches {
+		alias := strings.TrimSpace(string(m[1]))
+		if alias == "" {
+			continue
+		}
+		lower := strings.ToLower(alias)
+		if _, dup := seen[lower]; dup {
+			continue
+		}
+		seen[lower] = struct{}{}
+		models = append(models, alias)
+	}
+	return models
+}
+
+// --- OpenCode model discovery ---
+
+// opencodeConfig represents the relevant parts of ~/.config/opencode/opencode.json.
+type opencodeConfig struct {
+	Provider map[string]opencodeProvider `json:"provider"`
+}
+
+type opencodeProvider struct {
+	Models map[string]opencodeModel `json:"models"`
+}
+
+type opencodeModel struct {
+	Name string `json:"name"`
+}
+
+func probeOpencodeModels() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".config", "opencode", "opencode.json"))
+	if err != nil {
+		return nil
+	}
+
+	var cfg opencodeConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	var models []string
+
+	for providerID, provider := range cfg.Provider {
+		for modelID := range provider.Models {
+			// Use provider/model format for custom providers.
+			qualified := providerID + "/" + modelID
+			lower := strings.ToLower(qualified)
+			if _, dup := seen[lower]; dup {
+				continue
+			}
+			seen[lower] = struct{}{}
+			models = append(models, qualified)
+		}
+	}
+
+	return models
+}
+
+// --- Helpers ---
 
 func knownBinaryCandidates() map[string][]string {
 	known := make(map[string][]string)

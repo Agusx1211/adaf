@@ -169,10 +169,24 @@ func runAgentsDetect(cmd *cobra.Command, args []string) error {
 		if version == "" {
 			version = "unknown"
 		}
+		models := ""
+		if len(rec.SupportedModels) > 0 {
+			models = strings.Join(rec.SupportedModels, ", ")
+		}
 		fmt.Printf("  %s%s%s  %s  %s\n",
 			styleBoldGreen, name, colorReset,
 			colorDim+version+colorReset,
 			colorDim+rec.Path+colorReset)
+		if models != "" {
+			fmt.Printf("    %smodels: %s%s\n", colorDim, models, colorReset)
+		}
+		if len(rec.ReasoningLevels) > 0 {
+			var lvlNames []string
+			for _, l := range rec.ReasoningLevels {
+				lvlNames = append(lvlNames, l.Name)
+			}
+			fmt.Printf("    %sreasoning: %s%s\n", colorDim, strings.Join(lvlNames, ", "), colorReset)
+		}
 	}
 
 	fmt.Printf("\n  %s%d agent(s) detected and cached.%s\n\n", styleBoldGreen, count, colorReset)

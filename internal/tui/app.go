@@ -11,17 +11,22 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/agusx1211/adaf/internal/agent"
+	"github.com/agusx1211/adaf/internal/agentmeta"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/store"
 )
 
-// appState distinguishes the two modes of the unified TUI.
+// appState distinguishes the modes of the unified TUI.
 type appState int
 
 const (
-	stateSelector appState = iota
+	stateSelector        appState = iota
 	stateRunning
+	stateProfileName     // text input for new profile name
+	stateProfileAgent    // pick agent for new profile
+	stateProfileModel    // pick model for new profile
+	stateProfileReasoning // pick reasoning level for new profile
 )
 
 // AppModel is the top-level bubbletea model for the unified adaf TUI.
@@ -32,9 +37,24 @@ type AppModel struct {
 	width  int
 	height int
 
+	// Global config (profiles live here).
+	globalCfg *config.GlobalConfig
+
 	// Selector state.
-	agents   []agentEntry
+	profiles []profileEntry
 	selected int
+
+	// Profile creation wizard state.
+	profileNameInput       string
+	profileAgents          []string
+	profileAgentSel        int
+	profileModels          []string
+	profileModelSel        int
+	profileCustomModel     string
+	profileCustomModelMode bool
+	profileSelectedModel   string
+	profileReasoningLevels    []agentmeta.ReasoningLevel
+	profileReasoningLevelSel  int
 
 	// Cached project data for the selector.
 	project *store.ProjectConfig
@@ -50,12 +70,18 @@ type AppModel struct {
 
 // NewApp creates the unified TUI app model.
 func NewApp(s *store.Store) AppModel {
+	globalCfg, _ := config.Load()
+	if ensureDefaultProfiles(globalCfg) {
+		config.Save(globalCfg)
+	}
+
 	m := AppModel{
-		store: s,
-		state: stateSelector,
+		store:     s,
+		state:     stateSelector,
+		globalCfg: globalCfg,
 	}
 	m.loadProjectData()
-	m.loadAgents()
+	m.rebuildProfiles()
 	return m
 }
 
@@ -66,10 +92,10 @@ func (m *AppModel) loadProjectData() {
 	m.logs, _ = m.store.ListLogs()
 }
 
-func (m *AppModel) loadAgents() {
+func (m *AppModel) rebuildProfiles() {
 	agentsCfg, _ := agent.LoadAgentsConfig(m.store.Root())
 	agent.PopulateFromConfig(agentsCfg)
-	m.agents = buildAgentList(agentsCfg)
+	m.profiles = buildProfileList(m.globalCfg, agentsCfg)
 }
 
 // Init implements tea.Model.
@@ -96,6 +122,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSelector(msg)
 	case stateRunning:
 		return m.updateRunning(msg)
+	case stateProfileName:
+		return m.updateProfileName(msg)
+	case stateProfileAgent:
+		return m.updateProfileAgent(msg)
+	case stateProfileModel:
+		return m.updateProfileModel(msg)
+	case stateProfileReasoning:
+		return m.updateProfileReasoning(msg)
 	}
 	return m, nil
 }
@@ -107,17 +141,37 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "j", "down":
-			if len(m.agents) > 0 {
-				m.selected = (m.selected + 1) % len(m.agents)
+			if len(m.profiles) > 0 {
+				m.selected = (m.selected + 1) % len(m.profiles)
 			}
 		case "k", "up":
-			if len(m.agents) > 0 {
-				m.selected = (m.selected - 1 + len(m.agents)) % len(m.agents)
+			if len(m.profiles) > 0 {
+				m.selected = (m.selected - 1 + len(m.profiles)) % len(m.profiles)
 			}
 		case "enter":
-			if len(m.agents) > 0 {
+			if len(m.profiles) > 0 {
 				return m.startAgent()
 			}
+		case "n":
+			// Start new profile creation.
+			m.profileNameInput = ""
+			m.state = stateProfileName
+			return m, nil
+		case "d":
+			// Delete selected profile (unless it's the sentinel).
+			if m.selected >= 0 && m.selected < len(m.profiles) && !m.profiles[m.selected].IsNew {
+				name := m.profiles[m.selected].Name
+				m.globalCfg.RemoveProfile(name)
+				config.Save(m.globalCfg)
+				m.rebuildProfiles()
+				if m.selected >= len(m.profiles) {
+					m.selected = len(m.profiles) - 1
+				}
+				if m.selected < 0 {
+					m.selected = 0
+				}
+			}
+			return m, nil
 		}
 	}
 	return m, nil
@@ -144,36 +198,56 @@ func (m AppModel) updateRunning(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // startAgent transitions from selector to running state.
 func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
-	a := m.agents[m.selected]
+	p := m.profiles[m.selected]
 
-	agentInstance, ok := agent.Get(a.Name)
+	// If it's the sentinel entry, start profile creation.
+	if p.IsNew {
+		m.profileNameInput = ""
+		m.state = stateProfileName
+		return m, nil
+	}
+
+	agentInstance, ok := agent.Get(p.Agent)
 	if !ok {
 		return m, nil
 	}
 
-	// Resolve agent config from cache.
-	globalCfg, _ := config.Load()
+	// Load agent config for path lookups.
 	agentsCfg, _ := agent.LoadAgentsConfig(m.store.Root())
 
 	var customCmd string
 	if agentsCfg != nil {
-		if rec, ok := agentsCfg.Agents[a.Name]; ok && rec.Path != "" {
+		if rec, ok := agentsCfg.Agents[p.Agent]; ok && rec.Path != "" {
 			customCmd = rec.Path
 		}
 	}
 
-	modelOverride := agent.ResolveModelOverride(agentsCfg, globalCfg, a.Name)
+	// The profile model IS the override — no ResolveModelOverride needed.
+	modelOverride := p.Model
+
+	// Look up reasoning level from the saved profile.
+	reasoningLevel := ""
+	if prof := m.globalCfg.FindProfile(p.Name); prof != nil {
+		reasoningLevel = prof.ReasoningLevel
+	}
 
 	var agentArgs []string
-	switch a.Name {
+	agentEnv := make(map[string]string)
+	switch p.Agent {
 	case "claude":
 		if modelOverride != "" {
 			agentArgs = append(agentArgs, "--model", modelOverride)
+		}
+		if reasoningLevel != "" {
+			agentEnv["CLAUDE_CODE_EFFORT_LEVEL"] = reasoningLevel
 		}
 		agentArgs = append(agentArgs, "--dangerously-skip-permissions")
 	case "codex":
 		if modelOverride != "" {
 			agentArgs = append(agentArgs, "--model", modelOverride)
+		}
+		if reasoningLevel != "" {
+			agentArgs = append(agentArgs, "-c", `model_reasoning_effort="`+reasoningLevel+`"`)
 		}
 		agentArgs = append(agentArgs, "--full-auto")
 	case "opencode":
@@ -183,10 +257,10 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 	}
 
 	if customCmd == "" {
-		switch a.Name {
+		switch p.Agent {
 		case "claude", "codex", "vibe", "opencode", "generic":
 		default:
-			customCmd = a.Name
+			customCmd = p.Agent
 		}
 	}
 
@@ -201,9 +275,10 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 	prompt, _ := buildPrompt(m.store, m.project)
 
 	agentCfg := agent.Config{
-		Name:    a.Name,
+		Name:    p.Agent,
 		Command: customCmd,
 		Args:    agentArgs,
+		Env:     agentEnv,
 		WorkDir: workDir,
 		Prompt:  prompt,
 	}
@@ -225,7 +300,7 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 	m.state = stateRunning
 	m.runCancel = cancel
 	m.runEventCh = eventCh
-	m.runModel = runtui.NewModel(projectName, m.plan, a.Name, "", eventCh, cancel)
+	m.runModel = runtui.NewModel(projectName, m.plan, p.Agent, "", eventCh, cancel)
 	m.runModel.SetSize(m.width, m.height)
 
 	return m, m.runModel.Init()
@@ -240,6 +315,14 @@ func (m AppModel) View() string {
 	switch m.state {
 	case stateRunning:
 		return m.runModel.View()
+	case stateProfileName:
+		return m.viewProfileName()
+	case stateProfileAgent:
+		return m.viewProfileAgent()
+	case stateProfileModel:
+		return m.viewProfileModel()
+	case stateProfileReasoning:
+		return m.viewProfileReasoning()
 	default:
 		return m.viewSelector()
 	}
@@ -254,7 +337,7 @@ func (m AppModel) viewSelector() string {
 		panelH = 1
 	}
 
-	panels := renderSelector(m.agents, m.selected, m.project, m.plan, m.issues, m.logs, m.width, m.height)
+	panels := renderSelector(m.profiles, m.selected, m.project, m.plan, m.issues, m.logs, m.width, m.height)
 	return header + "\n" + panels + "\n" + statusBar
 }
 
@@ -284,6 +367,10 @@ func (m AppModel) renderStatusBar() string {
 
 	add("j/k", "navigate")
 	add("enter", "start")
+	if m.state == stateSelector {
+		add("n", "new profile")
+		add("d", "delete")
+	}
 	add("q", "quit")
 
 	content := strings.Join(parts, lipgloss.NewStyle().Foreground(ColorSubtext0).Background(ColorSurface0).Render("  "))
