@@ -61,6 +61,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			Instructions: s.Instructions,
 			CanStop:      s.CanStop,
 			CanMessage:   s.CanMessage,
+			CanPushover:  s.CanPushover,
 		}
 	}
 
@@ -138,6 +139,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				Instructions: stepDef.Instructions,
 				CanStop:      stepDef.CanStop,
 				CanMessage:   stepDef.CanMessage,
+				CanPushover:  stepDef.CanPushover,
 				Messages:     unseenMsgs,
 				RunID:        run.ID,
 			}

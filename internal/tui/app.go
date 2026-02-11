@@ -40,9 +40,11 @@ const (
 	stateLoopStepProfile  // pick profile for a step
 	stateLoopStepTurns    // input turns for a step
 	stateLoopStepInstr    // input custom instructions for a step
-	stateLoopStepCanStop  // toggle can_stop
-	stateLoopStepCanMsg   // toggle can_message
+	stateLoopStepTools    // multi-select tools (stop, message, pushover)
 	stateLoopMenu         // edit loop: field picker menu
+	stateSettings         // settings screen (pushover credentials, etc.)
+	stateSettingsPushoverUserKey  // input pushover user key
+	stateSettingsPushoverAppToken // input pushover app token
 )
 
 // AppModel is the top-level bubbletea model for the unified adaf TUI.
@@ -97,7 +99,14 @@ type AppModel struct {
 	loopStepInstrInput  string
 	loopStepCanStop     bool
 	loopStepCanMsg      bool
+	loopStepCanPushover bool
+	loopStepToolsSel    int    // cursor position in the tools multi-select
 	loopMenuSel         int
+
+	// Settings screen state.
+	settingsSel              int    // cursor in settings menu
+	settingsPushoverUserKey  string // input buffer for pushover user key
+	settingsPushoverAppToken string // input buffer for pushover app token
 
 	// Cached project data for the selector.
 	project *store.ProjectConfig
@@ -201,12 +210,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateLoopStepTurns(msg)
 	case stateLoopStepInstr:
 		return m.updateLoopStepInstr(msg)
-	case stateLoopStepCanStop:
-		return m.updateLoopStepCanStop(msg)
-	case stateLoopStepCanMsg:
-		return m.updateLoopStepCanMsg(msg)
+	case stateLoopStepTools:
+		return m.updateLoopStepTools(msg)
 	case stateLoopMenu:
 		return m.updateLoopMenu(msg)
+	case stateSettings:
+		return m.updateSettings(msg)
+	case stateSettingsPushoverUserKey:
+		return m.updateSettingsPushoverUserKey(msg)
+	case stateSettingsPushoverAppToken:
+		return m.updateSettingsPushoverAppToken(msg)
 	}
 	return m, nil
 }
@@ -284,6 +297,13 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "s":
 			// Show and attach to active sessions.
 			return m.showSessions()
+		case "S":
+			// Open settings.
+			m.settingsSel = 0
+			m.settingsPushoverUserKey = m.globalCfg.Pushover.UserKey
+			m.settingsPushoverAppToken = m.globalCfg.Pushover.AppToken
+			m.state = stateSettings
+			return m, nil
 		}
 	}
 	return m, nil
@@ -758,12 +778,16 @@ func (m AppModel) View() string {
 		return m.viewLoopStepTurns()
 	case stateLoopStepInstr:
 		return m.viewLoopStepInstr()
-	case stateLoopStepCanStop:
-		return m.viewLoopStepCanStop()
-	case stateLoopStepCanMsg:
-		return m.viewLoopStepCanMsg()
+	case stateLoopStepTools:
+		return m.viewLoopStepTools()
 	case stateLoopMenu:
 		return m.viewLoopMenu()
+	case stateSettings:
+		return m.viewSettings()
+	case stateSettingsPushoverUserKey:
+		return m.viewSettingsPushoverUserKey()
+	case stateSettingsPushoverAppToken:
+		return m.viewSettingsPushoverAppToken()
 	default:
 		return m.viewSelector()
 	}
@@ -814,6 +838,7 @@ func (m AppModel) renderStatusBar() string {
 		add("e", "edit")
 		add("d", "delete")
 		add("s", "sessions")
+		add("S", "settings")
 	}
 	add("q", "quit")
 

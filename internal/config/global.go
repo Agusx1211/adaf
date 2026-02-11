@@ -31,6 +31,7 @@ type LoopStep struct {
 	Instructions string `json:"instructions,omitempty"`    // custom instructions appended to prompt
 	CanStop      bool   `json:"can_stop,omitempty"`        // can this step signal loop stop?
 	CanMessage   bool   `json:"can_message,omitempty"`     // can this step send messages to subsequent steps?
+	CanPushover  bool   `json:"can_pushover,omitempty"`    // can this step send Pushover notifications?
 }
 
 // LoopDef defines a loop as a cyclic template of profile steps.
@@ -39,11 +40,18 @@ type LoopDef struct {
 	Steps []LoopStep `json:"steps"`
 }
 
+// PushoverConfig holds Pushover notification credentials.
+type PushoverConfig struct {
+	UserKey  string `json:"user_key,omitempty"`  // Pushover user/group key
+	AppToken string `json:"app_token,omitempty"` // Pushover application API token
+}
+
 // GlobalConfig holds user-level preferences stored in ~/.adaf/config.json.
 type GlobalConfig struct {
 	Agents   map[string]GlobalAgentConfig `json:"agents,omitempty"`
 	Profiles []Profile                    `json:"profiles,omitempty"`
 	Loops    []LoopDef                    `json:"loops,omitempty"`
+	Pushover PushoverConfig               `json:"pushover,omitempty"`
 }
 
 // GlobalAgentConfig holds per-agent overrides at the global (user) level.

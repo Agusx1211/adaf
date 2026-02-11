@@ -22,6 +22,9 @@ func (m AppModel) loopWizardTitle() string {
 // loopMenuItemCount is the number of items in the edit menu (Name, Steps, Save).
 const loopMenuItemCount = 3
 
+// loopStepToolCount is the number of toggleable tools in the step tools form.
+const loopStepToolCount = 3
+
 // --- Loop Name ---
 
 func (m AppModel) updateLoopName(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -121,6 +124,8 @@ func (m AppModel) updateLoopStepList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loopStepInstrInput = ""
 			m.loopStepCanStop = false
 			m.loopStepCanMsg = false
+			m.loopStepCanPushover = false
+			m.loopStepToolsSel = 0
 			m.state = stateLoopStepProfile
 			return m, nil
 		case "enter":
@@ -147,6 +152,8 @@ func (m AppModel) updateLoopStepList(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.loopStepInstrInput = step.Instructions
 				m.loopStepCanStop = step.CanStop
 				m.loopStepCanMsg = step.CanMessage
+				m.loopStepCanPushover = step.CanPushover
+				m.loopStepToolsSel = 0
 				m.state = stateLoopStepProfile
 			}
 			return m, nil
@@ -213,6 +220,9 @@ func (m AppModel) viewLoopStepList() string {
 		}
 		if step.CanMessage {
 			flags += " [msg]"
+		}
+		if step.CanPushover {
+			flags += " [push]"
 		}
 		label := fmt.Sprintf("%d. %s x%d%s", i+1, step.Profile, turns, flags)
 		if i == m.loopStepSel {
@@ -345,7 +355,8 @@ func (m AppModel) updateLoopStepInstr(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "enter":
-			m.state = stateLoopStepCanStop
+			m.loopStepToolsSel = 0
+			m.state = stateLoopStepTools
 		case "esc":
 			m.state = stateLoopStepTurns
 		case "backspace":
@@ -386,18 +397,28 @@ func (m AppModel) viewLoopStepInstr() string {
 	return header + "\n" + panel + "\n" + statusBar
 }
 
-// --- Loop Step CanStop ---
+// --- Loop Step Tools (consolidated multi-select) ---
 
-func (m AppModel) updateLoopStepCanStop(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m AppModel) updateLoopStepTools(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case " ", "enter":
-			if msg.String() == " " {
+		case "j", "down":
+			m.loopStepToolsSel = (m.loopStepToolsSel + 1) % loopStepToolCount
+		case "k", "up":
+			m.loopStepToolsSel = (m.loopStepToolsSel - 1 + loopStepToolCount) % loopStepToolCount
+		case " ":
+			switch m.loopStepToolsSel {
+			case 0:
 				m.loopStepCanStop = !m.loopStepCanStop
-				return m, nil
+			case 1:
+				m.loopStepCanMsg = !m.loopStepCanMsg
+			case 2:
+				m.loopStepCanPushover = !m.loopStepCanPushover
 			}
-			m.state = stateLoopStepCanMsg
+			return m, nil
+		case "enter":
+			return m.finishLoopStep()
 		case "esc":
 			m.state = stateLoopStepInstr
 		}
@@ -405,7 +426,7 @@ func (m AppModel) updateLoopStepCanStop(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m AppModel) viewLoopStepCanStop() string {
+func (m AppModel) viewLoopStepTools() string {
 	header := m.renderHeader()
 	statusBar := m.renderStatusBar()
 	style, cw, ch := profileWizardPanel(m)
@@ -414,64 +435,40 @@ func (m AppModel) viewLoopStepCanStop() string {
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
 
 	var lines []string
-	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Can Stop?"))
+	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Step Tools"))
 	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("Can this step signal the loop to stop?"))
+	lines = append(lines, dimStyle.Render("Which tools should this step have? (space to toggle)"))
 	lines = append(lines, "")
 
-	check := "[ ] No"
-	if m.loopStepCanStop {
-		check = lipgloss.NewStyle().Foreground(ColorGreen).Render("[x]") + " Yes"
+	type toolOption struct {
+		label   string
+		desc    string
+		enabled bool
 	}
-	lines = append(lines, "  "+check)
-	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("space: toggle  enter: continue  esc: back"))
+	tools := []toolOption{
+		{"Stop Loop", "Can signal the loop to stop", m.loopStepCanStop},
+		{"Send Messages", "Can send messages to subsequent steps", m.loopStepCanMsg},
+		{"Pushover Notify", "Can send push notifications to your device", m.loopStepCanPushover},
+	}
 
-	content := fitLines(lines, cw, ch)
-	panel := style.Render(content)
-	return header + "\n" + panel + "\n" + statusBar
-}
-
-// --- Loop Step CanMessage ---
-
-func (m AppModel) updateLoopStepCanMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case " ":
-			m.loopStepCanMsg = !m.loopStepCanMsg
-			return m, nil
-		case "enter":
-			// Finish step editing — save to loopSteps.
-			return m.finishLoopStep()
-		case "esc":
-			m.state = stateLoopStepCanStop
+	for i, tool := range tools {
+		check := "[ ]"
+		if tool.enabled {
+			check = lipgloss.NewStyle().Foreground(ColorGreen).Render("[x]")
+		}
+		label := tool.label
+		desc := dimStyle.Render(" — " + tool.desc)
+		if i == m.loopStepToolsSel {
+			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
+			nameStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
+			lines = append(lines, cursor+check+" "+nameStyled+desc)
+		} else {
+			lines = append(lines, "  "+check+" "+lipgloss.NewStyle().Foreground(ColorText).Render(label)+desc)
 		}
 	}
-	return m, nil
-}
 
-func (m AppModel) viewLoopStepCanMsg() string {
-	header := m.renderHeader()
-	statusBar := m.renderStatusBar()
-	style, cw, ch := profileWizardPanel(m)
-
-	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
-	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-
-	var lines []string
-	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Can Message?"))
 	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("Can this step send messages to subsequent steps?"))
-	lines = append(lines, "")
-
-	check := "[ ] No"
-	if m.loopStepCanMsg {
-		check = lipgloss.NewStyle().Foreground(ColorGreen).Render("[x]") + " Yes"
-	}
-	lines = append(lines, "  "+check)
-	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("space: toggle  enter: save step  esc: back"))
+	lines = append(lines, dimStyle.Render("space: toggle  j/k: navigate  enter: save step  esc: back"))
 
 	content := fitLines(lines, cw, ch)
 	panel := style.Render(content)
@@ -502,6 +499,7 @@ func (m AppModel) finishLoopStep() (tea.Model, tea.Cmd) {
 		Instructions: strings.TrimSpace(m.loopStepInstrInput),
 		CanStop:      m.loopStepCanStop,
 		CanMessage:   m.loopStepCanMsg,
+		CanPushover:  m.loopStepCanPushover,
 	}
 
 	if m.loopStepEditIdx >= 0 && m.loopStepEditIdx < len(m.loopSteps) {

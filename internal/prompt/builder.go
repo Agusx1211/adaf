@@ -24,6 +24,7 @@ type LoopPromptContext struct {
 	Instructions string             // step-specific custom instructions
 	CanStop      bool
 	CanMessage   bool
+	CanPushover  bool
 	Messages     []store.LoopMessage // unseen messages from other steps
 	RunID        int
 }
@@ -220,6 +221,17 @@ func Build(opts BuildOpts) (string, error) {
 		}
 		if lc.CanMessage {
 			b.WriteString("You can send a message to subsequent steps by running: `adaf loop message \"your message\"`\n\n")
+		}
+		if lc.CanPushover {
+			b.WriteString("## Pushover Notifications\n\n")
+			b.WriteString("You can send push notifications to the user's device by running:\n")
+			b.WriteString("`adaf loop notify \"<title>\" \"<message>\"` — Send a notification (default priority: normal)\n")
+			b.WriteString("`adaf loop notify --priority 1 \"<title>\" \"<message>\"` — Send a high-priority notification\n\n")
+			b.WriteString("**Character limits:**\n")
+			b.WriteString("- Title: max 250 characters (keep it short and descriptive)\n")
+			b.WriteString("- Message: max 1024 characters (concise summary of what happened)\n\n")
+			b.WriteString("**Priority levels:** -2 (lowest), -1 (low), 0 (normal), 1 (high)\n\n")
+			b.WriteString("**When to use:** Send notifications for significant events like task completion, errors requiring attention, or milestones reached. Do NOT spam — only send when genuinely useful.\n\n")
 		}
 
 		if len(lc.Messages) > 0 {
