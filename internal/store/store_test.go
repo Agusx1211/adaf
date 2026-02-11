@@ -30,7 +30,7 @@ func TestStoreInit(t *testing.T) {
 	}
 
 	// Check directories were created
-	for _, sub := range []string{"logs", "recordings", "docs", "issues", "decisions"} {
+	for _, sub := range []string{"logs", "records", "docs", "issues", "decisions"} {
 		path := filepath.Join(dir, AdafDir, sub)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			t.Errorf("expected directory %s to exist", sub)

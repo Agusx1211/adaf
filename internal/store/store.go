@@ -28,7 +28,7 @@ func (s *Store) Init(config ProjectConfig) error {
 	dirs := []string{
 		s.root,
 		filepath.Join(s.root, "logs"),
-		filepath.Join(s.root, "recordings"),
+		filepath.Join(s.root, "records"),
 		filepath.Join(s.root, "docs"),
 		filepath.Join(s.root, "issues"),
 		filepath.Join(s.root, "decisions"),
@@ -297,10 +297,10 @@ func (s *Store) CreateDecision(dec *Decision) error {
 	return s.writeJSON(filepath.Join(s.root, "decisions", fmt.Sprintf("%d.json", dec.ID)), dec)
 }
 
-// Recordings
+// Records (formerly "recordings")
 
 func (s *Store) SaveRecording(rec *SessionRecording) error {
-	dir := filepath.Join(s.root, "recordings", fmt.Sprintf("%d", rec.SessionID))
+	dir := filepath.Join(s.root, "records", fmt.Sprintf("%d", rec.SessionID))
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
@@ -308,7 +308,7 @@ func (s *Store) SaveRecording(rec *SessionRecording) error {
 }
 
 func (s *Store) AppendRecordingEvent(sessionID int, event RecordingEvent) error {
-	dir := filepath.Join(s.root, "recordings", fmt.Sprintf("%d", sessionID))
+	dir := filepath.Join(s.root, "records", fmt.Sprintf("%d", sessionID))
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
@@ -328,11 +328,28 @@ func (s *Store) AppendRecordingEvent(sessionID int, event RecordingEvent) error 
 }
 
 func (s *Store) LoadRecording(sessionID int) (*SessionRecording, error) {
+	// Try records/ first, fall back to recordings/ for backward compat.
 	var rec SessionRecording
-	if err := s.readJSON(filepath.Join(s.root, "recordings", fmt.Sprintf("%d", sessionID), "recording.json"), &rec); err != nil {
-		return nil, err
+	path := filepath.Join(s.root, "records", fmt.Sprintf("%d", sessionID), "recording.json")
+	if err := s.readJSON(path, &rec); err != nil {
+		// Try legacy path.
+		legacyPath := filepath.Join(s.root, "recordings", fmt.Sprintf("%d", sessionID), "recording.json")
+		if err2 := s.readJSON(legacyPath, &rec); err2 != nil {
+			return nil, err // return original error
+		}
 	}
 	return &rec, nil
+}
+
+// RecordsDirs returns paths to scan for session recording directories,
+// including the legacy "recordings/" path for backward compatibility.
+func (s *Store) RecordsDirs() []string {
+	dirs := []string{filepath.Join(s.root, "records")}
+	legacyDir := filepath.Join(s.root, "recordings")
+	if info, err := os.Stat(legacyDir); err == nil && info.IsDir() {
+		dirs = append(dirs, legacyDir)
+	}
+	return dirs
 }
 
 // Helpers

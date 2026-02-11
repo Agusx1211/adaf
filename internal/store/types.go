@@ -7,7 +7,7 @@ type ProjectConfig struct {
 	RepoPath    string            `json:"repo_path"`
 	Created     time.Time         `json:"created"`
 	AgentConfig map[string]string `json:"agent_config"` // agent name -> path/config
-	Metadata    map[string]string `json:"metadata"`
+	Metadata    map[string]any    `json:"metadata"`
 }
 
 type PlanPhase struct {

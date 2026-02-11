@@ -53,6 +53,42 @@ type ContentBlock struct {
 	Name  string          `json:"name,omitempty"`
 	ID    string          `json:"id,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
+
+	// For tool_result content blocks (inside "user" events).
+	ToolUseID   string          `json:"tool_use_id,omitempty"`
+	ToolContent json.RawMessage `json:"content,omitempty"`
+	IsError     bool            `json:"is_error,omitempty"`
+}
+
+// ToolContentText extracts the text content from a tool_result block.
+// ToolContent can be a JSON string or an array of content blocks.
+func (cb ContentBlock) ToolContentText() string {
+	if len(cb.ToolContent) == 0 {
+		return ""
+	}
+
+	// Try as a plain JSON string first.
+	var s string
+	if err := json.Unmarshal(cb.ToolContent, &s); err == nil {
+		return s
+	}
+
+	// Try as an array of {type, text} blocks.
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(cb.ToolContent, &blocks); err == nil {
+		var out string
+		for _, b := range blocks {
+			if b.Text != "" {
+				out += b.Text
+			}
+		}
+		return out
+	}
+
+	return string(cb.ToolContent)
 }
 
 // Delta represents incremental updates within a content block.

@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -122,28 +121,31 @@ func (m *Model) loadData() {
 	m.recordings = m.loadRecordings()
 }
 
-// loadRecordings scans the recordings directory and loads each recording.
+// loadRecordings scans both records/ and legacy recordings/ directories.
 func (m *Model) loadRecordings() []store.SessionRecording {
-	recordingsDir := filepath.Join(m.store.Root(), "recordings")
-	entries, err := os.ReadDir(recordingsDir)
-	if err != nil {
-		return nil
-	}
-
+	seen := make(map[int]bool)
 	var recordings []store.SessionRecording
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		sessionID, err := strconv.Atoi(entry.Name())
+
+	for _, dir := range m.store.RecordsDirs() {
+		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
 		}
-		rec, err := m.store.LoadRecording(sessionID)
-		if err != nil {
-			continue
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			sessionID, err := strconv.Atoi(entry.Name())
+			if err != nil || seen[sessionID] {
+				continue
+			}
+			rec, err := m.store.LoadRecording(sessionID)
+			if err != nil {
+				continue
+			}
+			seen[sessionID] = true
+			recordings = append(recordings, *rec)
 		}
-		recordings = append(recordings, *rec)
 	}
 	return recordings
 }

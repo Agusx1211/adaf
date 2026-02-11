@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/agusx1211/adaf/internal/recording"
+	"github.com/agusx1211/adaf/internal/stream"
 )
 
 // Config holds the configuration for running an agent.
@@ -17,6 +19,16 @@ type Config struct {
 	Prompt    string            // the prompt/message to send (piped to stdin or passed as arg)
 	MaxTurns  int               // max loop iterations (0 = infinite)
 	SessionID int               // current session ID for recording
+
+	// EventSink, when set, receives parsed Claude stream events instead of
+	// displaying them to stdout. Used by the TUI to render events in its
+	// own viewport.
+	EventSink chan<- stream.RawEvent
+
+	// Stdout and Stderr override the default os.Stdout/os.Stderr for agent
+	// process output. Nil means use the OS defaults.
+	Stdout io.Writer
+	Stderr io.Writer
 }
 
 // Result holds the outcome of a single agent run.

@@ -9,10 +9,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mattn/go-isatty"
+	"github.com/spf13/cobra"
+
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/loop"
+	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/store"
-	"github.com/spf13/cobra"
 )
 
 var runCmd = &cobra.Command{
@@ -31,6 +34,7 @@ func init() {
 	runCmd.Flags().Int("max-turns", 0, "Maximum number of agent turns (0 = unlimited)")
 	runCmd.Flags().String("model", "", "Model override for the agent")
 	runCmd.Flags().String("command", "", "Custom command path (for generic agent)")
+	runCmd.Flags().Bool("no-tui", false, "Disable TUI and use plain inline output (for CI/pipes)")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -45,6 +49,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	maxTurns, _ := cmd.Flags().GetInt("max-turns")
 	modelFlag, _ := cmd.Flags().GetString("model")
 	customCmd, _ := cmd.Flags().GetString("command")
+	noTUI, _ := cmd.Flags().GetBool("no-tui")
 	modelFlag = strings.TrimSpace(modelFlag)
 
 	// Look up agent from registry.
@@ -97,9 +102,6 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build agent args based on agent type.
-	// NOTE: Each agent's Run() method reads cfg.Prompt directly, so do NOT
-	// add the prompt to agentArgs here — that would duplicate it.
-	// All agents always run in full-auto / auto-approve mode.
 	var agentArgs []string
 	switch agentName {
 	case "claude":
@@ -129,6 +131,32 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		MaxTurns: maxTurns,
 	}
 
+	// Determine whether to use TUI or inline output.
+	useTUI := !noTUI && isatty.IsTerminal(os.Stdout.Fd())
+
+	if useTUI {
+		return runWithTUI(s, agentInstance, agentCfg, config)
+	}
+	return runInline(cmd, s, agentInstance, agentCfg, config, defaultModel, maxTurns)
+}
+
+// runWithTUI launches the two-column bubbletea TUI.
+func runWithTUI(s *store.Store, agentInstance agent.Agent, agentCfg agent.Config, config *store.ProjectConfig) error {
+	plan, _ := s.LoadPlan()
+
+	return runtui.Run(runtui.RunConfig{
+		Store:       s,
+		Agent:       agentInstance,
+		AgentCfg:    agentCfg,
+		Plan:        plan,
+		ProjectName: config.Name,
+	})
+}
+
+// runInline preserves the original inline output behavior for CI/pipes.
+func runInline(cmd *cobra.Command, s *store.Store, agentInstance agent.Agent, agentCfg agent.Config, config *store.ProjectConfig, defaultModel string, maxTurns int) error {
+	workDir := agentCfg.WorkDir
+
 	// Print run header
 	fmt.Println()
 	fmt.Println(styleBoldCyan + "  ==============================================" + colorReset)
@@ -137,11 +165,11 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	printField("Project", config.Name)
 	printField("Repo", workDir)
-	printField("Agent", agentName)
+	printField("Agent", agentCfg.Name)
 	if defaultModel != "" {
 		printField("Default Model", defaultModel)
 	}
-	printField("Prompt", prompt)
+	printField("Prompt", agentCfg.Prompt)
 	if maxTurns > 0 {
 		printField("Max Turns", fmt.Sprintf("%d", maxTurns))
 	} else {

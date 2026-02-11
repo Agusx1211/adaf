@@ -51,7 +51,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		Name:        name,
 		RepoPath:    absRepo,
 		AgentConfig: make(map[string]string),
-		Metadata:    make(map[string]string),
+		Metadata:    make(map[string]any),
 	}
 
 	if err := s.Init(config); err != nil {

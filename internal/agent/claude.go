@@ -70,9 +70,15 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 		return nil, fmt.Errorf("claude agent: stdout pipe: %w", err)
 	}
 
+	// Determine stderr writer.
+	stderrW := cfg.Stderr
+	if stderrW == nil {
+		stderrW = os.Stderr
+	}
+
 	// Stderr still goes through the old MultiWriter path.
 	var stderrBuf bytes.Buffer
-	cmd.Stderr = io.MultiWriter(&stderrBuf, recorder.WrapWriter(os.Stderr, "stderr"))
+	cmd.Stderr = io.MultiWriter(&stderrBuf, recorder.WrapWriter(stderrW, "stderr"))
 
 	recorder.RecordMeta("agent", "claude")
 	recorder.RecordMeta("command", cmdName+" "+strings.Join(args, " "))
@@ -83,37 +89,27 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 		return nil, fmt.Errorf("claude agent: failed to start command: %w", err)
 	}
 
-	// Parse the NDJSON stream and display formatted events in real-time.
-	display := stream.NewDisplay(os.Stdout)
+	// Parse the NDJSON stream.
 	events := stream.Parse(ctx, stdoutPipe)
 
 	var textBuf strings.Builder
 
-	// Status ticker: print a heartbeat every 30 seconds so the user
-	// knows the agent is still running.
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case ev, ok := <-events:
-			if !ok {
-				goto done
-			}
-
+	if cfg.EventSink != nil {
+		// TUI mode: forward events to the sink channel for the TUI to render.
+		for ev := range events {
 			// Record raw NDJSON line.
 			if len(ev.Raw) > 0 {
 				recorder.RecordStream(string(ev.Raw))
 			}
 
 			if ev.Err != nil {
-				// Parse error on a line - record but continue.
 				continue
 			}
 
-			display.Handle(ev.Parsed)
+			// Forward to TUI.
+			cfg.EventSink <- ev
 
-			// Accumulate text from assistant messages for the final Result.Output.
+			// Accumulate text for Result.Output.
 			if ev.Parsed.Type == "assistant" && ev.Parsed.AssistantMessage != nil {
 				for _, block := range ev.Parsed.AssistantMessage.Content {
 					if block.Type == "text" {
@@ -121,21 +117,66 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 					}
 				}
 			}
-			// Also accumulate from content_block_delta (streaming mode).
 			if ev.Parsed.Type == "content_block_delta" &&
 				ev.Parsed.Delta != nil &&
 				ev.Parsed.Delta.Type == "text_delta" {
 				textBuf.WriteString(ev.Parsed.Delta.Text)
 			}
-
-		case <-ticker.C:
-			elapsed := time.Since(start).Round(time.Second)
-			fmt.Fprintf(os.Stderr, "\033[2m[status]\033[0m agent running for %s...\n", elapsed)
 		}
-	}
+	} else {
+		// Legacy mode: display formatted events in real-time.
+		stdoutW := cfg.Stdout
+		if stdoutW == nil {
+			stdoutW = os.Stdout
+		}
+		display := stream.NewDisplay(stdoutW)
 
-done:
-	display.Finish()
+		// Status ticker: print a heartbeat every 30 seconds so the user
+		// knows the agent is still running.
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case ev, ok := <-events:
+				if !ok {
+					goto done
+				}
+
+				// Record raw NDJSON line.
+				if len(ev.Raw) > 0 {
+					recorder.RecordStream(string(ev.Raw))
+				}
+
+				if ev.Err != nil {
+					continue
+				}
+
+				display.Handle(ev.Parsed)
+
+				// Accumulate text for Result.Output.
+				if ev.Parsed.Type == "assistant" && ev.Parsed.AssistantMessage != nil {
+					for _, block := range ev.Parsed.AssistantMessage.Content {
+						if block.Type == "text" {
+							textBuf.WriteString(block.Text)
+						}
+					}
+				}
+				if ev.Parsed.Type == "content_block_delta" &&
+					ev.Parsed.Delta != nil &&
+					ev.Parsed.Delta.Type == "text_delta" {
+					textBuf.WriteString(ev.Parsed.Delta.Text)
+				}
+
+			case <-ticker.C:
+				elapsed := time.Since(start).Round(time.Second)
+				fmt.Fprintf(stderrW, "\033[2m[status]\033[0m agent running for %s...\n", elapsed)
+			}
+		}
+
+	done:
+		display.Finish()
+	}
 
 	waitErr := cmd.Wait()
 	duration := time.Since(start)

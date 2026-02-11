@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -45,56 +44,53 @@ func runSessionList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// List recording directories
-	recDir := filepath.Join(s.Root(), "recordings")
-	entries, err := os.ReadDir(recDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			printHeader("Session Recordings")
-			fmt.Printf("  %sNo recordings found.%s\n\n", colorDim, colorReset)
-			return nil
-		}
-		return fmt.Errorf("reading recordings directory: %w", err)
-	}
-
+	// List recording directories (records/ and legacy recordings/)
 	printHeader("Session Recordings")
 
+	seen := make(map[int]bool)
 	var rows [][]string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		sessionID, err := strconv.Atoi(e.Name())
+	for _, recDir := range s.RecordsDirs() {
+		entries, err := os.ReadDir(recDir)
 		if err != nil {
 			continue
 		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			sessionID, err := strconv.Atoi(e.Name())
+			if err != nil || seen[sessionID] {
+				continue
+			}
 
-		rec, err := s.LoadRecording(sessionID)
-		if err != nil {
-			continue
+			rec, err := s.LoadRecording(sessionID)
+			if err != nil {
+				continue
+			}
+			seen[sessionID] = true
+
+			duration := "-"
+			if !rec.EndTime.IsZero() {
+				d := rec.EndTime.Sub(rec.StartTime)
+				duration = fmt.Sprintf("%dm %ds", int(d.Minutes()), int(d.Seconds())%60)
+			}
+
+			exitCodeStr := fmt.Sprintf("%d", rec.ExitCode)
+			if rec.ExitCode == 0 {
+				exitCodeStr = colorGreen + "0" + colorReset
+			} else {
+				exitCodeStr = colorRed + exitCodeStr + colorReset
+			}
+
+			rows = append(rows, []string{
+				fmt.Sprintf("#%d", rec.SessionID),
+				rec.Agent,
+				rec.StartTime.Format("2006-01-02 15:04"),
+				duration,
+				fmt.Sprintf("%d", len(rec.Events)),
+				exitCodeStr,
+			})
 		}
-
-		duration := "-"
-		if !rec.EndTime.IsZero() {
-			d := rec.EndTime.Sub(rec.StartTime)
-			duration = fmt.Sprintf("%dm %ds", int(d.Minutes()), int(d.Seconds())%60)
-		}
-
-		exitCodeStr := fmt.Sprintf("%d", rec.ExitCode)
-		if rec.ExitCode == 0 {
-			exitCodeStr = colorGreen + "0" + colorReset
-		} else {
-			exitCodeStr = colorRed + exitCodeStr + colorReset
-		}
-
-		rows = append(rows, []string{
-			fmt.Sprintf("#%d", rec.SessionID),
-			rec.Agent,
-			rec.StartTime.Format("2006-01-02 15:04"),
-			duration,
-			fmt.Sprintf("%d", len(rec.Events)),
-			exitCodeStr,
-		})
 	}
 
 	if len(rows) == 0 {
