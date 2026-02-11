@@ -1,0 +1,13 @@
+{
+  "id": 7,
+  "title": "Add opencode agent implementation",
+  "description": "Implement internal/agent/opencode.go wrapping the opencode CLI tool. Detect configured provider/model from opencode config. Phase: p09",
+  "status": "open",
+  "priority": "medium",
+  "labels": [
+    "phase:p09",
+    "agent"
+  ],
+  "created": "2026-02-11T09:02:26.584615993Z",
+  "updated": "2026-02-11T09:02:26.584615993Z"
+}

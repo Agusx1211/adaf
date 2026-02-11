@@ -1,0 +1,9 @@
+{
+  "id": 1,
+  "title": "ADAF v0.2 Multi-Agent Orchestration Architecture",
+  "context": "adaf v0.1 is a single-agent runner with basic project management. We need to support multiple agents collaborating via protocols, real-time monitoring via web dashboard, and integrations with notification/metrics systems.",
+  "decision": "Adopt a daemon-based service architecture with: (1) Protocol engine using DAG-based step execution for multi-agent pipelines, (2) Git worktrees for parallel agent isolation, (3) Virtual instruction injection via file overlay for agent compatibility, (4) Embedded web dashboard with htmx+Go templates for single-binary deployment, (5) Pushover and Prometheus as first-class integrations.",
+  "alternatives": "Considered: (1) Sidecar process per agent instead of central daemon - rejected for complexity. (2) Environment variable injection instead of file overlay - rejected because not all agents support it. (3) React/Vue SPA for dashboard - rejected to avoid Node.js build dependency. (4) gRPC instead of REST/WebSocket - rejected for simplicity and browser compatibility.",
+  "rationale": "Daemon architecture enables real-time monitoring, cross-project management, and persistent metrics collection. DAG-based protocols allow flexible agent composition. File overlay injection is the most compatible approach across different agent tools. Embedded dashboard avoids external build dependencies. htmx keeps frontend simple while still being reactive.",
+  "date": "2026-02-11T09:01:52.493310135Z"
+}

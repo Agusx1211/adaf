@@ -1,0 +1,13 @@
+{
+  "id": 4,
+  "title": "Implement virtual AGENTS.md/CLAUDE.md injection system",
+  "description": "Build internal/inject/ package with file overlay system that transparently injects adaf context into agent instruction files. Support Claude (CLAUDE.md), Codex (AGENTS.md), and others. Safe cleanup on crash via defer + signal handlers. Phase: p03",
+  "status": "open",
+  "priority": "high",
+  "labels": [
+    "phase:p03",
+    "core"
+  ],
+  "created": "2026-02-11T09:02:23.266868673Z",
+  "updated": "2026-02-11T09:02:23.266868673Z"
+}

@@ -1,0 +1,13 @@
+{
+  "id": 6,
+  "title": "Build mobile-friendly web dashboard",
+  "description": "Create embedded SPA using htmx+Go templates served by daemon. Pages: overview grid, project detail, agent console with real-time output via WebSocket. Mobile-first responsive. Embedded via Go embed package. Phase: p05",
+  "status": "open",
+  "priority": "medium",
+  "labels": [
+    "phase:p05",
+    "ui"
+  ],
+  "created": "2026-02-11T09:02:25.68192949Z",
+  "updated": "2026-02-11T09:02:25.68192949Z"
+}

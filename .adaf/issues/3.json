@@ -1,0 +1,13 @@
+{
+  "id": 3,
+  "title": "Implement git worktree management for parallel agents",
+  "description": "Build internal/worktree/ package to create, sync, merge, and cleanup git worktrees. Needed for parallel agent execution in protocols. Phase: p02",
+  "status": "open",
+  "priority": "high",
+  "labels": [
+    "phase:p02",
+    "core"
+  ],
+  "created": "2026-02-11T09:02:22.500667178Z",
+  "updated": "2026-02-11T09:02:22.500667178Z"
+}

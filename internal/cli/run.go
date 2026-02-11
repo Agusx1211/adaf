@@ -11,6 +11,7 @@ import (
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/loop"
+	"github.com/agusx1211/adaf/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -26,7 +27,7 @@ Supported agents: claude, codex, vibe, generic`,
 
 func init() {
 	runCmd.Flags().String("agent", "claude", "Agent to run (claude, codex, vibe, generic)")
-	runCmd.Flags().String("prompt", ".", "Prompt to send to the agent")
+	runCmd.Flags().String("prompt", "", "Prompt to send to the agent (default: built from project context)")
 	runCmd.Flags().Int("max-turns", 1, "Maximum number of agent turns (0 = unlimited)")
 	runCmd.Flags().String("model", "", "Model override for the agent")
 	runCmd.Flags().Bool("auto-approve", false, "Auto-approve agent actions without confirmation")
@@ -64,11 +65,22 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		workDir, _ = os.Getwd()
 	}
 
-	// Build agent args based on agent type and flags
+	// If no explicit prompt was provided, build one from project context.
+	if prompt == "" {
+		built, err := buildDefaultPrompt(s, config)
+		if err != nil {
+			return fmt.Errorf("building default prompt: %w", err)
+		}
+		prompt = built
+	}
+
+	// Build agent args based on agent type and flags.
+	// NOTE: For agents where the Run() method appends the prompt from
+	// cfg.Prompt (e.g. claude), do NOT add it to agentArgs here to
+	// avoid duplicating the -p flag.
 	var agentArgs []string
 	switch agentName {
 	case "claude":
-		agentArgs = append(agentArgs, "-p", prompt)
 		if model != "" {
 			agentArgs = append(agentArgs, "--model", model)
 		}
@@ -165,4 +177,76 @@ func agentNames() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// buildDefaultPrompt constructs a prompt from the project's plan and open
+// issues so the agent has meaningful context when no --prompt is given.
+func buildDefaultPrompt(s *store.Store, config *store.ProjectConfig) (string, error) {
+	var b strings.Builder
+
+	b.WriteString("You are working on the project: " + config.Name + "\n\n")
+
+	// Include current plan context.
+	plan, err := s.LoadPlan()
+	if err == nil && len(plan.Phases) > 0 {
+		b.WriteString("## Current Plan\n")
+		if plan.Title != "" {
+			b.WriteString(plan.Title + "\n")
+		}
+		b.WriteString("\nPhases:\n")
+		for _, p := range plan.Phases {
+			b.WriteString(fmt.Sprintf("- [%s] %s: %s\n", p.Status, p.ID, p.Title))
+		}
+		b.WriteString("\n")
+
+		// Find the first actionable phase to focus the agent.
+		for _, p := range plan.Phases {
+			if p.Status == "not_started" || p.Status == "in_progress" {
+				b.WriteString("## Current Task\n")
+				b.WriteString(fmt.Sprintf("Work on phase %s: %s\n\n", p.ID, p.Title))
+				if p.Description != "" {
+					b.WriteString(p.Description + "\n\n")
+				}
+				break
+			}
+		}
+	}
+
+	// Include open issues.
+	issues, err := s.ListIssues()
+	if err == nil && len(issues) > 0 {
+		var open []store.Issue
+		for _, iss := range issues {
+			if iss.Status == "open" || iss.Status == "in_progress" {
+				open = append(open, iss)
+			}
+		}
+		if len(open) > 0 {
+			b.WriteString("## Open Issues\n")
+			for _, iss := range open {
+				b.WriteString(fmt.Sprintf("- #%d [%s] %s: %s\n", iss.ID, iss.Priority, iss.Title, iss.Description))
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	// Include recent session context so the agent knows what happened last.
+	latest, err := s.LatestLog()
+	if err == nil && latest != nil {
+		b.WriteString("## Last Session\n")
+		if latest.Objective != "" {
+			b.WriteString(fmt.Sprintf("Objective: %s\n", latest.Objective))
+		}
+		if latest.WhatWasBuilt != "" {
+			b.WriteString(fmt.Sprintf("Built: %s\n", latest.WhatWasBuilt))
+		}
+		if latest.NextSteps != "" {
+			b.WriteString(fmt.Sprintf("Next steps: %s\n", latest.NextSteps))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("Implement the current task described above. Write code, run tests, and ensure everything compiles.")
+
+	return b.String(), nil
 }

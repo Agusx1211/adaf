@@ -1,0 +1,13 @@
+{
+  "id": 8,
+  "title": "Implement global ~/.adaf/ config and project registry",
+  "description": "Create machine-wide config at ~/.adaf/config.json with defaults, notification settings, dashboard config. Auto-maintain registry.json of all projects. Config inheritance: global -\u003e project -\u003e env -\u003e flags. Phase: p08",
+  "status": "open",
+  "priority": "medium",
+  "labels": [
+    "phase:p08",
+    "core"
+  ],
+  "created": "2026-02-11T09:02:27.642087144Z",
+  "updated": "2026-02-11T09:02:27.642087144Z"
+}
