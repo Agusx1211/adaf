@@ -2,7 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -79,7 +81,7 @@ func buildProfileList(globalCfg *cfgpkg.GlobalConfig, agentsCfg *agent.AgentsCon
 }
 
 // renderSelector renders the selector view as two columns.
-func renderSelector(profiles []profileEntry, selected int, project *store.ProjectConfig, plan *store.Plan, issues []store.Issue, logs []store.SessionLog, width, height int) string {
+func renderSelector(profiles []profileEntry, selected int, project *store.ProjectConfig, plan *store.Plan, issues []store.Issue, logs []store.SessionLog, profileStats map[string]*store.ProfileStats, loopStats map[string]*store.LoopStats, width, height int) string {
 	panelH := height - 2 // header + status bar
 	if panelH < 1 {
 		panelH = 1
@@ -93,7 +95,7 @@ func renderSelector(profiles []profileEntry, selected int, project *store.Projec
 	}
 
 	left := renderProfileList(profiles, selected, leftOuter, panelH)
-	right := renderProjectPanel(profiles, selected, project, plan, issues, logs, rightOuter, panelH)
+	right := renderProjectPanel(profiles, selected, project, plan, issues, logs, profileStats, loopStats, rightOuter, panelH)
 
 	if leftOuter == 0 {
 		return right
@@ -176,7 +178,7 @@ func renderProfileList(profiles []profileEntry, selected int, outerW, outerH int
 	return style.Render(content)
 }
 
-func renderProjectPanel(profiles []profileEntry, selected int, project *store.ProjectConfig, plan *store.Plan, issues []store.Issue, logs []store.SessionLog, outerW, outerH int) string {
+func renderProjectPanel(profiles []profileEntry, selected int, project *store.ProjectConfig, plan *store.Plan, issues []store.Issue, logs []store.SessionLog, profileStats map[string]*store.ProfileStats, loopStats map[string]*store.LoopStats, outerW, outerH int) string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorSurface2).
@@ -263,6 +265,17 @@ func renderProjectPanel(profiles []profileEntry, selected int, project *store.Pr
 			lines = append(lines, sectionStyle.Render("Selected Loop"))
 			lines = append(lines, labelStyle.Render("Loop")+valueStyle.Render(p.LoopName))
 			lines = append(lines, labelStyle.Render("Steps")+valueStyle.Render(fmt.Sprintf("%d", p.LoopSteps)))
+			// Loop stats
+			if ls, ok := loopStats[p.LoopName]; ok && ls.TotalRuns > 0 {
+				lines = append(lines, "")
+				lines = append(lines, sectionStyle.Render("Stats"))
+				lines = append(lines, labelStyle.Render("Runs")+valueStyle.Render(fmt.Sprintf("%d", ls.TotalRuns)))
+				lines = append(lines, labelStyle.Render("Cycles")+valueStyle.Render(fmt.Sprintf("%d", ls.TotalCycles)))
+				lines = append(lines, labelStyle.Render("Cost")+valueStyle.Render(fmt.Sprintf("$%.2f", ls.TotalCostUSD)))
+				if !ls.LastRunAt.IsZero() {
+					lines = append(lines, labelStyle.Render("Last")+dimStyle.Render(formatSelectorTimeAgo(ls.LastRunAt)))
+				}
+			}
 		} else {
 			lines = append(lines, sectionStyle.Render("Selected Profile"))
 			lines = append(lines, labelStyle.Render("Profile")+valueStyle.Render(p.Name))
@@ -298,6 +311,20 @@ func renderProjectPanel(profiles []profileEntry, selected int, project *store.Pr
 			}
 			if len(p.Caps) > 0 {
 				lines = append(lines, labelStyle.Render("Capabilities")+dimStyle.Render(strings.Join(p.Caps, ", ")))
+			}
+			// Profile stats
+			if ps, ok := profileStats[p.Name]; ok && ps.TotalRuns > 0 {
+				lines = append(lines, "")
+				lines = append(lines, sectionStyle.Render("Stats"))
+				lines = append(lines, labelStyle.Render("Runs")+valueStyle.Render(
+					fmt.Sprintf("%d (%d ok, %d fail)", ps.TotalRuns, ps.SuccessCount, ps.FailureCount)))
+				lines = append(lines, labelStyle.Render("Cost")+valueStyle.Render(fmt.Sprintf("$%.2f", ps.TotalCostUSD)))
+				if !ps.LastRunAt.IsZero() {
+					lines = append(lines, labelStyle.Render("Last")+dimStyle.Render(formatSelectorTimeAgo(ps.LastRunAt)))
+				}
+				if len(ps.ToolCalls) > 0 {
+					lines = append(lines, labelStyle.Render("Top tools")+dimStyle.Render(formatSelectorTopTools(ps.ToolCalls)))
+				}
 			}
 		}
 	}
@@ -353,4 +380,41 @@ func fitLines(lines []string, w, h int) string {
 		}
 	}
 	return strings.Join(result, "\n")
+}
+
+// formatSelectorTimeAgo returns a short human-readable time-ago string for the TUI.
+func formatSelectorTimeAgo(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		days := int(d.Hours()) / 24
+		return fmt.Sprintf("%dd ago", days)
+	}
+}
+
+// formatSelectorTopTools returns a compact top-tools string for the TUI.
+func formatSelectorTopTools(tools map[string]int) string {
+	type tc struct {
+		name  string
+		count int
+	}
+	var sorted []tc
+	for name, count := range tools {
+		sorted = append(sorted, tc{name, count})
+	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].count > sorted[j].count })
+	var parts []string
+	for i, t := range sorted {
+		if i >= 3 {
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s(%d)", t.name, t.count))
+	}
+	return strings.Join(parts, " ")
 }

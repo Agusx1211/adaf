@@ -52,6 +52,7 @@ type SessionLog struct {
 	Date           time.Time `json:"date"`
 	Agent          string    `json:"agent"` // "claude", "codex", "vibe", etc.
 	AgentModel     string    `json:"agent_model,omitempty"`
+	ProfileName    string    `json:"profile_name,omitempty"`
 	CommitHash     string    `json:"commit_hash,omitempty"`
 	Objective      string    `json:"objective"`
 	WhatWasBuilt   string    `json:"what_was_built"`

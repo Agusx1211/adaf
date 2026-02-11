@@ -189,6 +189,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addLine("")
 			m.addLine(resultLabelStyle.Render("Agent loop finished."))
 		}
+		// Show cost/token summary.
+		if m.costUSD > 0 || m.inputTokens > 0 {
+			m.addLine(dimStyle.Render(fmt.Sprintf("  Total: $%.4f, %d in / %d out tokens, %d turns",
+				m.costUSD, m.inputTokens, m.outputTokens, m.numTurns)))
+		}
 		return m, nil
 
 	case LoopStepStartMsg:
@@ -215,6 +220,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.addLine("")
 			m.addLine(resultLabelStyle.Render(fmt.Sprintf("Loop finished (%s).", msg.Reason)))
+		}
+		// Show cost/token summary.
+		if m.costUSD > 0 || m.inputTokens > 0 {
+			m.addLine(dimStyle.Render(fmt.Sprintf("  Total: $%.4f, %d in / %d out tokens, %d turns",
+				m.costUSD, m.inputTokens, m.outputTokens, m.numTurns)))
 		}
 		return m, nil
 

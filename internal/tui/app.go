@@ -105,6 +105,10 @@ type AppModel struct {
 	issues  []store.Issue
 	logs    []store.SessionLog
 
+	// Cached stats for selector display.
+	cachedProfileStats map[string]*store.ProfileStats
+	cachedLoopStats    map[string]*store.LoopStats
+
 	// Running state — embedded run TUI model.
 	runModel   runtui.Model
 	runCancel  context.CancelFunc
@@ -137,6 +141,20 @@ func (m *AppModel) loadProjectData() {
 	m.plan, _ = m.store.LoadPlan()
 	m.issues, _ = m.store.ListIssues()
 	m.logs, _ = m.store.ListLogs()
+	m.loadStats()
+}
+
+func (m *AppModel) loadStats() {
+	m.cachedProfileStats = make(map[string]*store.ProfileStats)
+	m.cachedLoopStats = make(map[string]*store.LoopStats)
+	profileStats, _ := m.store.ListProfileStats()
+	for i := range profileStats {
+		m.cachedProfileStats[profileStats[i].ProfileName] = &profileStats[i]
+	}
+	loopStats, _ := m.store.ListLoopStats()
+	for i := range loopStats {
+		m.cachedLoopStats[loopStats[i].LoopName] = &loopStats[i]
+	}
 }
 
 func (m *AppModel) rebuildProfiles() {
@@ -706,6 +724,7 @@ func (m AppModel) startAgentInline(p profileEntry, projectName string) (tea.Mode
 		AgentCfg:    agentCfg,
 		Plan:        m.plan,
 		ProjectName: projectName,
+		ProfileName: p.Name,
 	}, eventCh)
 
 	m.state = stateRunning
@@ -778,7 +797,7 @@ func (m AppModel) viewSelector() string {
 		panelH = 1
 	}
 
-	panels := renderSelector(m.profiles, m.selected, m.project, m.plan, m.issues, m.logs, m.width, m.height)
+	panels := renderSelector(m.profiles, m.selected, m.project, m.plan, m.issues, m.logs, m.cachedProfileStats, m.cachedLoopStats, m.width, m.height)
 	return header + "\n" + panels + "\n" + statusBar
 }
 

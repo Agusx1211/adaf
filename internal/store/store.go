@@ -679,7 +679,7 @@ func (s *Store) UnreadMessages(spawnID int, direction string) ([]SpawnMessage, e
 
 // EnsureDirs creates directories that may be missing from older projects.
 func (s *Store) EnsureDirs() error {
-	for _, sub := range []string{"spawns", "notes", "messages", "loopruns"} {
+	for _, sub := range []string{"spawns", "notes", "messages", "loopruns", "stats", "stats/profiles", "stats/loops"} {
 		if err := os.MkdirAll(filepath.Join(s.root, sub), 0755); err != nil {
 			return err
 		}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/recording"
+	"github.com/agusx1211/adaf/internal/stats"
 	"github.com/agusx1211/adaf/internal/store"
 )
 
@@ -17,6 +18,9 @@ type Loop struct {
 	Store  *store.Store
 	Agent  agent.Agent
 	Config agent.Config
+
+	// ProfileName is the name of the profile that launched this loop.
+	ProfileName string
 
 	// OnStart is called at the beginning of each iteration, before the agent runs.
 	// The sessionID of the upcoming run is passed as an argument.
@@ -53,8 +57,9 @@ func (l *Loop) Run(ctx context.Context) error {
 
 		// Allocate a new session ID by creating a session log entry.
 		sessionLog := &store.SessionLog{
-			Agent:     l.Agent.Name(),
-			Objective: l.Config.Prompt,
+			Agent:       l.Agent.Name(),
+			ProfileName: l.ProfileName,
+			Objective:   l.Config.Prompt,
 		}
 		if err := l.Store.CreateLog(sessionLog); err != nil {
 			return fmt.Errorf("creating session log: %w", err)
@@ -100,6 +105,11 @@ func (l *Loop) Run(ctx context.Context) error {
 		if flushErr := rec.Flush(); flushErr != nil {
 			// Log flush error but don't fail the loop.
 			fmt.Printf("warning: failed to flush recording for session %d: %v\n", sessionID, flushErr)
+		}
+
+		// Update profile stats from the completed session.
+		if l.ProfileName != "" {
+			_ = stats.UpdateProfileStats(l.Store, l.ProfileName, sessionID)
 		}
 
 		// Update the session log with results.

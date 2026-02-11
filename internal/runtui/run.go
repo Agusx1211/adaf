@@ -22,6 +22,7 @@ type RunConfig struct {
 	AgentCfg    agent.Config
 	Plan        *store.Plan
 	ProjectName string
+	ProfileName string
 }
 
 // Run launches the two-column TUI and runs the agent loop concurrently.
@@ -100,9 +101,10 @@ func runAgentLoop(ctx context.Context, cfg RunConfig, eventCh chan any, streamCh
 	agentCfg.Stderr = io.Discard
 
 	l := &loop.Loop{
-		Store:  cfg.Store,
-		Agent:  cfg.Agent,
-		Config: agentCfg,
+		Store:       cfg.Store,
+		Agent:       cfg.Agent,
+		Config:      agentCfg,
+		ProfileName: cfg.ProfileName,
 		OnStart: func(sessionID int) {
 			eventCh <- AgentStartedMsg{SessionID: sessionID}
 		},

@@ -12,6 +12,7 @@ import (
 	"github.com/agusx1211/adaf/internal/loop"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
 	"github.com/agusx1211/adaf/internal/runtui"
+	"github.com/agusx1211/adaf/internal/stats"
 	"github.com/agusx1211/adaf/internal/store"
 	"github.com/agusx1211/adaf/internal/stream"
 )
@@ -79,6 +80,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 		run.Status = "stopped"
 		run.StoppedAt = time.Now().UTC()
 		cfg.Store.UpdateLoopRun(run)
+		_ = stats.UpdateLoopStats(cfg.Store, loopDef.Name, run)
 	}()
 
 	// Run cycles indefinitely until stopped or cancelled.
@@ -175,9 +177,10 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			agentCfg.Stderr = io.Discard
 
 			l := &loop.Loop{
-				Store:  cfg.Store,
-				Agent:  agentInstance,
-				Config: agentCfg,
+				Store:       cfg.Store,
+				Agent:       agentInstance,
+				Config:      agentCfg,
+				ProfileName: prof.Name,
 				OnStart: func(sessionID int) {
 					run.SessionIDs = append(run.SessionIDs, sessionID)
 					cfg.Store.UpdateLoopRun(run)
