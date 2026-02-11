@@ -11,8 +11,9 @@ import (
 )
 
 var sessionCmd = &cobra.Command{
-	Use:   "session",
-	Short: "Manage session recordings",
+	Use:     "session",
+	Aliases: []string{"recording", "recordings"},
+	Short:   "Manage session recordings",
 	Long:  `View and replay session recordings that capture agent interactions.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
@@ -20,16 +21,18 @@ var sessionCmd = &cobra.Command{
 }
 
 var sessionListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List recorded sessions",
-	RunE:  runSessionList,
+	Use:     "list",
+	Aliases: []string{"ls", "l"},
+	Short:   "List recorded sessions",
+	RunE:    runSessionList,
 }
 
 var sessionShowCmd = &cobra.Command{
-	Use:   "show <id>",
-	Short: "Show session recording details",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runSessionShow,
+	Use:     "show <id>",
+	Aliases: []string{"get", "view", "display"},
+	Short:   "Show session recording details",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runSessionShow,
 }
 
 func init() {

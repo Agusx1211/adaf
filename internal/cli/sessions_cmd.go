@@ -11,8 +11,9 @@ import (
 )
 
 var sessionsCmd = &cobra.Command{
-	Use:   "sessions",
-	Short: "List active and recent adaf sessions",
+	Use:     "sessions",
+	Aliases: []string{"session-list", "session_list", "ls-sessions", "ls_sessions"},
+	Short:   "List active and recent adaf sessions",
 	Long: `List all adaf sessions that are currently running or recently completed.
 Sessions are created when agents are launched through the TUI with session support.
 

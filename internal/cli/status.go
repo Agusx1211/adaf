@@ -8,8 +8,9 @@ import (
 )
 
 var statusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show comprehensive project status",
+	Use:     "status",
+	Aliases: []string{"info", "state", "st"},
+	Short:   "Show comprehensive project status",
 	Long:  `Display a summary of the project including plan progress, issues, sessions, and recent activity.`,
 	RunE:  runStatus,
 }

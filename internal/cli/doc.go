@@ -10,8 +10,9 @@ import (
 )
 
 var docCmd = &cobra.Command{
-	Use:   "doc",
-	Short: "Manage project documents",
+	Use:     "doc",
+	Aliases: []string{"docs", "document", "documents"},
+	Short:   "Manage project documents",
 	Long:  `Create, list, show, and update project documentation tracked by adaf.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
@@ -19,29 +20,33 @@ var docCmd = &cobra.Command{
 }
 
 var docListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List all documents",
-	RunE:  runDocList,
+	Use:     "list",
+	Aliases: []string{"ls", "l"},
+	Short:   "List all documents",
+	RunE:    runDocList,
 }
 
 var docShowCmd = &cobra.Command{
-	Use:   "show <id>",
-	Short: "Show a document",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runDocShow,
+	Use:     "show <id>",
+	Aliases: []string{"get", "view", "display"},
+	Short:   "Show a document",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runDocShow,
 }
 
 var docCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a new document",
-	RunE:  runDocCreate,
+	Use:     "create",
+	Aliases: []string{"new", "add"},
+	Short:   "Create a new document",
+	RunE:    runDocCreate,
 }
 
 var docUpdateCmd = &cobra.Command{
-	Use:   "update <id>",
-	Short: "Update a document",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runDocUpdate,
+	Use:     "update <id>",
+	Aliases: []string{"edit", "modify", "set"},
+	Short:   "Update a document",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runDocUpdate,
 }
 
 func init() {

@@ -11,20 +11,23 @@ import (
 )
 
 var worktreeCmd = &cobra.Command{
-	Use:   "worktree",
-	Short: "Manage adaf git worktrees",
+	Use:     "worktree",
+	Aliases: []string{"worktrees", "wt"},
+	Short:   "Manage adaf git worktrees",
 }
 
 var worktreeCleanupCmd = &cobra.Command{
-	Use:   "cleanup",
-	Short: "Remove all adaf-managed worktrees (crash recovery)",
-	RunE:  runWorktreeCleanup,
+	Use:     "cleanup",
+	Aliases: []string{"clean", "prune", "gc"},
+	Short:   "Remove all adaf-managed worktrees (crash recovery)",
+	RunE:    runWorktreeCleanup,
 }
 
 var worktreeListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List active adaf-managed worktrees",
-	RunE:  runWorktreeList,
+	Use:     "list",
+	Aliases: []string{"ls", "l"},
+	Short:   "List active adaf-managed worktrees",
+	RunE:    runWorktreeList,
 }
 
 func init() {

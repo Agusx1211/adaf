@@ -11,8 +11,9 @@ import (
 )
 
 var planCmd = &cobra.Command{
-	Use:   "plan",
-	Short: "Manage the project plan",
+	Use:     "plan",
+	Aliases: []string{"plans"},
+	Short:   "Manage the project plan",
 	Long:  `View and manage the project plan, including phases and their statuses.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Default to showing the plan
@@ -21,14 +22,16 @@ var planCmd = &cobra.Command{
 }
 
 var planShowCmd = &cobra.Command{
-	Use:   "show",
-	Short: "Display the current plan",
-	RunE:  runPlanShow,
+	Use:     "show",
+	Aliases: []string{"get", "view", "display"},
+	Short:   "Display the current plan",
+	RunE:    runPlanShow,
 }
 
 var planSetCmd = &cobra.Command{
-	Use:   "set [file]",
-	Short: "Set the plan from a JSON file or stdin",
+	Use:     "set [file]",
+	Aliases: []string{"load", "import"},
+	Short:   "Set the plan from a JSON file or stdin",
 	Long: `Set the project plan from a JSON file. If no file is specified, reads from stdin.
 
 The JSON should have the structure:
@@ -43,8 +46,9 @@ The JSON should have the structure:
 }
 
 var planPhaseStatusCmd = &cobra.Command{
-	Use:   "phase-status <phase-id> <status>",
-	Short: "Update a phase's status",
+	Use:     "phase-status <phase-id> <status>",
+	Aliases: []string{"phase_status", "update-phase", "update_phase"},
+	Short:   "Update a phase's status",
 	Long:  `Update the status of a specific plan phase. Valid statuses: not_started, in_progress, complete, blocked`,
 	Args:  cobra.ExactArgs(2),
 	RunE:  runPlanPhaseStatus,

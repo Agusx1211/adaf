@@ -10,8 +10,9 @@ import (
 )
 
 var logCmd = &cobra.Command{
-	Use:   "log",
-	Short: "Manage session logs",
+	Use:     "log",
+	Aliases: []string{"logs", "session-log", "session_log", "session-logs", "session_logs"},
+	Short:   "Manage session logs",
 	Long:  `View and create session logs that track what each agent session accomplished.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
@@ -19,28 +20,32 @@ var logCmd = &cobra.Command{
 }
 
 var logListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List all session logs",
-	RunE:  runLogList,
+	Use:     "list",
+	Aliases: []string{"ls", "l"},
+	Short:   "List all session logs",
+	RunE:    runLogList,
 }
 
 var logShowCmd = &cobra.Command{
-	Use:   "show <id>",
-	Short: "Show a full session log",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runLogShow,
+	Use:     "show <id>",
+	Aliases: []string{"get", "view", "display"},
+	Short:   "Show a full session log",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runLogShow,
 }
 
 var logLatestCmd = &cobra.Command{
-	Use:   "latest",
-	Short: "Show the most recent session log",
-	RunE:  runLogLatest,
+	Use:     "latest",
+	Aliases: []string{"last", "recent"},
+	Short:   "Show the most recent session log",
+	RunE:    runLogLatest,
 }
 
 var logCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a new session log entry",
-	RunE:  runLogCreate,
+	Use:     "create",
+	Aliases: []string{"new", "add"},
+	Short:   "Create a new session log entry",
+	RunE:    runLogCreate,
 }
 
 func init() {

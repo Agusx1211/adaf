@@ -10,9 +10,10 @@ import (
 )
 
 var treeCmd = &cobra.Command{
-	Use:   "tree",
-	Short: "Show agent hierarchy tree",
-	RunE:  runTree,
+	Use:     "tree",
+	Aliases: []string{"hierarchy", "spawn-tree", "spawn_tree"},
+	Short:   "Show agent hierarchy tree",
+	RunE:    runTree,
 }
 
 func init() {

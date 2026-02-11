@@ -19,43 +19,49 @@ import (
 )
 
 var loopCmd = &cobra.Command{
-	Use:   "loop",
-	Short: "Manage and run loops",
+	Use:     "loop",
+	Aliases: []string{"loops"},
+	Short:   "Manage and run loops",
 	Long:  "Loops are cyclic templates of profile steps. Each step runs an agent profile for N turns, with support for inter-step messaging and stop signals.",
 }
 
 var loopListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List loop definitions from config",
-	RunE:  loopList,
+	Use:     "list",
+	Aliases: []string{"ls", "l"},
+	Short:   "List loop definitions from config",
+	RunE:    loopList,
 }
 
 var loopStartCmd = &cobra.Command{
-	Use:   "start <name>",
-	Short: "Start a loop (inline output)",
-	Args:  cobra.ExactArgs(1),
-	RunE:  loopStart,
+	Use:     "start <name>",
+	Aliases: []string{"run", "begin"},
+	Short:   "Start a loop (inline output)",
+	Args:    cobra.ExactArgs(1),
+	RunE:    loopStart,
 }
 
 var loopStopCmd = &cobra.Command{
-	Use:   "stop",
-	Short: "Signal the current loop to stop",
+	Use:     "stop",
+	Aliases: []string{"halt", "cancel", "end"},
+	Short:   "Signal the current loop to stop",
 	Long:  "Reads ADAF_LOOP_RUN_ID from environment and signals the loop to stop after the current step.",
 	RunE:  loopStop,
 }
 
 var loopMessageCmd = &cobra.Command{
-	Use:   "message <text>",
-	Short: "Post a message to subsequent loop steps",
+	Use:     "message <text>",
+	Aliases: []string{"msg", "send"},
+	Short:   "Post a message to subsequent loop steps",
 	Long:  "Reads ADAF_LOOP_RUN_ID and ADAF_LOOP_STEP_INDEX from environment.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  loopMessage,
 }
 
 var loopStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show the active loop run status",
-	RunE:  loopStatus,
+	Use:     "status",
+	Aliases: []string{"info", "state"},
+	Short:   "Show the active loop run status",
+	RunE:    loopStatus,
 }
 
 func init() {
