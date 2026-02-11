@@ -14,7 +14,16 @@ var sessionCmd = &cobra.Command{
 	Use:     "session",
 	Aliases: []string{"recording", "recordings"},
 	Short:   "Manage session recordings",
-	Long:  `View and replay session recordings that capture agent interactions.`,
+	Long: `View and replay session recordings that capture agent interactions.
+
+Every agent run is recorded: stdin, stdout, stderr, and parsed stream events
+are saved to .adaf/records/. Use 'session list' to see all recordings and
+'session show' to view the event timeline with timestamps and color-coded
+event types.
+
+Examples:
+  adaf session list
+  adaf session show 12`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
 	},

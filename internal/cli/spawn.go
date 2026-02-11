@@ -22,7 +22,22 @@ import (
 var spawnCmd = &cobra.Command{
 	Use:     "spawn",
 	Aliases: []string{"fork", "sub-agent", "sub_agent", "subagent"},
-	Short:   "Spawn a sub-agent to work on a task",
+	Short: "Spawn a sub-agent to work on a task",
+	Long: `Spawn a child agent to work on a subtask in an isolated git worktree.
+
+The child agent runs in its own branch and can be monitored, messaged,
+and eventually merged or rejected. Use --read-only for analysis tasks
+that don't need a separate worktree.
+
+Must be called from within an adaf agent session (ADAF_SESSION_ID set).
+
+Examples:
+  adaf spawn --profile junior --task "Write unit tests for auth.go"
+  adaf spawn --profile junior --task-file task.md --wait
+  adaf spawn --profile senior --task "Review PR #42" --read-only
+  adaf spawn-status                       # Check all spawns
+  adaf spawn-diff --spawn-id 3            # View changes
+  adaf spawn-merge --spawn-id 3           # Merge changes`,
 	RunE:    runSpawn,
 }
 

@@ -11,7 +11,15 @@ var statusCmd = &cobra.Command{
 	Use:     "status",
 	Aliases: []string{"info", "state", "st"},
 	Short:   "Show comprehensive project status",
-	Long:  `Display a summary of the project including plan progress, issues, sessions, and recent activity.`,
+	Long: `Display a comprehensive summary of the project including plan progress,
+open issues, session history, architectural decisions, and documents.
+
+Shows a progress bar for plan phases, highlights critical/high priority
+issues, and displays the most recent session details.
+
+Examples:
+  adaf status
+  adaf st          # short alias`,
 	RunE:  runStatus,
 }
 

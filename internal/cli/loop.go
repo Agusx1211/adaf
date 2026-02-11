@@ -23,7 +23,21 @@ var loopCmd = &cobra.Command{
 	Use:     "loop",
 	Aliases: []string{"loops"},
 	Short:   "Manage and run loops",
-	Long:  "Loops are cyclic templates of profile steps. Each step runs an agent profile for N turns, with support for inter-step messaging and stop signals.",
+	Long: `Loops are cyclic templates of profile steps. Each step runs an agent profile
+for N turns, with support for inter-step messaging and stop signals.
+
+Loops are defined in ~/.adaf/config.json and can chain multiple agent profiles
+together (e.g., a "junior" agent writes code, then a "senior" agent reviews).
+Steps can send Pushover notifications, post messages to subsequent steps,
+and signal the loop to stop.
+
+Examples:
+  adaf loop list                          # Show defined loops
+  adaf loop start dev-cycle               # Start a loop
+  adaf loop status                        # Check active loop
+  adaf loop stop                          # Signal loop to stop
+  adaf loop message "auth module done"    # Post inter-step message
+  adaf loop notify "Done" "Build passed"  # Send push notification`,
 }
 
 var loopListCmd = &cobra.Command{

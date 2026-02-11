@@ -12,8 +12,18 @@ import (
 var treeCmd = &cobra.Command{
 	Use:     "tree",
 	Aliases: []string{"hierarchy", "spawn-tree", "spawn_tree"},
-	Short:   "Show agent hierarchy tree",
-	RunE:    runTree,
+	Short: "Show agent hierarchy tree",
+	Long: `Display the hierarchical tree of spawned sub-agents.
+
+Shows parent-child relationships, status, elapsed time, and task descriptions
+for all active spawns. Use --all to include completed/rejected spawns and
+--watch for a live-updating view.
+
+Examples:
+  adaf tree                               # Show active spawns
+  adaf tree --all                         # Include completed spawns
+  adaf tree --watch                       # Live refresh every 2s`,
+	RunE: runTree,
 }
 
 func init() {

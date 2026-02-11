@@ -13,7 +13,18 @@ var issueCmd = &cobra.Command{
 	Use:     "issue",
 	Aliases: []string{"issues", "bug", "bugs", "ticket", "tickets"},
 	Short:   "Manage project issues",
-	Long:  `Create, list, show, and update project issues tracked by adaf.`,
+	Long: `Create, list, show, and update project issues tracked by adaf.
+
+Issues have a title, description, status (open, in_progress, resolved, wontfix),
+priority (critical, high, medium, low), and optional labels. Issues are stored
+as individual JSON files in .adaf/issues/.
+
+Examples:
+  adaf issue list                              # List all issues
+  adaf issue list --status open                # Filter by status
+  adaf issue create --title "Fix login bug" --priority high
+  adaf issue show 3                            # Show issue details
+  adaf issue update 3 --status resolved        # Mark as resolved`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
 	},

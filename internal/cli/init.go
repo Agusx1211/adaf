@@ -16,7 +16,22 @@ var initCmd = &cobra.Command{
 	Use:     "init",
 	Aliases: []string{"initialize", "setup"},
 	Short:   "Initialize a new adaf project",
-	Long:  `Initialize a new adaf project in the current directory (or specified directory). Creates the .adaf/ directory structure and project.json configuration.`,
+	Long: `Initialize a new adaf project in the current directory (or specified directory).
+Creates the .adaf/ directory structure with project.json, issue tracker,
+session logs, documents, decisions, and recording storage.
+
+Also scans PATH for installed AI agent tools (claude, codex, vibe, etc.)
+and caches the results for future runs.
+
+Examples:
+  # Initialize in current directory
+  adaf init
+
+  # Initialize with a custom name
+  adaf init --name my-cool-project
+
+  # Initialize for a different repo
+  adaf init --repo /path/to/other/repo`,
 	RunE:  runInit,
 }
 

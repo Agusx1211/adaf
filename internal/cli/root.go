@@ -49,7 +49,20 @@ var rootCmd = &cobra.Command{
   adaf tracks plans, issues, decisions, session logs, and recordings
   so that multiple AI agents (and humans) can collaborate effectively.
 
-  Run ` + styleBoldWhite + `adaf status` + colorReset + ` for project overview, or ` + styleBoldWhite + `adaf init` + colorReset + ` to start a new project.`,
+  Run ` + styleBoldWhite + `adaf status` + colorReset + ` for project overview, or ` + styleBoldWhite + `adaf init` + colorReset + ` to start a new project.
+
+` + colorBold + `Getting Started:` + colorReset + `
+  adaf init --name my-project     Initialize a project
+  adaf plan set plan.json         Load a project plan
+  adaf run --agent claude         Run an agent session
+  adaf status                     Show project overview
+  adaf                            Launch interactive TUI
+
+` + colorBold + `Supported Agents:` + colorReset + `
+  claude, codex, vibe, opencode, gemini, generic
+
+` + colorBold + `More Info:` + colorReset + `
+  https://github.com/agusx1211/adaf`,
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// When run with no subcommand, show a brief status or help

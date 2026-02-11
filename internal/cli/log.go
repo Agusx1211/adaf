@@ -13,7 +13,17 @@ var logCmd = &cobra.Command{
 	Use:     "log",
 	Aliases: []string{"logs", "session-log", "session_log", "session-logs", "session_logs"},
 	Short:   "Manage session logs",
-	Long:  `View and create session logs that track what each agent session accomplished.`,
+	Long: `View and create session logs that track what each agent session accomplished.
+
+Session logs capture the objective, what was built, key decisions, challenges,
+current state, known issues, and next steps. They serve as the handoff
+mechanism between agent sessions, enabling relay-style collaboration.
+
+Examples:
+  adaf log list                                    # List all logs
+  adaf log latest                                  # Show most recent
+  adaf log show 5                                  # Show log #5
+  adaf log create --agent claude --objective "Fix auth" --built "JWT implementation"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
 	},

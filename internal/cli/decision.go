@@ -13,7 +13,19 @@ var decisionCmd = &cobra.Command{
 	Use:     "decision",
 	Aliases: []string{"decisions", "adr", "adrs"},
 	Short:   "Manage architectural decisions",
-	Long:  `Record, list, and view architectural decisions made during the project.`,
+	Long: `Record, list, and view architectural decisions (ADRs) made during the project.
+
+Each decision captures the context/problem, the decision made, the rationale,
+and alternatives considered. Decisions are linked to sessions for traceability.
+
+Examples:
+  adaf decision list
+  adaf decision show 3
+  adaf decision create \
+    --title "Use JWT for auth" \
+    --context "Need stateless authentication" \
+    --decision "Adopt JWT with RS256" \
+    --rationale "Scales horizontally, no session store needed"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
 	},

@@ -13,7 +13,18 @@ var docCmd = &cobra.Command{
 	Use:     "doc",
 	Aliases: []string{"docs", "document", "documents"},
 	Short:   "Manage project documents",
-	Long:  `Create, list, show, and update project documentation tracked by adaf.`,
+	Long: `Create, list, show, and update project documentation tracked by adaf.
+
+Documents can store API specs, architecture notes, onboarding guides, or any
+text content relevant to the project. Content can be provided inline or read
+from a file.
+
+Examples:
+  adaf doc list
+  adaf doc create --title "API Spec" --file openapi.yaml
+  adaf doc create --title "Architecture" --content "..."
+  adaf doc show api-spec
+  adaf doc update api-spec --file openapi-v2.yaml`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
 	},

@@ -14,7 +14,17 @@ var planCmd = &cobra.Command{
 	Use:     "plan",
 	Aliases: []string{"plans"},
 	Short:   "Manage the project plan",
-	Long:  `View and manage the project plan, including phases and their statuses.`,
+	Long: `View and manage the project plan, including phases and their statuses.
+
+A plan consists of a title, description, and ordered phases. Each phase has
+an ID, title, status (not_started, in_progress, complete, blocked), priority,
+and optional dependencies on other phases.
+
+Examples:
+  adaf plan                       # Show current plan
+  adaf plan set plan.json         # Load plan from file
+  cat plan.json | adaf plan set   # Load plan from stdin
+  adaf plan phase-status p3 complete`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Default to showing the plan
 		return runPlanShow(cmd, args)
