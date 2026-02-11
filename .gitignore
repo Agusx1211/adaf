@@ -1,5 +1,5 @@
-# Binaries
-adaf
+# Binaries (the built binary, not the cmd/adaf source dir)
+/adaf
 /bin/
 /dist/
 
