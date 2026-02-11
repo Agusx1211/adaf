@@ -60,7 +60,17 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Write a .gitignore inside .adaf/ to keep recordings out of version control.
 	gitignorePath := filepath.Join(absRepo, store.AdafDir, ".gitignore")
-	if err := os.WriteFile(gitignorePath, []byte("recordings/\n"), 0644); err != nil {
+	gitignoreContent := `# Raw session I/O recordings
+recordings/
+records/
+
+# Machine-specific agent detection cache
+agents.json
+
+# Session logs (ephemeral per-run artifacts)
+logs/
+`
+	if err := os.WriteFile(gitignorePath, []byte(gitignoreContent), 0644); err != nil {
 		return fmt.Errorf("writing .adaf/.gitignore: %w", err)
 	}
 

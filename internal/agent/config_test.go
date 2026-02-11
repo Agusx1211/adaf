@@ -19,7 +19,7 @@ func TestSyncDetectedAgentsPersistsAndPreservesOverrides(t *testing.T) {
 			Capabilities:    []string{"prompt-arg"},
 			SupportedModels: []string{"opus-4", "sonnet-4.5"},
 		},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("SyncDetectedAgents() error = %v", err)
 	}
@@ -50,7 +50,7 @@ func TestSyncDetectedAgentsPersistsAndPreservesOverrides(t *testing.T) {
 			Capabilities:    []string{"prompt-arg", "model-select"},
 			SupportedModels: []string{"opus-4", "sonnet-4.5", "haiku-4.5"},
 		},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("SyncDetectedAgents() second call error = %v", err)
 	}
@@ -84,10 +84,10 @@ func TestResolveDefaultModel(t *testing.T) {
 		},
 	}
 
-	if got := ResolveDefaultModel(cfg, "codex"); got != "o3" {
+	if got := ResolveDefaultModel(cfg, nil, "codex"); got != "o3" {
 		t.Fatalf("ResolveDefaultModel(codex) = %q", got)
 	}
-	if got := ResolveDefaultModel(nil, "claude"); got != "sonnet-4.5" {
+	if got := ResolveDefaultModel(nil, nil, "claude"); got != "sonnet-4.5" {
 		t.Fatalf("ResolveDefaultModel(nil, claude) = %q", got)
 	}
 }
@@ -107,13 +107,13 @@ func TestResolveModelOverride(t *testing.T) {
 		},
 	}
 
-	if got := ResolveModelOverride(cfg, "codex"); got != "gpt-4.1" {
+	if got := ResolveModelOverride(cfg, nil, "codex"); got != "gpt-4.1" {
 		t.Fatalf("ResolveModelOverride(codex) = %q", got)
 	}
-	if got := ResolveModelOverride(cfg, "claude"); got != "" {
+	if got := ResolveModelOverride(cfg, nil, "claude"); got != "" {
 		t.Fatalf("ResolveModelOverride(claude) = %q, want empty", got)
 	}
-	if got := ResolveModelOverride(nil, "codex"); got != "" {
+	if got := ResolveModelOverride(nil, nil, "codex"); got != "" {
 		t.Fatalf("ResolveModelOverride(nil, codex) = %q, want empty", got)
 	}
 }

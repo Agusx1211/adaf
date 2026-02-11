@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/agusx1211/adaf/internal/agent"
+	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/loop"
 	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/store"
@@ -58,7 +59,12 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unknown agent %q (valid: %s)", agentName, strings.Join(agentNames(), ", "))
 	}
 
-	agentsCfg, err := agent.LoadAndSyncAgentsConfig(s.Root())
+	globalCfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading global config: %w", err)
+	}
+
+	agentsCfg, err := agent.LoadAndSyncAgentsConfig(s.Root(), globalCfg)
 	if err != nil {
 		return fmt.Errorf("loading agent configuration: %w", err)
 	}
@@ -67,8 +73,8 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			customCmd = rec.Path
 		}
 	}
-	defaultModel := agent.ResolveDefaultModel(agentsCfg, agentName)
-	modelOverride := agent.ResolveModelOverride(agentsCfg, agentName)
+	defaultModel := agent.ResolveDefaultModel(agentsCfg, globalCfg, agentName)
+	modelOverride := agent.ResolveModelOverride(agentsCfg, globalCfg, agentName)
 	if modelFlag != "" {
 		modelOverride = modelFlag
 		defaultModel = modelFlag

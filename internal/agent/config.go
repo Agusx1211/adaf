@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/detect"
 )
 
@@ -81,7 +82,9 @@ func SaveAgentsConfig(adafRoot string, cfg *AgentsConfig) error {
 }
 
 // SyncDetectedAgents merges fresh detection results into persisted agent config.
-func SyncDetectedAgents(adafRoot string, detected []detect.DetectedAgent) (*AgentsConfig, error) {
+// If globalCfg is non-nil, agent paths from the global config are used as fallback
+// when detection doesn't find a path.
+func SyncDetectedAgents(adafRoot string, detected []detect.DetectedAgent, globalCfg *config.GlobalConfig) (*AgentsConfig, error) {
 	cfg, err := LoadAgentsConfig(adafRoot)
 	if err != nil {
 		return nil, err
@@ -124,6 +127,22 @@ func SyncDetectedAgents(adafRoot string, detected []detect.DetectedAgent) (*Agen
 		cfg.Agents[name] = rec
 	}
 
+	// Apply global path fallback for agents without a detected path.
+	if globalCfg != nil {
+		for name, ga := range globalCfg.Agents {
+			name = normalizeAgentName(name)
+			if strings.TrimSpace(ga.Path) == "" {
+				continue
+			}
+			rec := cfg.Agents[name]
+			if strings.TrimSpace(rec.Path) == "" {
+				rec.Name = name
+				rec.Path = ga.Path
+				cfg.Agents[name] = rec
+			}
+		}
+	}
+
 	if err := SaveAgentsConfig(adafRoot, cfg); err != nil {
 		return nil, err
 	}
@@ -131,17 +150,18 @@ func SyncDetectedAgents(adafRoot string, detected []detect.DetectedAgent) (*Agen
 }
 
 // LoadAndSyncAgentsConfig scans local agents and persists the merged view.
-func LoadAndSyncAgentsConfig(adafRoot string) (*AgentsConfig, error) {
+// If globalCfg is non-nil, global settings are merged in.
+func LoadAndSyncAgentsConfig(adafRoot string, globalCfg *config.GlobalConfig) (*AgentsConfig, error) {
 	detected, err := detect.Scan()
 	if err != nil {
 		return nil, err
 	}
-	return SyncDetectedAgents(adafRoot, detected)
+	return SyncDetectedAgents(adafRoot, detected, globalCfg)
 }
 
 // SetModelOverride sets a user's default-model override for an agent.
-func SetModelOverride(adafRoot, agentName, model string) (*AgentsConfig, error) {
-	cfg, err := LoadAndSyncAgentsConfig(adafRoot)
+func SetModelOverride(adafRoot, agentName, model string, globalCfg *config.GlobalConfig) (*AgentsConfig, error) {
+	cfg, err := LoadAndSyncAgentsConfig(adafRoot, globalCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -168,8 +188,11 @@ func SetModelOverride(adafRoot, agentName, model string) (*AgentsConfig, error) 
 
 // ResolveDefaultModel returns the configured model override, falling back to
 // built-in defaults for the agent.
-func ResolveDefaultModel(cfg *AgentsConfig, agentName string) string {
+// Priority (lowest to highest): built-in defaults, global config, project config.
+func ResolveDefaultModel(cfg *AgentsConfig, globalCfg *config.GlobalConfig, agentName string) string {
 	agentName = normalizeAgentName(agentName)
+
+	// Project-level override (highest priority of stored config).
 	if cfg != nil {
 		if rec, ok := cfg.Agents[agentName]; ok {
 			if strings.TrimSpace(rec.ModelOverride) != "" {
@@ -180,21 +203,43 @@ func ResolveDefaultModel(cfg *AgentsConfig, agentName string) string {
 			}
 		}
 	}
+
+	// Global-level override.
+	if globalCfg != nil {
+		if ga, ok := globalCfg.Agents[agentName]; ok {
+			if strings.TrimSpace(ga.ModelOverride) != "" {
+				return strings.TrimSpace(ga.ModelOverride)
+			}
+		}
+	}
+
 	return DefaultModel(agentName)
 }
 
 // ResolveModelOverride returns only an explicit model override for an agent.
-// It does not fall back to defaults.
-func ResolveModelOverride(cfg *AgentsConfig, agentName string) string {
+// It checks project config first, then global config. Does not fall back to defaults.
+func ResolveModelOverride(cfg *AgentsConfig, globalCfg *config.GlobalConfig, agentName string) string {
 	agentName = normalizeAgentName(agentName)
-	if cfg == nil {
-		return ""
+
+	// Project-level override takes priority.
+	if cfg != nil {
+		if rec, ok := cfg.Agents[agentName]; ok {
+			if strings.TrimSpace(rec.ModelOverride) != "" {
+				return strings.TrimSpace(rec.ModelOverride)
+			}
+		}
 	}
-	rec, ok := cfg.Agents[agentName]
-	if !ok {
-		return ""
+
+	// Global-level override.
+	if globalCfg != nil {
+		if ga, ok := globalCfg.Agents[agentName]; ok {
+			if strings.TrimSpace(ga.ModelOverride) != "" {
+				return strings.TrimSpace(ga.ModelOverride)
+			}
+		}
 	}
-	return strings.TrimSpace(rec.ModelOverride)
+
+	return ""
 }
 
 func effectiveDefaultModel(agentName, override string) string {

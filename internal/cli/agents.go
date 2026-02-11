@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/agusx1211/adaf/internal/agent"
+	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/recording"
 	"github.com/agusx1211/adaf/internal/store"
 	"github.com/spf13/cobra"
@@ -42,6 +43,7 @@ var agentsTestCmd = &cobra.Command{
 
 func init() {
 	agentsTestCmd.Flags().Duration("timeout", 30*time.Second, "Health-check timeout")
+	agentsSetModelCmd.Flags().Bool("global", false, "Write override to global config (~/.adaf/config.json) instead of project")
 
 	agentsCmd.AddCommand(agentsListCmd)
 	agentsCmd.AddCommand(agentsSetModelCmd)
@@ -55,7 +57,12 @@ func runAgentsList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	cfg, err := agent.LoadAndSyncAgentsConfig(adafRoot)
+	globalCfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading global config: %w", err)
+	}
+
+	cfg, err := agent.LoadAndSyncAgentsConfig(adafRoot, globalCfg)
 	if err != nil {
 		return fmt.Errorf("scanning agents: %w", err)
 	}
@@ -72,9 +79,17 @@ func runAgentsList(cmd *cobra.Command, args []string) error {
 
 	for _, name := range names {
 		rec := cfg.Agents[name]
-		defaultModel := agent.ResolveDefaultModel(cfg, name)
+		defaultModel := agent.ResolveDefaultModel(cfg, globalCfg, name)
 		if defaultModel == "" {
 			defaultModel = "-"
+		}
+
+		// Annotate override source.
+		modelSource := ""
+		if strings.TrimSpace(rec.ModelOverride) != "" {
+			modelSource = " (project)"
+		} else if ga, ok := globalCfg.Agents[name]; ok && strings.TrimSpace(ga.ModelOverride) != "" {
+			modelSource = " (global)"
 		}
 
 		models := "-"
@@ -90,7 +105,7 @@ func runAgentsList(cmd *cobra.Command, args []string) error {
 			name,
 			version,
 			truncate(rec.Path, 56),
-			defaultModel,
+			defaultModel + modelSource,
 			truncate(models, 64),
 		})
 	}
@@ -98,7 +113,8 @@ func runAgentsList(cmd *cobra.Command, args []string) error {
 	printHeader("Detected Agents")
 	printTable([]string{"NAME", "VERSION", "PATH", "DEFAULT MODEL", "AVAILABLE MODELS"}, rows)
 	fmt.Println()
-	printField("Config", agent.AgentsConfigPath(adafRoot))
+	printField("Config (project)", agent.AgentsConfigPath(adafRoot))
+	printField("Config (global)", config.Dir()+"/config.json")
 	printField("Detected", fmt.Sprintf("%d", len(rows)))
 
 	return nil
@@ -111,12 +127,41 @@ func runAgentsSetModel(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("model cannot be empty")
 	}
 
+	useGlobal, _ := cmd.Flags().GetBool("global")
+
+	globalCfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading global config: %w", err)
+	}
+
+	if useGlobal {
+		// Validate agent name.
+		if _, ok := agent.Get(agentName); !ok {
+			return fmt.Errorf("unknown agent %q", agentName)
+		}
+
+		ga := globalCfg.Agents[agentName]
+		ga.ModelOverride = model
+		globalCfg.Agents[agentName] = ga
+
+		if err := config.Save(globalCfg); err != nil {
+			return fmt.Errorf("saving global config: %w", err)
+		}
+
+		cfgPath := config.Dir() + "/config.json"
+		fmt.Printf("\n  %sGlobal default model updated.%s\n\n", styleBoldGreen, colorReset)
+		printField("Agent", agentName)
+		printField("Model", model)
+		printField("Config", cfgPath)
+		return nil
+	}
+
 	adafRoot, err := agentsRoot()
 	if err != nil {
 		return err
 	}
 
-	cfg, err := agent.LoadAndSyncAgentsConfig(adafRoot)
+	cfg, err := agent.LoadAndSyncAgentsConfig(adafRoot, globalCfg)
 	if err != nil {
 		return fmt.Errorf("scanning agents: %w", err)
 	}
@@ -132,12 +177,12 @@ func runAgentsSetModel(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("model %q is not in known models for %s (%s)", model, agentName, strings.Join(rec.SupportedModels, ", "))
 	}
 
-	cfg, err = agent.SetModelOverride(adafRoot, agentName, model)
+	cfg, err = agent.SetModelOverride(adafRoot, agentName, model, globalCfg)
 	if err != nil {
 		return fmt.Errorf("saving agent config: %w", err)
 	}
 
-	resolved := agent.ResolveDefaultModel(cfg, agentName)
+	resolved := agent.ResolveDefaultModel(cfg, globalCfg, agentName)
 	fmt.Printf("\n  %sDefault model updated.%s\n\n", styleBoldGreen, colorReset)
 	printField("Agent", agentName)
 	printField("Model", resolved)
@@ -154,7 +199,12 @@ func runAgentsTest(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	cfg, err := agent.LoadAndSyncAgentsConfig(adafRoot)
+	globalCfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading global config: %w", err)
+	}
+
+	cfg, err := agent.LoadAndSyncAgentsConfig(adafRoot, globalCfg)
 	if err != nil {
 		return fmt.Errorf("scanning agents: %w", err)
 	}
@@ -170,8 +220,8 @@ func runAgentsTest(cmd *cobra.Command, args []string) error {
 		command = agentName
 	}
 
-	defaultModel := agent.ResolveDefaultModel(cfg, agentName)
-	modelOverride := agent.ResolveModelOverride(cfg, agentName)
+	defaultModel := agent.ResolveDefaultModel(cfg, globalCfg, agentName)
+	modelOverride := agent.ResolveModelOverride(cfg, globalCfg, agentName)
 	runArgs := healthCheckArgs(agentName, modelOverride)
 
 	workDir, err := os.Getwd()
