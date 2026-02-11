@@ -972,7 +972,8 @@ func (m AppModel) viewProfileName() string {
 	lines = append(lines, "")
 
 	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(m.profileNameInput)
+	displayText := truncateInputForDisplay(m.profileNameInput, cw-4)
+	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(displayText)
 	lines = append(lines, "> "+inputText+cursor)
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: confirm  esc: cancel"))
@@ -1191,7 +1192,8 @@ func (m AppModel) viewProfileDesc() string {
 	lines = append(lines, "")
 
 	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(m.profileDescInput)
+	displayDesc := truncateInputForDisplay(m.profileDescInput, cw-4)
+	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(displayDesc)
 	lines = append(lines, "> "+inputText+cursor)
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: continue  esc: back"))

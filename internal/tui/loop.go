@@ -88,7 +88,8 @@ func (m AppModel) viewLoopName() string {
 	lines = append(lines, "")
 
 	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(m.loopNameInput)
+	displayName := truncateInputForDisplay(m.loopNameInput, cw-4)
+	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(displayName)
 	lines = append(lines, "> "+inputText+cursor)
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: confirm  esc: cancel"))
@@ -387,7 +388,8 @@ func (m AppModel) viewLoopStepInstr() string {
 	lines = append(lines, "")
 
 	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(m.loopStepInstrInput)
+	displayInstr := truncateInputForDisplay(m.loopStepInstrInput, cw-4)
+	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(displayInstr)
 	lines = append(lines, "> "+inputText+cursor)
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: continue  esc: back"))

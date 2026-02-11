@@ -28,10 +28,11 @@ type profileEntry struct {
 	Detected      bool
 	IsNew         bool   // sentinel "+ New Profile" entry
 	IsNewLoop     bool   // sentinel "+ New Loop" entry
-	IsLoop        bool   // true if this represents a loop definition
-	LoopName      string // loop name (when IsLoop)
-	LoopSteps     int    // number of steps (when IsLoop)
-	IsSeparator   bool   // separator line between sections
+	IsLoop          bool              // true if this represents a loop definition
+	LoopName        string            // loop name (when IsLoop)
+	LoopSteps       int               // number of steps (when IsLoop)
+	LoopStepDetails []cfgpkg.LoopStep // step details for rendering (when IsLoop)
+	IsSeparator     bool              // separator line between sections
 	Caps          []string
 }
 
@@ -66,10 +67,11 @@ func buildProfileList(globalCfg *cfgpkg.GlobalConfig, agentsCfg *agent.AgentsCon
 		entries = append(entries, profileEntry{IsSeparator: true, Name: "───"})
 		for _, l := range globalCfg.Loops {
 			entries = append(entries, profileEntry{
-				IsLoop:    true,
-				LoopName:  l.Name,
-				Name:      l.Name,
-				LoopSteps: len(l.Steps),
+				IsLoop:          true,
+				LoopName:        l.Name,
+				Name:            l.Name,
+				LoopSteps:       len(l.Steps),
+				LoopStepDetails: l.Steps,
 			})
 		}
 	}
@@ -265,6 +267,37 @@ func renderProjectPanel(profiles []profileEntry, selected int, project *store.Pr
 			lines = append(lines, sectionStyle.Render("Selected Loop"))
 			lines = append(lines, labelStyle.Render("Loop")+valueStyle.Render(p.LoopName))
 			lines = append(lines, labelStyle.Render("Steps")+valueStyle.Render(fmt.Sprintf("%d", p.LoopSteps)))
+			// Step details.
+			if len(p.LoopStepDetails) > 0 {
+				lines = append(lines, "")
+				lines = append(lines, sectionStyle.Render("Step Details"))
+				for i, step := range p.LoopStepDetails {
+					turns := step.Turns
+					if turns <= 0 {
+						turns = 1
+					}
+					flags := ""
+					if step.CanStop {
+						flags += " [stop]"
+					}
+					if step.CanMessage {
+						flags += " [msg]"
+					}
+					if step.CanPushover {
+						flags += " [push]"
+					}
+					stepLine := fmt.Sprintf("%d. %s x%d%s", i+1, step.Profile, turns, flags)
+					lines = append(lines, dimStyle.Render(stepLine))
+					if step.Instructions != "" {
+						instr := step.Instructions
+						maxInstrW := cw - 4
+						if maxInstrW > 0 && len(instr) > maxInstrW {
+							instr = instr[:maxInstrW-3] + "..."
+						}
+						lines = append(lines, dimStyle.Render("  "+instr))
+					}
+				}
+			}
 			// Loop stats
 			if ls, ok := loopStats[p.LoopName]; ok && ls.TotalRuns > 0 {
 				lines = append(lines, "")
@@ -355,6 +388,22 @@ func roleBadge(role string) string {
 		color = ColorOverlay0
 	}
 	return lipgloss.NewStyle().Foreground(color).Render("[" + tag + "]")
+}
+
+// truncateInputForDisplay returns the tail of the input string that fits within
+// maxWidth, prefixed with "..." if truncated. This prevents text inputs from
+// overflowing outside the terminal panel.
+func truncateInputForDisplay(input string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	if len(input) <= maxWidth {
+		return input
+	}
+	if maxWidth <= 3 {
+		return input[len(input)-maxWidth:]
+	}
+	return "..." + input[len(input)-maxWidth+3:]
 }
 
 // fitLines is equivalent to runtui's fitToSize: exactly w cols and h lines.

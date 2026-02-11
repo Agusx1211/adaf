@@ -158,7 +158,8 @@ func (m AppModel) viewSettingsPushoverUserKey() string {
 	lines = append(lines, "")
 
 	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(m.settingsPushoverUserKey)
+	displayKey := truncateInputForDisplay(m.settingsPushoverUserKey, cw-4)
+	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(displayKey)
 	lines = append(lines, "> "+inputText+cursor)
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: save  esc: cancel"))
@@ -213,7 +214,8 @@ func (m AppModel) viewSettingsPushoverAppToken() string {
 	lines = append(lines, "")
 
 	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(m.settingsPushoverAppToken)
+	displayToken := truncateInputForDisplay(m.settingsPushoverAppToken, cw-4)
+	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(displayToken)
 	lines = append(lines, "> "+inputText+cursor)
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: save  esc: cancel"))

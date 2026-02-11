@@ -45,6 +45,7 @@ const (
 	stateSettings         // settings screen (pushover credentials, etc.)
 	stateSettingsPushoverUserKey  // input pushover user key
 	stateSettingsPushoverAppToken // input pushover app token
+	stateConfirmDelete           // confirmation before deleting a profile/loop
 )
 
 // AppModel is the top-level bubbletea model for the unified adaf TUI.
@@ -102,6 +103,9 @@ type AppModel struct {
 	loopStepCanPushover bool
 	loopStepToolsSel    int    // cursor position in the tools multi-select
 	loopMenuSel         int
+
+	// Confirm delete state.
+	confirmDeleteIdx int // index of profile/loop pending deletion
 
 	// Settings screen state.
 	settingsSel              int    // cursor in settings menu
@@ -238,6 +242,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSettingsPushoverUserKey(msg)
 	case stateSettingsPushoverAppToken:
 		return m.updateSettingsPushoverAppToken(msg)
+	case stateConfirmDelete:
+		return m.updateConfirmDelete(msg)
 	}
 	return m, nil
 }
@@ -299,16 +305,9 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Delete selected profile or loop (unless sentinel/separator).
 			if m.selected >= 0 && m.selected < len(m.profiles) {
 				p := m.profiles[m.selected]
-				if p.IsLoop {
-					m.globalCfg.RemoveLoop(p.LoopName)
-					config.Save(m.globalCfg)
-					m.rebuildProfiles()
-					m.clampSelected()
-				} else if !p.IsNew && !p.IsNewLoop && !p.IsSeparator {
-					m.globalCfg.RemoveProfile(p.Name)
-					config.Save(m.globalCfg)
-					m.rebuildProfiles()
-					m.clampSelected()
+				if p.IsLoop || (!p.IsNew && !p.IsNewLoop && !p.IsSeparator) {
+					m.confirmDeleteIdx = m.selected
+					m.state = stateConfirmDelete
 				}
 			}
 			return m, nil
@@ -343,6 +342,73 @@ func (m *AppModel) clampSelected() {
 			m.selected++
 		}
 	}
+}
+
+// updateConfirmDelete handles the y/n confirmation before deleting.
+func (m AppModel) updateConfirmDelete(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "y":
+			if m.confirmDeleteIdx >= 0 && m.confirmDeleteIdx < len(m.profiles) {
+				p := m.profiles[m.confirmDeleteIdx]
+				if p.IsLoop {
+					m.globalCfg.RemoveLoop(p.LoopName)
+					config.Save(m.globalCfg)
+					m.rebuildProfiles()
+					m.clampSelected()
+				} else if !p.IsNew && !p.IsNewLoop && !p.IsSeparator {
+					m.globalCfg.RemoveProfile(p.Name)
+					config.Save(m.globalCfg)
+					m.rebuildProfiles()
+					m.clampSelected()
+				}
+			}
+			m.state = stateSelector
+			return m, nil
+		case "n", "esc":
+			m.state = stateSelector
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+// viewConfirmDelete renders the delete confirmation prompt.
+func (m AppModel) viewConfirmDelete() string {
+	header := m.renderHeader()
+	statusBar := m.renderStatusBar()
+	style, cw, ch := profileWizardPanel(m)
+
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorRed)
+	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
+	nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorText)
+
+	var lines []string
+	lines = append(lines, sectionStyle.Render("Confirm Delete"))
+	lines = append(lines, "")
+
+	name := ""
+	kind := ""
+	if m.confirmDeleteIdx >= 0 && m.confirmDeleteIdx < len(m.profiles) {
+		p := m.profiles[m.confirmDeleteIdx]
+		if p.IsLoop {
+			name = p.LoopName
+			kind = "loop"
+		} else {
+			name = p.Name
+			kind = "profile"
+		}
+	}
+
+	lines = append(lines, dimStyle.Render("Are you sure you want to delete the "+kind))
+	lines = append(lines, nameStyle.Render(name)+dimStyle.Render("?"))
+	lines = append(lines, "")
+	lines = append(lines, dimStyle.Render("y: yes, delete  n/esc: cancel"))
+
+	content := fitLines(lines, cw, ch)
+	panel := style.Render(content)
+	return header + "\n" + panel + "\n" + statusBar
 }
 
 // startLoop transitions from selector to running a loop.
@@ -817,6 +883,8 @@ func (m AppModel) View() string {
 		return m.viewSettingsPushoverUserKey()
 	case stateSettingsPushoverAppToken:
 		return m.viewSettingsPushoverAppToken()
+	case stateConfirmDelete:
+		return m.viewConfirmDelete()
 	default:
 		return m.viewSelector()
 	}
