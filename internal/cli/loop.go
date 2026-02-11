@@ -14,6 +14,7 @@ import (
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/looprun"
+	"github.com/agusx1211/adaf/internal/pushover"
 	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/store"
 )
@@ -57,6 +58,21 @@ var loopMessageCmd = &cobra.Command{
 	RunE:  loopMessage,
 }
 
+var loopNotifyCmd = &cobra.Command{
+	Use:   "notify <title> <message>",
+	Short: "Send a Pushover notification",
+	Long: `Send a Pushover notification from a loop step.
+Reads ADAF_LOOP_RUN_ID from environment to confirm running inside a loop.
+
+Title: max 250 characters.
+Message: max 1024 characters.
+
+Use --priority to set notification priority:
+  -2 = lowest, -1 = low, 0 = normal (default), 1 = high`,
+	Args: cobra.ExactArgs(2),
+	RunE: loopNotify,
+}
+
 var loopStatusCmd = &cobra.Command{
 	Use:     "status",
 	Aliases: []string{"info", "state"},
@@ -65,7 +81,8 @@ var loopStatusCmd = &cobra.Command{
 }
 
 func init() {
-	loopCmd.AddCommand(loopListCmd, loopStartCmd, loopStopCmd, loopMessageCmd, loopStatusCmd)
+	loopNotifyCmd.Flags().IntP("priority", "p", 0, "Notification priority (-2 to 1)")
+	loopCmd.AddCommand(loopListCmd, loopStartCmd, loopStopCmd, loopMessageCmd, loopNotifyCmd, loopStatusCmd)
 	rootCmd.AddCommand(loopCmd)
 }
 
@@ -94,6 +111,9 @@ func loopList(cmd *cobra.Command, args []string) error {
 			}
 			if step.CanMessage {
 				flags += " [can_message]"
+			}
+			if step.CanPushover {
+				flags += " [can_pushover]"
 			}
 			fmt.Printf("    %d. %s x%d%s\n", i+1, step.Profile, turns, flags)
 			if step.Instructions != "" {
@@ -311,5 +331,39 @@ func loopStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	return nil
+}
+
+func loopNotify(cmd *cobra.Command, args []string) error {
+	runIDStr := os.Getenv("ADAF_LOOP_RUN_ID")
+	if runIDStr == "" {
+		return fmt.Errorf("ADAF_LOOP_RUN_ID not set (are you running inside a loop step?)")
+	}
+
+	globalCfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	if !pushover.Configured(&globalCfg.Pushover) {
+		return fmt.Errorf("pushover not configured: run 'adaf pushover setup' to set credentials")
+	}
+
+	priority, _ := cmd.Flags().GetInt("priority")
+	if priority < -2 || priority > 1 {
+		return fmt.Errorf("priority must be between -2 and 1")
+	}
+
+	msg := pushover.Message{
+		Title:    args[0],
+		Body:     args[1],
+		Priority: priority,
+	}
+
+	if err := pushover.Send(&globalCfg.Pushover, msg); err != nil {
+		return fmt.Errorf("sending notification: %w", err)
+	}
+
+	fmt.Printf("  %sPushover notification sent.%s\n", styleBoldGreen, colorReset)
 	return nil
 }
