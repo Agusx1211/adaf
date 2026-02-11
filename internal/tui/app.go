@@ -570,11 +570,16 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 		if modelOverride != "" {
 			agentArgs = append(agentArgs, "--model", modelOverride)
 		}
+	case "gemini":
+		if modelOverride != "" {
+			agentArgs = append(agentArgs, "--model", modelOverride)
+		}
+		agentArgs = append(agentArgs, "-y")
 	}
 
 	if customCmd == "" {
 		switch p.Agent {
-		case "claude", "codex", "vibe", "opencode", "generic":
+		case "claude", "codex", "vibe", "opencode", "gemini", "generic":
 		default:
 			customCmd = p.Agent
 		}
@@ -704,11 +709,16 @@ func (m AppModel) startAgentInline(p profileEntry, projectName string) (tea.Mode
 		if modelOverride != "" {
 			agentArgs = append(agentArgs, "--model", modelOverride)
 		}
+	case "gemini":
+		if modelOverride != "" {
+			agentArgs = append(agentArgs, "--model", modelOverride)
+		}
+		agentArgs = append(agentArgs, "-y")
 	}
 
 	if customCmd == "" {
 		switch p.Agent {
-		case "claude", "codex", "vibe", "opencode", "generic":
+		case "claude", "codex", "vibe", "opencode", "gemini", "generic":
 		default:
 			customCmd = p.Agent
 		}

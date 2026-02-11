@@ -233,6 +233,11 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 		if modelOverride != "" {
 			agentArgs = append(agentArgs, "--model", modelOverride)
 		}
+	case "gemini":
+		if modelOverride != "" {
+			agentArgs = append(agentArgs, "--model", modelOverride)
+		}
+		agentArgs = append(agentArgs, "-y")
 	}
 
 	// Look up custom command path.
@@ -245,7 +250,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 	}
 	if customCmd == "" {
 		switch childProf.Agent {
-		case "claude", "codex", "vibe", "opencode", "generic":
+		case "claude", "codex", "vibe", "opencode", "gemini", "generic":
 		default:
 			customCmd = childProf.Agent
 		}

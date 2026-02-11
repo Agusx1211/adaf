@@ -272,11 +272,16 @@ func buildAgentConfig(cfg RunConfig, prof *config.Profile, runID, stepIndex int)
 		if modelOverride != "" {
 			agentArgs = append(agentArgs, "--model", modelOverride)
 		}
+	case "gemini":
+		if modelOverride != "" {
+			agentArgs = append(agentArgs, "--model", modelOverride)
+		}
+		agentArgs = append(agentArgs, "-y")
 	}
 
 	if customCmd == "" {
 		switch prof.Agent {
-		case "claude", "codex", "vibe", "opencode", "generic":
+		case "claude", "codex", "vibe", "opencode", "gemini", "generic":
 		default:
 			customCmd = prof.Agent
 		}

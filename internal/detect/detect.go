@@ -129,6 +129,8 @@ func probeModelDiscovery(name, path string) (models []string, levels []agentmeta
 		return probeVibeModels(), nil
 	case "opencode":
 		return probeOpencodeModels(), nil
+	case "gemini":
+		return probeGeminiModels()
 	default:
 		return nil, nil
 	}
@@ -377,6 +379,55 @@ func probeOpencodeModels() []string {
 	return models
 }
 
+// --- Gemini model discovery ---
+
+// geminiSettings represents the relevant parts of ~/.gemini/settings.json.
+type geminiSettings struct {
+	Model string `json:"model"`
+}
+
+func probeGeminiModels() ([]string, []agentmeta.ReasoningLevel) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, nil
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".gemini", "settings.json"))
+	if err != nil {
+		return nil, nil
+	}
+
+	var settings geminiSettings
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, nil
+	}
+
+	if settings.Model == "" {
+		return nil, nil
+	}
+
+	// Start with the configured model, then add defaults if different.
+	seen := make(map[string]struct{})
+	var models []string
+	add := func(m string) {
+		lower := strings.ToLower(m)
+		if _, dup := seen[lower]; dup {
+			return
+		}
+		seen[lower] = struct{}{}
+		models = append(models, m)
+	}
+
+	add(settings.Model)
+
+	// Always include the well-known models.
+	for _, m := range []string{"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"} {
+		add(m)
+	}
+
+	return models, nil
+}
+
 // --- Helpers ---
 
 func knownBinaryCandidates() map[string][]string {
@@ -399,7 +450,6 @@ func genericNameCandidates() []string {
 		"cody",
 		"llm",
 		"qwen-code",
-		"gemini",
 		"chatgpt",
 	}
 
@@ -684,7 +734,6 @@ var genericNameTokens = []string{
 	"cody",
 	"llm",
 	"gpt",
-	"gemini",
 	"qwen",
 	"chatgpt",
 	"openai",

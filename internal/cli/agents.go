@@ -18,8 +18,20 @@ import (
 var agentsCmd = &cobra.Command{
 	Use:     "agents",
 	Aliases: []string{"agent"},
-	Short:   "Manage agent tool configuration",
-	RunE:    runAgentsList,
+	Short: "Manage agent tool configuration",
+	Long: `Detect, list, configure, and health-check AI agent tools.
+
+adaf wraps existing CLI tools (claude, codex, vibe, opencode, gemini) and
+needs to know where they are installed. Use 'agents detect' to scan your
+PATH and cache the results. Use 'agents set-model' to set default models.
+
+Examples:
+  adaf agents                             # List detected agents
+  adaf agents detect                      # Scan PATH for agents
+  adaf agents set-model claude sonnet     # Set default model
+  adaf agents set-model claude opus --global
+  adaf agents test claude                 # Run health check`,
+	RunE: runAgentsList,
 }
 
 var agentsListCmd = &cobra.Command{
@@ -374,6 +386,11 @@ func healthCheckArgs(agentName, modelOverride string) []string {
 		if modelOverride != "" {
 			args = append(args, "--model", modelOverride)
 		}
+	case "gemini":
+		if modelOverride != "" {
+			args = append(args, "--model", modelOverride)
+		}
+		args = append(args, "-y")
 	}
 	return args
 }

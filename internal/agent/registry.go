@@ -21,6 +21,7 @@ func DefaultRegistry() map[string]Agent {
 		"codex":    NewCodexAgent(),
 		"vibe":     NewVibeAgent(),
 		"opencode": NewOpencodeAgent(),
+		"gemini":   NewGeminiAgent(),
 		"generic":  NewGenericAgent("generic"),
 	}
 }

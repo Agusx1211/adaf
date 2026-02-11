@@ -23,13 +23,31 @@ var runCmd = &cobra.Command{
 	Use:     "run",
 	Aliases: []string{"execute", "exec"},
 	Short:   "Run an agent loop against the project (inline output for CI/scripts)",
-	Long: `Run an AI agent in a loop against the project. The agent will work on the
-current plan, resolve issues, and log its progress.
+	Long: `Run an AI agent against the project. The agent receives a prompt built from
+the current project context (plan, issues, decisions, session history) and
+works autonomously for the specified number of turns.
 
-Output is printed inline (suitable for CI/pipes). For the interactive TUI,
-run 'adaf' with no subcommand.
+Output is printed inline (suitable for CI/pipes). For the interactive TUI
+with real-time monitoring, run 'adaf' with no subcommand.
 
-Supported agents: claude, codex, vibe, opencode, generic`,
+Supported agents: claude, codex, vibe, opencode, gemini, generic
+
+Examples:
+  # Run claude for a single turn
+  adaf run --agent claude --max-turns 1
+
+  # Run with a custom prompt
+  adaf run --agent claude --prompt "Fix the failing tests in auth/"
+
+  # Run codex with a specific model
+  adaf run --agent codex --model o3
+
+  # Run as a detachable session (like tmux)
+  adaf run --agent claude -s
+  adaf attach <session-id>
+
+  # Run with extended reasoning
+  adaf run --agent claude --reasoning-level high`,
 	RunE: runAgent,
 }
 
@@ -87,7 +105,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	}
 	if customCmd == "" {
 		switch agentName {
-		case "claude", "codex", "vibe", "opencode", "generic":
+		case "claude", "codex", "vibe", "opencode", "gemini", "generic":
 		default:
 			customCmd = agentName
 		}
@@ -142,6 +160,11 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		if modelOverride != "" {
 			agentArgs = append(agentArgs, "--model", modelOverride)
 		}
+	case "gemini":
+		if modelOverride != "" {
+			agentArgs = append(agentArgs, "--model", modelOverride)
+		}
+		agentArgs = append(agentArgs, "-y")
 	}
 
 	agentCfg := agent.Config{
