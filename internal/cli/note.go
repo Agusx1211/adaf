@@ -12,24 +12,27 @@ import (
 // --- adaf note ---
 
 var noteCmd = &cobra.Command{
-	Use:   "note",
-	Short: "Supervisor notes for running agent sessions",
+	Use:     "note",
+	Aliases: []string{"notes"},
+	Short:   "Supervisor notes for running agent sessions",
 }
 
 // --- adaf note add ---
 
 var noteAddCmd = &cobra.Command{
-	Use:   "add",
-	Short: "Add a supervisor note to a session",
-	RunE:  runNoteAdd,
+	Use:     "add",
+	Aliases: []string{"create", "new"},
+	Short:   "Add a supervisor note to a session",
+	RunE:    runNoteAdd,
 }
 
 // --- adaf note list ---
 
 var noteListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List supervisor notes",
-	RunE:  runNoteList,
+	Use:     "list",
+	Aliases: []string{"ls", "l"},
+	Short:   "List supervisor notes",
+	RunE:    runNoteList,
 }
 
 func init() {

@@ -10,8 +10,9 @@ import (
 )
 
 var issueCmd = &cobra.Command{
-	Use:   "issue",
-	Short: "Manage project issues",
+	Use:     "issue",
+	Aliases: []string{"issues", "bug", "bugs", "ticket", "tickets"},
+	Short:   "Manage project issues",
 	Long:  `Create, list, show, and update project issues tracked by adaf.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
@@ -19,29 +20,33 @@ var issueCmd = &cobra.Command{
 }
 
 var issueListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List all issues",
-	RunE:  runIssueList,
+	Use:     "list",
+	Aliases: []string{"ls", "l"},
+	Short:   "List all issues",
+	RunE:    runIssueList,
 }
 
 var issueCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a new issue",
-	RunE:  runIssueCreate,
+	Use:     "create",
+	Aliases: []string{"new", "add", "open"},
+	Short:   "Create a new issue",
+	RunE:    runIssueCreate,
 }
 
 var issueShowCmd = &cobra.Command{
-	Use:   "show <id>",
-	Short: "Show issue details",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runIssueShow,
+	Use:     "show <id>",
+	Aliases: []string{"get", "view", "display"},
+	Short:   "Show issue details",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runIssueShow,
 }
 
 var issueUpdateCmd = &cobra.Command{
-	Use:   "update <id>",
-	Short: "Update an issue",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runIssueUpdate,
+	Use:     "update <id>",
+	Aliases: []string{"edit", "modify", "set"},
+	Short:   "Update an issue",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runIssueUpdate,
 }
 
 func init() {

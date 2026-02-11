@@ -20,8 +20,9 @@ import (
 )
 
 var runCmd = &cobra.Command{
-	Use:   "run",
-	Short: "Run an agent loop against the project (inline output for CI/scripts)",
+	Use:     "run",
+	Aliases: []string{"execute", "exec"},
+	Short:   "Run an agent loop against the project (inline output for CI/scripts)",
 	Long: `Run an AI agent in a loop against the project. The agent will work on the
 current plan, resolve issues, and log its progress.
 

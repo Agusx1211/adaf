@@ -16,35 +16,40 @@ import (
 )
 
 var agentsCmd = &cobra.Command{
-	Use:   "agents",
-	Short: "Manage agent tool configuration",
-	RunE:  runAgentsList,
+	Use:     "agents",
+	Aliases: []string{"agent"},
+	Short:   "Manage agent tool configuration",
+	RunE:    runAgentsList,
 }
 
 var agentsListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List known agent tools (from cache)",
-	RunE:  runAgentsList,
+	Use:     "list",
+	Aliases: []string{"ls", "l"},
+	Short:   "List known agent tools (from cache)",
+	RunE:    runAgentsList,
 }
 
 var agentsDetectCmd = &cobra.Command{
-	Use:   "detect",
-	Short: "Scan PATH for agent tools and update the cache",
-	RunE:  runAgentsDetect,
+	Use:     "detect",
+	Aliases: []string{"scan", "discover", "refresh"},
+	Short:   "Scan PATH for agent tools and update the cache",
+	RunE:    runAgentsDetect,
 }
 
 var agentsSetModelCmd = &cobra.Command{
-	Use:   "set-model <agent> <model>",
-	Short: "Set default model for an agent",
-	Args:  cobra.ExactArgs(2),
-	RunE:  runAgentsSetModel,
+	Use:     "set-model <agent> <model>",
+	Aliases: []string{"set_model", "setmodel", "model"},
+	Short:   "Set default model for an agent",
+	Args:    cobra.ExactArgs(2),
+	RunE:    runAgentsSetModel,
 }
 
 var agentsTestCmd = &cobra.Command{
-	Use:   "test <agent>",
-	Short: "Run a health-check prompt against an agent",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runAgentsTest,
+	Use:     "test <agent>",
+	Aliases: []string{"check", "health-check", "healthcheck", "health_check"},
+	Short:   "Run a health-check prompt against an agent",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runAgentsTest,
 }
 
 func init() {

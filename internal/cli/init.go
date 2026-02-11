@@ -13,8 +13,9 @@ import (
 )
 
 var initCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Initialize a new adaf project",
+	Use:     "init",
+	Aliases: []string{"initialize", "setup"},
+	Short:   "Initialize a new adaf project",
 	Long:  `Initialize a new adaf project in the current directory (or specified directory). Creates the .adaf/ directory structure and project.json configuration.`,
 	RunE:  runInit,
 }

@@ -13,10 +13,11 @@ import (
 // --- adaf parent-ask ---
 
 var parentAskCmd = &cobra.Command{
-	Use:   "parent-ask [question]",
-	Short: "Ask parent agent a question (blocks until answered)",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runParentAsk,
+	Use:     "parent-ask [question]",
+	Aliases: []string{"parent_ask", "parentask", "ask-parent", "ask_parent"},
+	Short:   "Ask parent agent a question (blocks until answered)",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runParentAsk,
 }
 
 func init() {
@@ -94,10 +95,11 @@ func runParentAsk(cmd *cobra.Command, args []string) error {
 // --- adaf spawn-reply ---
 
 var spawnReplyCmd = &cobra.Command{
-	Use:   "spawn-reply [answer]",
-	Short: "Reply to a child agent's question",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runSpawnReply,
+	Use:     "spawn-reply [answer]",
+	Aliases: []string{"spawn_reply", "spawnreply", "reply"},
+	Short:   "Reply to a child agent's question",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runSpawnReply,
 }
 
 func init() {
@@ -152,10 +154,11 @@ func runSpawnReply(cmd *cobra.Command, args []string) error {
 // --- adaf spawn-message ---
 
 var spawnMessageCmd = &cobra.Command{
-	Use:   "spawn-message [message]",
-	Short: "Send an async message to a child agent",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runSpawnMessage,
+	Use:     "spawn-message [message]",
+	Aliases: []string{"spawn_message", "spawnmessage", "send-message", "send_message"},
+	Short:   "Send an async message to a child agent",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runSpawnMessage,
 }
 
 func init() {
@@ -192,9 +195,10 @@ func runSpawnMessage(cmd *cobra.Command, args []string) error {
 // --- adaf spawn-read-messages ---
 
 var spawnReadMessagesCmd = &cobra.Command{
-	Use:   "spawn-read-messages",
-	Short: "Read unread messages from parent",
-	RunE:  runSpawnReadMessages,
+	Use:     "spawn-read-messages",
+	Aliases: []string{"spawn_read_messages", "spawnreadmessages", "read-messages", "read_messages"},
+	Short:   "Read unread messages from parent",
+	RunE:    runSpawnReadMessages,
 }
 
 func init() {

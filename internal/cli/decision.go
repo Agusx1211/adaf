@@ -10,8 +10,9 @@ import (
 )
 
 var decisionCmd = &cobra.Command{
-	Use:   "decision",
-	Short: "Manage architectural decisions",
+	Use:     "decision",
+	Aliases: []string{"decisions", "adr", "adrs"},
+	Short:   "Manage architectural decisions",
 	Long:  `Record, list, and view architectural decisions made during the project.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
@@ -19,22 +20,25 @@ var decisionCmd = &cobra.Command{
 }
 
 var decisionListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List all decisions",
-	RunE:  runDecisionList,
+	Use:     "list",
+	Aliases: []string{"ls", "l"},
+	Short:   "List all decisions",
+	RunE:    runDecisionList,
 }
 
 var decisionCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Record a new architectural decision",
-	RunE:  runDecisionCreate,
+	Use:     "create",
+	Aliases: []string{"new", "add", "record"},
+	Short:   "Record a new architectural decision",
+	RunE:    runDecisionCreate,
 }
 
 var decisionShowCmd = &cobra.Command{
-	Use:   "show <id>",
-	Short: "Show decision details",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runDecisionShow,
+	Use:     "show <id>",
+	Aliases: []string{"get", "view", "display"},
+	Short:   "Show decision details",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runDecisionShow,
 }
 
 func init() {

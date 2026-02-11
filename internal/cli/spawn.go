@@ -20,9 +20,10 @@ import (
 // --- adaf spawn ---
 
 var spawnCmd = &cobra.Command{
-	Use:   "spawn",
-	Short: "Spawn a sub-agent to work on a task",
-	RunE:  runSpawn,
+	Use:     "spawn",
+	Aliases: []string{"fork", "sub-agent", "sub_agent", "subagent"},
+	Short:   "Spawn a sub-agent to work on a task",
+	RunE:    runSpawn,
 }
 
 func init() {
@@ -97,9 +98,10 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 // --- adaf spawn-status ---
 
 var spawnStatusCmd = &cobra.Command{
-	Use:   "spawn-status",
-	Short: "Show status of spawned sub-agents",
-	RunE:  runSpawnStatus,
+	Use:     "spawn-status",
+	Aliases: []string{"spawn_status", "spawnstatus"},
+	Short:   "Show status of spawned sub-agents",
+	RunE:    runSpawnStatus,
 }
 
 func init() {
@@ -145,9 +147,10 @@ func runSpawnStatus(cmd *cobra.Command, args []string) error {
 // --- adaf spawn-wait ---
 
 var spawnWaitCmd = &cobra.Command{
-	Use:   "spawn-wait",
-	Short: "Wait for spawned sub-agents to complete",
-	RunE:  runSpawnWait,
+	Use:     "spawn-wait",
+	Aliases: []string{"spawn_wait", "spawnwait"},
+	Short:   "Wait for spawned sub-agents to complete",
+	RunE:    runSpawnWait,
 }
 
 func init() {
@@ -186,9 +189,10 @@ func runSpawnWait(cmd *cobra.Command, args []string) error {
 // --- adaf spawn-diff ---
 
 var spawnDiffCmd = &cobra.Command{
-	Use:   "spawn-diff",
-	Short: "Show diff of a spawn's changes",
-	RunE:  runSpawnDiff,
+	Use:     "spawn-diff",
+	Aliases: []string{"spawn_diff", "spawndiff"},
+	Short:   "Show diff of a spawn's changes",
+	RunE:    runSpawnDiff,
 }
 
 func init() {
@@ -218,9 +222,10 @@ func runSpawnDiff(cmd *cobra.Command, args []string) error {
 // --- adaf spawn-merge ---
 
 var spawnMergeCmd = &cobra.Command{
-	Use:   "spawn-merge",
-	Short: "Merge a spawn's changes into the current branch",
-	RunE:  runSpawnMerge,
+	Use:     "spawn-merge",
+	Aliases: []string{"spawn_merge", "spawnmerge"},
+	Short:   "Merge a spawn's changes into the current branch",
+	RunE:    runSpawnMerge,
 }
 
 func init() {
@@ -252,9 +257,10 @@ func runSpawnMerge(cmd *cobra.Command, args []string) error {
 // --- adaf spawn-reject ---
 
 var spawnRejectCmd = &cobra.Command{
-	Use:   "spawn-reject",
-	Short: "Reject a spawn's changes and clean up",
-	RunE:  runSpawnReject,
+	Use:     "spawn-reject",
+	Aliases: []string{"spawn_reject", "spawnreject"},
+	Short:   "Reject a spawn's changes and clean up",
+	RunE:    runSpawnReject,
 }
 
 func init() {
@@ -283,9 +289,10 @@ func runSpawnReject(cmd *cobra.Command, args []string) error {
 // --- adaf spawn-watch ---
 
 var spawnWatchCmd = &cobra.Command{
-	Use:   "spawn-watch",
-	Short: "Watch spawn output in real-time",
-	RunE:  runSpawnWatch,
+	Use:     "spawn-watch",
+	Aliases: []string{"spawn_watch", "spawnwatch"},
+	Short:   "Watch spawn output in real-time",
+	RunE:    runSpawnWatch,
 }
 
 func init() {

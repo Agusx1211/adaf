@@ -16,8 +16,9 @@ import (
 )
 
 var attachCmd = &cobra.Command{
-	Use:   "attach [session-id]",
-	Short: "Attach to a running session",
+	Use:     "attach [session-id]",
+	Aliases: []string{"reattach", "connect"},
+	Short:   "Attach to a running session",
 	Long: `Reattach to a running adaf session. The session's event history is replayed
 and then live events are streamed in real-time.
 
