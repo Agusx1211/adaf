@@ -24,12 +24,6 @@
 
 ---
 
-<p align="center">
-  <img src=".github/screenshot.svg" alt="adaf status output" width="800">
-</p>
-
----
-
 **adaf** is a meta-orchestrator for AI coding agents. It manages plans, issues, docs, session logs, architectural decisions, and deep session recordings **outside** the target repository, so multiple AI agents can collaborate on a codebase via structured relay handoffs.
 
 Think of it as project management infrastructure purpose-built for AI agents -- plans with phases, an issue tracker, session logs for handoffs, architectural decision records, sub-agent spawning with worktree isolation, looping workflows, detachable sessions, and full I/O recording. All stored in `.adaf/`, never cluttering your repo.
