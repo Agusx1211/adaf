@@ -44,9 +44,10 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	agentName, _ := cmd.Flags().GetString("agent")
 	prompt, _ := cmd.Flags().GetString("prompt")
 	maxTurns, _ := cmd.Flags().GetInt("max-turns")
-	model, _ := cmd.Flags().GetString("model")
+	modelFlag, _ := cmd.Flags().GetString("model")
 	autoApprove, _ := cmd.Flags().GetBool("auto-approve")
 	customCmd, _ := cmd.Flags().GetString("command")
+	modelFlag = strings.TrimSpace(modelFlag)
 
 	// Look up agent from registry.
 	agentInstance, ok := agent.Get(agentName)
@@ -63,8 +64,11 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			customCmd = rec.Path
 		}
 	}
-	if model == "" {
-		model = agent.ResolveDefaultModel(agentsCfg, agentName)
+	defaultModel := agent.ResolveDefaultModel(agentsCfg, agentName)
+	modelOverride := agent.ResolveModelOverride(agentsCfg, agentName)
+	if modelFlag != "" {
+		modelOverride = modelFlag
+		defaultModel = modelFlag
 	}
 	if customCmd == "" {
 		switch agentName {
@@ -100,15 +104,15 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	var agentArgs []string
 	switch agentName {
 	case "claude":
-		if model != "" {
-			agentArgs = append(agentArgs, "--model", model)
+		if modelOverride != "" {
+			agentArgs = append(agentArgs, "--model", modelOverride)
 		}
 		if autoApprove {
 			agentArgs = append(agentArgs, "--dangerously-skip-permissions")
 		}
 	case "codex":
-		if model != "" {
-			agentArgs = append(agentArgs, "--model", model)
+		if modelOverride != "" {
+			agentArgs = append(agentArgs, "--model", modelOverride)
 		}
 		if autoApprove {
 			agentArgs = append(agentArgs, "--full-auto")
@@ -116,8 +120,8 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	case "vibe":
 		// vibe reads prompt from cfg.Prompt via stdin, no extra args needed.
 	case "opencode":
-		if model != "" {
-			agentArgs = append(agentArgs, "--model", model)
+		if modelOverride != "" {
+			agentArgs = append(agentArgs, "--model", modelOverride)
 		}
 	}
 
@@ -139,8 +143,8 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	printField("Project", config.Name)
 	printField("Repo", workDir)
 	printField("Agent", agentName)
-	if model != "" {
-		printField("Model", model)
+	if defaultModel != "" {
+		printField("Default Model", defaultModel)
 	}
 	printField("Prompt", prompt)
 	if maxTurns > 0 {

@@ -183,6 +183,20 @@ func ResolveDefaultModel(cfg *AgentsConfig, agentName string) string {
 	return DefaultModel(agentName)
 }
 
+// ResolveModelOverride returns only an explicit model override for an agent.
+// It does not fall back to defaults.
+func ResolveModelOverride(cfg *AgentsConfig, agentName string) string {
+	agentName = normalizeAgentName(agentName)
+	if cfg == nil {
+		return ""
+	}
+	rec, ok := cfg.Agents[agentName]
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(rec.ModelOverride)
+}
+
 func effectiveDefaultModel(agentName, override string) string {
 	if strings.TrimSpace(override) != "" {
 		return strings.TrimSpace(override)

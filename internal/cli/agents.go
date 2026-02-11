@@ -170,8 +170,9 @@ func runAgentsTest(cmd *cobra.Command, args []string) error {
 		command = agentName
 	}
 
-	model := agent.ResolveDefaultModel(cfg, agentName)
-	runArgs := healthCheckArgs(agentName, model)
+	defaultModel := agent.ResolveDefaultModel(cfg, agentName)
+	modelOverride := agent.ResolveModelOverride(cfg, agentName)
+	runArgs := healthCheckArgs(agentName, modelOverride)
 
 	workDir, err := os.Getwd()
 	if err != nil {
@@ -196,8 +197,8 @@ func runAgentsTest(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\n  %sRunning health-check...%s\n", styleBoldCyan, colorReset)
 	printField("Agent", agentName)
-	if model != "" {
-		printField("Model", model)
+	if defaultModel != "" {
+		printField("Default Model", defaultModel)
 	}
 	printField("Command", command)
 	fmt.Println()
@@ -228,22 +229,22 @@ func runAgentsTest(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func healthCheckArgs(agentName, model string) []string {
+func healthCheckArgs(agentName, modelOverride string) []string {
 	args := make([]string, 0, 4)
 	switch agentName {
 	case "claude":
-		if model != "" {
-			args = append(args, "--model", model)
+		if modelOverride != "" {
+			args = append(args, "--model", modelOverride)
 		}
 		args = append(args, "--dangerously-skip-permissions")
 	case "codex":
-		if model != "" {
-			args = append(args, "--model", model)
+		if modelOverride != "" {
+			args = append(args, "--model", modelOverride)
 		}
 		args = append(args, "--full-auto")
 	case "opencode":
-		if model != "" {
-			args = append(args, "--model", model)
+		if modelOverride != "" {
+			args = append(args, "--model", modelOverride)
 		}
 	}
 	return args

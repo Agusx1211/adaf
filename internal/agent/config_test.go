@@ -91,3 +91,29 @@ func TestResolveDefaultModel(t *testing.T) {
 		t.Fatalf("ResolveDefaultModel(nil, claude) = %q", got)
 	}
 }
+
+func TestResolveModelOverride(t *testing.T) {
+	cfg := &AgentsConfig{
+		Agents: map[string]AgentRecord{
+			"codex": {
+				Name:          "codex",
+				ModelOverride: "gpt-4.1",
+				DefaultModel:  "o4-mini",
+			},
+			"claude": {
+				Name:         "claude",
+				DefaultModel: "sonnet-4.5",
+			},
+		},
+	}
+
+	if got := ResolveModelOverride(cfg, "codex"); got != "gpt-4.1" {
+		t.Fatalf("ResolveModelOverride(codex) = %q", got)
+	}
+	if got := ResolveModelOverride(cfg, "claude"); got != "" {
+		t.Fatalf("ResolveModelOverride(claude) = %q, want empty", got)
+	}
+	if got := ResolveModelOverride(nil, "codex"); got != "" {
+		t.Fatalf("ResolveModelOverride(nil, codex) = %q, want empty", got)
+	}
+}

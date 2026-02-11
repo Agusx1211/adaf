@@ -81,7 +81,7 @@ adaf wraps existing AI CLI tools. It does not reimplement them.
 | Agent | CLI | How adaf invokes it |
 |-------|-----|---------------------|
 | claude | `claude` | `claude -p <prompt> [--model ...] [--dangerously-skip-permissions]` |
-| codex | `codex` | `codex <prompt> [--model ...] [--full-auto]` |
+| codex | `codex` | `codex exec <prompt> [--model ...] [--full-auto]` |
 | vibe | `vibe` | `vibe <prompt>` |
 | generic | any | Custom command with prompt piped to stdin |
 

@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -26,21 +28,18 @@ func (c *CodexAgent) Name() string {
 
 // Run executes the codex CLI with the given configuration.
 //
-// The prompt is passed as a positional argument to codex. Additional flags
-// (e.g. --model, --approval-mode) can be supplied via cfg.Args.
-//
-// Codex requires stdin, stdout, and stderr to be real TTYs (it performs isatty
-// checks on all three). We therefore pass the real terminal file descriptors
-// through instead of wrapping them with io.MultiWriter. Output capture in
-// Result.Output/Error will be empty; metadata and exit code are still recorded.
+// ADAF runs codex in non-interactive mode via "codex exec" so the underlying
+// TUI does not take over the terminal. Additional flags (e.g. --model,
+// --full-auto) can be supplied via cfg.Args.
 func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Recorder) (*Result, error) {
 	cmdName := cfg.Command
 	if cmdName == "" {
 		cmdName = "codex"
 	}
 
-	// Build arguments: defaults first, then the prompt as a positional arg.
-	args := make([]string, 0, len(cfg.Args)+1)
+	// Build arguments: force non-interactive exec mode, then configured flags.
+	args := make([]string, 0, len(cfg.Args)+2)
+	args = append(args, "exec")
 	args = append(args, cfg.Args...)
 
 	if cfg.Prompt != "" {
@@ -51,16 +50,15 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
 
-	// Pass real terminal FDs so codex sees TTYs on all three streams.
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
 	// Environment: inherit + overlay.
 	cmd.Env = os.Environ()
 	for k, v := range cfg.Env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = io.MultiWriter(&stdoutBuf, recorder.WrapWriter(os.Stdout, "stdout"))
+	cmd.Stderr = io.MultiWriter(&stderrBuf, recorder.WrapWriter(os.Stderr, "stderr"))
 
 	recorder.RecordMeta("agent", "codex")
 	recorder.RecordMeta("command", cmdName+" "+strings.Join(args, " "))
@@ -82,5 +80,7 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 	return &Result{
 		ExitCode: exitCode,
 		Duration: duration,
+		Output:   stdoutBuf.String(),
+		Error:    stderrBuf.String(),
 	}, nil
 }
