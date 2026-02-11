@@ -29,11 +29,13 @@ func RolePrompt(profile *config.Profile, globalCfg *config.GlobalConfig) string 
 		b.WriteString("# Your Role: SENIOR DEVELOPER\n\n")
 		b.WriteString("You are a SENIOR DEVELOPER agent. You can both write code AND delegate tasks. You are strongly encouraged to delegate smaller tasks to junior agents when appropriate.\n\n")
 		b.WriteString(delegationCommands())
+		b.WriteString(communicationCommands())
 		b.WriteString(spawnableInfo(profile, globalCfg))
 
 	case config.RoleJunior:
 		b.WriteString("# Your Role: JUNIOR DEVELOPER\n\n")
 		b.WriteString("You are a JUNIOR DEVELOPER agent. Focus exclusively on your assigned task. You cannot spawn sub-agents.\n\n")
+		b.WriteString(communicationCommands())
 
 	case config.RoleSupervisor:
 		b.WriteString("# Your Role: SUPERVISOR\n\n")
@@ -60,11 +62,23 @@ func delegationCommands() string {
 	var b strings.Builder
 	b.WriteString("## Delegation Commands\n\n")
 	b.WriteString("- `adaf spawn --profile <name> --task \"task description\" [--read-only] [--wait]` — Spawn a sub-agent\n")
+	b.WriteString("- `adaf spawn --profile <name> --task-file <path> [--read-only] [--wait]` — Spawn with detailed task from file\n")
 	b.WriteString("- `adaf spawn-status [--spawn-id N]` — Check spawn status\n")
 	b.WriteString("- `adaf spawn-wait [--spawn-id N]` — Wait for spawn(s) to complete\n")
 	b.WriteString("- `adaf spawn-diff --spawn-id N` — View diff of spawn's changes\n")
 	b.WriteString("- `adaf spawn-merge --spawn-id N [--squash]` — Merge spawn's changes\n")
-	b.WriteString("- `adaf spawn-reject --spawn-id N` — Reject spawn's changes\n\n")
+	b.WriteString("- `adaf spawn-reject --spawn-id N` — Reject spawn's changes\n")
+	b.WriteString("- `adaf spawn-watch --spawn-id N` — Watch spawn output in real-time\n")
+	b.WriteString("- `adaf spawn-reply --spawn-id N \"answer\"` — Reply to child's question\n")
+	b.WriteString("- `adaf spawn-message --spawn-id N \"guidance\"` — Send async message to child\n\n")
+	return b.String()
+}
+
+func communicationCommands() string {
+	var b strings.Builder
+	b.WriteString("## Communication with Parent\n\n")
+	b.WriteString("- `adaf parent-ask \"question\"` — Ask your parent a question (blocks until answered)\n")
+	b.WriteString("- `adaf spawn-read-messages` — Read messages from parent\n\n")
 	return b.String()
 }
 

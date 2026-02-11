@@ -37,6 +37,9 @@ type BuildOpts struct {
 
 	// SupervisorNotes are injected into the prompt.
 	SupervisorNotes []store.SupervisorNote
+
+	// Messages from parent agent (for child prompts).
+	Messages []store.SpawnMessage
 }
 
 // Build constructs a prompt from project context and role configuration.
@@ -167,6 +170,15 @@ func Build(opts BuildOpts) (string, error) {
 		b.WriteString("## Supervisor Notes\n\n")
 		for _, note := range opts.SupervisorNotes {
 			fmt.Fprintf(&b, "- [%s] %s: %s\n", note.CreatedAt.Format("15:04:05"), note.Author, note.Note)
+		}
+		b.WriteString("\n")
+	}
+
+	// Messages from parent.
+	if len(opts.Messages) > 0 {
+		b.WriteString("## Messages from Parent\n\n")
+		for _, msg := range opts.Messages {
+			fmt.Fprintf(&b, "- [%s] %s\n", msg.CreatedAt.Format("15:04:05"), msg.Content)
 		}
 		b.WriteString("\n")
 	}

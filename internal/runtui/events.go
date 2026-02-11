@@ -43,9 +43,10 @@ type SpawnStatusMsg struct {
 
 // SpawnInfo describes a spawn entry for the hierarchy view.
 type SpawnInfo struct {
-	ID      int
-	Profile string
-	Status  string // "queued", "running", "completed", "failed", "merged", "rejected"
+	ID       int
+	Profile  string
+	Status   string // "queued", "running", "awaiting_input", "completed", "failed", "merged", "rejected"
+	Question string // pending question when status is "awaiting_input"
 }
 
 // tickMsg is sent every second to update the elapsed time display.

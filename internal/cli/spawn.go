@@ -2,9 +2,13 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -23,7 +27,8 @@ var spawnCmd = &cobra.Command{
 
 func init() {
 	spawnCmd.Flags().String("profile", "", "Profile name of the sub-agent to spawn (required)")
-	spawnCmd.Flags().String("task", "", "Task description for the sub-agent (required)")
+	spawnCmd.Flags().String("task", "", "Task description for the sub-agent")
+	spawnCmd.Flags().String("task-file", "", "Path to file containing task description (mutually exclusive with --task)")
 	spawnCmd.Flags().Bool("read-only", false, "Run sub-agent in read-only mode (no worktree)")
 	spawnCmd.Flags().Bool("wait", false, "Block until the sub-agent completes")
 	rootCmd.AddCommand(spawnCmd)
@@ -32,14 +37,28 @@ func init() {
 func runSpawn(cmd *cobra.Command, args []string) error {
 	profileName, _ := cmd.Flags().GetString("profile")
 	task, _ := cmd.Flags().GetString("task")
+	taskFile, _ := cmd.Flags().GetString("task-file")
 	readOnly, _ := cmd.Flags().GetBool("read-only")
 	wait, _ := cmd.Flags().GetBool("wait")
 
 	if profileName == "" {
 		return fmt.Errorf("--profile is required")
 	}
-	if task == "" {
-		return fmt.Errorf("--task is required")
+	if task != "" && taskFile != "" {
+		return fmt.Errorf("--task and --task-file are mutually exclusive")
+	}
+	if task == "" && taskFile == "" {
+		return fmt.Errorf("--task or --task-file is required")
+	}
+	if taskFile != "" {
+		data, err := os.ReadFile(taskFile)
+		if err != nil {
+			return fmt.Errorf("reading task file: %w", err)
+		}
+		if len(data) > 100*1024 {
+			fmt.Fprintf(os.Stderr, "Warning: task file is %dKB (>100KB), this may be very large for a prompt\n", len(data)/1024)
+		}
+		task = string(data)
 	}
 
 	parentSessionID, parentProfile, err := getSessionContext()
@@ -261,6 +280,127 @@ func runSpawnReject(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// --- adaf spawn-watch ---
+
+var spawnWatchCmd = &cobra.Command{
+	Use:   "spawn-watch",
+	Short: "Watch spawn output in real-time",
+	RunE:  runSpawnWatch,
+}
+
+func init() {
+	spawnWatchCmd.Flags().Int("spawn-id", 0, "Spawn ID to watch (required)")
+	spawnWatchCmd.Flags().Bool("raw", false, "Print raw NDJSON without formatting")
+	rootCmd.AddCommand(spawnWatchCmd)
+}
+
+func runSpawnWatch(cmd *cobra.Command, args []string) error {
+	spawnID, _ := cmd.Flags().GetInt("spawn-id")
+	raw, _ := cmd.Flags().GetBool("raw")
+	if spawnID == 0 {
+		return fmt.Errorf("--spawn-id is required")
+	}
+
+	s, err := openStoreRequired()
+	if err != nil {
+		return err
+	}
+
+	// Wait for child session ID to be set.
+	var rec *store.SpawnRecord
+	for i := 0; i < 50; i++ { // poll up to 10 seconds
+		rec, err = s.GetSpawn(spawnID)
+		if err != nil {
+			return fmt.Errorf("spawn %d not found: %w", spawnID, err)
+		}
+		if rec.ChildSessionID > 0 {
+			break
+		}
+		if rec.Status == "completed" || rec.Status == "failed" || rec.Status == "merged" || rec.Status == "rejected" {
+			fmt.Printf("Spawn #%d is already %s\n", spawnID, rec.Status)
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if rec.ChildSessionID == 0 {
+		return fmt.Errorf("spawn %d has not started a session yet", spawnID)
+	}
+
+	// Find events file.
+	eventsPath := filepath.Join(s.Root(), "records", fmt.Sprintf("%d", rec.ChildSessionID), "events.jsonl")
+
+	// Tail the events file.
+	var offset int64
+	for {
+		// Check if spawn is terminal.
+		rec, _ = s.GetSpawn(spawnID)
+		terminal := rec != nil && (rec.Status == "completed" || rec.Status == "failed" || rec.Status == "merged" || rec.Status == "rejected")
+
+		f, err := os.Open(eventsPath)
+		if err != nil {
+			if os.IsNotExist(err) && !terminal {
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			if terminal {
+				return nil
+			}
+			return err
+		}
+
+		if offset > 0 {
+			f.Seek(offset, 0)
+		}
+
+		buf := make([]byte, 64*1024)
+		n, readErr := f.Read(buf)
+		if n > 0 {
+			offset += int64(n)
+			chunk := string(buf[:n])
+			lines := strings.Split(chunk, "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				if raw {
+					fmt.Println(line)
+				} else {
+					formatEventLine(line)
+				}
+			}
+		}
+		f.Close()
+
+		if readErr != nil && terminal {
+			return nil
+		}
+
+		if n == 0 {
+			if terminal {
+				return nil
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+}
+
+// formatEventLine formats a single NDJSON recording event for display.
+func formatEventLine(line string) {
+	var ev store.RecordingEvent
+	if err := json.Unmarshal([]byte(line), &ev); err != nil {
+		fmt.Println(line)
+		return
+	}
+
+	prefix := fmt.Sprintf("[%s] %s: ", ev.Timestamp.Format("15:04:05"), ev.Type)
+	data := ev.Data
+	if len(data) > 200 {
+		data = data[:200] + "..."
+	}
+	fmt.Printf("%s%s\n", prefix, data)
+}
+
 // --- Helpers ---
 
 func getSessionContext() (int, string, error) {
@@ -320,14 +460,25 @@ func printSpawnRecord(r *store.SpawnRecord) {
 	if r.ReadOnly {
 		printField("Mode", "read-only")
 	}
+	if r.Status == "running" || r.Status == "awaiting_input" {
+		printField("Elapsed", time.Since(r.StartedAt).Round(time.Second).String())
+	}
 	if !r.CompletedAt.IsZero() {
-		printField("Duration", r.CompletedAt.Sub(r.StartedAt).Round(1).String())
+		printField("Duration", r.CompletedAt.Sub(r.StartedAt).Round(time.Second).String())
 	}
 	if r.MergeCommit != "" {
 		printField("Merge Commit", r.MergeCommit)
 	}
 	if r.Result != "" {
 		printField("Result", truncate(r.Result, 120))
+	}
+	if r.Status == "awaiting_input" {
+		s, err := openStoreRequired()
+		if err == nil {
+			if ask, err := s.PendingAsk(r.ID); err == nil && ask != nil {
+				printField("Question", truncate(ask.Content, 120))
+			}
+		}
 	}
 	fmt.Println()
 }

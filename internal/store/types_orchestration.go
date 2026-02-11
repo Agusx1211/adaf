@@ -13,12 +13,24 @@ type SpawnRecord struct {
 	Branch           string    `json:"branch,omitempty"`
 	WorktreePath     string    `json:"worktree_path,omitempty"`
 	ReadOnly         bool      `json:"read_only,omitempty"`
-	Status           string    `json:"status"` // "queued","running","completed","failed","merged","rejected"
+	Status           string    `json:"status"` // "queued","running","awaiting_input","completed","failed","merged","rejected"
 	Result           string    `json:"result,omitempty"`
 	ExitCode         int       `json:"exit_code,omitempty"`
 	StartedAt        time.Time `json:"started_at"`
 	CompletedAt      time.Time `json:"completed_at,omitzero"`
 	MergeCommit      string    `json:"merge_commit,omitempty"`
+}
+
+// SpawnMessage is a message exchanged between parent and child agents.
+type SpawnMessage struct {
+	ID        int       `json:"id"`
+	SpawnID   int       `json:"spawn_id"`
+	Direction string    `json:"direction"` // "child_to_parent" or "parent_to_child"
+	Type      string    `json:"type"`      // "ask", "reply", "message"
+	Content   string    `json:"content"`
+	ReplyToID int       `json:"reply_to_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	ReadAt    time.Time `json:"read_at,omitempty"`
 }
 
 // SupervisorNote is a message from a supervisor to a running session.

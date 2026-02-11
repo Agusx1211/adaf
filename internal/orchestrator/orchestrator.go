@@ -284,6 +284,27 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 			Store:  o.store,
 			Agent:  agentInstance,
 			Config: agentCfg,
+			OnStart: func(sessionID int) {
+				rec.ChildSessionID = sessionID
+				o.store.UpdateSpawn(rec)
+			},
+			PromptFunc: func(sessionID int) string {
+				msgs, _ := o.store.UnreadMessages(rec.ID, "parent_to_child")
+				for _, m := range msgs {
+					o.store.MarkMessageRead(m.SpawnID, m.ID)
+				}
+				newPrompt, _ := promptpkg.Build(promptpkg.BuildOpts{
+					Store:           o.store,
+					Project:         projCfg,
+					Profile:         childProf,
+					GlobalCfg:       o.globalCfg,
+					Task:            req.Task,
+					ReadOnly:        req.ReadOnly,
+					ParentSessionID: req.ParentSessionID,
+					Messages:        msgs,
+				})
+				return newPrompt
+			},
 		}
 
 		err := l.Run(childCtx)

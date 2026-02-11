@@ -570,9 +570,116 @@ func (s *Store) NotesBySession(sessionID int) ([]SupervisorNote, error) {
 	return filtered, nil
 }
 
+// --- Spawn Messages ---
+
+// messagesDir returns the directory for messages of a given spawn.
+func (s *Store) messagesDir(spawnID int) string {
+	return filepath.Join(s.root, "messages", fmt.Sprintf("%d", spawnID))
+}
+
+// CreateMessage persists a new message with an auto-assigned ID.
+func (s *Store) CreateMessage(msg *SpawnMessage) error {
+	dir := s.messagesDir(msg.SpawnID)
+	os.MkdirAll(dir, 0755)
+
+	s.mu.Lock()
+	msg.ID = s.nextID(dir)
+	s.mu.Unlock()
+
+	msg.CreatedAt = time.Now().UTC()
+	return s.writeJSONLocked(filepath.Join(dir, fmt.Sprintf("%d.json", msg.ID)), msg)
+}
+
+// ListMessages returns all messages for a spawn, sorted by ID.
+func (s *Store) ListMessages(spawnID int) ([]SpawnMessage, error) {
+	dir := s.messagesDir(spawnID)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var msgs []SpawnMessage
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		var msg SpawnMessage
+		if err := s.readJSONLocked(filepath.Join(dir, e.Name()), &msg); err != nil {
+			continue
+		}
+		msgs = append(msgs, msg)
+	}
+	sort.Slice(msgs, func(i, j int) bool { return msgs[i].ID < msgs[j].ID })
+	return msgs, nil
+}
+
+// GetMessage loads a single message by spawn and message ID.
+func (s *Store) GetMessage(spawnID, msgID int) (*SpawnMessage, error) {
+	var msg SpawnMessage
+	if err := s.readJSONLocked(filepath.Join(s.messagesDir(spawnID), fmt.Sprintf("%d.json", msgID)), &msg); err != nil {
+		return nil, err
+	}
+	return &msg, nil
+}
+
+// MarkMessageRead sets the ReadAt timestamp on a message.
+func (s *Store) MarkMessageRead(spawnID, msgID int) error {
+	msg, err := s.GetMessage(spawnID, msgID)
+	if err != nil {
+		return err
+	}
+	if msg.ReadAt.IsZero() {
+		msg.ReadAt = time.Now().UTC()
+		return s.writeJSONLocked(filepath.Join(s.messagesDir(spawnID), fmt.Sprintf("%d.json", msgID)), msg)
+	}
+	return nil
+}
+
+// PendingAsk finds an unanswered ask (type=ask with no reply) for a spawn.
+func (s *Store) PendingAsk(spawnID int) (*SpawnMessage, error) {
+	msgs, err := s.ListMessages(spawnID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build set of ask IDs that have been replied to.
+	replied := make(map[int]bool)
+	for _, m := range msgs {
+		if m.Type == "reply" && m.ReplyToID > 0 {
+			replied[m.ReplyToID] = true
+		}
+	}
+
+	// Find unanswered asks.
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Type == "ask" && !replied[msgs[i].ID] {
+			return &msgs[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// UnreadMessages returns unread messages for a spawn in the given direction.
+func (s *Store) UnreadMessages(spawnID int, direction string) ([]SpawnMessage, error) {
+	msgs, err := s.ListMessages(spawnID)
+	if err != nil {
+		return nil, err
+	}
+	var unread []SpawnMessage
+	for _, m := range msgs {
+		if m.Direction == direction && m.ReadAt.IsZero() {
+			unread = append(unread, m)
+		}
+	}
+	return unread, nil
+}
+
 // EnsureDirs creates directories that may be missing from older projects.
 func (s *Store) EnsureDirs() error {
-	for _, sub := range []string{"spawns", "notes"} {
+	for _, sub := range []string{"spawns", "notes", "messages"} {
 		if err := os.MkdirAll(filepath.Join(s.root, sub), 0755); err != nil {
 			return err
 		}

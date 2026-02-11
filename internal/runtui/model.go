@@ -693,6 +693,8 @@ func (m Model) renderLeftPanel(outerW, outerH int) string {
 			switch sp.Status {
 			case "running":
 				statusStyle = lipgloss.NewStyle().Foreground(theme.ColorYellow)
+			case "awaiting_input":
+				statusStyle = lipgloss.NewStyle().Foreground(theme.ColorMauve)
 			case "completed", "merged":
 				statusStyle = lipgloss.NewStyle().Foreground(theme.ColorGreen)
 			case "failed", "rejected":
@@ -702,6 +704,9 @@ func (m Model) renderLeftPanel(outerW, outerH int) string {
 			}
 			line := fmt.Sprintf("  [%d] %s (%s)", sp.ID, sp.Profile, statusStyle.Render(sp.Status))
 			lines = append(lines, line)
+			if sp.Status == "awaiting_input" && sp.Question != "" {
+				lines = append(lines, dimStyle.Render("    Q: "+sp.Question))
+			}
 		}
 		lines = append(lines, "")
 	}
