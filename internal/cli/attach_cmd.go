@@ -23,6 +23,7 @@ var attachCmd = &cobra.Command{
 and then live events are streamed in real-time.
 
 Press Ctrl+D to detach (session continues running).
+Press q to detach (session continues running).
 Press Ctrl+C to stop the agent and detach.
 
 Use 'adaf sessions' to list available sessions.`,
@@ -74,6 +75,7 @@ func runAttach(cmd *cobra.Command, args []string) error {
 	// Handle signals.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
 	go func() {
 		<-sigCh
 		cancelFunc()
@@ -89,7 +91,7 @@ func runAttach(cmd *cobra.Command, args []string) error {
 	}()
 
 	// Create the TUI model.
-	model := runtui.NewModel(
+	runModel := runtui.NewModel(
 		meta.ProjectName,
 		nil, // no plan in attach mode
 		meta.AgentName,
@@ -97,22 +99,70 @@ func runAttach(cmd *cobra.Command, args []string) error {
 		eventCh,
 		cancelFunc,
 	)
-	model.SetSessionMode(meta.ID)
+	runModel.SetSessionMode(meta.ID)
+	model := newAttachModel(runModel)
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
-	_, err = p.Run()
+	finalModel, err := p.Run()
+	detached := false
+	if fm, ok := finalModel.(attachModel); ok {
+		detached = fm.detached
+	}
 
-	// Check if we detached (TUI exited without cancelling).
+	if detached {
+		// Detached — close connection, agent keeps running.
+		client.Close()
+		fmt.Printf("\n  %sDetached from session #%d. Use 'adaf attach %d' to reattach.%s\n",
+			colorDim, meta.ID, meta.ID, colorReset)
+		return err
+	}
+
+	// Handle non-detach exits.
 	select {
 	case <-ctx.Done():
 		// Cancelled — agent was stopped.
 	default:
-		// Detached — just close connection, agent keeps running.
 		client.Close()
-		fmt.Printf("\n  %sDetached from session #%d. Use 'adaf attach %d' to reattach.%s\n",
-			colorDim, meta.ID, meta.ID, colorReset)
 	}
 
 	return err
+}
+
+type attachModel struct {
+	inner    runtui.Model
+	detached bool
+}
+
+func newAttachModel(inner runtui.Model) attachModel {
+	return attachModel{inner: inner}
+}
+
+func (m attachModel) Init() tea.Cmd {
+	return m.inner.Init()
+}
+
+func (m attachModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		key := msg.String()
+		if !m.inner.Done() && (key == "ctrl+d" || key == "q") {
+			m.detached = true
+			return m, tea.Quit
+		}
+
+	case runtui.DetachMsg:
+		m.detached = true
+		return m, tea.Quit
+	}
+
+	updated, cmd := m.inner.Update(msg)
+	if inner, ok := updated.(runtui.Model); ok {
+		m.inner = inner
+	}
+	return m, cmd
+}
+
+func (m attachModel) View() string {
+	return m.inner.View()
 }
