@@ -1073,30 +1073,56 @@ func (o *Orchestrator) CleanupAll(ctx context.Context) error {
 	return o.worktrees.CleanupAll(ctx)
 }
 
-// staleWorktreeMaxAge is the TTL after which any worktree is considered stale,
-// regardless of spawn status. Covers crashed sessions that never updated the record.
+// staleWorktreeMaxAge is the TTL after which an untracked worktree is considered stale.
+// Tracked spawn worktrees are preserved for review/merge/reject flows.
 const staleWorktreeMaxAge = 24 * time.Hour
 
-// cleanupStaleWorktrees removes worktrees from completed/failed spawns and
-// worktrees older than staleWorktreeMaxAge. Best-effort, errors are logged.
+// cleanupStaleWorktrees removes worktrees from merged/rejected spawns and
+// old untracked worktrees. Best-effort, errors are logged.
 func (o *Orchestrator) cleanupStaleWorktrees() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Build set of worktree paths that belong to terminal spawns.
+	// Build sets of tracked paths:
+	// - deadPaths: cleanup eligible on startup
+	// - keepPaths: must be preserved for diff/merge/reject flows
 	deadPaths := make(map[string]bool)
+	keepPaths := make(map[string]bool)
 	spawns, _ := o.store.ListSpawns()
 	for _, rec := range spawns {
 		if rec.WorktreePath == "" {
 			continue
 		}
 		switch rec.Status {
-		case "completed", "failed", "merged", "rejected":
+		case "merged", "rejected":
 			deadPaths[rec.WorktreePath] = true
+		default:
+			keepPaths[rec.WorktreePath] = true
 		}
 	}
 
-	removed, err := o.worktrees.CleanupStale(ctx, staleWorktreeMaxAge, deadPaths)
+	// For untracked worktrees, apply age-based cleanup.
+	if staleWorktreeMaxAge > 0 {
+		if active, err := o.worktrees.ListActive(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: stale worktree cleanup list: %v\n", err)
+		} else {
+			now := time.Now()
+			for _, wt := range active {
+				if deadPaths[wt.Path] || keepPaths[wt.Path] {
+					continue
+				}
+				info, err := os.Stat(wt.Path)
+				if err != nil {
+					continue
+				}
+				if now.Sub(info.ModTime()) > staleWorktreeMaxAge {
+					deadPaths[wt.Path] = true
+				}
+			}
+		}
+	}
+
+	removed, err := o.worktrees.CleanupStale(ctx, 0, deadPaths)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: stale worktree cleanup: %v\n", err)
 	}
