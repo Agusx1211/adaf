@@ -544,15 +544,14 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 			rec.Summary = missingSpawnReportMessage(rec.ID, errors.New("child returned no result payload"))
 		}
 
-		status := "completed"
-		exitCode := 0
-		result := ""
-		if err != nil && err != context.Canceled {
-			status = "failed"
-			exitCode = 1
-			result = err.Error()
+		status, exitCode, result := classifySpawnCompletion(err, l.LastResult)
+		autoCommitNote, autoCommitErr := o.autoCommitSpawnWork(rec)
+		if status == "canceled" {
+			cancelNote := canceledSpawnMessage(autoCommitNote != "")
+			result = appendSpawnResult(result, cancelNote)
+			rec.Summary = appendSpawnSummary(rec.Summary, cancelNote)
 		}
-		if autoCommitNote, autoCommitErr := o.autoCommitSpawnWork(rec); autoCommitErr != nil {
+		if autoCommitErr != nil {
 			result = appendSpawnResult(result, fmt.Sprintf("auto-commit fallback failed: %v", autoCommitErr))
 		} else if autoCommitNote != "" {
 			result = appendSpawnResult(result, autoCommitNote)
@@ -604,6 +603,52 @@ func appendSpawnResult(base, extra string) string {
 		return extra
 	}
 	return base + " | " + extra
+}
+
+func appendSpawnSummary(base, extra string) string {
+	extra = strings.TrimSpace(extra)
+	if extra == "" {
+		return base
+	}
+	base = strings.TrimSpace(base)
+	if base == "" {
+		return extra
+	}
+	return base + "\n\n" + extra
+}
+
+func classifySpawnCompletion(runErr error, lastResult *agent.Result) (status string, exitCode int, result string) {
+	status = "completed"
+	exitCode = 0
+	result = ""
+
+	if lastResult != nil {
+		exitCode = lastResult.ExitCode
+	}
+
+	switch {
+	case errors.Is(runErr, context.Canceled):
+		status = "canceled"
+		if lastResult == nil {
+			// Keep canceled runs distinguishable even when no child result was captured.
+			exitCode = -1
+		}
+	case runErr != nil:
+		status = "failed"
+		if lastResult == nil && exitCode == 0 {
+			exitCode = 1
+		}
+		result = runErr.Error()
+	}
+
+	return status, exitCode, result
+}
+
+func canceledSpawnMessage(autoCommitted bool) string {
+	if autoCommitted {
+		return "Spawn was canceled before completion. Partial work was auto-committed."
+	}
+	return "Spawn was canceled before completion."
 }
 
 // extractSpawnReport returns the child agent's last assistant message as-is.
@@ -1141,7 +1186,7 @@ func (o *Orchestrator) ActiveSpawnsForParent(parentTurnID int) []int {
 
 func isTerminalSpawnStatus(status string) bool {
 	switch status {
-	case "completed", "failed", "merged", "rejected":
+	case "completed", "failed", "canceled", "merged", "rejected":
 		return true
 	default:
 		return false
