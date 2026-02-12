@@ -780,6 +780,7 @@ func (m AppModel) updateRunning(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Intercept DetachMsg to detach from the session without stopping the agent.
 	if detach, ok := msg.(runtui.DetachMsg); ok {
+		startBackgroundEventDrain(m.runEventCh)
 		if m.sessionClient != nil {
 			m.sessionClient.Close()
 			m.sessionClient = nil
@@ -796,6 +797,18 @@ func (m AppModel) updateRunning(msg tea.Msg) (tea.Model, tea.Cmd) {
 	updated, cmd := m.runModel.Update(msg)
 	m.runModel = updated.(runtui.Model)
 	return m, cmd
+}
+
+// startBackgroundEventDrain consumes and discards remaining events from ch
+// so that the goroutine writing to it (e.g. StreamEvents) doesn't block.
+func startBackgroundEventDrain(ch <-chan any) {
+	if ch == nil {
+		return
+	}
+	go func() {
+		for range ch {
+		}
+	}()
 }
 
 // startAgent transitions from selector to running state.

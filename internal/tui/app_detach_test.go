@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -11,6 +12,70 @@ import (
 	"github.com/agusx1211/adaf/internal/session"
 	"github.com/agusx1211/adaf/internal/store"
 )
+
+func TestStartBackgroundEventDrainConsumesMessages(t *testing.T) {
+	ch := make(chan any)
+	startBackgroundEventDrain(ch)
+
+	sent := make(chan struct{})
+	go func() {
+		ch <- runtui.AgentRawOutputMsg{Data: "hello"}
+		close(sent)
+	}()
+
+	select {
+	case <-sent:
+	case <-time.After(time.Second):
+		t.Fatalf("send blocked; background drain not consuming events")
+	}
+
+	close(ch)
+}
+
+func TestUpdateRunningDetachDrainsEventChannel(t *testing.T) {
+	tmp := t.TempDir()
+	s, err := store.New(tmp)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "proj", RepoPath: tmp}); err != nil {
+		t.Fatalf("store.Init: %v", err)
+	}
+
+	ch := make(chan any)
+	m := AppModel{
+		store:      s,
+		state:      stateRunning,
+		runModel:   runtui.NewModel("proj", nil, "", "", make(chan any, 1), nil),
+		runEventCh: ch,
+		runCancel:  func() {},
+		sessionID:  9,
+	}
+
+	updated, _ := m.updateRunning(runtui.DetachMsg{SessionID: 9})
+	got, ok := updated.(AppModel)
+	if !ok {
+		t.Fatalf("updated model type = %T, want tui.AppModel", updated)
+	}
+	if got.runEventCh != nil {
+		t.Fatalf("runEventCh = %v, want nil", got.runEventCh)
+	}
+
+	// The original channel should still be drainable (background goroutine consuming).
+	sent := make(chan struct{})
+	go func() {
+		ch <- runtui.AgentRawOutputMsg{Data: "after-detach"}
+		close(sent)
+	}()
+
+	select {
+	case <-sent:
+	case <-time.After(time.Second):
+		t.Fatalf("send blocked after detach; expected background drain")
+	}
+
+	close(ch)
+}
 
 func TestUpdateRunningDetachReturnsToSelector(t *testing.T) {
 	tmp := t.TempDir()
