@@ -117,6 +117,7 @@ type Orchestrator struct {
 	instances map[string]int // child profile -> count of running instances
 	queue     []*pendingSpawn
 	spawns    map[int]*activeSpawn
+	spawnWG   sync.WaitGroup // tracks running spawn goroutines
 }
 
 // New creates an Orchestrator.
@@ -444,7 +445,9 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 	}()
 
 	// Run the child agent in a goroutine.
+	o.spawnWG.Add(1)
 	go func() {
+		defer o.spawnWG.Done()
 		debug.LogKV("orch", "spawn goroutine started",
 			"spawn_id", rec.ID,
 			"child_profile", req.ChildProfile,
@@ -1009,6 +1012,77 @@ func (o *Orchestrator) WaitOne(spawnID int) SpawnResult {
 		}
 		<-ticker.C
 	}
+}
+
+// WaitForRunningSpawns waits up to timeout for running spawn goroutines to
+// finish their cleanup (including auto-commit and onSpawnComplete).
+// If parentTurnIDs is non-empty, only spawns belonging to those parent turns
+// are waited on. It returns true when all targeted spawns completed before the timeout.
+func (o *Orchestrator) WaitForRunningSpawns(parentTurnIDs []int, timeout time.Duration) bool {
+	type waitTarget struct {
+		done <-chan struct{}
+	}
+
+	parentFilter := make(map[int]struct{}, len(parentTurnIDs))
+	for _, turnID := range parentTurnIDs {
+		parentFilter[turnID] = struct{}{}
+	}
+
+	o.mu.Lock()
+	targets := make([]waitTarget, 0, len(o.spawns))
+	for _, as := range o.spawns {
+		if len(parentFilter) > 0 {
+			if as.record == nil {
+				continue
+			}
+			if _, ok := parentFilter[as.record.ParentTurnID]; !ok {
+				continue
+			}
+		}
+		targets = append(targets, waitTarget{done: as.done})
+	}
+	o.mu.Unlock()
+	if len(targets) == 0 {
+		return true
+	}
+
+	debug.LogKV("orch", "WaitForRunningSpawns() called",
+		"running_spawns", len(targets),
+		"parent_turns", fmt.Sprintf("%v", parentTurnIDs),
+		"timeout", timeout,
+	)
+
+	waitCtx := context.Background()
+	cancel := func() {}
+	if timeout <= 0 {
+		waitCtx, cancel = context.WithCancel(waitCtx)
+	} else {
+		waitCtx, cancel = context.WithTimeout(waitCtx, timeout)
+	}
+	defer cancel()
+
+	for i, t := range targets {
+		select {
+		case <-t.done:
+		case <-waitCtx.Done():
+			remaining := len(targets) - i
+			if remaining < 0 {
+				remaining = 0
+			}
+			if timeout <= 0 {
+				debug.LogKV("orch", "WaitForRunningSpawns() cancelled", "remaining_spawns", remaining)
+			} else {
+				debug.LogKV("orch", "WaitForRunningSpawns() timed out",
+					"remaining_spawns", remaining,
+					"timeout", timeout,
+				)
+			}
+			return false
+		}
+	}
+
+	debug.LogKV("orch", "WaitForRunningSpawns() completed", "running_spawns", len(targets))
+	return true
 }
 
 // Cancel cancels a running spawn.

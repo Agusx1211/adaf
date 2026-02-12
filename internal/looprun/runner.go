@@ -46,6 +46,8 @@ type RunConfig struct {
 	MaxCycles int
 }
 
+const spawnCleanupGracePeriod = 12 * time.Second
+
 // Run is the blocking loop execution implementation.
 func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 	debug.LogKV("looprun", "Run() starting",
@@ -354,6 +356,11 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			close(streamCh)
 			<-bridgeDone
 
+			var stepTurnIDs []int
+			if stepTurnStart < len(run.TurnIDs) {
+				stepTurnIDs = append(stepTurnIDs, run.TurnIDs[stepTurnStart:]...)
+			}
+
 			// Update watermark: step has seen all current messages.
 			allMsgs, _ := cfg.Store.ListLoopMessages(run.ID)
 			if len(allMsgs) > 0 {
@@ -375,16 +382,13 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			if loopErr != nil {
 				if ctx.Err() != nil {
 					run.Status = "cancelled"
+					waitForSpawnCleanupOnCancel(stepTurnIDs, spawnCleanupGracePeriod)
 					return ctx.Err()
 				}
 				return fmt.Errorf("step %d (%s) failed: %w", stepIdx, prof.Name, loopErr)
 			}
 
 			// Collect handoffs: running spawns marked as handoff from this step's turns.
-			var stepTurnIDs []int
-			if stepTurnStart < len(run.TurnIDs) {
-				stepTurnIDs = append(stepTurnIDs, run.TurnIDs[stepTurnStart:]...)
-			}
 			run.PendingHandoffs = collectHandoffs(cfg.Store, stepTurnIDs)
 			cfg.Store.UpdateLoopRun(run)
 
@@ -394,6 +398,38 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			}
 		}
 	}
+}
+
+func waitForSpawnCleanupOnCancel(stepTurnIDs []int, timeout time.Duration) {
+	if len(stepTurnIDs) == 0 {
+		return
+	}
+
+	o := orchestrator.Get()
+	if o == nil {
+		return
+	}
+
+	hasRunningSpawns := false
+	for _, turnID := range stepTurnIDs {
+		if len(o.ActiveSpawnsForParent(turnID)) > 0 {
+			hasRunningSpawns = true
+			break
+		}
+	}
+	if !hasRunningSpawns {
+		return
+	}
+
+	debug.LogKV("looprun", "waiting for spawn cleanup after cancellation",
+		"turn_ids", fmt.Sprintf("%v", stepTurnIDs),
+		"timeout", timeout,
+	)
+	completed := o.WaitForRunningSpawns(stepTurnIDs, timeout)
+	debug.LogKV("looprun", "spawn cleanup wait finished",
+		"turn_ids", fmt.Sprintf("%v", stepTurnIDs),
+		"completed", completed,
+	)
 }
 
 func pollSpawnStatus(ctx context.Context, s *store.Store, parentTurnID int, eventCh chan any) {
