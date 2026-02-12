@@ -18,7 +18,7 @@ type Config struct {
 	Env       map[string]string // extra environment variables
 	Prompt    string            // the prompt/message to send (piped to stdin or passed as arg)
 	MaxTurns  int               // max loop iterations (0 = infinite)
-	SessionID int               // current session ID for recording
+	TurnID    int               // current turn ID for recording
 
 	// EventSink, when set, receives parsed Claude stream events instead of
 	// displaying them to stdout. Used by the TUI to render events in its

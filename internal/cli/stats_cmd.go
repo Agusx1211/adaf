@@ -140,9 +140,9 @@ func runStatsProfile(cmd *cobra.Command, args []string) error {
 		printField("Triggered By", strings.Join(parts, ", "))
 	}
 
-	// Recent sessions
-	if len(ps.SessionIDs) > 0 {
-		recent := ps.SessionIDs
+	// Recent turns
+	if len(ps.TurnIDs) > 0 {
+		recent := ps.TurnIDs
 		if len(recent) > 5 {
 			recent = recent[len(recent)-5:]
 		}
@@ -150,7 +150,7 @@ func runStatsProfile(cmd *cobra.Command, args []string) error {
 		for _, id := range recent {
 			ids = append(ids, fmt.Sprintf("#%d", id))
 		}
-		printField("Recent Sessions", strings.Join(ids, ", "))
+		printField("Recent Turns", strings.Join(ids, ", "))
 	}
 
 	if !ps.LastRunAt.IsZero() {
@@ -192,8 +192,8 @@ func runStatsLoop(cmd *cobra.Command, args []string) error {
 		printField("Step Profiles", strings.Join(parts, ", "))
 	}
 
-	if len(ls.SessionIDs) > 0 {
-		recent := ls.SessionIDs
+	if len(ls.TurnIDs) > 0 {
+		recent := ls.TurnIDs
 		if len(recent) > 5 {
 			recent = recent[len(recent)-5:]
 		}
@@ -201,7 +201,7 @@ func runStatsLoop(cmd *cobra.Command, args []string) error {
 		for _, id := range recent {
 			ids = append(ids, fmt.Sprintf("#%d", id))
 		}
-		printField("Recent Sessions", strings.Join(ids, ", "))
+		printField("Recent Turns", strings.Join(ids, ", "))
 	}
 
 	if !ls.LastRunAt.IsZero() {
@@ -221,12 +221,12 @@ func runStatsMigrate(cmd *cobra.Command, args []string) error {
 
 	globalCfg, _ := config.Load()
 
-	logs, err := s.ListLogs()
+	turns, err := s.ListTurns()
 	if err != nil {
-		return fmt.Errorf("listing logs: %w", err)
+		return fmt.Errorf("listing turns: %w", err)
 	}
 
-	fmt.Printf("Migrating stats from %d session logs...\n", len(logs))
+	fmt.Printf("Migrating stats from %d turn records...\n", len(turns))
 
 	// Build a map of agent name -> profile name for fallback matching.
 	agentToProfile := make(map[string]string)
@@ -239,14 +239,14 @@ func runStatsMigrate(cmd *cobra.Command, args []string) error {
 	// Accumulate stats per profile.
 	profileStatsMap := make(map[string]*store.ProfileStats)
 
-	for _, log := range logs {
-		profileName := log.ProfileName
+	for _, turn := range turns {
+		profileName := turn.ProfileName
 		if profileName == "" {
 			// Fallback: try to match agent name to a known profile.
-			if pn, ok := agentToProfile[log.Agent]; ok {
+			if pn, ok := agentToProfile[turn.Agent]; ok {
 				profileName = pn
 			} else {
-				profileName = log.Agent // Use agent name as last resort.
+				profileName = turn.Agent // Use agent name as last resort.
 			}
 		}
 
@@ -261,21 +261,21 @@ func runStatsMigrate(cmd *cobra.Command, args []string) error {
 		}
 
 		ps.TotalRuns++
-		ps.TotalDuration += log.DurationSecs
-		ps.SessionIDs = append(ps.SessionIDs, log.ID)
+		ps.TotalDuration += turn.DurationSecs
+		ps.TurnIDs = append(ps.TurnIDs, turn.ID)
 
-		if log.BuildState == "success" {
+		if turn.BuildState == "success" {
 			ps.SuccessCount++
-		} else if log.BuildState != "" {
+		} else if turn.BuildState != "" {
 			ps.FailureCount++
 		}
 
-		if !log.Date.IsZero() && log.Date.After(ps.LastRunAt) {
-			ps.LastRunAt = log.Date
+		if !turn.Date.IsZero() && turn.Date.After(ps.LastRunAt) {
+			ps.LastRunAt = turn.Date
 		}
 
 		// Extract detailed metrics from recording.
-		metrics, err := stats.ExtractFromRecording(s, log.ID)
+		metrics, err := stats.ExtractFromRecording(s, turn.ID)
 		if err == nil {
 			ps.TotalCostUSD += metrics.TotalCostUSD
 			ps.TotalInputTok += metrics.InputTokens
@@ -351,7 +351,7 @@ func migrateLoopStats(s *store.Store) {
 		ls.TotalRuns++
 		ls.TotalCycles += run.Cycle + 1
 
-		for _, sid := range run.SessionIDs {
+		for _, sid := range run.TurnIDs {
 			metrics, err := stats.ExtractFromRecording(s, sid)
 			if err == nil {
 				ls.TotalCostUSD += metrics.TotalCostUSD
@@ -363,7 +363,7 @@ func migrateLoopStats(s *store.Store) {
 			ls.StepStats[step.Profile]++
 		}
 
-		ls.SessionIDs = append(ls.SessionIDs, run.SessionIDs...)
+		ls.TurnIDs = append(ls.TurnIDs, run.TurnIDs...)
 
 		if !run.StartedAt.IsZero() && run.StartedAt.After(ls.LastRunAt) {
 			ls.LastRunAt = run.StartedAt

@@ -45,7 +45,7 @@ var rootCmd = &cobra.Command{
   ` + styleBoldCyan + `Autonomous Developer Agent Flow` + colorReset + ` v` + buildinfo.Current().Version + `
 
   Orchestrate AI agents to build, plan, and maintain software projects.
-  adaf tracks plans, issues, decisions, session logs, and recordings
+  adaf tracks plans, issues, decisions, turn logs, and recordings
   so that multiple AI agents (and humans) can collaborate effectively.
 
   Run ` + styleBoldWhite + `adaf status` + colorReset + ` for project overview, or ` + styleBoldWhite + `adaf init` + colorReset + ` to start a new project.

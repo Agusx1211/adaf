@@ -93,7 +93,7 @@ func renderSelector(
 	plans []store.Plan,
 	issues []store.Issue,
 	docs []store.Doc,
-	logs []store.SessionLog,
+	turns []store.Turn,
 	activeSessions []session.SessionMeta,
 	activeLoop *store.LoopRun,
 	profileStats map[string]*store.ProfileStats,
@@ -121,7 +121,7 @@ func renderSelector(
 		plans,
 		issues,
 		docs,
-		logs,
+		turns,
 		activeSessions,
 		activeLoop,
 		profileStats,
@@ -219,7 +219,7 @@ func renderProjectPanel(
 	plans []store.Plan,
 	issues []store.Issue,
 	docs []store.Doc,
-	logs []store.SessionLog,
+	turns []store.Turn,
 	activeSessions []session.SessionMeta,
 	activeLoop *store.LoopRun,
 	profileStats map[string]*store.ProfileStats,
@@ -326,8 +326,8 @@ func renderProjectPanel(
 		lines = append(lines, labelStyle.Render("Issues")+dimStyle.Render("none"))
 	}
 
-	// Sessions count
-	lines = append(lines, labelStyle.Render("Sessions")+valueStyle.Render(fmt.Sprintf("%d", len(logs))))
+	// Turns count
+	lines = append(lines, labelStyle.Render("Turns")+valueStyle.Render(fmt.Sprintf("%d", len(turns))))
 	lines = append(lines, labelStyle.Render("Docs")+valueStyle.Render(fmt.Sprintf("%d", len(docs))))
 
 	lines = append(lines, "")

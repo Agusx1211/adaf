@@ -2,16 +2,19 @@ package agent
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/agusx1211/adaf/internal/detect"
 )
 
 func TestSyncDetectedAgentsPersistsAndPreservesOverrides(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".adaf")
+	// Override the global config dir to a temp directory for this test.
+	origHome := os.Getenv("HOME")
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	defer os.Setenv("HOME", origHome)
 
-	cfg, err := SyncDetectedAgents(root, []detect.DetectedAgent{
+	cfg, err := SyncDetectedAgents([]detect.DetectedAgent{
 		{
 			Name:            "claude",
 			Path:            "/tmp/claude",
@@ -38,11 +41,11 @@ func TestSyncDetectedAgentsPersistsAndPreservesOverrides(t *testing.T) {
 	rec.ModelOverride = "opus"
 	rec.DefaultModel = "opus"
 	cfg.Agents["claude"] = rec
-	if err := SaveAgentsConfig(root, cfg); err != nil {
+	if err := SaveAgentsConfig(cfg); err != nil {
 		t.Fatalf("SaveAgentsConfig() error = %v", err)
 	}
 
-	cfg, err = SyncDetectedAgents(root, []detect.DetectedAgent{
+	cfg, err = SyncDetectedAgents([]detect.DetectedAgent{
 		{
 			Name:            "claude",
 			Path:            "/tmp/claude2",
@@ -69,7 +72,7 @@ func TestSyncDetectedAgentsPersistsAndPreservesOverrides(t *testing.T) {
 		t.Fatalf("expected effective default to keep override, got %q", rec.DefaultModel)
 	}
 
-	if _, err := os.Stat(AgentsConfigPath(root)); err != nil {
+	if _, err := os.Stat(agentsConfigPath()); err != nil {
 		t.Fatalf("expected agents config file to exist: %v", err)
 	}
 }

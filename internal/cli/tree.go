@@ -77,10 +77,10 @@ func printTree(s *store.Store, showAll bool) error {
 	var roots []store.SpawnRecord
 
 	// All parent session IDs that are themselves spawn child sessions.
-	childSessionToSpawn := make(map[int]int) // child_session_id -> spawn_id
+	childTurnToSpawn := make(map[int]int) // child_session_id -> spawn_id
 	for _, r := range records {
-		if r.ChildSessionID > 0 {
-			childSessionToSpawn[r.ChildSessionID] = r.ID
+		if r.ChildTurnID > 0 {
+			childTurnToSpawn[r.ChildTurnID] = r.ID
 		}
 	}
 
@@ -89,9 +89,9 @@ func printTree(s *store.Store, showAll bool) error {
 			continue
 		}
 		// Check if this spawn's parent is itself a spawn child.
-		if _, ok := childSessionToSpawn[r.ParentSessionID]; ok {
+		if _, ok := childTurnToSpawn[r.ParentTurnID]; ok {
 			// This is a nested spawn — group under parent spawn's child session.
-			parentSpawnID := childSessionToSpawn[r.ParentSessionID]
+			parentSpawnID := childTurnToSpawn[r.ParentTurnID]
 			children[parentSpawnID] = append(children[parentSpawnID], r)
 		} else {
 			roots = append(roots, r)

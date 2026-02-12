@@ -99,7 +99,7 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 		&stdoutBuf,
 		recorder.WrapWriter(stdoutW, "stdout"),
 	}
-	if w := newEventSinkWriter(cfg.EventSink, cfg.SessionID, ""); w != nil {
+	if w := newEventSinkWriter(cfg.EventSink, cfg.TurnID, ""); w != nil {
 		stdoutWriters = append(stdoutWriters, w)
 	}
 	cmd.Stdout = io.MultiWriter(stdoutWriters...)
@@ -108,7 +108,7 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 		&stderrBuf,
 		recorder.WrapWriter(stderrW, "stderr"),
 	}
-	if w := newEventSinkWriter(cfg.EventSink, cfg.SessionID, "[stderr] "); w != nil {
+	if w := newEventSinkWriter(cfg.EventSink, cfg.TurnID, "[stderr] "); w != nil {
 		stderrWriters = append(stderrWriters, w)
 	}
 	cmd.Stderr = io.MultiWriter(stderrWriters...)

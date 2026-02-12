@@ -55,7 +55,7 @@ func All() map[string]Agent {
 
 // PopulateFromConfig adds agents found in the persisted config to the registry
 // as generic agents (if not already registered). This avoids running PATH
-// detection — it only uses the previously cached agents.json.
+// detection — it only uses the previously cached ~/.adaf/agents.json.
 func PopulateFromConfig(cfg *AgentsConfig) {
 	if cfg == nil {
 		return

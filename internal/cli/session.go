@@ -57,7 +57,7 @@ func runSessionList(cmd *cobra.Command, args []string) error {
 	}
 
 	// List recording directories (records/ and legacy recordings/)
-	printHeader("Session Recordings")
+	printHeader("Turn Recordings")
 
 	seen := make(map[int]bool)
 	var rows [][]string
@@ -70,16 +70,16 @@ func runSessionList(cmd *cobra.Command, args []string) error {
 			if !e.IsDir() {
 				continue
 			}
-			sessionID, err := strconv.Atoi(e.Name())
-			if err != nil || seen[sessionID] {
+			turnID, err := strconv.Atoi(e.Name())
+			if err != nil || seen[turnID] {
 				continue
 			}
 
-			rec, err := s.LoadRecording(sessionID)
+			rec, err := s.LoadRecording(turnID)
 			if err != nil {
 				continue
 			}
-			seen[sessionID] = true
+			seen[turnID] = true
 
 			duration := "-"
 			if !rec.EndTime.IsZero() {
@@ -95,7 +95,7 @@ func runSessionList(cmd *cobra.Command, args []string) error {
 			}
 
 			rows = append(rows, []string{
-				fmt.Sprintf("#%d", rec.SessionID),
+				fmt.Sprintf("#%d", rec.TurnID),
 				rec.Agent,
 				rec.StartTime.Format("2006-01-02 15:04"),
 				duration,
@@ -110,7 +110,7 @@ func runSessionList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	headers := []string{"SESSION", "AGENT", "STARTED", "DURATION", "EVENTS", "EXIT"}
+	headers := []string{"TURN", "AGENT", "STARTED", "DURATION", "EVENTS", "EXIT"}
 	printTable(headers, rows)
 
 	fmt.Printf("\n  %sTotal: %d recording(s)%s\n\n", colorDim, len(rows), colorReset)
@@ -123,17 +123,17 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	sessionID, err := strconv.Atoi(args[0])
+	turnID, err := strconv.Atoi(args[0])
 	if err != nil {
-		return fmt.Errorf("invalid session ID %q: must be a number", args[0])
+		return fmt.Errorf("invalid turn ID %q: must be a number", args[0])
 	}
 
-	rec, err := s.LoadRecording(sessionID)
+	rec, err := s.LoadRecording(turnID)
 	if err != nil {
-		return fmt.Errorf("loading recording for session #%d: %w", sessionID, err)
+		return fmt.Errorf("loading recording for turn #%d: %w", turnID, err)
 	}
 
-	printHeader(fmt.Sprintf("Session Recording #%d", rec.SessionID))
+	printHeader(fmt.Sprintf("Turn Recording #%d", rec.TurnID))
 
 	printField("Agent", rec.Agent)
 	printField("Started", rec.StartTime.Format("2006-01-02 15:04:05 UTC"))

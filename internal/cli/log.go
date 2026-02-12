@@ -9,82 +9,82 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var logCmd = &cobra.Command{
-	Use:     "log",
-	Aliases: []string{"logs", "session-log", "session_log", "session-logs", "session_logs"},
-	Short:   "Manage session logs",
-	Long: `View and create session logs that track what each agent session accomplished.
+var turnCmd = &cobra.Command{
+	Use:     "turn",
+	Aliases: []string{"turns", "log", "logs", "turn-log"},
+	Short:   "Manage turn records",
+	Long: `View and create turn records that track what each agent turn accomplished.
 
-Session logs capture the objective, what was built, key decisions, challenges,
+Turn records capture the objective, what was built, key decisions, challenges,
 current state, known issues, and next steps. They serve as the handoff
-mechanism between agent sessions, enabling relay-style collaboration.
+mechanism between agent turns, enabling relay-style collaboration.
 
 Examples:
-  adaf log list                                    # List all logs
-  adaf log latest                                  # Show most recent
-  adaf log show 5                                  # Show log #5
-  adaf log create --agent claude --objective "Fix auth" --built "JWT implementation"`,
+  adaf turn list                                    # List all turns
+  adaf turn latest                                  # Show most recent
+  adaf turn show 5                                  # Show turn #5
+  adaf turn create --agent claude --objective "Fix auth" --built "JWT implementation"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
 	},
 }
 
-var logListCmd = &cobra.Command{
+var turnListCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls", "l"},
-	Short:   "List all session logs",
-	RunE:    runLogList,
+	Short:   "List all turns",
+	RunE:    runTurnList,
 }
 
-var logShowCmd = &cobra.Command{
+var turnShowCmd = &cobra.Command{
 	Use:     "show <id>",
 	Aliases: []string{"get", "view", "display"},
-	Short:   "Show a full session log",
+	Short:   "Show a full turn record",
 	Args:    cobra.ExactArgs(1),
-	RunE:    runLogShow,
+	RunE:    runTurnShow,
 }
 
-var logLatestCmd = &cobra.Command{
+var turnLatestCmd = &cobra.Command{
 	Use:     "latest",
 	Aliases: []string{"last", "recent"},
-	Short:   "Show the most recent session log",
-	RunE:    runLogLatest,
+	Short:   "Show the most recent turn record",
+	RunE:    runTurnLatest,
 }
 
-var logCreateCmd = &cobra.Command{
+var turnCreateCmd = &cobra.Command{
 	Use:     "create",
 	Aliases: []string{"new", "add"},
-	Short:   "Create a new session log entry",
-	RunE:    runLogCreate,
+	Short:   "Create a new turn record entry",
+	RunE:    runTurnCreate,
 }
 
 func init() {
-	logListCmd.Flags().String("plan", "", "Filter logs by plan ID")
+	turnListCmd.Flags().String("plan", "", "Filter turns by plan ID")
 
-	logCreateCmd.Flags().String("agent", "", "Agent name (required)")
-	logCreateCmd.Flags().String("model", "", "Agent model")
-	logCreateCmd.Flags().String("commit", "", "Commit hash")
-	logCreateCmd.Flags().String("plan", "", "Plan ID associated with this session")
-	logCreateCmd.Flags().String("objective", "", "Session objective (required)")
-	logCreateCmd.Flags().String("built", "", "What was built")
-	logCreateCmd.Flags().String("decisions", "", "Key decisions made")
-	logCreateCmd.Flags().String("challenges", "", "Challenges encountered")
-	logCreateCmd.Flags().String("state", "", "Current state of the project")
-	logCreateCmd.Flags().String("issues", "", "Known issues")
-	logCreateCmd.Flags().String("next", "", "Next steps")
-	logCreateCmd.Flags().String("build-state", "", "Build state (compiles, tests pass, etc.)")
-	logCreateCmd.Flags().Int("duration", 0, "Session duration in seconds")
-	_ = logCreateCmd.MarkFlagRequired("agent")
-	_ = logCreateCmd.MarkFlagRequired("objective")
+	turnCreateCmd.Flags().String("agent", "", "Agent name (required)")
+	turnCreateCmd.Flags().String("model", "", "Agent model")
+	turnCreateCmd.Flags().String("commit", "", "Commit hash")
+	turnCreateCmd.Flags().String("plan", "", "Plan ID associated with this turn")
+	turnCreateCmd.Flags().String("objective", "", "Turn objective (required)")
+	turnCreateCmd.Flags().String("built", "", "What was built")
+	turnCreateCmd.Flags().String("decisions", "", "Key decisions made")
+	turnCreateCmd.Flags().String("challenges", "", "Challenges encountered")
+	turnCreateCmd.Flags().String("state", "", "Current state of the project")
+	turnCreateCmd.Flags().String("issues", "", "Known issues")
+	turnCreateCmd.Flags().String("next", "", "Next steps")
+	turnCreateCmd.Flags().String("build-state", "", "Build state (compiles, tests pass, etc.)")
+	turnCreateCmd.Flags().Int("duration", 0, "Turn duration in seconds")
+	_ = turnCreateCmd.MarkFlagRequired("agent")
+	_ = turnCreateCmd.MarkFlagRequired("objective")
 
-	logCmd.AddCommand(logListCmd)
-	logCmd.AddCommand(logShowCmd)
-	logCmd.AddCommand(logLatestCmd)
-	logCmd.AddCommand(logCreateCmd)
-	rootCmd.AddCommand(logCmd)
+	turnCmd.AddCommand(turnListCmd)
+	turnCmd.AddCommand(turnShowCmd)
+	turnCmd.AddCommand(turnLatestCmd)
+	turnCmd.AddCommand(turnCreateCmd)
+	rootCmd.AddCommand(turnCmd)
 }
 
-func runLogList(cmd *cobra.Command, args []string) error {
+func runTurnList(cmd *cobra.Command, args []string) error {
 	s, err := openStoreRequired()
 	if err != nil {
 		return err
@@ -97,50 +97,50 @@ func runLogList(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	logs, err := s.ListLogs()
+	turns, err := s.ListTurns()
 	if err != nil {
-		return fmt.Errorf("listing logs: %w", err)
+		return fmt.Errorf("listing turns: %w", err)
 	}
 	if planFilter != "" {
-		var filtered []store.SessionLog
-		for _, l := range logs {
-			if l.PlanID == planFilter {
-				filtered = append(filtered, l)
+		var filtered []store.Turn
+		for _, t := range turns {
+			if t.PlanID == planFilter {
+				filtered = append(filtered, t)
 			}
 		}
-		logs = filtered
+		turns = filtered
 	}
 
-	printHeader("Session Logs")
+	printHeader("Turns")
 
-	if len(logs) == 0 {
-		fmt.Printf("  %sNo session logs found.%s\n\n", colorDim, colorReset)
+	if len(turns) == 0 {
+		fmt.Printf("  %sNo turns found.%s\n\n", colorDim, colorReset)
 		return nil
 	}
 
 	headers := []string{"ID", "DATE", "AGENT", "PLAN", "OBJECTIVE", "BUILD"}
 	var rows [][]string
-	for _, l := range logs {
+	for _, t := range turns {
 		plan := "shared"
-		if l.PlanID != "" {
-			plan = l.PlanID
+		if t.PlanID != "" {
+			plan = t.PlanID
 		}
 		rows = append(rows, []string{
-			fmt.Sprintf("#%d", l.ID),
-			l.Date.Format("2006-01-02 15:04"),
-			l.Agent,
+			fmt.Sprintf("#%d", t.ID),
+			t.Date.Format("2006-01-02 15:04"),
+			t.Agent,
 			plan,
-			truncate(l.Objective, 45),
-			truncate(l.BuildState, 15),
+			truncate(t.Objective, 45),
+			truncate(t.BuildState, 15),
 		})
 	}
 	printTable(headers, rows)
 
-	fmt.Printf("\n  %sTotal: %d session(s)%s\n\n", colorDim, len(logs), colorReset)
+	fmt.Printf("\n  %sTotal: %d turn(s)%s\n\n", colorDim, len(turns), colorReset)
 	return nil
 }
 
-func runLogShow(cmd *cobra.Command, args []string) error {
+func runTurnShow(cmd *cobra.Command, args []string) error {
 	s, err := openStoreRequired()
 	if err != nil {
 		return err
@@ -148,40 +148,40 @@ func runLogShow(cmd *cobra.Command, args []string) error {
 
 	id, err := strconv.Atoi(args[0])
 	if err != nil {
-		return fmt.Errorf("invalid log ID %q: must be a number", args[0])
+		return fmt.Errorf("invalid turn ID %q: must be a number", args[0])
 	}
 
-	log, err := s.GetLog(id)
+	turn, err := s.GetTurn(id)
 	if err != nil {
-		return fmt.Errorf("getting log #%d: %w", id, err)
+		return fmt.Errorf("getting turn #%d: %w", id, err)
 	}
 
-	printSessionLog(log)
+	printTurn(turn)
 	return nil
 }
 
-func runLogLatest(cmd *cobra.Command, args []string) error {
+func runTurnLatest(cmd *cobra.Command, args []string) error {
 	s, err := openStoreRequired()
 	if err != nil {
 		return err
 	}
 
-	log, err := s.LatestLog()
+	turn, err := s.LatestTurn()
 	if err != nil {
-		return fmt.Errorf("getting latest log: %w", err)
+		return fmt.Errorf("getting latest turn: %w", err)
 	}
 
-	if log == nil {
+	if turn == nil {
 		fmt.Println()
-		fmt.Printf("  %sNo session logs found.%s\n\n", colorDim, colorReset)
+		fmt.Printf("  %sNo turns found.%s\n\n", colorDim, colorReset)
 		return nil
 	}
 
-	printSessionLog(log)
+	printTurn(turn)
 	return nil
 }
 
-func runLogCreate(cmd *cobra.Command, args []string) error {
+func runTurnCreate(cmd *cobra.Command, args []string) error {
 	s, err := openStoreRequired()
 	if err != nil {
 		return err
@@ -214,7 +214,7 @@ func runLogCreate(cmd *cobra.Command, args []string) error {
 	buildState, _ := cmd.Flags().GetString("build-state")
 	duration, _ := cmd.Flags().GetInt("duration")
 
-	log := &store.SessionLog{
+	turn := &store.Turn{
 		Agent:        agent,
 		AgentModel:   model,
 		CommitHash:   commit,
@@ -230,52 +230,52 @@ func runLogCreate(cmd *cobra.Command, args []string) error {
 		DurationSecs: duration,
 	}
 
-	if err := s.CreateLog(log); err != nil {
-		return fmt.Errorf("creating log: %w", err)
+	if err := s.CreateTurn(turn); err != nil {
+		return fmt.Errorf("creating turn: %w", err)
 	}
 
 	fmt.Println()
-	fmt.Printf("  %sSession log #%d created.%s\n", styleBoldGreen, log.ID, colorReset)
-	printField("Agent", log.Agent)
-	if log.PlanID != "" {
-		printField("Plan", log.PlanID)
+	fmt.Printf("  %sTurn #%d created.%s\n", styleBoldGreen, turn.ID, colorReset)
+	printField("Agent", turn.Agent)
+	if turn.PlanID != "" {
+		printField("Plan", turn.PlanID)
 	}
-	printField("Objective", log.Objective)
+	printField("Objective", turn.Objective)
 	fmt.Println()
 
 	return nil
 }
 
-func printSessionLog(log *store.SessionLog) {
-	printHeader(fmt.Sprintf("Session Log #%d", log.ID))
+func printTurn(turn *store.Turn) {
+	printHeader(fmt.Sprintf("Turn #%d", turn.ID))
 
-	printField("Date", log.Date.Format("2006-01-02 15:04:05 UTC"))
-	printField("Agent", log.Agent)
-	if log.AgentModel != "" {
-		printField("Model", log.AgentModel)
+	printField("Date", turn.Date.Format("2006-01-02 15:04:05 UTC"))
+	printField("Agent", turn.Agent)
+	if turn.AgentModel != "" {
+		printField("Model", turn.AgentModel)
 	}
-	if log.CommitHash != "" {
-		printField("Commit", log.CommitHash)
+	if turn.CommitHash != "" {
+		printField("Commit", turn.CommitHash)
 	}
-	if log.DurationSecs > 0 {
-		mins := log.DurationSecs / 60
-		secs := log.DurationSecs % 60
+	if turn.DurationSecs > 0 {
+		mins := turn.DurationSecs / 60
+		secs := turn.DurationSecs % 60
 		printField("Duration", fmt.Sprintf("%dm %ds", mins, secs))
 	}
-	if log.BuildState != "" {
-		printField("Build State", log.BuildState)
+	if turn.BuildState != "" {
+		printField("Build State", turn.BuildState)
 	}
-	if log.PlanID != "" {
-		printField("Plan", log.PlanID)
+	if turn.PlanID != "" {
+		printField("Plan", turn.PlanID)
 	}
 
-	printLogSection("Objective", log.Objective)
-	printLogSection("What Was Built", log.WhatWasBuilt)
-	printLogSection("Key Decisions", log.KeyDecisions)
-	printLogSection("Challenges", log.Challenges)
-	printLogSection("Current State", log.CurrentState)
-	printLogSection("Known Issues", log.KnownIssues)
-	printLogSection("Next Steps", log.NextSteps)
+	printLogSection("Objective", turn.Objective)
+	printLogSection("What Was Built", turn.WhatWasBuilt)
+	printLogSection("Key Decisions", turn.KeyDecisions)
+	printLogSection("Challenges", turn.Challenges)
+	printLogSection("Current State", turn.CurrentState)
+	printLogSection("Known Issues", turn.KnownIssues)
+	printLogSection("Next Steps", turn.NextSteps)
 
 	fmt.Println()
 }

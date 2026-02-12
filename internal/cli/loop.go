@@ -241,7 +241,7 @@ func loopStart(cmd *cobra.Command, args []string) error {
 }
 
 func runLoopForeground(parentCtx context.Context, s *store.Store, globalCfg *config.GlobalConfig, loopDef *config.LoopDef, projCfg *store.ProjectConfig, planID string) error {
-	agentsCfg, err := agent.LoadAgentsConfig(s.Root())
+	agentsCfg, err := agent.LoadAgentsConfig()
 	if err != nil {
 		return fmt.Errorf("loading agent configuration: %w", err)
 	}
@@ -442,7 +442,7 @@ func loopStatus(cmd *cobra.Command, args []string) error {
 		step := run.Steps[run.StepIndex]
 		printField("Current Step", fmt.Sprintf("%d/%d (%s)", run.StepIndex+1, len(run.Steps), step.Profile))
 	}
-	printField("Sessions", fmt.Sprintf("%d", len(run.SessionIDs)))
+	printField("Turns", fmt.Sprintf("%d", len(run.TurnIDs)))
 	printField("Started", run.StartedAt.Format("2006-01-02 15:04:05"))
 	if s.IsLoopStopped(run.ID) {
 		printFieldColored("Stop Signal", "received", colorYellow)

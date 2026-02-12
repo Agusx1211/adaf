@@ -13,7 +13,7 @@ var statusCmd = &cobra.Command{
 	Aliases: []string{"info", "state", "st"},
 	Short:   "Show comprehensive project status",
 	Long: `Display a comprehensive summary of the project including plans, issues,
-session history, architectural decisions, and documents.`,
+turn history, architectural decisions, and documents.`,
 	RunE: runStatus,
 }
 
@@ -80,8 +80,8 @@ func runStatusBrief(s *store.Store) error {
 		fmt.Printf("  |  Active: none")
 	}
 
-	logs, _ := s.ListLogs()
-	fmt.Printf("  |  %d session(s)\n", len(logs))
+	turns, _ := s.ListTurns()
+	fmt.Printf("  |  %d turn(s)\n", len(turns))
 
 	fmt.Println()
 	fmt.Printf("  Run %sadaf status%s for full details.\n\n", styleBoldWhite, colorReset)
@@ -192,13 +192,13 @@ func runStatusFull(s *store.Store) error {
 		fmt.Printf("  %sShared open issues:%s %d\n", colorDim, colorReset, sharedOpen)
 	}
 
-	logs, _ := s.ListLogs()
-	printHeader("Sessions")
-	fmt.Printf("  Total: %d session(s)\n", len(logs))
-	if len(logs) > 0 {
-		latest := logs[len(logs)-1]
+	turns, _ := s.ListTurns()
+	printHeader("Turns")
+	fmt.Printf("  Total: %d turn(s)\n", len(turns))
+	if len(turns) > 0 {
+		latest := turns[len(turns)-1]
 		fmt.Println()
-		fmt.Printf("  %sLatest Session (#%d):%s\n", colorBold, latest.ID, colorReset)
+		fmt.Printf("  %sLatest Turn (#%d):%s\n", colorBold, latest.ID, colorReset)
 		printField("Date", latest.Date.Format("2006-01-02 15:04:05"))
 		printField("Agent", latest.Agent)
 		if latest.AgentModel != "" {

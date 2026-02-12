@@ -61,8 +61,8 @@ func TestParseGeminiNDJSON(t *testing.T) {
 	if events[0].Parsed.Subtype != "init" {
 		t.Errorf("event[0].Subtype = %q, want %q", events[0].Parsed.Subtype, "init")
 	}
-	if events[0].Parsed.SessionID != "gem-123" {
-		t.Errorf("event[0].SessionID = %q, want %q", events[0].Parsed.SessionID, "gem-123")
+	if events[0].Parsed.TurnID != "gem-123" {
+		t.Errorf("event[0].TurnID = %q, want %q", events[0].Parsed.TurnID, "gem-123")
 	}
 	if events[0].Parsed.Model != "gemini-2.5-pro" {
 		t.Errorf("event[0].Model = %q, want %q", events[0].Parsed.Model, "gemini-2.5-pro")

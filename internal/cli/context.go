@@ -7,40 +7,44 @@ import (
 	"strings"
 )
 
-func sessionIDFromEnv() (int, bool, error) {
-	sessionEnv := strings.TrimSpace(os.Getenv("ADAF_SESSION_ID"))
-	if sessionEnv == "" {
+func turnIDFromEnv() (int, bool, error) {
+	turnEnv := strings.TrimSpace(os.Getenv("ADAF_TURN_ID"))
+	if turnEnv == "" {
+		// Backward compat: fall back to ADAF_SESSION_ID
+		turnEnv = strings.TrimSpace(os.Getenv("ADAF_SESSION_ID"))
+	}
+	if turnEnv == "" {
 		return 0, false, nil
 	}
 
-	sessionID, err := strconv.Atoi(sessionEnv)
-	if err != nil || sessionID <= 0 {
-		return 0, false, fmt.Errorf("invalid ADAF_SESSION_ID: %q", sessionEnv)
+	turnID, err := strconv.Atoi(turnEnv)
+	if err != nil || turnID <= 0 {
+		return 0, false, fmt.Errorf("invalid ADAF_TURN_ID: %q", turnEnv)
 	}
-	return sessionID, true, nil
+	return turnID, true, nil
 }
 
-func resolveOptionalSessionID(sessionFlag int) (int, error) {
-	if sessionFlag > 0 {
-		return sessionFlag, nil
+func resolveOptionalTurnID(turnFlag int) (int, error) {
+	if turnFlag > 0 {
+		return turnFlag, nil
 	}
-	sessionID, found, err := sessionIDFromEnv()
+	turnID, found, err := turnIDFromEnv()
 	if err != nil {
 		return 0, err
 	}
 	if found {
-		return sessionID, nil
+		return turnID, nil
 	}
 	return 0, nil
 }
 
-func resolveRequiredSessionID(sessionFlag int) (int, error) {
-	sessionID, err := resolveOptionalSessionID(sessionFlag)
+func resolveRequiredTurnID(turnFlag int) (int, error) {
+	turnID, err := resolveOptionalTurnID(turnFlag)
 	if err != nil {
 		return 0, err
 	}
-	if sessionID <= 0 {
+	if turnID <= 0 {
 		return 0, fmt.Errorf("--session is required (or run inside an adaf agent session)")
 	}
-	return sessionID, nil
+	return turnID, nil
 }

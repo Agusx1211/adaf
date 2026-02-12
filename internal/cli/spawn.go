@@ -29,7 +29,7 @@ The child agent runs in its own branch and can be monitored, messaged,
 and eventually merged or rejected. Use --read-only for analysis tasks
 that don't need a separate worktree.
 
-Must be called from within an adaf agent session (ADAF_SESSION_ID set).
+Must be called from within an adaf agent turn (ADAF_TURN_ID or ADAF_SESSION_ID set).
 
 Examples:
   adaf spawn --profile junior --task "Write unit tests for auth.go"
@@ -77,7 +77,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		task = string(data)
 	}
 
-	parentSessionID, parentProfile, err := getSessionContext()
+	parentTurnID, parentProfile, err := getTurnContext()
 	if err != nil {
 		return err
 	}
@@ -94,7 +94,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	}
 
 	spawnID, err := o.Spawn(context.Background(), orchestrator.SpawnRequest{
-		ParentSessionID: parentSessionID,
+		ParentTurnID: parentTurnID,
 		ParentProfile:   parentProfile,
 		ChildProfile:    profileName,
 		PlanID:          planID,
@@ -134,7 +134,7 @@ func init() {
 
 func runSpawnStatus(cmd *cobra.Command, args []string) error {
 	spawnID, _ := cmd.Flags().GetInt("spawn-id")
-	parentSessionID, _, err := getSessionContext()
+	parentTurnID, _, err := getTurnContext()
 	if err != nil {
 		return err
 	}
@@ -153,7 +153,7 @@ func runSpawnStatus(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	records, err := s.SpawnsByParent(parentSessionID)
+	records, err := s.SpawnsByParent(parentTurnID)
 	if err != nil {
 		return err
 	}
@@ -183,7 +183,7 @@ func init() {
 
 func runSpawnWait(cmd *cobra.Command, args []string) error {
 	spawnID, _ := cmd.Flags().GetInt("spawn-id")
-	parentSessionID, _, err := getSessionContext()
+	parentTurnID, _, err := getTurnContext()
 	if err != nil {
 		return err
 	}
@@ -199,7 +199,7 @@ func runSpawnWait(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	results := o.Wait(parentSessionID)
+	results := o.Wait(parentTurnID)
 	for _, r := range results {
 		fmt.Printf("Spawn #%d: status=%s exit_code=%d\n", r.SpawnID, r.Status, r.ExitCode)
 	}
@@ -343,7 +343,7 @@ func runSpawnWatch(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("spawn %d not found: %w", spawnID, err)
 		}
-		if rec.ChildSessionID > 0 {
+		if rec.ChildTurnID > 0 {
 			break
 		}
 		if rec.Status == "completed" || rec.Status == "failed" || rec.Status == "merged" || rec.Status == "rejected" {
@@ -352,12 +352,12 @@ func runSpawnWatch(cmd *cobra.Command, args []string) error {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	if rec.ChildSessionID == 0 {
+	if rec.ChildTurnID == 0 {
 		return fmt.Errorf("spawn %d has not started a session yet", spawnID)
 	}
 
 	// Find events file.
-	eventsPath := filepath.Join(s.Root(), "records", fmt.Sprintf("%d", rec.ChildSessionID), "events.jsonl")
+	eventsPath := filepath.Join(s.Root(), "records", fmt.Sprintf("%d", rec.ChildTurnID), "events.jsonl")
 
 	// Tail the events file.
 	var offset int64
@@ -496,12 +496,12 @@ func runSpawnInspect(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("spawn %d not found: %w", spawnID, err)
 	}
-	if rec.ChildSessionID == 0 {
+	if rec.ChildTurnID == 0 {
 		fmt.Println("Spawn has not started a child session yet.")
 		return nil
 	}
 
-	eventsPath := filepath.Join(s.Root(), "records", fmt.Sprintf("%d", rec.ChildSessionID), "events.jsonl")
+	eventsPath := filepath.Join(s.Root(), "records", fmt.Sprintf("%d", rec.ChildTurnID), "events.jsonl")
 	data, err := os.ReadFile(eventsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -609,20 +609,24 @@ func resolveCurrentDelegation(parentProfile string) (*config.DelegationConfig, e
 	return &deleg, nil
 }
 
-func getSessionContext() (int, string, error) {
-	sessionStr := os.Getenv("ADAF_SESSION_ID")
+func getTurnContext() (int, string, error) {
+	turnStr := os.Getenv("ADAF_TURN_ID")
+	if turnStr == "" {
+		// Backward compat: fall back to ADAF_SESSION_ID
+		turnStr = os.Getenv("ADAF_SESSION_ID")
+	}
 	profile := os.Getenv("ADAF_PROFILE")
 
-	if sessionStr == "" || profile == "" {
-		return 0, "", fmt.Errorf("ADAF_SESSION_ID and ADAF_PROFILE environment variables must be set (are you running inside an adaf agent session?)")
+	if turnStr == "" || profile == "" {
+		return 0, "", fmt.Errorf("ADAF_TURN_ID and ADAF_PROFILE environment variables must be set (are you running inside an adaf agent turn?)")
 	}
 
-	sessionID, err := strconv.Atoi(sessionStr)
+	turnID, err := strconv.Atoi(turnStr)
 	if err != nil {
-		return 0, "", fmt.Errorf("invalid ADAF_SESSION_ID: %w", err)
+		return 0, "", fmt.Errorf("invalid ADAF_TURN_ID: %w", err)
 	}
 
-	return sessionID, profile, nil
+	return turnID, profile, nil
 }
 
 func ensureOrchestrator() (*orchestrator.Orchestrator, error) {

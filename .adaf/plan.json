@@ -1,0 +1,125 @@
+{
+  "title": "ADAF v2 - Refactor, Standalone Mode \u0026 Web UI",
+  "description": "Major evolution of ADAF: (1) code quality cleanup and refactoring, (2) standalone agent mode for single-run or N-run sessions with user-provided prompts instead of plans, fully integrated into the TUI, and (3) a web server providing remote UI for managing loops, standalone sessions, and a built-in terminal, accessible from desktop and mobile.",
+  "phases": [
+    {
+      "id": "p1-audit",
+      "title": "Code Audit \u0026 Cleanup Targets",
+      "description": "Audit the entire codebase to identify refactoring targets. Focus areas:\n- runtui/model.go is ~52KB in a single file - identify logical splits\n- tui/app.go has 53+ states in one state machine - consider decomposing\n- cli/ has 31 files with some inconsistent patterns - normalize\n- Identify dead code, unused exports, and overly complex functions\n- Document tech debt items as issues in the store\n- Check for error handling inconsistencies\n- Identify any code duplication across agent implementations",
+      "status": "not_started",
+      "priority": 1
+    },
+    {
+      "id": "p2-runtui-refactor",
+      "title": "Split and Refactor runtui Package",
+      "description": "Break up runtui/model.go (~52KB) into logical submodules:\n- Extract panel rendering (left panel, right panel, command panel) into separate files\n- Extract event handling logic by event type\n- Extract scroll/pagination state into its own type\n- Extract spawn hierarchy rendering\n- Extract markdown/ANSI rendering helpers\n- Keep Model as the coordinator but delegate rendering and state to sub-components\n- Ensure all existing TUI behavior is preserved (run existing tests after each split)",
+      "status": "not_started",
+      "priority": 1,
+      "depends_on": [
+        "p1-audit"
+      ]
+    },
+    {
+      "id": "p3-tui-refactor",
+      "title": "Decompose TUI State Machine",
+      "description": "Refactor tui/app.go's monolithic state machine:\n- Group related states into sub-state-machines (e.g. profile wizard, loop wizard, plan menu, settings)\n- Each sub-state-machine becomes its own file with its own Update/View methods\n- AppModel delegates to the active sub-state-machine\n- Extract selector rendering into its own component\n- This sets the foundation for standalone mode UI integration",
+      "status": "not_started",
+      "priority": 1,
+      "depends_on": [
+        "p1-audit"
+      ]
+    },
+    {
+      "id": "p4-agent-cleanup",
+      "title": "Normalize Agent Implementations",
+      "description": "Clean up agent integration code:\n- Extract common patterns (process group setup, env overlay, recording) into shared helpers\n- Reduce boilerplate across claude.go, codex.go, gemini.go, vibe.go, opencode.go, generic.go\n- Standardize error wrapping and exit code handling\n- Ensure all agents properly handle context cancellation\n- Verify process cleanup paths (no orphan processes)\n- Add missing tests for edge cases",
+      "status": "not_started",
+      "priority": 2,
+      "depends_on": [
+        "p1-audit"
+      ]
+    },
+    {
+      "id": "p5-store-cleanup",
+      "title": "Store Package Cleanup",
+      "description": "Refactor store.go (1,320 lines):\n- Split into logical files by domain (plan_store.go, session_store.go, spawn_store.go, loop_store.go, signal_store.go)\n- Keep Store struct as the unified type but organize methods by file\n- Standardize file locking patterns\n- Add better error messages for common failure modes\n- Consider adding a lightweight migration system for schema changes",
+      "status": "not_started",
+      "priority": 2,
+      "depends_on": [
+        "p1-audit"
+      ]
+    },
+    {
+      "id": "p6-standalone-core",
+      "title": "Standalone Mode - Core Engine",
+      "description": "Add a standalone (non-loop) execution mode:\n- New 'adaf ask' (or 'adaf run --standalone') command that takes a prompt from the user (flag, stdin, or interactive input)\n- Runs a single agent session with that prompt, waits for completion, and exits\n- Support --count N flag to run N times sequentially (default 1)\n- Support --agent/--profile flags to select which agent to use\n- Support --model flag for model override\n- The session is still recorded and logged like any other session\n- The daemon is still used for detach/reattach support, but the flow is: prompt -\u003e run -\u003e done (no loop)\n- If --count \u003e 1, each run gets the same prompt but can optionally include the previous run's output as context\n- Exit code reflects the agent's result",
+      "status": "not_started",
+      "priority": 1,
+      "depends_on": [
+        "p4-agent-cleanup"
+      ]
+    },
+    {
+      "id": "p7-standalone-tui",
+      "title": "Standalone Mode - TUI Integration",
+      "description": "Integrate standalone mode into the Bubble Tea TUI:\n- Add a 'Quick Run' or 'Ask' option in the main selector alongside profiles and loops\n- Prompt input: text area where user types their prompt (multi-line support)\n- Agent/profile picker dropdown\n- Model selector (optional override)\n- Count selector (1, 2, 3, N)\n- Live output view reuses the existing runtui display\n- Progress indicator showing run X of N when count \u003e 1\n- After completion, show summary and option to run again with modified prompt\n- Keyboard shortcut for quick access (e.g. 'a' for ask from selector)\n- The standalone session should appear in the sessions list for later review",
+      "status": "not_started",
+      "priority": 1,
+      "depends_on": [
+        "p6-standalone-core",
+        "p3-tui-refactor"
+      ]
+    },
+    {
+      "id": "p8-web-foundation",
+      "title": "Web Server - Foundation \u0026 API",
+      "description": "Add an HTTP/WebSocket server to ADAF:\n- New 'adaf web' command that starts the server (configurable port, default 8080)\n- REST API endpoints:\n  - GET /api/status - project status\n  - GET /api/sessions - list sessions (active + recent)\n  - GET /api/sessions/:id - session details\n  - POST /api/sessions/:id/stop - stop a session\n  - GET /api/loops - list loop definitions\n  - POST /api/loops/:name/start - start a loop\n  - POST /api/loops/:name/stop - stop a running loop\n  - GET /api/loopruns - list loop runs\n  - GET /api/plans - list plans\n  - GET /api/plans/:id - plan details\n  - GET /api/profiles - list profiles\n  - GET /api/agents - list detected agents\n  - POST /api/ask - start a standalone session\n- WebSocket endpoint for live event streaming:\n  - WS /ws/sessions/:id/events - stream session events in real time\n  - WS /ws/loops/:name/events - stream loop events\n- Authentication: optional API key (configured in ~/.adaf/config.json)\n- CORS support for local development\n- Use stdlib net/http + gorilla/websocket (or nhooyr.io/websocket for fewer deps)\n- Internal package: internal/web/",
+      "status": "not_started",
+      "priority": 2,
+      "depends_on": [
+        "p6-standalone-core"
+      ]
+    },
+    {
+      "id": "p9-web-ui",
+      "title": "Web Server - Frontend UI",
+      "description": "Build the web frontend (embedded in the Go binary):\n- Technology: vanilla JS/HTML/CSS or lightweight framework (Preact/Alpine.js) - keep deps minimal\n- Embedded via Go embed directive (internal/web/static/)\n- Pages/Views:\n  - Dashboard: project status, active sessions, recent runs\n  - Sessions list: all sessions with status, agent, duration, filter/sort\n  - Session detail: live streaming output (via WebSocket), session metadata, controls (stop/pause)\n  - Loops: list loops, start/stop controls, current cycle info\n  - Loop detail: step-by-step progress, spawn tree, messages\n  - Plans: plan viewer with phase status\n  - Standalone/Ask: prompt input, agent selector, run button, live output\n  - Settings: profile/loop management\n- Responsive design: works on both desktop and mobile\n- Dark theme matching terminal aesthetics\n- Auto-reconnect WebSocket connections\n- Toast notifications for session completions/failures",
+      "status": "not_started",
+      "priority": 2,
+      "depends_on": [
+        "p8-web-foundation"
+      ]
+    },
+    {
+      "id": "p10-web-terminal",
+      "title": "Web Server - Built-in Terminal",
+      "description": "Add a web-based terminal emulator:\n- Embed xterm.js in the web UI\n- Backend: WebSocket-backed PTY (os/exec with pty allocation)\n- Endpoint: WS /ws/terminal - spawns a shell session\n- Support multiple terminal tabs\n- Terminal can run adaf CLI commands directly\n- Can also be used to run arbitrary shell commands in the project directory\n- Optional: restrict terminal access with authentication\n- Handle resize events (SIGWINCH forwarding)\n- Graceful cleanup on disconnect\n- Consider using creack/pty for PTY allocation",
+      "status": "not_started",
+      "priority": 3,
+      "depends_on": [
+        "p9-web-ui"
+      ]
+    },
+    {
+      "id": "p11-web-remote",
+      "title": "Web Server - Remote Access \u0026 Polish",
+      "description": "Make the web server suitable for remote access:\n- TLS support (auto-generate self-signed cert or use Let's Encrypt with ACME)\n- Authentication: password or token-based auth (not just API key)\n- Rate limiting for public-facing deployments\n- Session timeout and idle disconnect\n- Mobile-optimized touch interactions\n- Push notifications (browser Notification API) for session events\n- Shareable session URLs\n- Connection status indicator\n- Offline resilience (queue actions when disconnected)\n- 'adaf web --expose' mode for LAN/public access vs default localhost-only",
+      "status": "not_started",
+      "priority": 3,
+      "depends_on": [
+        "p10-web-terminal"
+      ]
+    }
+  ],
+  "critical_path": [
+    "p1-audit",
+    "p3-tui-refactor",
+    "p6-standalone-core",
+    "p7-standalone-tui",
+    "p8-web-foundation",
+    "p9-web-ui",
+    "p10-web-terminal",
+    "p11-web-remote"
+  ],
+  "updated": "2026-02-12T11:03:30.623257318Z"
+}

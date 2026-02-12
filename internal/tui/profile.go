@@ -40,7 +40,7 @@ func buildModelChoices(agentName string, agentsCfg *agent.AgentsConfig) []string
 	var models []string
 	seen := make(map[string]struct{})
 
-	// Prefer detected models from agents.json (authoritative when present).
+	// Prefer detected models from the agents config (authoritative when present).
 	if agentsCfg != nil {
 		if rec, ok := agentsCfg.Agents[agentName]; ok && len(rec.SupportedModels) > 0 {
 			for _, m := range rec.SupportedModels {
@@ -191,7 +191,7 @@ func (m AppModel) updateProfileMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = stateProfileAgent
 			case 2: // Model
 				selectedAgent := m.profileAgents[m.profileAgentSel]
-				agentsCfg, _ := agent.LoadAgentsConfig(m.store.Root())
+				agentsCfg, _ := agent.LoadAgentsConfig()
 				m.profileModels = buildModelChoices(selectedAgent, agentsCfg)
 				m.profileModelSel = 0
 				if m.profileSelectedModel != "" {
@@ -206,7 +206,7 @@ func (m AppModel) updateProfileMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = stateProfileModel
 			case 3: // Reasoning
 				selectedAgent := m.profileAgents[m.profileAgentSel]
-				agentsCfg, _ := agent.LoadAgentsConfig(m.store.Root())
+				agentsCfg, _ := agent.LoadAgentsConfig()
 				levels := buildReasoningChoices(selectedAgent, agentsCfg)
 				if len(levels) == 0 {
 					return m, nil // no reasoning levels for this agent
@@ -438,7 +438,7 @@ func (m AppModel) updateProfileAgent(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				selectedAgent := m.profileAgents[m.profileAgentSel]
-				agentsCfg, _ := agent.LoadAgentsConfig(m.store.Root())
+				agentsCfg, _ := agent.LoadAgentsConfig()
 				m.profileModels = buildModelChoices(selectedAgent, agentsCfg)
 				m.profileModelSel = 0
 				m.profileCustomModel = ""
@@ -542,7 +542,7 @@ func (m AppModel) updateCustomModelInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 // supports it, otherwise skips to role selection.
 func (m AppModel) transitionToReasoningOrFinish() (tea.Model, tea.Cmd) {
 	selectedAgent := m.profileAgents[m.profileAgentSel]
-	agentsCfg, _ := agent.LoadAgentsConfig(m.store.Root())
+	agentsCfg, _ := agent.LoadAgentsConfig()
 	levels := buildReasoningChoices(selectedAgent, agentsCfg)
 	if len(levels) > 0 {
 		m.profileReasoningLevels = levels

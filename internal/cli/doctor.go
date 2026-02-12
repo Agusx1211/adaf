@@ -117,45 +117,45 @@ func runDoctorProfile(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
-	// Session History
-	logs, _ := s.ListLogs()
-	profileLogs := filterLogsByProfile(logs, name, prof.Agent)
+	// Turn History
+	turns, _ := s.ListTurns()
+	profileTurns := filterTurnsByProfile(turns, name, prof.Agent)
 
-	if len(profileLogs) > 0 {
-		fmt.Println("## Session History")
+	if len(profileTurns) > 0 {
+		fmt.Println("## Turn History")
 		fmt.Println()
 
-		// Show most recent sessions (up to 20)
+		// Show most recent turns (up to 20)
 		start := 0
-		if len(profileLogs) > 20 {
-			start = len(profileLogs) - 20
+		if len(profileTurns) > 20 {
+			start = len(profileTurns) - 20
 		}
 
-		for _, log := range profileLogs[start:] {
-			metrics, _ := stats.ExtractFromRecording(s, log.ID)
+		for _, turn := range profileTurns[start:] {
+			metrics, _ := stats.ExtractFromRecording(s, turn.ID)
 
 			outcome := "unknown"
-			if log.BuildState == "success" {
+			if turn.BuildState == "success" {
 				outcome = "success"
-			} else if log.BuildState != "" {
-				outcome = log.BuildState
+			} else if turn.BuildState != "" {
+				outcome = turn.BuildState
 			}
 
-			fmt.Printf("### Session #%d (%s, %s, %s)\n",
-				log.ID,
-				log.Date.Format("2006-01-02"),
-				formatDuration(log.DurationSecs),
+			fmt.Printf("### Turn #%d (%s, %s, %s)\n",
+				turn.ID,
+				turn.Date.Format("2006-01-02"),
+				formatDuration(turn.DurationSecs),
 				outcome)
 
-			if log.Objective != "" {
-				obj := log.Objective
+			if turn.Objective != "" {
+				obj := turn.Objective
 				if len(obj) > 200 {
 					obj = obj[:200] + "..."
 				}
 				fmt.Printf("Objective: %s\n", obj)
 			}
-			if log.WhatWasBuilt != "" {
-				fmt.Printf("Outcome: %s\n", log.WhatWasBuilt)
+			if turn.WhatWasBuilt != "" {
+				fmt.Printf("Outcome: %s\n", turn.WhatWasBuilt)
 			}
 
 			if metrics != nil {
@@ -173,12 +173,12 @@ func runDoctorProfile(cmd *cobra.Command, args []string) error {
 				}
 			}
 
-			if log.CommitHash != "" {
-				fmt.Printf("Git commit: %s\n", log.CommitHash)
+			if turn.CommitHash != "" {
+				fmt.Printf("Git commit: %s\n", turn.CommitHash)
 			}
 
-			if log.KnownIssues != "" {
-				fmt.Printf("Issues: %s\n", log.KnownIssues)
+			if turn.KnownIssues != "" {
+				fmt.Printf("Issues: %s\n", turn.KnownIssues)
 			}
 
 			fmt.Println()
@@ -215,7 +215,7 @@ func runDoctorProfile(cmd *cobra.Command, args []string) error {
 		fmt.Println("## Observations")
 		if ps.TotalRuns > 0 {
 			avgDuration := ps.TotalDuration / ps.TotalRuns
-			fmt.Printf("- Average session duration: %s\n", formatDuration(avgDuration))
+			fmt.Printf("- Average turn duration: %s\n", formatDuration(avgDuration))
 		}
 		if ps.TotalRuns > 0 {
 			successRate := float64(ps.SuccessCount) / float64(ps.TotalRuns) * 100
@@ -298,31 +298,31 @@ func runDoctorLoop(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
-	// Session History
-	if len(ls.SessionIDs) > 0 {
-		fmt.Println("## Session History")
-		recent := ls.SessionIDs
+	// Turn History
+	if len(ls.TurnIDs) > 0 {
+		fmt.Println("## Turn History")
+		recent := ls.TurnIDs
 		if len(recent) > 20 {
 			recent = recent[len(recent)-20:]
 		}
-		for _, sid := range recent {
-			log, err := s.GetLog(sid)
+		for _, tid := range recent {
+			turn, err := s.GetTurn(tid)
 			if err != nil {
 				continue
 			}
-			metrics, _ := stats.ExtractFromRecording(s, sid)
+			metrics, _ := stats.ExtractFromRecording(s, tid)
 
 			outcome := "unknown"
-			if log.BuildState == "success" {
+			if turn.BuildState == "success" {
 				outcome = "success"
-			} else if log.BuildState != "" {
-				outcome = log.BuildState
+			} else if turn.BuildState != "" {
+				outcome = turn.BuildState
 			}
 
-			fmt.Printf("- Session #%d (%s, %s, %s)",
-				sid,
-				log.Date.Format("2006-01-02"),
-				formatDuration(log.DurationSecs),
+			fmt.Printf("- Turn #%d (%s, %s, %s)",
+				tid,
+				turn.Date.Format("2006-01-02"),
+				formatDuration(turn.DurationSecs),
 				outcome)
 
 			if metrics != nil && metrics.TotalCostUSD > 0 {
@@ -336,14 +336,14 @@ func runDoctorLoop(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// filterLogsByProfile returns session logs matching a profile name or agent name.
-func filterLogsByProfile(logs []store.SessionLog, profileName, agentName string) []store.SessionLog {
-	var result []store.SessionLog
-	for _, log := range logs {
-		if log.ProfileName == profileName {
-			result = append(result, log)
-		} else if log.ProfileName == "" && log.Agent == agentName {
-			result = append(result, log)
+// filterTurnsByProfile returns turns matching a profile name or agent name.
+func filterTurnsByProfile(turns []store.Turn, profileName, agentName string) []store.Turn {
+	var result []store.Turn
+	for _, t := range turns {
+		if t.ProfileName == profileName {
+			result = append(result, t)
+		} else if t.ProfileName == "" && t.Agent == agentName {
+			result = append(result, t)
 		}
 	}
 	return result

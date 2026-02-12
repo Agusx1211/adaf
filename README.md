@@ -198,7 +198,6 @@ adaf stores all orchestration state in a `.adaf/` directory at the root of your 
 .adaf/
   project.json        # Project metadata (name, repo path, agent config)
   plan.json           # Plan with phases, statuses, dependencies
-  agents.json         # Detected agent tools (auto-generated cache)
   issues/             # Issue tracker (one JSON file per issue)
   logs/               # Session logs (one JSON per session)
   decisions/          # Architectural decision records (ADRs)
@@ -337,7 +336,7 @@ Created by `adaf init`. Contains project name, repo path, and project-level agen
 ### Config Priority
 
 1. CLI flags (highest)
-2. Project-level config (`.adaf/agents.json`)
+2. Agent detection cache (`~/.adaf/agents.json`)
 3. Global user-level config (`~/.adaf/config.json`)
 
 ## Interactive TUI

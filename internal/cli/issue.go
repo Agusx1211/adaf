@@ -70,7 +70,7 @@ func init() {
 	issueCreateCmd.Flags().String("priority", "medium", "Priority (critical, high, medium, low)")
 	issueCreateCmd.Flags().StringSlice("labels", nil, "Labels (comma-separated)")
 	issueCreateCmd.Flags().String("plan", "", "Plan scope for this issue (empty = shared)")
-	issueCreateCmd.Flags().Int("session", 0, "Associated session ID (optional; defaults to current agent session)")
+	issueCreateCmd.Flags().Int("session", 0, "Associated turn ID (optional; defaults to current agent turn)")
 	_ = issueCreateCmd.MarkFlagRequired("title")
 
 	issueUpdateCmd.Flags().String("status", "", "New status")
@@ -182,8 +182,8 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 	labels, _ := cmd.Flags().GetStringSlice("labels")
 	planID, _ := cmd.Flags().GetString("plan")
 	planID = strings.TrimSpace(planID)
-	sessionFlag, _ := cmd.Flags().GetInt("session")
-	sessionID, err := resolveOptionalSessionID(sessionFlag)
+	turnFlag, _ := cmd.Flags().GetInt("session")
+	turnID, err := resolveOptionalTurnID(turnFlag)
 	if err != nil {
 		return err
 	}
@@ -217,7 +217,7 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 		Priority:    priority,
 		Labels:      labels,
 		PlanID:      planID,
-		SessionID:   sessionID,
+		TurnID:      turnID,
 	}
 
 	if err := s.CreateIssue(issue); err != nil {
@@ -234,8 +234,8 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 	} else {
 		printField("Plan", "shared")
 	}
-	if issue.SessionID > 0 {
-		printField("Session", fmt.Sprintf("#%d", issue.SessionID))
+	if issue.TurnID > 0 {
+		printField("Turn", fmt.Sprintf("#%d", issue.TurnID))
 	}
 	if len(issue.Labels) > 0 {
 		printField("Labels", strings.Join(issue.Labels, ", "))
@@ -276,8 +276,8 @@ func runIssueShow(cmd *cobra.Command, args []string) error {
 	if len(issue.Labels) > 0 {
 		printField("Labels", strings.Join(issue.Labels, ", "))
 	}
-	if issue.SessionID > 0 {
-		printField("Session", fmt.Sprintf("#%d", issue.SessionID))
+	if issue.TurnID > 0 {
+		printField("Turn", fmt.Sprintf("#%d", issue.TurnID))
 	}
 
 	if issue.Description != "" {

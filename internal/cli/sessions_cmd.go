@@ -86,8 +86,14 @@ func runSessions(cmd *cobra.Command, args []string) error {
 			project = "-"
 		}
 
+		loopName := s.LoopName
+		if loopName == "" {
+			loopName = "-"
+		}
+
 		rows = append(rows, []string{
 			fmt.Sprintf("%d", s.ID),
+			loopName,
 			s.ProfileName,
 			s.AgentName,
 			project,
@@ -97,7 +103,7 @@ func runSessions(cmd *cobra.Command, args []string) error {
 	}
 
 	printTable(
-		[]string{"ID", "Profile", "Agent", "Project", "Status", "Time"},
+		[]string{"ID", "LOOP", "Profile", "Agent", "Project", "Status", "Time"},
 		rows,
 	)
 
@@ -112,7 +118,7 @@ func runSessions(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if hasActive {
-		fmt.Printf("  Use %sadaf attach <id>%s to reattach to a running session.\n", styleBoldWhite, colorReset)
+		fmt.Printf("  Use %sadaf attach [loop-name|id]%s to reattach to a running session.\n", styleBoldWhite, colorReset)
 		fmt.Printf("  Use %sadaf sessions output [id]%s to inspect output without attaching.\n", styleBoldWhite, colorReset)
 		fmt.Printf("  Use %sadaf sessions logs [id]%s to inspect adaf daemon logs.\n", styleBoldWhite, colorReset)
 		fmt.Println()

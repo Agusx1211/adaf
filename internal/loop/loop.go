@@ -16,7 +16,7 @@ import (
 
 // WaitCallback is called when the loop detects a wait signal.
 // It should block until spawns complete and return results for the next prompt.
-type WaitCallback func(sessionID int) []WaitResult
+type WaitCallback func(turnID int) []WaitResult
 
 // WaitResult describes the outcome of a spawn that was waited on.
 type WaitResult struct {
@@ -28,7 +28,7 @@ type WaitResult struct {
 }
 
 // Loop is the main agent loop controller. It runs an agent one or more times,
-// creating a new session recording for each iteration, and persists results
+// creating a new turn recording for each iteration, and persists results
 // to the store.
 type Loop struct {
 	Store  *store.Store
@@ -38,20 +38,20 @@ type Loop struct {
 	// ProfileName is the name of the profile that launched this loop.
 	ProfileName string
 
-	// PlanID tracks the plan context for this loop/session.
+	// PlanID tracks the plan context for this loop.
 	PlanID string
 
 	// OnStart is called at the beginning of each iteration, before the agent runs.
-	// The sessionID of the upcoming run is passed as an argument.
-	OnStart func(sessionID int)
+	// The turnID of the upcoming run is passed as an argument.
+	OnStart func(turnID int)
 
 	// OnEnd is called after each iteration completes (successfully or not).
-	// The sessionID and the result (which may be nil on error) are passed.
-	OnEnd func(sessionID int, result *agent.Result)
+	// The turnID and the result (which may be nil on error) are passed.
+	OnEnd func(turnID int, result *agent.Result)
 
 	// PromptFunc, if set, is called before each turn to dynamically refresh the
 	// prompt (e.g. to inject supervisor notes). If nil, Config.Prompt is used.
-	PromptFunc func(sessionID int, supervisorNotes []store.SupervisorNote) string
+	PromptFunc func(turnID int, supervisorNotes []store.SupervisorNote) string
 
 	// OnWait is called when the agent signals a wait-for-spawns.
 	// It should block until spawns complete and return results.
@@ -86,25 +86,25 @@ func (l *Loop) Run(ctx context.Context) error {
 		default:
 		}
 
-		// Allocate a new session ID by creating a session log entry.
+		// Allocate a new turn ID by creating a turn entry.
 		objective := summarizeObjectiveForLog(l.Config.Prompt)
 		if objective == "" {
 			objective = "Agent run"
 		}
-		sessionLog := &store.SessionLog{
+		turnLog := &store.Turn{
 			Agent:       l.Agent.Name(),
 			ProfileName: l.ProfileName,
 			PlanID:      l.PlanID,
 			Objective:   objective,
 		}
-		if err := l.Store.CreateLog(sessionLog); err != nil {
-			return fmt.Errorf("creating session log: %w", err)
+		if err := l.Store.CreateTurn(turnLog); err != nil {
+			return fmt.Errorf("creating turn: %w", err)
 		}
-		sessionID := sessionLog.ID
+		turnID := turnLog.ID
 
-		// Update config with the current session ID.
+		// Update config with the current turn ID.
 		cfg := l.Config
-		cfg.SessionID = sessionID
+		cfg.TurnID = turnID
 
 		// Set ADAF_AGENT=1 so the agent process knows it's running under adaf
 		// and session management commands are blocked.
@@ -112,7 +112,7 @@ func (l *Loop) Run(ctx context.Context) error {
 			cfg.Env = make(map[string]string)
 		}
 		cfg.Env["ADAF_AGENT"] = "1"
-		cfg.Env["ADAF_SESSION_ID"] = fmt.Sprintf("%d", sessionID)
+		cfg.Env["ADAF_TURN_ID"] = fmt.Sprintf("%d", turnID)
 		if strings.TrimSpace(l.ProfileName) != "" {
 			cfg.Env["ADAF_PROFILE"] = l.ProfileName
 		}
@@ -127,15 +127,15 @@ func (l *Loop) Run(ctx context.Context) error {
 		}
 		var supervisorNotes []store.SupervisorNote
 		if l.PromptFunc != nil && l.Store != nil {
-			notes, err := l.Store.NotesBySession(sessionID)
+			notes, err := l.Store.NotesByTurn(turnID)
 			if err != nil {
-				fmt.Printf("warning: failed to load supervisor notes for session %d: %v\n", sessionID, err)
+				fmt.Printf("warning: failed to load supervisor notes for turn %d: %v\n", turnID, err)
 			} else {
 				supervisorNotes = notes
 			}
 		}
 		if l.PromptFunc != nil {
-			cfg.Prompt = l.PromptFunc(sessionID, supervisorNotes)
+			cfg.Prompt = l.PromptFunc(turnID, supervisorNotes)
 		}
 
 		// Inject wait results from a previous wait-for-spawns cycle.
@@ -155,11 +155,11 @@ func (l *Loop) Run(ctx context.Context) error {
 
 		// Notify listener.
 		if l.OnStart != nil {
-			l.OnStart(sessionID)
+			l.OnStart(turnID)
 		}
 
-		// Create a recorder for this session.
-		rec := recording.New(sessionID, l.Store)
+		// Create a recorder for this turn.
+		rec := recording.New(turnID, l.Store)
 		rec.RecordMeta("agent", l.Agent.Name())
 		rec.RecordMeta("turn", fmt.Sprintf("%d", turn+1))
 		rec.RecordMeta("start_time", time.Now().UTC().Format(time.RFC3339))
@@ -177,41 +177,41 @@ func (l *Loop) Run(ctx context.Context) error {
 		// Flush the recording to the store.
 		if flushErr := rec.Flush(); flushErr != nil {
 			// Log flush error but don't fail the loop.
-			fmt.Printf("warning: failed to flush recording for session %d: %v\n", sessionID, flushErr)
+			fmt.Printf("warning: failed to flush recording for turn %d: %v\n", turnID, flushErr)
 		}
 
-		// Update profile stats from the completed session.
+		// Update profile stats from the completed turn.
 		if l.ProfileName != "" {
-			_ = stats.UpdateProfileStats(l.Store, l.ProfileName, sessionID)
+			_ = stats.UpdateProfileStats(l.Store, l.ProfileName, turnID)
 		}
 
-		// Update the session log with results.
+		// Update the turn with results.
 		if result != nil {
-			sessionLog.DurationSecs = int(result.Duration.Seconds())
+			turnLog.DurationSecs = int(result.Duration.Seconds())
 			if result.ExitCode == 0 {
-				sessionLog.BuildState = "success"
+				turnLog.BuildState = "success"
 			} else {
-				sessionLog.BuildState = fmt.Sprintf("exit_code_%d", result.ExitCode)
+				turnLog.BuildState = fmt.Sprintf("exit_code_%d", result.ExitCode)
 			}
-			sessionLog.CurrentState = fmt.Sprintf("Turn %d completed", turn+1)
+			turnLog.CurrentState = fmt.Sprintf("Turn %d completed", turn+1)
 		} else {
 			if errors.Is(runErr, context.Canceled) {
-				sessionLog.BuildState = "cancelled"
+				turnLog.BuildState = "cancelled"
 			} else {
-				sessionLog.BuildState = "error"
+				turnLog.BuildState = "error"
 			}
 			if runErr != nil {
-				sessionLog.KnownIssues = runErr.Error()
+				turnLog.KnownIssues = runErr.Error()
 			}
 		}
 
-		// Best-effort update of the session log. We re-read the ID since
-		// CreateLog already assigned it.
-		_ = l.Store.UpdateLog(sessionLog)
+		// Best-effort update of the turn. We re-read the ID since
+		// CreateTurn already assigned it.
+		_ = l.Store.UpdateTurn(turnLog)
 
 		// Notify listener.
 		if l.OnEnd != nil {
-			l.OnEnd(sessionID, result)
+			l.OnEnd(turnID, result)
 		}
 
 		// If the agent run failed with a hard error (not just non-zero exit),
@@ -226,16 +226,16 @@ func (l *Loop) Run(ctx context.Context) error {
 				// Preserve cancellation semantics so callers can classify graceful stop.
 				return context.Canceled
 			}
-			return fmt.Errorf("agent run failed (session %d): %w", sessionID, runErr)
+			return fmt.Errorf("agent run failed (turn %d): %w", turnID, runErr)
 		}
 
 		// Check for wait-for-spawns signal.
-		if l.Store != nil && l.Store.IsWaiting(sessionID) {
-			if err := l.Store.ClearWait(sessionID); err != nil {
-				fmt.Printf("warning: failed to clear wait signal for session %d: %v\n", sessionID, err)
+		if l.Store != nil && l.Store.IsWaiting(turnID) {
+			if err := l.Store.ClearWait(turnID); err != nil {
+				fmt.Printf("warning: failed to clear wait signal for turn %d: %v\n", turnID, err)
 			}
 			if l.OnWait != nil {
-				l.lastWaitResults = l.OnWait(sessionID)
+				l.lastWaitResults = l.OnWait(turnID)
 			}
 			// Don't increment turn count — the wait turn doesn't count toward the limit.
 			// Loop continues to next iteration with wait results in the prompt.
@@ -260,7 +260,7 @@ func (l *Loop) checkInterrupt() bool {
 }
 
 // summarizeObjectiveForLog extracts a compact objective summary from a full
-// generated prompt so session logs don't recursively store entire prior prompts.
+// generated prompt so turn logs don't recursively store entire prior prompts.
 func summarizeObjectiveForLog(prompt string) string {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {

@@ -8,9 +8,9 @@ type RawEvent struct {
 	Parsed ClaudeEvent
 	// Text carries raw stdout/stderr chunks for non-NDJSON agents.
 	Text string
-	// SessionID identifies which loop session produced Text.
-	SessionID int
-	Err       error
+	// TurnID identifies which loop turn produced Text.
+	TurnID int
+	Err    error
 }
 
 // ClaudeEvent is the top-level structure for a Claude stream-json event.
@@ -33,7 +33,7 @@ type ClaudeEvent struct {
 	Subtype string `json:"subtype,omitempty"`
 
 	// Common field across most events.
-	SessionID string `json:"session_id,omitempty"`
+	TurnID string `json:"session_id,omitempty"`
 
 	// For system/init events (subtype "init").
 	Model          string   `json:"model,omitempty"`

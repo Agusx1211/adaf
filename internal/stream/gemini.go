@@ -20,7 +20,7 @@ import (
 type GeminiEvent struct {
 	Type      string            `json:"type"`
 	Timestamp string            `json:"timestamp,omitempty"`
-	SessionID string            `json:"session_id,omitempty"`
+	TurnID    string            `json:"session_id,omitempty"`
 	Model     string            `json:"model,omitempty"`
 	Role      string            `json:"role,omitempty"`
 	Content   string            `json:"content,omitempty"`
@@ -59,10 +59,10 @@ func GeminiToClaudeEvent(ge GeminiEvent) (ClaudeEvent, bool) {
 	switch ge.Type {
 	case "init":
 		return ClaudeEvent{
-			Type:      "system",
-			Subtype:   "init",
-			SessionID: ge.SessionID,
-			Model:     ge.Model,
+			Type:    "system",
+			Subtype: "init",
+			TurnID:  ge.TurnID,
+			Model:   ge.Model,
 		}, true
 
 	case "message":

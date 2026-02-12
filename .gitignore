@@ -31,3 +31,4 @@ Thumbs.db
 # adaf project data (don't commit the orchestrator state into its own repo)
 # Users' project .adaf dirs are in their target repos, not here
 ~/.adaf
+.adaf-worktrees/

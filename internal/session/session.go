@@ -377,6 +377,57 @@ func FormatTimeAgo(t time.Time) string {
 	}
 }
 
+// FindOnlyRunningSession returns the single running session if exactly one exists.
+// Returns an error if zero or more than one session is running.
+func FindOnlyRunningSession() (*SessionMeta, error) {
+	active, err := ListActiveSessions()
+	if err != nil {
+		return nil, err
+	}
+	if len(active) == 0 {
+		return nil, fmt.Errorf("no running sessions")
+	}
+	if len(active) > 1 {
+		var hints []string
+		for _, s := range active {
+			label := fmt.Sprintf("#%d", s.ID)
+			if s.LoopName != "" {
+				label += " (" + s.LoopName + ")"
+			} else if s.ProfileName != "" {
+				label += " (" + s.ProfileName + ")"
+			}
+			hints = append(hints, label)
+		}
+		return nil, fmt.Errorf("multiple running sessions: %s — specify a loop name or session ID", strings.Join(hints, ", "))
+	}
+	return &active[0], nil
+}
+
+// FindRunningByLoopName finds a running session by its loop name (case-insensitive).
+// Returns an error if no running session matches or if multiple match.
+func FindRunningByLoopName(name string) (*SessionMeta, error) {
+	active, err := ListActiveSessions()
+	if err != nil {
+		return nil, err
+	}
+
+	name = strings.ToLower(strings.TrimSpace(name))
+	var matches []SessionMeta
+	for _, s := range active {
+		if strings.ToLower(s.LoopName) == name {
+			matches = append(matches, s)
+		}
+	}
+
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("no running session for loop %q", name)
+	}
+	if len(matches) > 1 {
+		return nil, fmt.Errorf("multiple running sessions for loop %q, specify the session ID", name)
+	}
+	return &matches[0], nil
+}
+
 // FindSessionByPartial finds a session by numeric ID or partial profile name match.
 func FindSessionByPartial(query string) (*SessionMeta, error) {
 	// Try numeric ID first.

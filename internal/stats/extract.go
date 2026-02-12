@@ -23,10 +23,10 @@ type SessionMetrics struct {
 	Success      bool
 }
 
-// ExtractFromRecording reads the events.jsonl file for a session and
+// ExtractFromRecording reads the events.jsonl file for a turn and
 // parses claude_stream events to extract metrics.
-func ExtractFromRecording(st *store.Store, sessionID int) (*SessionMetrics, error) {
-	eventsPath, err := findEventsFile(st, sessionID)
+func ExtractFromRecording(st *store.Store, turnID int) (*SessionMetrics, error) {
+	eventsPath, err := findEventsFile(st, turnID)
 	if err != nil {
 		return nil, err
 	}
@@ -62,16 +62,16 @@ func ExtractFromRecording(st *store.Store, sessionID int) (*SessionMetrics, erro
 	return m, scanner.Err()
 }
 
-// findEventsFile locates the events.jsonl for a given session ID,
+// findEventsFile locates the events.jsonl for a given turn ID,
 // checking both the current and legacy recording directories.
-func findEventsFile(st *store.Store, sessionID int) (string, error) {
+func findEventsFile(st *store.Store, turnID int) (string, error) {
 	for _, dir := range st.RecordsDirs() {
-		path := filepath.Join(dir, fmt.Sprintf("%d", sessionID), "events.jsonl")
+		path := filepath.Join(dir, fmt.Sprintf("%d", turnID), "events.jsonl")
 		if _, err := os.Stat(path); err == nil {
 			return path, nil
 		}
 	}
-	return "", fmt.Errorf("events.jsonl not found for session %d", sessionID)
+	return "", fmt.Errorf("events.jsonl not found for turn %d", turnID)
 }
 
 // processStreamEvent parses a claude_stream event and extracts metrics.

@@ -19,14 +19,14 @@ import (
 
 // SpawnRequest describes a request to spawn a sub-agent.
 type SpawnRequest struct {
-	ParentSessionID int
-	ParentProfile   string
-	ChildProfile    string
-	PlanID          string
-	Task            string
-	ReadOnly        bool
-	Wait            bool                     // if true, Spawn blocks until child completes
-	Delegation      *config.DelegationConfig // explicit delegation config (required for spawning)
+	ParentTurnID  int
+	ParentProfile string
+	ChildProfile  string
+	PlanID        string
+	Task          string
+	ReadOnly      bool
+	Wait          bool                     // if true, Spawn blocks until child completes
+	Delegation    *config.DelegationConfig // explicit delegation config (required for spawning)
 }
 
 // SpawnResult is the outcome of a completed spawn.
@@ -247,7 +247,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 
 	// Create spawn record.
 	rec := &store.SpawnRecord{
-		ParentSessionID: req.ParentSessionID,
+		ParentTurnID: req.ParentTurnID,
 		ParentProfile:   req.ParentProfile,
 		ChildProfile:    req.ChildProfile,
 		Task:            req.Task,
@@ -259,7 +259,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 
 	var wtPath string
 	if !req.ReadOnly {
-		branchName := worktree.BranchName(req.ParentSessionID, req.ChildProfile)
+		branchName := worktree.BranchName(req.ParentTurnID, req.ChildProfile)
 		var err error
 		wtPath, err = o.worktrees.Create(ctx, branchName)
 		if err != nil {
@@ -292,8 +292,8 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 	projCfg, _ := o.store.LoadProject()
 	parentPlanID := req.PlanID
 	if parentPlanID == "" {
-		if parentLog, err := o.store.GetLog(req.ParentSessionID); err == nil && parentLog != nil {
-			parentPlanID = parentLog.PlanID
+		if parentTurn, err := o.store.GetTurn(req.ParentTurnID); err == nil && parentTurn != nil {
+			parentPlanID = parentTurn.PlanID
 		}
 	}
 	childPrompt, _ := promptpkg.Build(promptpkg.BuildOpts{
@@ -304,7 +304,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 		PlanID:          parentPlanID,
 		Task:            req.Task,
 		ReadOnly:        req.ReadOnly,
-		ParentSessionID: req.ParentSessionID,
+		ParentTurnID: req.ParentTurnID,
 	})
 
 	workDir := o.repoRoot
@@ -315,9 +315,9 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 	// Build agent args (similar to startAgent in TUI).
 	var agentArgs []string
 	agentEnv := map[string]string{
-		"ADAF_SESSION_ID":     fmt.Sprintf("%d", rec.ID),
-		"ADAF_PROFILE":        childProf.Name,
-		"ADAF_PARENT_SESSION": fmt.Sprintf("%d", req.ParentSessionID),
+		"ADAF_TURN_ID":      fmt.Sprintf("%d", rec.ID),
+		"ADAF_PROFILE":      childProf.Name,
+		"ADAF_PARENT_TURN":  fmt.Sprintf("%d", req.ParentTurnID),
 	}
 	if parentPlanID != "" {
 		agentEnv["ADAF_PLAN_ID"] = parentPlanID
@@ -352,7 +352,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 	}
 
 	// Look up custom command path.
-	agentsCfg, _ := agent.LoadAgentsConfig(o.store.Root())
+	agentsCfg, _ := agent.LoadAgentsConfig()
 	var customCmd string
 	if agentsCfg != nil {
 		if arec, ok := agentsCfg.Agents[childProf.Agent]; ok && arec.Path != "" {
@@ -451,11 +451,11 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 			Agent:  agentInstance,
 			Config: agentCfg,
 			PlanID: parentPlanID,
-			OnStart: func(sessionID int) {
-				rec.ChildSessionID = sessionID
+			OnStart: func(turnID int) {
+				rec.ChildTurnID = turnID
 				o.store.UpdateSpawn(rec)
 			},
-			PromptFunc: func(sessionID int, supervisorNotes []store.SupervisorNote) string {
+			PromptFunc: func(turnID int, supervisorNotes []store.SupervisorNote) string {
 				msgs, _ := o.store.UnreadMessages(rec.ID, "parent_to_child")
 				for _, m := range msgs {
 					o.store.MarkMessageRead(m.SpawnID, m.ID)
@@ -468,15 +468,15 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 					PlanID:          parentPlanID,
 					Task:            req.Task,
 					ReadOnly:        req.ReadOnly,
-					ParentSessionID: req.ParentSessionID,
+					ParentTurnID: req.ParentTurnID,
 					SupervisorNotes: supervisorNotes,
 					Messages:        msgs,
 				})
 				return newPrompt
 			},
-			OnWait: func(sessionID int) []loop.WaitResult {
+			OnWait: func(turnID int) []loop.WaitResult {
 				// Wait for this child's own spawns to complete.
-				results := o.Wait(rec.ChildSessionID)
+				results := o.Wait(rec.ChildTurnID)
 				var wr []loop.WaitResult
 				for _, r := range results {
 					childRec, _ := o.store.GetSpawn(r.SpawnID)
@@ -593,10 +593,10 @@ func (o *Orchestrator) decrementInstancesLocked(profile string) {
 	}
 }
 
-// Wait blocks until all spawns for the given parent session are done.
-func (o *Orchestrator) Wait(parentSessionID int) []SpawnResult {
+// Wait blocks until all spawns for the given parent turn are done.
+func (o *Orchestrator) Wait(parentTurnID int) []SpawnResult {
 	// Snapshot non-terminal spawns for this parent and wait until they complete.
-	records, _ := o.store.SpawnsByParent(parentSessionID)
+	records, _ := o.store.SpawnsByParent(parentTurnID)
 	pending := make(map[int]struct{})
 	for _, r := range records {
 		if !isTerminalSpawnStatus(r.Status) {
@@ -618,7 +618,7 @@ func (o *Orchestrator) Wait(parentSessionID int) []SpawnResult {
 	}
 
 	// Return results from store.
-	records, _ = o.store.SpawnsByParent(parentSessionID)
+	records, _ = o.store.SpawnsByParent(parentTurnID)
 	var results []SpawnResult
 	for _, r := range records {
 		results = append(results, SpawnResult{
@@ -772,9 +772,9 @@ func (o *Orchestrator) Diff(ctx context.Context, spawnID int) (string, error) {
 	return o.worktrees.Diff(ctx, rec.Branch)
 }
 
-// Status returns spawn records for a parent session.
-func (o *Orchestrator) Status(parentSessionID int) []store.SpawnRecord {
-	records, _ := o.store.SpawnsByParent(parentSessionID)
+// Status returns spawn records for a parent turn.
+func (o *Orchestrator) Status(parentTurnID int) []store.SpawnRecord {
+	records, _ := o.store.SpawnsByParent(parentTurnID)
 	return records
 }
 
@@ -783,34 +783,34 @@ func (o *Orchestrator) CleanupAll(ctx context.Context) error {
 	return o.worktrees.CleanupAll(ctx)
 }
 
-// ReparentSpawn updates a spawn's parent session ID, used for handoff across loop steps.
-func (o *Orchestrator) ReparentSpawn(spawnID, newParentSessionID int) error {
+// ReparentSpawn updates a spawn's parent turn ID, used for handoff across loop steps.
+func (o *Orchestrator) ReparentSpawn(spawnID, newParentTurnID int) error {
 	rec, err := o.store.GetSpawn(spawnID)
 	if err != nil {
 		return fmt.Errorf("spawn %d not found: %w", spawnID, err)
 	}
-	rec.ParentSessionID = newParentSessionID
-	rec.HandedOffTo = newParentSessionID
+	rec.ParentTurnID = newParentTurnID
+	rec.HandedOffToTurn = newParentTurnID
 	if err := o.store.UpdateSpawn(rec); err != nil {
 		return err
 	}
 
 	o.mu.Lock()
 	if as, ok := o.spawns[spawnID]; ok && as.record != nil {
-		as.record.ParentSessionID = newParentSessionID
-		as.record.HandedOffTo = newParentSessionID
+		as.record.ParentTurnID = newParentTurnID
+		as.record.HandedOffToTurn = newParentTurnID
 	}
 	o.mu.Unlock()
 	return nil
 }
 
-// ActiveSpawnsForParent returns IDs of currently running spawns for a parent session.
-func (o *Orchestrator) ActiveSpawnsForParent(parentSessionID int) []int {
+// ActiveSpawnsForParent returns IDs of currently running spawns for a parent turn.
+func (o *Orchestrator) ActiveSpawnsForParent(parentTurnID int) []int {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	var ids []int
 	for _, as := range o.spawns {
-		if as.record.ParentSessionID == parentSessionID {
+		if as.record.ParentTurnID == parentTurnID {
 			ids = append(ids, as.record.ID)
 		}
 	}

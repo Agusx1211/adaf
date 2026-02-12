@@ -8,20 +8,20 @@ import (
 	"github.com/agusx1211/adaf/internal/store"
 )
 
-// Recorder captures all I/O events for a session and persists them to the store.
+// Recorder captures all I/O events for a turn and persists them to the store.
 type Recorder struct {
-	SessionID int
-	Store     *store.Store
+	TurnID int
+	Store  *store.Store
 
 	mu     sync.Mutex
 	events []store.RecordingEvent
 }
 
-// New creates a new Recorder for the given session.
-func New(sessionID int, s *store.Store) *Recorder {
+// New creates a new Recorder for the given turn.
+func New(turnID int, s *store.Store) *Recorder {
 	return &Recorder{
-		SessionID: sessionID,
-		Store:     s,
+		TurnID: turnID,
+		Store:  s,
 	}
 }
 
@@ -66,7 +66,7 @@ func (r *Recorder) record(eventType, data string) {
 
 	// Best-effort append to persistent store; errors are non-fatal
 	// so we don't interrupt the running agent.
-	_ = r.Store.AppendRecordingEvent(r.SessionID, event)
+	_ = r.Store.AppendRecordingEvent(r.TurnID, event)
 }
 
 // Events returns a snapshot of all recorded events.
@@ -78,16 +78,16 @@ func (r *Recorder) Events() []store.RecordingEvent {
 	return cp
 }
 
-// Flush writes the full session recording to the store.
+// Flush writes the full turn recording to the store.
 func (r *Recorder) Flush() error {
 	r.mu.Lock()
 	events := make([]store.RecordingEvent, len(r.events))
 	copy(events, r.events)
 	r.mu.Unlock()
 
-	rec := &store.SessionRecording{
-		SessionID: r.SessionID,
-		Events:    events,
+	rec := &store.TurnRecording{
+		TurnID: r.TurnID,
+		Events: events,
 	}
 	return r.Store.SaveRecording(rec)
 }

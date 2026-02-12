@@ -84,7 +84,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading global config: %w", err)
 	}
 
-	agentsCfg, err := agent.LoadAgentsConfig(s.Root())
+	agentsCfg, err := agent.LoadAgentsConfig()
 	if err != nil {
 		return fmt.Errorf("loading agent configuration: %w", err)
 	}

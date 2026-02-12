@@ -138,7 +138,7 @@ type AppModel struct {
 	plan           *store.Plan
 	issues         []store.Issue
 	docs           []store.Doc
-	logs           []store.SessionLog
+	turns          []store.Turn
 	activeSessions []session.SessionMeta
 	activeLoop     *store.LoopRun
 
@@ -196,7 +196,7 @@ func (m *AppModel) loadProjectData() {
 		m.issues, _ = m.store.ListSharedIssues()
 		m.docs, _ = m.store.ListSharedDocs()
 	}
-	m.logs, _ = m.store.ListLogs()
+	m.turns, _ = m.store.ListTurns()
 	m.loadStats()
 	m.loadRuntimeData()
 }
@@ -222,7 +222,7 @@ func (m *AppModel) loadStats() {
 }
 
 func (m *AppModel) rebuildProfiles() {
-	agentsCfg, _ := agent.LoadAgentsConfig(m.store.Root())
+	agentsCfg, _ := agent.LoadAgentsConfig()
 	agent.PopulateFromConfig(agentsCfg)
 	m.profiles = buildProfileList(m.globalCfg, agentsCfg)
 }
@@ -900,7 +900,7 @@ func (m AppModel) viewSelector() string {
 		m.plans,
 		m.issues,
 		m.docs,
-		m.logs,
+		m.turns,
 		m.activeSessions,
 		m.activeLoop,
 		m.cachedProfileStats,

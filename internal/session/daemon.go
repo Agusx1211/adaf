@@ -530,7 +530,7 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 		}
 	}
 
-	agentsCfg, err := agent.LoadAgentsConfig(s.Root())
+	agentsCfg, err := agent.LoadAgentsConfig()
 	if err != nil {
 		return fmt.Errorf("loading agent config: %w", err)
 	}

@@ -18,7 +18,7 @@ var initCmd = &cobra.Command{
 	Short:   "Initialize a new adaf project",
 	Long: `Initialize a new adaf project in the current directory (or specified directory).
 Creates the .adaf/ directory structure with project.json, issue tracker,
-session logs, documents, decisions, and recording storage.
+turn logs, documents, decisions, and recording storage.
 
 Also scans PATH for installed AI agent tools (claude, codex, vibe, etc.)
 and caches the results for future runs.
@@ -103,10 +103,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 recordings/
 records/
 
-# Machine-specific agent detection cache
-agents.json
-
-# Session logs (ephemeral per-run artifacts)
+# Turn logs (ephemeral per-run artifacts)
 logs/
 
 # Orchestration state
@@ -123,7 +120,7 @@ notes/
 
 	// Run initial agent detection so the cache is populated.
 	globalCfg, _ := config.Load()
-	agentsCfg, scanErr := agent.LoadAndSyncAgentsConfig(s.Root(), globalCfg)
+	agentsCfg, scanErr := agent.LoadAndSyncAgentsConfig(globalCfg)
 	if scanErr == nil {
 		agent.PopulateFromConfig(agentsCfg)
 	}

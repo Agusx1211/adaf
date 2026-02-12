@@ -6,14 +6,14 @@ import (
 	"github.com/agusx1211/adaf/internal/store"
 )
 
-// UpdateProfileStats extracts metrics from a completed session and
+// UpdateProfileStats extracts metrics from a completed turn and
 // merges them into the profile's aggregate stats.
-func UpdateProfileStats(st *store.Store, profileName string, sessionID int) error {
+func UpdateProfileStats(st *store.Store, profileName string, turnID int) error {
 	if profileName == "" {
 		return nil
 	}
 
-	metrics, err := ExtractFromRecording(st, sessionID)
+	metrics, err := ExtractFromRecording(st, turnID)
 	if err != nil {
 		// Recording may not exist yet or be unreadable; non-fatal.
 		return nil
@@ -41,7 +41,7 @@ func UpdateProfileStats(st *store.Store, profileName string, sessionID int) erro
 		stats.FailureCount++
 	}
 
-	stats.SessionIDs = append(stats.SessionIDs, sessionID)
+	stats.TurnIDs = append(stats.TurnIDs, turnID)
 	stats.LastRunAt = time.Now().UTC()
 	stats.UpdatedAt = time.Now().UTC()
 
@@ -88,8 +88,8 @@ func UpdateLoopStats(st *store.Store, loopName string, run *store.LoopRun) error
 	stats.TotalRuns++
 	stats.TotalCycles += run.Cycle + 1 // Cycle is 0-indexed
 
-	// Aggregate cost and duration from all sessions in this run.
-	for _, sid := range run.SessionIDs {
+	// Aggregate cost and duration from all turns in this run.
+	for _, sid := range run.TurnIDs {
 		metrics, err := ExtractFromRecording(st, sid)
 		if err != nil {
 			continue
@@ -103,7 +103,7 @@ func UpdateLoopStats(st *store.Store, loopName string, run *store.LoopRun) error
 		stats.StepStats[step.Profile]++
 	}
 
-	stats.SessionIDs = append(stats.SessionIDs, run.SessionIDs...)
+	stats.TurnIDs = append(stats.TurnIDs, run.TurnIDs...)
 	stats.LastRunAt = time.Now().UTC()
 	stats.UpdatedAt = time.Now().UTC()
 

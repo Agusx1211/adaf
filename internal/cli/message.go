@@ -29,7 +29,7 @@ func runParentAsk(cmd *cobra.Command, args []string) error {
 	question := args[0]
 	timeout, _ := cmd.Flags().GetDuration("timeout")
 
-	spawnID, _, err := getSessionContext()
+	spawnID, _, err := getTurnContext()
 	if err != nil {
 		return err
 	}
@@ -217,7 +217,7 @@ func init() {
 }
 
 func runSpawnReadMessages(cmd *cobra.Command, args []string) error {
-	spawnID, _, err := getSessionContext()
+	spawnID, _, err := getTurnContext()
 	if err != nil {
 		return err
 	}
@@ -266,7 +266,7 @@ func init() {
 }
 
 func runWaitForSpawns(cmd *cobra.Command, args []string) error {
-	sessionID, _, err := getSessionContext()
+	turnID, _, err := getTurnContext()
 	if err != nil {
 		return err
 	}
@@ -276,7 +276,7 @@ func runWaitForSpawns(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := s.SignalWait(sessionID); err != nil {
+	if err := s.SignalWait(turnID); err != nil {
 		return fmt.Errorf("signaling wait: %w", err)
 	}
 
@@ -303,7 +303,7 @@ func init() {
 func runParentNotify(cmd *cobra.Command, args []string) error {
 	content := args[0]
 
-	spawnID, _, err := getSessionContext()
+	spawnID, _, err := getTurnContext()
 	if err != nil {
 		return err
 	}

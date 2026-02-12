@@ -41,8 +41,8 @@ func TestParseNDJSON(t *testing.T) {
 	if events[0].Parsed.Type != "system" {
 		t.Errorf("event[0].Type = %q, want %q", events[0].Parsed.Type, "system")
 	}
-	if events[0].Parsed.SessionID != "abc123" {
-		t.Errorf("event[0].SessionID = %q, want %q", events[0].Parsed.SessionID, "abc123")
+	if events[0].Parsed.TurnID != "abc123" {
+		t.Errorf("event[0].TurnID = %q, want %q", events[0].Parsed.TurnID, "abc123")
 	}
 	if events[0].Parsed.Model != "claude-sonnet-4-5-20250929" {
 		t.Errorf("event[0].Model = %q, want %q", events[0].Parsed.Model, "claude-sonnet-4-5-20250929")

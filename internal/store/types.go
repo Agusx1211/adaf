@@ -39,7 +39,7 @@ type Issue struct {
 	Status      string    `json:"status"`   // "open", "in_progress", "resolved", "wontfix"
 	Priority    string    `json:"priority"` // "critical", "high", "medium", "low"
 	Labels      []string  `json:"labels,omitempty"`
-	SessionID   int       `json:"session_id,omitempty"` // which session created it
+	TurnID      int       `json:"session_id,omitempty"` // which turn created it
 	Created     time.Time `json:"created"`
 	Updated     time.Time `json:"updated"`
 }
@@ -53,7 +53,8 @@ type Doc struct {
 	Updated time.Time `json:"updated"`
 }
 
-type SessionLog struct {
+// Turn records what an agent accomplished in a single invocation (one turn of a loop).
+type Turn struct {
 	ID           int       `json:"id"`
 	PlanID       string    `json:"plan_id,omitempty"`
 	Date         time.Time `json:"date"`
@@ -79,12 +80,13 @@ type Decision struct {
 	Decision     string    `json:"decision"`
 	Alternatives string    `json:"alternatives,omitempty"`
 	Rationale    string    `json:"rationale"`
-	SessionID    int       `json:"session_id,omitempty"`
+	TurnID       int       `json:"session_id,omitempty"` // which turn made this decision
 	Date         time.Time `json:"date"`
 }
 
-type SessionRecording struct {
-	SessionID int              `json:"session_id"`
+// TurnRecording captures the raw I/O of a single agent turn.
+type TurnRecording struct {
+	TurnID    int              `json:"session_id"` // keep JSON key for backward compat
 	Agent     string           `json:"agent"`
 	StartTime time.Time        `json:"start_time"`
 	EndTime   time.Time        `json:"end_time,omitempty"`

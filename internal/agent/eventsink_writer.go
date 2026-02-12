@@ -4,19 +4,19 @@ import "github.com/agusx1211/adaf/internal/stream"
 
 // eventSinkWriter forwards raw output chunks to the configured EventSink.
 type eventSinkWriter struct {
-	sink      chan<- stream.RawEvent
-	sessionID int
-	prefix    string
+	sink   chan<- stream.RawEvent
+	turnID int
+	prefix string
 }
 
-func newEventSinkWriter(sink chan<- stream.RawEvent, sessionID int, prefix string) *eventSinkWriter {
+func newEventSinkWriter(sink chan<- stream.RawEvent, turnID int, prefix string) *eventSinkWriter {
 	if sink == nil {
 		return nil
 	}
 	return &eventSinkWriter{
-		sink:      sink,
-		sessionID: sessionID,
-		prefix:    prefix,
+		sink:   sink,
+		turnID: turnID,
+		prefix: prefix,
 	}
 }
 
@@ -25,8 +25,8 @@ func (w *eventSinkWriter) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 	w.sink <- stream.RawEvent{
-		Text:      w.prefix + string(p),
-		SessionID: w.sessionID,
+		Text:   w.prefix + string(p),
+		TurnID: w.turnID,
 	}
 	return len(p), nil
 }

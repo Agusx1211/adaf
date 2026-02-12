@@ -1,0 +1,10 @@
+# Raw session I/O recordings
+recordings/
+records/
+
+# Session logs (ephemeral per-run artifacts)
+logs/
+
+# Orchestration state
+spawns/
+notes/

@@ -173,7 +173,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 						continue
 					}
 					if ev.Text != "" {
-						eventCh <- runtui.AgentRawOutputMsg{Data: ev.Text, SessionID: ev.SessionID}
+						eventCh <- runtui.AgentRawOutputMsg{Data: ev.Text, SessionID: ev.TurnID}
 						continue
 					}
 					eventCh <- runtui.AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw}
@@ -188,7 +188,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			var pollCancel context.CancelFunc
 			var pollDone chan struct{}
 			basePrompt := agentCfg.Prompt
-			stepSessionStart := len(run.SessionIDs)
+			stepTurnStart := len(run.TurnIDs)
 			handoffsReparented := false
 
 			l := &loop.Loop{
@@ -196,7 +196,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				Agent:  agentInstance,
 				Config: agentCfg,
 				PlanID: cfg.PlanID,
-				PromptFunc: func(sessionID int, supervisorNotes []store.SupervisorNote) string {
+				PromptFunc: func(turnID int, supervisorNotes []store.SupervisorNote) string {
 					opts := promptOpts
 					opts.SupervisorNotes = supervisorNotes
 					built, err := promptpkg.Build(opts)
@@ -206,25 +206,25 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 					return built
 				},
 				ProfileName: prof.Name,
-				OnStart: func(sessionID int) {
+				OnStart: func(turnID int) {
 					if !handoffsReparented && len(handoffs) > 0 {
-						reparentHandoffs(cfg.Store, handoffs, sessionID)
+						reparentHandoffs(cfg.Store, handoffs, turnID)
 						handoffsReparented = true
 					}
 
-					run.SessionIDs = append(run.SessionIDs, sessionID)
+					run.TurnIDs = append(run.TurnIDs, turnID)
 					cfg.Store.UpdateLoopRun(run)
-					eventCh <- runtui.AgentStartedMsg{SessionID: sessionID}
+					eventCh <- runtui.AgentStartedMsg{SessionID: turnID}
 
 					pollCtx, cancel := context.WithCancel(ctx)
 					pollCancel = cancel
 					pollDone = make(chan struct{})
 					go func() {
 						defer close(pollDone)
-						pollSpawnStatus(pollCtx, cfg.Store, sessionID, eventCh)
+						pollSpawnStatus(pollCtx, cfg.Store, turnID, eventCh)
 					}()
 				},
-				OnEnd: func(sessionID int, result *agent.Result) {
+				OnEnd: func(turnID int, result *agent.Result) {
 					if pollCancel != nil {
 						pollCancel()
 						pollCancel = nil
@@ -234,12 +234,12 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 						pollDone = nil
 					}
 					eventCh <- runtui.AgentFinishedMsg{
-						SessionID: sessionID,
+						SessionID: turnID,
 						Result:    result,
 					}
 				},
-				OnWait: func(sessionID int) []loop.WaitResult {
-					return waitForSessionSpawns(cfg.Store, sessionID)
+				OnWait: func(turnID int) []loop.WaitResult {
+					return waitForSessionSpawns(cfg.Store, turnID)
 				},
 			}
 
@@ -277,12 +277,12 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				return fmt.Errorf("step %d (%s) failed: %w", stepIdx, prof.Name, loopErr)
 			}
 
-			// Collect handoffs: running spawns marked as handoff from this step's sessions.
-			var stepSessionIDs []int
-			if stepSessionStart < len(run.SessionIDs) {
-				stepSessionIDs = append(stepSessionIDs, run.SessionIDs[stepSessionStart:]...)
+			// Collect handoffs: running spawns marked as handoff from this step's turns.
+			var stepTurnIDs []int
+			if stepTurnStart < len(run.TurnIDs) {
+				stepTurnIDs = append(stepTurnIDs, run.TurnIDs[stepTurnStart:]...)
 			}
-			run.PendingHandoffs = collectHandoffs(cfg.Store, stepSessionIDs)
+			run.PendingHandoffs = collectHandoffs(cfg.Store, stepTurnIDs)
 			cfg.Store.UpdateLoopRun(run)
 
 			// Check stop signal after steps with can_stop.
@@ -293,13 +293,13 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 	}
 }
 
-func pollSpawnStatus(ctx context.Context, s *store.Store, parentSessionID int, eventCh chan any) {
+func pollSpawnStatus(ctx context.Context, s *store.Store, parentTurnID int, eventCh chan any) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	lastSnapshot := ""
 	emitIfChanged := func() {
-		records, err := s.SpawnsByParent(parentSessionID)
+		records, err := s.SpawnsByParent(parentTurnID)
 		if err != nil {
 			return
 		}
@@ -427,11 +427,11 @@ func buildAgentConfig(cfg RunConfig, prof *config.Profile, runID, stepIndex int)
 	}
 }
 
-// collectHandoffs finds running spawns marked as handoff from any of the given session IDs.
-func collectHandoffs(s *store.Store, sessionIDs []int) []store.HandoffInfo {
+// collectHandoffs finds running spawns marked as handoff from any of the given turn IDs.
+func collectHandoffs(s *store.Store, turnIDs []int) []store.HandoffInfo {
 	var handoffs []store.HandoffInfo
 	seen := make(map[int]struct{})
-	for _, sid := range sessionIDs {
+	for _, sid := range turnIDs {
 		records, err := s.SpawnsByParent(sid)
 		if err != nil {
 			continue
@@ -456,7 +456,7 @@ func collectHandoffs(s *store.Store, sessionIDs []int) []store.HandoffInfo {
 	return handoffs
 }
 
-func reparentHandoffs(s *store.Store, handoffs []store.HandoffInfo, newParentSessionID int) {
+func reparentHandoffs(s *store.Store, handoffs []store.HandoffInfo, newParentTurnID int) {
 	if len(handoffs) == 0 {
 		return
 	}
@@ -465,7 +465,7 @@ func reparentHandoffs(s *store.Store, handoffs []store.HandoffInfo, newParentSes
 	// stay in sync with persisted store data.
 	if o := orchestrator.Get(); o != nil {
 		for _, h := range handoffs {
-			_ = o.ReparentSpawn(h.SpawnID, newParentSessionID)
+			_ = o.ReparentSpawn(h.SpawnID, newParentTurnID)
 		}
 		return
 	}
@@ -475,14 +475,14 @@ func reparentHandoffs(s *store.Store, handoffs []store.HandoffInfo, newParentSes
 		if err != nil {
 			continue
 		}
-		rec.ParentSessionID = newParentSessionID
-		rec.HandedOffTo = newParentSessionID
+		rec.ParentTurnID = newParentTurnID
+		rec.HandedOffToTurn = newParentTurnID
 		_ = s.UpdateSpawn(rec)
 	}
 }
 
-func waitForSessionSpawns(s *store.Store, parentSessionID int) []loop.WaitResult {
-	records, err := s.SpawnsByParent(parentSessionID)
+func waitForSessionSpawns(s *store.Store, parentTurnID int) []loop.WaitResult {
+	records, err := s.SpawnsByParent(parentTurnID)
 	if err != nil || len(records) == 0 {
 		return nil
 	}

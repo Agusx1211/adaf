@@ -66,7 +66,7 @@ var agentsTestCmd = &cobra.Command{
 
 func init() {
 	agentsTestCmd.Flags().Duration("timeout", 30*time.Second, "Health-check timeout")
-	agentsSetModelCmd.Flags().Bool("global", false, "Write override to global config (~/.adaf/config.json) instead of project")
+	agentsSetModelCmd.Flags().Bool("global", false, "Write override to global config (~/.adaf/config.json) instead of agents cache")
 
 	agentsCmd.AddCommand(agentsListCmd)
 	agentsCmd.AddCommand(agentsDetectCmd)
@@ -76,17 +76,12 @@ func init() {
 }
 
 func runAgentsList(cmd *cobra.Command, args []string) error {
-	adafRoot, err := agentsRoot()
-	if err != nil {
-		return err
-	}
-
 	globalCfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading global config: %w", err)
 	}
 
-	cfg, err := agent.LoadAgentsConfig(adafRoot)
+	cfg, err := agent.LoadAgentsConfig()
 	if err != nil {
 		return fmt.Errorf("loading agents config: %w", err)
 	}
@@ -111,7 +106,7 @@ func runAgentsList(cmd *cobra.Command, args []string) error {
 		// Annotate override source.
 		modelSource := ""
 		if strings.TrimSpace(rec.ModelOverride) != "" {
-			modelSource = " (project)"
+			modelSource = " (agents)"
 		} else if ga, ok := globalCfg.Agents[name]; ok && strings.TrimSpace(ga.ModelOverride) != "" {
 			modelSource = " (global)"
 		}
@@ -142,7 +137,6 @@ func runAgentsList(cmd *cobra.Command, args []string) error {
 		printTable([]string{"NAME", "VERSION", "PATH", "DEFAULT MODEL", "AVAILABLE MODELS"}, rows)
 	}
 	fmt.Println()
-	printField("Config (project)", agent.AgentsConfigPath(adafRoot))
 	printField("Config (global)", config.Dir()+"/config.json")
 	printField("Detected", fmt.Sprintf("%d", len(rows)))
 
@@ -150,11 +144,6 @@ func runAgentsList(cmd *cobra.Command, args []string) error {
 }
 
 func runAgentsDetect(cmd *cobra.Command, args []string) error {
-	adafRoot, err := agentsRoot()
-	if err != nil {
-		return err
-	}
-
 	globalCfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading global config: %w", err)
@@ -162,7 +151,7 @@ func runAgentsDetect(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\n  %sScanning for agent tools...%s\n\n", styleBoldCyan, colorReset)
 
-	cfg, err := agent.LoadAndSyncAgentsConfig(adafRoot, globalCfg)
+	cfg, err := agent.LoadAndSyncAgentsConfig(globalCfg)
 	if err != nil {
 		return fmt.Errorf("scanning agents: %w", err)
 	}
@@ -246,12 +235,7 @@ func runAgentsSetModel(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	adafRoot, err := agentsRoot()
-	if err != nil {
-		return err
-	}
-
-	cfg, err := agent.LoadAgentsConfig(adafRoot)
+	cfg, err := agent.LoadAgentsConfig()
 	if err != nil {
 		return fmt.Errorf("loading agents config: %w", err)
 	}
@@ -267,7 +251,7 @@ func runAgentsSetModel(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("model %q is not in known models for %s (%s)", model, agentName, strings.Join(rec.SupportedModels, ", "))
 	}
 
-	cfg, err = agent.SetModelOverride(adafRoot, agentName, model, globalCfg)
+	cfg, err = agent.SetModelOverride(agentName, model, globalCfg)
 	if err != nil {
 		return fmt.Errorf("saving agent config: %w", err)
 	}
@@ -276,7 +260,7 @@ func runAgentsSetModel(cmd *cobra.Command, args []string) error {
 	fmt.Printf("\n  %sDefault model updated.%s\n\n", styleBoldGreen, colorReset)
 	printField("Agent", agentName)
 	printField("Model", resolved)
-	printField("Config", agent.AgentsConfigPath(adafRoot))
+	printField("Config", config.Dir()+"/agents.json")
 	return nil
 }
 
@@ -284,17 +268,12 @@ func runAgentsTest(cmd *cobra.Command, args []string) error {
 	agentName := strings.ToLower(strings.TrimSpace(args[0]))
 	timeout, _ := cmd.Flags().GetDuration("timeout")
 
-	adafRoot, err := agentsRoot()
-	if err != nil {
-		return err
-	}
-
 	globalCfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading global config: %w", err)
 	}
 
-	cfg, err := agent.LoadAgentsConfig(adafRoot)
+	cfg, err := agent.LoadAgentsConfig()
 	if err != nil {
 		return fmt.Errorf("loading agents config: %w", err)
 	}
@@ -395,10 +374,3 @@ func healthCheckArgs(agentName, modelOverride string) []string {
 	return args
 }
 
-func agentsRoot() (string, error) {
-	s, err := openStore()
-	if err != nil {
-		return "", err
-	}
-	return s.Root(), nil
-}

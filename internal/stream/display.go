@@ -31,9 +31,9 @@ func (d *Display) Handle(ev ClaudeEvent) {
 		switch ev.Subtype {
 		case "init":
 			model := ev.Model
-			sessionID := ev.SessionID
-			if model != "" || sessionID != "" {
-				fmt.Fprintf(d.w, "\033[2m[init]\033[0m session=%s model=%s\n", sessionID, model)
+			turnID := ev.TurnID
+			if model != "" || turnID != "" {
+				fmt.Fprintf(d.w, "\033[2m[init]\033[0m session=%s model=%s\n", turnID, model)
 			}
 		case "api_error":
 			fmt.Fprintf(d.w, "\033[1;31m[api_error]\033[0m\n")

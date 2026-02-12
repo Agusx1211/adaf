@@ -55,8 +55,8 @@ type BuildOpts struct {
 	// ReadOnly appends read-only instructions.
 	ReadOnly bool
 
-	// ParentSessionID, if >0, provides parent context to the child.
-	ParentSessionID int
+	// ParentTurnID, if >0, provides parent context to the child.
+	ParentTurnID int
 
 	// SupervisorNotes are injected into the prompt.
 	SupervisorNotes []store.SupervisorNote
@@ -132,7 +132,7 @@ func Build(opts BuildOpts) (string, error) {
 		}
 	}
 
-	latest, _ := s.LatestLog()
+	latest, _ := s.LatestTurn()
 
 	// Role-specific header.
 	if opts.Profile != nil {

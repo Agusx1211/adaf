@@ -60,7 +60,7 @@ func init() {
 	decisionCreateCmd.Flags().String("decision", "", "The decision made (required)")
 	decisionCreateCmd.Flags().String("rationale", "", "Rationale for the decision (required)")
 	decisionCreateCmd.Flags().String("alternatives", "", "Alternatives considered")
-	decisionCreateCmd.Flags().Int("session", 0, "Associated session ID")
+	decisionCreateCmd.Flags().Int("session", 0, "Associated turn ID")
 	_ = decisionCreateCmd.MarkFlagRequired("title")
 	_ = decisionCreateCmd.MarkFlagRequired("context")
 	_ = decisionCreateCmd.MarkFlagRequired("decision")
@@ -90,18 +90,18 @@ func runDecisionList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	headers := []string{"ID", "DATE", "TITLE", "SESSION"}
+	headers := []string{"ID", "DATE", "TITLE", "TURN"}
 	var rows [][]string
 	for _, d := range decisions {
-		session := "-"
-		if d.SessionID > 0 {
-			session = fmt.Sprintf("#%d", d.SessionID)
+		turn := "-"
+		if d.TurnID > 0 {
+			turn = fmt.Sprintf("#%d", d.TurnID)
 		}
 		rows = append(rows, []string{
 			fmt.Sprintf("#%d", d.ID),
 			d.Date.Format("2006-01-02"),
 			truncate(d.Title, 50),
-			session,
+			turn,
 		})
 	}
 	printTable(headers, rows)
@@ -121,8 +121,8 @@ func runDecisionCreate(cmd *cobra.Command, args []string) error {
 	decision, _ := cmd.Flags().GetString("decision")
 	rationale, _ := cmd.Flags().GetString("rationale")
 	alternatives, _ := cmd.Flags().GetString("alternatives")
-	sessionFlag, _ := cmd.Flags().GetInt("session")
-	sessionID, err := resolveOptionalSessionID(sessionFlag)
+	turnFlag, _ := cmd.Flags().GetInt("session")
+	turnID, err := resolveOptionalTurnID(turnFlag)
 	if err != nil {
 		return err
 	}
@@ -133,7 +133,7 @@ func runDecisionCreate(cmd *cobra.Command, args []string) error {
 		Decision:     decision,
 		Rationale:    rationale,
 		Alternatives: alternatives,
-		SessionID:    sessionID,
+		TurnID:       turnID,
 	}
 
 	if err := s.CreateDecision(dec); err != nil {
@@ -172,8 +172,8 @@ func runDecisionShow(cmd *cobra.Command, args []string) error {
 
 	printField("Title", dec.Title)
 	printField("Date", dec.Date.Format("2006-01-02 15:04:05"))
-	if dec.SessionID > 0 {
-		printField("Session", fmt.Sprintf("#%d", dec.SessionID))
+	if dec.TurnID > 0 {
+		printField("Turn", fmt.Sprintf("#%d", dec.TurnID))
 	}
 
 	fmt.Println()

@@ -17,18 +17,22 @@ import (
 )
 
 var attachCmd = &cobra.Command{
-	Use:     "attach [session-id]",
+	Use:     "attach [loop-name|session-id]",
 	Aliases: []string{"reattach", "connect"},
-	Short:   "Attach to a running session",
-	Long: `Reattach to a running adaf session. The session's event history is replayed
+	Short:   "Attach to a running loop or session",
+	Long: `Reattach to a running adaf loop or session. The event history is replayed
 and then live events are streamed in real-time.
+
+With no arguments, attaches to the only running session (if exactly one exists).
+With a loop name, attaches to the running session for that loop.
+With a numeric session ID, attaches to that specific session.
 
 Press Ctrl+D to detach (session continues running).
 Press q to detach (session continues running).
 Press Ctrl+C to stop the agent and detach.
 
 Use 'adaf sessions' to list available sessions.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: runAttach,
 }
 
@@ -45,10 +49,25 @@ func runAttach(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("attach requires an interactive terminal")
 	}
 
-	// Find the session.
-	meta, err := session.FindSessionByPartial(args[0])
-	if err != nil {
-		return err
+	// Find the session to attach to.
+	var meta *session.SessionMeta
+	var err error
+
+	if len(args) == 0 {
+		// No argument: auto-attach to the only running session.
+		meta, err = session.FindOnlyRunningSession()
+		if err != nil {
+			return err
+		}
+	} else {
+		// Try loop name first, then fall back to session ID / profile match.
+		meta, err = session.FindRunningByLoopName(args[0])
+		if err != nil {
+			meta, err = session.FindSessionByPartial(args[0])
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	if meta.Status != "running" && meta.Status != "starting" {
@@ -128,8 +147,12 @@ func runAttach(cmd *cobra.Command, args []string) error {
 	if detached {
 		// Detached — close connection, agent keeps running.
 		client.Close()
-		fmt.Printf("\n  %sDetached from session #%d. Use 'adaf attach %d' to reattach.%s\n",
-			colorDim, meta.ID, meta.ID, colorReset)
+		reattachHint := fmt.Sprintf("%d", meta.ID)
+		if meta.LoopName != "" {
+			reattachHint = meta.LoopName
+		}
+		fmt.Printf("\n  %sDetached from session #%d. Use 'adaf attach %s' to reattach.%s\n",
+			colorDim, meta.ID, reattachHint, colorReset)
 		return err
 	}
 

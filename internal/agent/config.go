@@ -13,6 +13,11 @@ import (
 	"github.com/agusx1211/adaf/internal/detect"
 )
 
+// agentsConfigPath returns the full path to ~/.adaf/agents.json (global, machine-local cache).
+func agentsConfigPath() string {
+	return filepath.Join(config.Dir(), "agents.json")
+}
+
 // AgentsConfig persists detected agent state and user overrides.
 type AgentsConfig struct {
 	Updated time.Time              `json:"updated"`
@@ -33,17 +38,9 @@ type AgentRecord struct {
 	DetectedAt      time.Time                  `json:"detected_at,omitempty"`
 }
 
-// AgentsConfigPath returns the full path to .adaf/agents.json.
-func AgentsConfigPath(adafRoot string) string {
-	if strings.TrimSpace(adafRoot) == "" {
-		adafRoot = ".adaf"
-	}
-	return filepath.Join(adafRoot, "agents.json")
-}
-
-// LoadAgentsConfig loads .adaf/agents.json, returning an empty config if absent.
-func LoadAgentsConfig(adafRoot string) (*AgentsConfig, error) {
-	path := AgentsConfigPath(adafRoot)
+// LoadAgentsConfig loads ~/.adaf/agents.json, returning an empty config if absent.
+func LoadAgentsConfig() (*AgentsConfig, error) {
+	path := agentsConfigPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -62,8 +59,8 @@ func LoadAgentsConfig(adafRoot string) (*AgentsConfig, error) {
 	return &cfg, nil
 }
 
-// SaveAgentsConfig writes .adaf/agents.json.
-func SaveAgentsConfig(adafRoot string, cfg *AgentsConfig) error {
+// SaveAgentsConfig writes ~/.adaf/agents.json.
+func SaveAgentsConfig(cfg *AgentsConfig) error {
 	if cfg == nil {
 		cfg = &AgentsConfig{}
 	}
@@ -72,7 +69,7 @@ func SaveAgentsConfig(adafRoot string, cfg *AgentsConfig) error {
 	}
 	cfg.Updated = time.Now().UTC()
 
-	if err := os.MkdirAll(filepath.Dir(AgentsConfigPath(adafRoot)), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(agentsConfigPath()), 0755); err != nil {
 		return err
 	}
 
@@ -80,14 +77,14 @@ func SaveAgentsConfig(adafRoot string, cfg *AgentsConfig) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(AgentsConfigPath(adafRoot), data, 0644)
+	return os.WriteFile(agentsConfigPath(), data, 0644)
 }
 
 // SyncDetectedAgents merges fresh detection results into persisted agent config.
 // If globalCfg is non-nil, agent paths from the global config are used as fallback
 // when detection doesn't find a path.
-func SyncDetectedAgents(adafRoot string, detected []detect.DetectedAgent, globalCfg *config.GlobalConfig) (*AgentsConfig, error) {
-	cfg, err := LoadAgentsConfig(adafRoot)
+func SyncDetectedAgents(detected []detect.DetectedAgent, globalCfg *config.GlobalConfig) (*AgentsConfig, error) {
+	cfg, err := LoadAgentsConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +143,7 @@ func SyncDetectedAgents(adafRoot string, detected []detect.DetectedAgent, global
 		}
 	}
 
-	if err := SaveAgentsConfig(adafRoot, cfg); err != nil {
+	if err := SaveAgentsConfig(cfg); err != nil {
 		return nil, err
 	}
 	return cfg, nil
@@ -154,17 +151,17 @@ func SyncDetectedAgents(adafRoot string, detected []detect.DetectedAgent, global
 
 // LoadAndSyncAgentsConfig scans local agents and persists the merged view.
 // If globalCfg is non-nil, global settings are merged in.
-func LoadAndSyncAgentsConfig(adafRoot string, globalCfg *config.GlobalConfig) (*AgentsConfig, error) {
+func LoadAndSyncAgentsConfig(globalCfg *config.GlobalConfig) (*AgentsConfig, error) {
 	detected, err := detect.Scan()
 	if err != nil {
 		return nil, err
 	}
-	return SyncDetectedAgents(adafRoot, detected, globalCfg)
+	return SyncDetectedAgents(detected, globalCfg)
 }
 
 // SetModelOverride sets a user's default-model override for an agent.
-func SetModelOverride(adafRoot, agentName, model string, globalCfg *config.GlobalConfig) (*AgentsConfig, error) {
-	cfg, err := LoadAgentsConfig(adafRoot)
+func SetModelOverride(agentName, model string, globalCfg *config.GlobalConfig) (*AgentsConfig, error) {
+	cfg, err := LoadAgentsConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +180,7 @@ func SetModelOverride(adafRoot, agentName, model string, globalCfg *config.Globa
 	}
 	cfg.Agents[agentName] = rec
 
-	if err := SaveAgentsConfig(adafRoot, cfg); err != nil {
+	if err := SaveAgentsConfig(cfg); err != nil {
 		return nil, err
 	}
 	return cfg, nil
@@ -191,11 +188,11 @@ func SetModelOverride(adafRoot, agentName, model string, globalCfg *config.Globa
 
 // ResolveDefaultModel returns the configured model override, falling back to
 // built-in defaults for the agent.
-// Priority (lowest to highest): built-in defaults, global config, project config.
+// Priority (lowest to highest): built-in defaults, global config, agents config.
 func ResolveDefaultModel(cfg *AgentsConfig, globalCfg *config.GlobalConfig, agentName string) string {
 	agentName = normalizeAgentName(agentName)
 
-	// Project-level override (highest priority of stored config).
+	// Agents config override (highest priority of stored config).
 	if cfg != nil {
 		if rec, ok := cfg.Agents[agentName]; ok {
 			if strings.TrimSpace(rec.ModelOverride) != "" {
@@ -220,7 +217,7 @@ func ResolveDefaultModel(cfg *AgentsConfig, globalCfg *config.GlobalConfig, agen
 }
 
 // ResolveModelOverride returns only an explicit model override for an agent.
-// It checks project config first, then global config. Does not fall back to defaults.
+// It checks agents config first, then global config. Does not fall back to defaults.
 func ResolveModelOverride(cfg *AgentsConfig, globalCfg *config.GlobalConfig, agentName string) string {
 	agentName = normalizeAgentName(agentName)
 

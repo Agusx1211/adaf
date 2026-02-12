@@ -1204,8 +1204,8 @@ func (m *Model) renderVibeStreamingLine(scope, line string) bool {
 func (m *Model) handleEvent(ev stream.ClaudeEvent) {
 	scope := ""
 	sessionID := 0
-	if ev.SessionID != "" {
-		if sid, err := strconv.Atoi(strings.TrimSpace(ev.SessionID)); err == nil && sid > 0 {
+	if ev.TurnID != "" {
+		if sid, err := strconv.Atoi(strings.TrimSpace(ev.TurnID)); err == nil && sid > 0 {
 			sessionID = sid
 			scope = m.sessionScope(sid)
 			m.ensureSession(sid)
@@ -1220,7 +1220,7 @@ func (m *Model) handleEvent(ev stream.ClaudeEvent) {
 	switch ev.Type {
 	case "system":
 		m.addScopedLine(scope, initLabelStyle.Render(
-			fmt.Sprintf("[init] session=%s model=%s", ev.SessionID, ev.Model)))
+			fmt.Sprintf("[init] session=%s model=%s", ev.TurnID, ev.Model)))
 		if ev.Model != "" {
 			m.modelName = ev.Model
 			if sessionID > 0 {
@@ -1940,8 +1940,8 @@ func (m Model) issueDetailLines() []string {
 		fieldLine("Created", issue.Created.Format("2006-01-02 15:04")),
 		fieldLine("Updated", issue.Updated.Format("2006-01-02 15:04")),
 	}
-	if issue.SessionID > 0 {
-		lines = append(lines, fieldLine("Session", fmt.Sprintf("#%d", issue.SessionID)))
+	if issue.TurnID > 0 {
+		lines = append(lines, fieldLine("Turn", fmt.Sprintf("#%d", issue.TurnID)))
 	}
 	if len(issue.Labels) > 0 {
 		lines = append(lines, fieldLine("Labels", strings.Join(issue.Labels, ", ")))

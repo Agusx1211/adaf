@@ -21,7 +21,7 @@ type Store struct {
 }
 
 var requiredProjectSubdirs = []string{
-	"logs",
+	"turns",
 	"records",
 	"plans",
 	"docs",
@@ -420,13 +420,26 @@ func (s *Store) UpdateIssue(issue *Issue) error {
 	return s.writeJSON(filepath.Join(s.root, "issues", fmt.Sprintf("%d.json", issue.ID)), issue)
 }
 
-// Session logs
+// Turns
 
-func (s *Store) ListLogs() ([]SessionLog, error) {
+func (s *Store) turnsDir() string {
+	dir := filepath.Join(s.root, "turns")
+	if _, err := os.Stat(dir); err == nil {
+		return dir
+	}
+	// Fall back to legacy "logs/" for backward compat.
+	legacyDir := filepath.Join(s.root, "logs")
+	if _, err := os.Stat(legacyDir); err == nil {
+		return legacyDir
+	}
+	return dir
+}
+
+func (s *Store) ListTurns() ([]Turn, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	dir := filepath.Join(s.root, "logs")
+	dir := s.turnsDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -435,51 +448,52 @@ func (s *Store) ListLogs() ([]SessionLog, error) {
 		return nil, err
 	}
 
-	var logs []SessionLog
+	var turns []Turn
 	for _, e := range entries {
 		if !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		var log SessionLog
-		if err := s.readJSON(filepath.Join(dir, e.Name()), &log); err != nil {
+		var turn Turn
+		if err := s.readJSON(filepath.Join(dir, e.Name()), &turn); err != nil {
 			continue
 		}
-		logs = append(logs, log)
+		turns = append(turns, turn)
 	}
-	sort.Slice(logs, func(i, j int) bool { return logs[i].ID < logs[j].ID })
-	return logs, nil
+	sort.Slice(turns, func(i, j int) bool { return turns[i].ID < turns[j].ID })
+	return turns, nil
 }
 
-func (s *Store) CreateLog(log *SessionLog) error {
+func (s *Store) CreateTurn(turn *Turn) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	log.ID = s.nextID(filepath.Join(s.root, "logs"))
-	log.Date = time.Now().UTC()
-	return s.writeJSON(filepath.Join(s.root, "logs", fmt.Sprintf("%d.json", log.ID)), log)
+	dir := s.turnsDir()
+	turn.ID = s.nextID(dir)
+	turn.Date = time.Now().UTC()
+	return s.writeJSON(filepath.Join(dir, fmt.Sprintf("%d.json", turn.ID)), turn)
 }
 
-func (s *Store) GetLog(id int) (*SessionLog, error) {
-	var log SessionLog
-	if err := s.readJSON(filepath.Join(s.root, "logs", fmt.Sprintf("%d.json", id)), &log); err != nil {
+func (s *Store) GetTurn(id int) (*Turn, error) {
+	var turn Turn
+	if err := s.readJSON(filepath.Join(s.turnsDir(), fmt.Sprintf("%d.json", id)), &turn); err != nil {
 		return nil, err
 	}
-	return &log, nil
+	return &turn, nil
 }
 
-func (s *Store) UpdateLog(log *SessionLog) error {
-	return s.writeJSON(filepath.Join(s.root, "logs", fmt.Sprintf("%d.json", log.ID)), log)
+func (s *Store) UpdateTurn(turn *Turn) error {
+	return s.writeJSON(filepath.Join(s.turnsDir(), fmt.Sprintf("%d.json", turn.ID)), turn)
 }
 
-func (s *Store) LatestLog() (*SessionLog, error) {
-	logs, err := s.ListLogs()
+func (s *Store) LatestTurn() (*Turn, error) {
+	turns, err := s.ListTurns()
 	if err != nil {
 		return nil, err
 	}
-	if len(logs) == 0 {
+	if len(turns) == 0 {
 		return nil, nil
 	}
-	return &logs[len(logs)-1], nil
+	return &turns[len(turns)-1], nil
 }
 
 // Docs
@@ -617,16 +631,16 @@ func (s *Store) GetDecision(id int) (*Decision, error) {
 
 // Records (formerly "recordings")
 
-func (s *Store) SaveRecording(rec *SessionRecording) error {
-	dir := filepath.Join(s.root, "records", fmt.Sprintf("%d", rec.SessionID))
+func (s *Store) SaveRecording(rec *TurnRecording) error {
+	dir := filepath.Join(s.root, "records", fmt.Sprintf("%d", rec.TurnID))
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	return s.writeJSON(filepath.Join(dir, "recording.json"), rec)
 }
 
-func (s *Store) AppendRecordingEvent(sessionID int, event RecordingEvent) error {
-	dir := filepath.Join(s.root, "records", fmt.Sprintf("%d", sessionID))
+func (s *Store) AppendRecordingEvent(turnID int, event RecordingEvent) error {
+	dir := filepath.Join(s.root, "records", fmt.Sprintf("%d", turnID))
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
@@ -645,13 +659,13 @@ func (s *Store) AppendRecordingEvent(sessionID int, event RecordingEvent) error 
 	return err
 }
 
-func (s *Store) LoadRecording(sessionID int) (*SessionRecording, error) {
+func (s *Store) LoadRecording(turnID int) (*TurnRecording, error) {
 	// Try records/ first, fall back to recordings/ for backward compat.
-	var rec SessionRecording
-	path := filepath.Join(s.root, "records", fmt.Sprintf("%d", sessionID), "recording.json")
+	var rec TurnRecording
+	path := filepath.Join(s.root, "records", fmt.Sprintf("%d", turnID), "recording.json")
 	if err := s.readJSON(path, &rec); err != nil {
 		// Try legacy path.
-		legacyPath := filepath.Join(s.root, "recordings", fmt.Sprintf("%d", sessionID), "recording.json")
+		legacyPath := filepath.Join(s.root, "recordings", fmt.Sprintf("%d", turnID), "recording.json")
 		if err2 := s.readJSON(legacyPath, &rec); err2 != nil {
 			return nil, err // return original error
 		}
@@ -659,7 +673,7 @@ func (s *Store) LoadRecording(sessionID int) (*SessionRecording, error) {
 	return &rec, nil
 }
 
-// RecordsDirs returns paths to scan for session recording directories,
+// RecordsDirs returns paths to scan for turn recording directories,
 // including the legacy "recordings/" path for backward compatibility.
 func (s *Store) RecordsDirs() []string {
 	dirs := []string{filepath.Join(s.root, "records")}
@@ -876,15 +890,15 @@ func (s *Store) UpdateSpawn(rec *SpawnRecord) error {
 	return s.writeJSONLocked(filepath.Join(s.root, "spawns", fmt.Sprintf("%d.json", rec.ID)), rec)
 }
 
-// SpawnsByParent returns spawn records created by a given parent session.
-func (s *Store) SpawnsByParent(parentSessionID int) ([]SpawnRecord, error) {
+// SpawnsByParent returns spawn records created by a given parent turn.
+func (s *Store) SpawnsByParent(parentTurnID int) ([]SpawnRecord, error) {
 	all, err := s.ListSpawns()
 	if err != nil {
 		return nil, err
 	}
 	var filtered []SpawnRecord
 	for _, r := range all {
-		if r.ParentSessionID == parentSessionID {
+		if r.ParentTurnID == parentTurnID {
 			filtered = append(filtered, r)
 		}
 	}
@@ -934,15 +948,15 @@ func (s *Store) CreateNote(note *SupervisorNote) error {
 	return s.writeJSONLocked(filepath.Join(dir, fmt.Sprintf("%d.json", note.ID)), note)
 }
 
-// NotesBySession returns notes targeting a given session.
-func (s *Store) NotesBySession(sessionID int) ([]SupervisorNote, error) {
+// NotesByTurn returns notes targeting a given turn.
+func (s *Store) NotesByTurn(turnID int) ([]SupervisorNote, error) {
 	all, err := s.ListNotes()
 	if err != nil {
 		return nil, err
 	}
 	var filtered []SupervisorNote
 	for _, n := range all {
-		if n.SessionID == sessionID {
+		if n.TurnID == turnID {
 			filtered = append(filtered, n)
 		}
 	}
@@ -1065,6 +1079,17 @@ func (s *Store) EnsureDirs() error {
 // Repair recreates missing project store directories and runs legacy migrations.
 // It returns a list of created relative directory paths (for reporting).
 func (s *Store) Repair() ([]string, error) {
+	// Migrate legacy "logs/" directory to "turns/" if needed.
+	logsDir := filepath.Join(s.root, "logs")
+	turnsDir := filepath.Join(s.root, "turns")
+	if info, err := os.Stat(logsDir); err == nil && info.IsDir() {
+		if _, err := os.Stat(turnsDir); os.IsNotExist(err) {
+			if err := os.Rename(logsDir, turnsDir); err != nil {
+				return nil, fmt.Errorf("migrating logs/ to turns/: %w", err)
+			}
+		}
+	}
+
 	created, err := s.ensureProjectDirs()
 	if err != nil {
 		return nil, err
@@ -1274,38 +1299,38 @@ func (s *Store) IsLoopStopped(runID int) bool {
 
 // --- Wait Signal ---
 
-// SignalWait creates a wait signal file for a session.
+// SignalWait creates a wait signal file for a turn.
 // This indicates the agent wants to pause and resume when spawns complete.
-func (s *Store) SignalWait(sessionID int) error {
+func (s *Store) SignalWait(turnID int) error {
 	dir := filepath.Join(s.root, "waits")
 	os.MkdirAll(dir, 0755)
-	return os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d", sessionID)), []byte("waiting"), 0644)
+	return os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d", turnID)), []byte("waiting"), 0644)
 }
 
-// IsWaiting checks if a wait signal exists for a session.
-func (s *Store) IsWaiting(sessionID int) bool {
-	_, err := os.Stat(filepath.Join(s.root, "waits", fmt.Sprintf("%d", sessionID)))
+// IsWaiting checks if a wait signal exists for a turn.
+func (s *Store) IsWaiting(turnID int) bool {
+	_, err := os.Stat(filepath.Join(s.root, "waits", fmt.Sprintf("%d", turnID)))
 	return err == nil
 }
 
-// ClearWait removes the wait signal for a session.
-func (s *Store) ClearWait(sessionID int) error {
-	return os.Remove(filepath.Join(s.root, "waits", fmt.Sprintf("%d", sessionID)))
+// ClearWait removes the wait signal for a turn.
+func (s *Store) ClearWait(turnID int) error {
+	return os.Remove(filepath.Join(s.root, "waits", fmt.Sprintf("%d", turnID)))
 }
 
 // --- Interrupt Signal ---
 
-// SignalInterrupt creates an interrupt signal file for a spawn.
-func (s *Store) SignalInterrupt(spawnID int, message string) error {
+// SignalInterrupt creates an interrupt signal file for a turn.
+func (s *Store) SignalInterrupt(turnID int, message string) error {
 	dir := filepath.Join(s.root, "interrupts")
 	os.MkdirAll(dir, 0755)
-	return os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d", spawnID)), []byte(message), 0644)
+	return os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d", turnID)), []byte(message), 0644)
 }
 
-// CheckInterrupt checks for and returns an interrupt message for a spawn.
+// CheckInterrupt checks for and returns an interrupt message for a turn.
 // Returns empty string if no interrupt is pending.
-func (s *Store) CheckInterrupt(spawnID int) string {
-	path := filepath.Join(s.root, "interrupts", fmt.Sprintf("%d", spawnID))
+func (s *Store) CheckInterrupt(turnID int) string {
+	path := filepath.Join(s.root, "interrupts", fmt.Sprintf("%d", turnID))
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return ""
