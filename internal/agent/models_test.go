@@ -3,7 +3,7 @@ package agent
 import "testing"
 
 func TestModelRegistry(t *testing.T) {
-	if got := DefaultModel("claude"); got != "sonnet-4.5" {
+	if got := DefaultModel("claude"); got != "sonnet" {
 		t.Fatalf("DefaultModel(claude) = %q", got)
 	}
 

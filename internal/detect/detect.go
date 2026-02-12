@@ -217,8 +217,14 @@ func probeCodexModels() ([]string, []agentmeta.ReasoningLevel) {
 
 // --- Claude model discovery ---
 
-// claudeModelRE matches model aliases like "opus-4-6", "sonnet-4.5", "haiku-4-5" etc.
-var claudeModelRE = regexp.MustCompile(`"((?:opus|sonnet|haiku)[-0-9.]*)"`)
+// claudeFullModelRE matches full model IDs like "claude-opus-4-6" or
+// "claude-sonnet-4-5-20250929" in the CLI bundle. These are the precise
+// identifiers the CLI accepts via --model.
+var claudeFullModelRE = regexp.MustCompile(`"(claude-(?:opus|sonnet|haiku)[-0-9]*)"`)
+
+// claudeAliasRE matches bare alias references like "opus", "sonnet", "haiku"
+// (without any version suffix) which the CLI also accepts as shortcuts for the latest.
+var claudeAliasRE = regexp.MustCompile(`"((?:opus|sonnet|haiku))"`)
 
 // claudeEffortRE matches the effort levels array, e.g. ["low","medium","high","max"]
 var claudeEffortRE = regexp.MustCompile(`\["low","medium","high"(?:,"max")?\]`)
@@ -236,18 +242,31 @@ func probeClaudeModels(binPath string) ([]string, []agentmeta.ReasoningLevel) {
 		return nil, nil
 	}
 
-	// Extract model aliases.
-	matches := claudeModelRE.FindAllSubmatch(data, -1)
+	// The CLI accepts two forms via --model:
+	//   1. Bare aliases: "opus", "sonnet", "haiku" (resolve to latest version)
+	//   2. Full IDs: "claude-opus-4-6", "claude-sonnet-4-5-20250929", etc.
+	// We extract both from the bundle. Bare aliases go first (most useful),
+	// then full IDs for when the user wants a specific version.
 	seen := make(map[string]struct{})
 	var models []string
-	for _, m := range matches {
-		name := string(m[1])
+
+	add := func(name string) {
 		lower := strings.ToLower(name)
 		if _, dup := seen[lower]; dup {
-			continue
+			return
 		}
 		seen[lower] = struct{}{}
 		models = append(models, name)
+	}
+
+	// Bare aliases first.
+	for _, m := range claudeAliasRE.FindAllSubmatch(data, -1) {
+		add(string(m[1]))
+	}
+
+	// Full model IDs.
+	for _, m := range claudeFullModelRE.FindAllSubmatch(data, -1) {
+		add(string(m[1]))
 	}
 
 	// Extract effort/reasoning levels from the bundle.

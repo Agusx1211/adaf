@@ -17,7 +17,7 @@ func TestSyncDetectedAgentsPersistsAndPreservesOverrides(t *testing.T) {
 			Path:            "/tmp/claude",
 			Version:         "1.0.0",
 			Capabilities:    []string{"prompt-arg"},
-			SupportedModels: []string{"opus-4", "sonnet-4.5"},
+			SupportedModels: []string{"opus", "sonnet"},
 		},
 	}, nil)
 	if err != nil {
@@ -31,12 +31,12 @@ func TestSyncDetectedAgentsPersistsAndPreservesOverrides(t *testing.T) {
 	if !rec.Detected {
 		t.Fatal("expected claude to be marked detected")
 	}
-	if rec.DefaultModel != "sonnet-4.5" {
+	if rec.DefaultModel != "sonnet" {
 		t.Fatalf("unexpected default model: %q", rec.DefaultModel)
 	}
 
-	rec.ModelOverride = "opus-4"
-	rec.DefaultModel = "opus-4"
+	rec.ModelOverride = "opus"
+	rec.DefaultModel = "opus"
 	cfg.Agents["claude"] = rec
 	if err := SaveAgentsConfig(root, cfg); err != nil {
 		t.Fatalf("SaveAgentsConfig() error = %v", err)
@@ -48,7 +48,7 @@ func TestSyncDetectedAgentsPersistsAndPreservesOverrides(t *testing.T) {
 			Path:            "/tmp/claude2",
 			Version:         "1.1.0",
 			Capabilities:    []string{"prompt-arg", "model-select"},
-			SupportedModels: []string{"opus-4", "sonnet-4.5", "haiku-4.5"},
+			SupportedModels: []string{"opus", "sonnet", "haiku"},
 		},
 	}, nil)
 	if err != nil {
@@ -62,10 +62,10 @@ func TestSyncDetectedAgentsPersistsAndPreservesOverrides(t *testing.T) {
 	if rec.Version != "1.1.0" {
 		t.Fatalf("expected updated version, got %q", rec.Version)
 	}
-	if rec.ModelOverride != "opus-4" {
+	if rec.ModelOverride != "opus" {
 		t.Fatalf("expected override preserved, got %q", rec.ModelOverride)
 	}
-	if rec.DefaultModel != "opus-4" {
+	if rec.DefaultModel != "opus" {
 		t.Fatalf("expected effective default to keep override, got %q", rec.DefaultModel)
 	}
 
@@ -87,7 +87,7 @@ func TestResolveDefaultModel(t *testing.T) {
 	if got := ResolveDefaultModel(cfg, nil, "codex"); got != "o3" {
 		t.Fatalf("ResolveDefaultModel(codex) = %q", got)
 	}
-	if got := ResolveDefaultModel(nil, nil, "claude"); got != "sonnet-4.5" {
+	if got := ResolveDefaultModel(nil, nil, "claude"); got != "sonnet" {
 		t.Fatalf("ResolveDefaultModel(nil, claude) = %q", got)
 	}
 }
@@ -102,7 +102,7 @@ func TestResolveModelOverride(t *testing.T) {
 			},
 			"claude": {
 				Name:         "claude",
-				DefaultModel: "sonnet-4.5",
+				DefaultModel: "sonnet",
 			},
 		},
 	}

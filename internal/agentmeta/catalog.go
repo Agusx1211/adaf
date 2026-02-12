@@ -24,11 +24,11 @@ var builtin = map[string]Info{
 	"claude": {
 		Name:         "claude",
 		Binary:       "claude",
-		DefaultModel: "sonnet-4.5",
+		DefaultModel: "sonnet",
 		SupportedModels: []string{
-			"opus-4",
-			"sonnet-4.5",
-			"haiku-4.5",
+			"opus",
+			"sonnet",
+			"haiku",
 		},
 		Capabilities: []string{"prompt-arg", "model-select", "auto-approve", "stream-output"},
 	},
