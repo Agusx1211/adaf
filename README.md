@@ -241,9 +241,30 @@ Loops define cyclic workflows where multiple agent profiles take turns working o
     {
       "name": "dev-cycle",
       "steps": [
-        { "profile": "junior", "turns": 3, "instructions": "Implement the next planned feature" },
-        { "profile": "senior", "turns": 1, "instructions": "Review and fix issues", "can_stop": true },
-        { "profile": "tester", "turns": 1, "instructions": "Run tests and file issues" }
+        {
+          "profile": "builder",
+          "role": "junior",
+          "turns": 3,
+          "instructions": "Implement the next planned feature",
+          "delegation": {
+            "profiles": [
+              { "name": "tester" }
+            ]
+          }
+        },
+        {
+          "profile": "reviewer",
+          "role": "senior",
+          "turns": 1,
+          "instructions": "Review and fix issues",
+          "can_stop": true
+        },
+        {
+          "profile": "tester",
+          "role": "junior",
+          "turns": 1,
+          "instructions": "Run tests and file issues"
+        }
       ]
     }
   ]
@@ -279,37 +300,31 @@ Child agents run in their own git branches. Results can be reviewed, merged, or 
 
 ### Agent Profiles
 
-Profiles define agent configurations with roles:
+Profiles define reusable agent/model characteristics:
 
 ```json
 {
   "profiles": [
     {
-      "name": "senior",
+      "name": "reviewer",
       "agent": "claude",
       "model": "claude-opus-4-6",
-      "role": "senior",
       "intelligence": 9,
-      "spawnable_profiles": ["junior"],
       "description": "Senior engineer for complex tasks and code review"
     },
     {
-      "name": "junior",
+      "name": "builder",
       "agent": "claude",
       "model": "claude-sonnet-4-5-20250929",
-      "role": "junior",
+      "reasoning_level": "high",
       "intelligence": 7,
-      "description": "Junior engineer for implementation tasks"
+      "description": "Implementation-focused engineer"
     }
   ]
 }
 ```
 
-Roles control capabilities:
-- **supervisor** -- Monitoring and analysis only
-- **manager** -- Can spawn sub-agents, orchestrate work
-- **senior** -- Can write code and spawn sub-agents
-- **junior** -- Can write code, read-only spawning
+Roles and spawn permissions are configured per loop step (`loops[].steps[]`), not per profile.
 
 ## Configuration
 

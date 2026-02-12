@@ -29,6 +29,22 @@ func EffectiveRole(role string) string {
 	return role
 }
 
+// EffectiveStepRole resolves the role for a loop step.
+//
+// Priority:
+//  1. Explicit step role
+//  2. Legacy profile role (if profile != nil)
+//  3. "junior"
+func EffectiveStepRole(stepRole string, profile *Profile) string {
+	if stepRole != "" && ValidRole(stepRole) {
+		return stepRole
+	}
+	if profile != nil && profile.Role != "" && ValidRole(profile.Role) {
+		return profile.Role
+	}
+	return RoleJunior
+}
+
 // CanSpawn reports whether the given role is traditionally allowed to spawn sub-agents.
 // Deprecated: spawning is now controlled by DelegationConfig on loop steps / session starts.
 // This is kept for backward compatibility with profile creation UIs.

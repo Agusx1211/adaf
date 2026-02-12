@@ -46,6 +46,10 @@ type BuildOpts struct {
 	// Profile is the profile of the agent being prompted.
 	Profile *config.Profile
 
+	// Role overrides the role prompt for this run context.
+	// When empty, prompt generation falls back to profile.Role.
+	Role string
+
 	// GlobalCfg provides access to all profiles (for spawnable info).
 	GlobalCfg *config.GlobalConfig
 
@@ -136,7 +140,7 @@ func Build(opts BuildOpts) (string, error) {
 
 	// Role-specific header.
 	if opts.Profile != nil {
-		roleSection := RolePrompt(opts.Profile, opts.GlobalCfg)
+		roleSection := RolePrompt(opts.Profile, opts.Role, opts.GlobalCfg)
 		if roleSection != "" {
 			b.WriteString(roleSection)
 			b.WriteString("\n")

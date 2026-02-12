@@ -23,7 +23,6 @@ type profileEntry struct {
 	Agent           string
 	Model           string
 	ReasoningLevel  string // thinking budget value from profile
-	Role            string // "manager", "senior", "junior", "supervisor"
 	Intelligence    int
 	Description     string
 	MaxInstances    int // max concurrent instances (0 = unlimited)
@@ -47,7 +46,6 @@ func buildProfileList(globalCfg *cfgpkg.GlobalConfig, agentsCfg *agent.AgentsCon
 			Agent:          p.Agent,
 			Model:          p.Model,
 			ReasoningLevel: p.ReasoningLevel,
-			Role:           cfgpkg.EffectiveRole(p.Role),
 			Intelligence:   p.Intelligence,
 			Description:    p.Description,
 			MaxInstances:   p.MaxInstances,
@@ -68,12 +66,17 @@ func buildProfileList(globalCfg *cfgpkg.GlobalConfig, agentsCfg *agent.AgentsCon
 	if len(globalCfg.Loops) > 0 {
 		entries = append(entries, profileEntry{IsSeparator: true, Name: "───"})
 		for _, l := range globalCfg.Loops {
+			steps := make([]cfgpkg.LoopStep, len(l.Steps))
+			for i, step := range l.Steps {
+				steps[i] = step
+				steps[i].Role = cfgpkg.EffectiveStepRole(step.Role, globalCfg.FindProfile(step.Profile))
+			}
 			entries = append(entries, profileEntry{
 				IsLoop:          true,
 				LoopName:        l.Name,
 				Name:            l.Name,
 				LoopSteps:       len(l.Steps),
-				LoopStepDetails: l.Steps,
+				LoopStepDetails: steps,
 			})
 		}
 	}
@@ -164,7 +167,7 @@ func renderProfileList(profiles []profileEntry, selected int, outerW, outerH int
 		}
 
 		name := p.Name
-		maxW := cw - 10 // leave room for role/loop badge
+		maxW := cw - 10 // leave room for loop badge
 		if maxW > 0 && len(name) > maxW {
 			name = name[:maxW]
 		}
@@ -195,15 +198,13 @@ func renderProfileList(profiles []profileEntry, selected int, outerW, outerH int
 			continue
 		}
 
-		badge := roleBadge(p.Role)
-
 		if i == selected {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			nameStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(name)
-			lines = append(lines, cursor+nameStyled+" "+badge)
+			lines = append(lines, cursor+nameStyled)
 		} else {
 			nameStyled := lipgloss.NewStyle().Foreground(ColorText).Render(name)
-			lines = append(lines, "  "+nameStyled+" "+badge)
+			lines = append(lines, "  "+nameStyled)
 		}
 	}
 
@@ -394,6 +395,11 @@ func renderProjectPanel(
 					if turns <= 0 {
 						turns = 1
 					}
+					role := cfgpkg.EffectiveRole(step.Role)
+					spawnCount := 0
+					if step.Delegation != nil {
+						spawnCount = len(step.Delegation.Profiles)
+					}
 					flags := ""
 					if step.CanStop {
 						flags += " [stop]"
@@ -404,7 +410,11 @@ func renderProjectPanel(
 					if step.CanPushover {
 						flags += " [push]"
 					}
-					stepLine := fmt.Sprintf("%d. %s x%d%s", i+1, step.Profile, turns, flags)
+					spawnTag := " [no-spawn]"
+					if spawnCount > 0 {
+						spawnTag = fmt.Sprintf(" [spawn:%d]", spawnCount)
+					}
+					stepLine := fmt.Sprintf("%d. %s %s x%d%s%s", i+1, step.Profile, roleBadge(role), turns, spawnTag, flags)
 					lines = append(lines, dimStyle.Render(stepLine))
 					if step.Instructions != "" {
 						instr := step.Instructions
@@ -437,7 +447,6 @@ func renderProjectPanel(
 			if p.ReasoningLevel != "" {
 				lines = append(lines, labelStyle.Render("Reasoning")+valueStyle.Render(p.ReasoningLevel))
 			}
-			lines = append(lines, labelStyle.Render("Role")+valueStyle.Render(p.Role)+" "+roleBadge(p.Role))
 			if p.Intelligence > 0 {
 				lines = append(lines, labelStyle.Render("Intelligence")+valueStyle.Render(fmt.Sprintf("%d/10", p.Intelligence)))
 			}

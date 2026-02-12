@@ -126,6 +126,11 @@ func loopList(cmd *cobra.Command, args []string) error {
 			if turns <= 0 {
 				turns = 1
 			}
+			role := config.EffectiveStepRole(step.Role, globalCfg.FindProfile(step.Profile))
+			spawnCount := 0
+			if step.Delegation != nil {
+				spawnCount = len(step.Delegation.Profiles)
+			}
 			flags := ""
 			if step.CanStop {
 				flags += " [can_stop]"
@@ -136,7 +141,11 @@ func loopList(cmd *cobra.Command, args []string) error {
 			if step.CanPushover {
 				flags += " [can_pushover]"
 			}
-			fmt.Printf("    %d. %s x%d%s\n", i+1, step.Profile, turns, flags)
+			spawnTag := " [no-spawn]"
+			if spawnCount > 0 {
+				spawnTag = fmt.Sprintf(" [spawn:%d]", spawnCount)
+			}
+			fmt.Printf("    %d. %s (%s) x%d%s%s\n", i+1, step.Profile, role, turns, spawnTag, flags)
 			if step.Instructions != "" {
 				instr := step.Instructions
 				if len(instr) > 60 {

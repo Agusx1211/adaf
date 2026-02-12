@@ -45,6 +45,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 	for i, s := range loopDef.Steps {
 		steps[i] = store.LoopRunStep{
 			Profile:      s.Profile,
+			Role:         s.Role,
 			Turns:        s.Turns,
 			Instructions: s.Instructions,
 			CanStop:      s.CanStop,
@@ -148,6 +149,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				Store:       cfg.Store,
 				Project:     cfg.Project,
 				Profile:     prof,
+				Role:        stepDef.Role,
 				GlobalCfg:   cfg.GlobalCfg,
 				PlanID:      cfg.PlanID,
 				LoopContext: loopCtx,

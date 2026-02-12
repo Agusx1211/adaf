@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/agusx1211/adaf/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -47,6 +48,9 @@ func TestBuildRunLoopDefinition(t *testing.T) {
 	step := loopDef.Steps[0]
 	if step.Profile != "run:codex" {
 		t.Fatalf("step profile = %q, want %q", step.Profile, "run:codex")
+	}
+	if step.Role != config.RoleJunior {
+		t.Fatalf("step role = %q, want %q", step.Role, config.RoleJunior)
 	}
 	if step.Turns != 4 {
 		t.Fatalf("step turns = %d, want 4", step.Turns)

@@ -15,8 +15,10 @@ type Profile struct {
 	Model          string `json:"model,omitempty"`           // Model override (empty = agent default)
 	ReasoningLevel string `json:"reasoning_level,omitempty"` // Reasoning level (e.g. "low", "medium", "high", "xhigh")
 
-	// Orchestration fields (all optional — existing profiles work unchanged).
-	Role         string `json:"role,omitempty"`          // "manager", "senior", "junior", "supervisor" (empty = "junior")
+	// Profile metadata fields.
+	// Deprecated: role is now configured per-loop step. Kept for backward
+	// compatibility with existing config files.
+	Role         string `json:"role,omitempty"`          // "manager", "senior", "junior", "supervisor"
 	Description  string `json:"description,omitempty"`   // strengths/weaknesses text
 	Intelligence int    `json:"intelligence,omitempty"`  // 1-10 capability rating
 	MaxInstances int    `json:"max_instances,omitempty"` // max concurrent instances of this profile (0 = unlimited)
@@ -31,6 +33,7 @@ type Profile struct {
 // LoopStep defines one step in a loop cycle.
 type LoopStep struct {
 	Profile      string            `json:"profile"`                // profile name reference
+	Role         string            `json:"role,omitempty"`         // "manager", "senior", "junior", "supervisor"
 	Turns        int               `json:"turns,omitempty"`        // turns per step (0 = 1 turn)
 	Instructions string            `json:"instructions,omitempty"` // custom instructions appended to prompt
 	CanStop      bool              `json:"can_stop,omitempty"`     // can this step signal loop stop?

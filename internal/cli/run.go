@@ -180,6 +180,7 @@ func buildRunLoopDefinition(agentName, profileName, prompt string, maxTurns int)
 		Steps: []config.LoopStep{
 			{
 				Profile:      profileName,
+				Role:         config.RoleJunior,
 				Turns:        stepTurns,
 				Instructions: prompt,
 			},

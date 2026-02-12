@@ -1,6 +1,8 @@
 {
+  "id": "default",
   "title": "ADAF v2 - Refactor, Standalone Mode \u0026 Web UI",
   "description": "Major evolution of ADAF: (1) code quality cleanup and refactoring, (2) standalone agent mode for single-run or N-run sessions with user-provided prompts instead of plans, fully integrated into the TUI, and (3) a web server providing remote UI for managing loops, standalone sessions, and a built-in terminal, accessible from desktop and mobile.",
+  "status": "active",
   "phases": [
     {
       "id": "p1-audit",
@@ -121,5 +123,6 @@
     "p10-web-terminal",
     "p11-web-remote"
   ],
+  "created": "2026-02-12T11:47:27.999988241Z",
   "updated": "2026-02-12T11:03:30.623257318Z"
 }

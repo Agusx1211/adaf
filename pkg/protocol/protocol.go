@@ -49,7 +49,7 @@ You have access to the ` + "`adaf`" + ` CLI for managing project state. Use it t
 - ` + "`adaf doc list`" + ` — List project documents
 - ` + "`adaf doc show <id>`" + ` — Read a document
 
-### Agent Orchestration (for manager/senior roles)
+### Agent Orchestration (when delegation is enabled for your loop step)
 - ` + "`adaf spawn --profile <name> --task \"...\" [--read-only] [--wait]`" + ` — Spawn a sub-agent
 - ` + "`adaf spawn-status [--spawn-id N]`" + ` — Check spawn status
 - ` + "`adaf spawn-wait [--spawn-id N]`" + ` — Wait for spawn(s) to complete
@@ -77,8 +77,8 @@ You have access to the ` + "`adaf`" + ` CLI for managing project state. Use it t
 
 // PromptTemplates defines common prompt patterns for different agent types.
 var PromptTemplates = map[string]string{
-	"dot": ".",
-	"orient": "Read the project status and latest session log, then decide what to work on next. Start working immediately.",
-	"fix": "Check for any failing tests or build errors and fix them.",
+	"dot":      ".",
+	"orient":   "Read the project status and latest session log, then decide what to work on next. Start working immediately.",
+	"fix":      "Check for any failing tests or build errors and fix them.",
 	"continue": "Continue working on the current in-progress phase of the plan.",
 }

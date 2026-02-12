@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -110,17 +109,6 @@ func (m AppModel) startEditProfile() (tea.Model, tea.Cmd) {
 	m.profileSelectedModel = prof.Model
 	m.profileSelectedReasoning = prof.ReasoningLevel
 
-	// Pre-populate role selection.
-	m.profileRoleSel = 2 // default "junior"
-	roles := config.AllRoles()
-	effectiveRole := config.EffectiveRole(prof.Role)
-	for i, r := range roles {
-		if r == effectiveRole {
-			m.profileRoleSel = i
-			break
-		}
-	}
-
 	// Pre-populate text inputs.
 	m.profileDescInput = prof.Description
 	m.profileIntelInput = ""
@@ -130,28 +118,6 @@ func (m AppModel) startEditProfile() (tea.Model, tea.Cmd) {
 	m.profileMaxInstInput = ""
 	if prof.MaxInstances > 0 {
 		m.profileMaxInstInput = strconv.Itoa(prof.MaxInstances)
-	}
-	m.profileMaxParInput = ""
-	if prof.MaxParallel > 0 {
-		m.profileMaxParInput = strconv.Itoa(prof.MaxParallel)
-	}
-
-	// Pre-populate spawnable selections.
-	m.profileSpawnableOptions = nil
-	m.profileSpawnableSelected = make(map[int]bool)
-	m.profileSpawnableSel = 0
-	for _, sp := range m.globalCfg.Profiles {
-		if !strings.EqualFold(sp.Name, prof.Name) {
-			m.profileSpawnableOptions = append(m.profileSpawnableOptions, sp.Name)
-		}
-	}
-	for i, name := range m.profileSpawnableOptions {
-		for _, sp := range prof.SpawnableProfiles {
-			if strings.EqualFold(name, sp) {
-				m.profileSpawnableSelected[i] = true
-				break
-			}
-		}
 	}
 
 	m.profileMenuSel = 0
@@ -167,8 +133,8 @@ func (m AppModel) wizardTitle() string {
 	return "New Profile"
 }
 
-// editMenuItemCount is the number of items in the edit menu (10 fields + Save).
-const editMenuItemCount = 11
+// editMenuItemCount is the number of items in the edit menu (7 fields + Save).
+const editMenuItemCount = 8
 
 // updateProfileMenu handles the edit profile field picker menu.
 func (m AppModel) updateProfileMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -222,39 +188,13 @@ func (m AppModel) updateProfileMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				m.state = stateProfileReasoning
-			case 4: // Role
-				m.state = stateProfileRole
-			case 5: // Intelligence
+			case 4: // Intelligence
 				m.state = stateProfileIntel
-			case 6: // Description
+			case 5: // Description
 				m.state = stateProfileDesc
-			case 7: // Max Instances
+			case 6: // Max Instances
 				m.state = stateProfileMaxInst
-			case 8: // Spawnable Profiles
-				// Rebuild options, preserving existing selections by name.
-				oldSel := make(map[string]bool)
-				for i, name := range m.profileSpawnableOptions {
-					if m.profileSpawnableSelected[i] {
-						oldSel[name] = true
-					}
-				}
-				m.profileSpawnableOptions = nil
-				m.profileSpawnableSelected = make(map[int]bool)
-				m.profileSpawnableSel = 0
-				for _, p := range m.globalCfg.Profiles {
-					if !strings.EqualFold(p.Name, m.profileNameInput) {
-						m.profileSpawnableOptions = append(m.profileSpawnableOptions, p.Name)
-					}
-				}
-				for i, name := range m.profileSpawnableOptions {
-					if oldSel[name] {
-						m.profileSpawnableSelected[i] = true
-					}
-				}
-				m.state = stateProfileSpawnable
-			case 9: // Max Parallel
-				m.state = stateProfileMaxPar
-			case 10: // Save
+			case 7: // Save
 				return m.finishProfileCreation()
 			}
 		}
@@ -290,11 +230,6 @@ func (m AppModel) viewProfileMenu() string {
 	if reasoning == "" {
 		reasoning = "(none)"
 	}
-	role := ""
-	roles := config.AllRoles()
-	if m.profileRoleSel < len(roles) {
-		role = roles[m.profileRoleSel]
-	}
 	intel := m.profileIntelInput
 	if intel == "" {
 		intel = "-"
@@ -311,20 +246,6 @@ func (m AppModel) viewProfileMenu() string {
 	if maxInst == "" {
 		maxInst = "unlimited"
 	}
-	spawnCount := 0
-	for _, sel := range m.profileSpawnableSelected {
-		if sel {
-			spawnCount++
-		}
-	}
-	spawnVal := fmt.Sprintf("%d selected", spawnCount)
-	if spawnCount == 0 {
-		spawnVal = "none"
-	}
-	maxPar := m.profileMaxParInput
-	if maxPar == "" {
-		maxPar = "-"
-	}
 
 	type menuItem struct {
 		label, value string
@@ -334,12 +255,9 @@ func (m AppModel) viewProfileMenu() string {
 		{"Agent", agentName},
 		{"Model", model},
 		{"Reasoning", reasoning},
-		{"Role", role + " " + roleBadge(role)},
 		{"Intelligence", intel},
 		{"Description", desc},
 		{"Max Instances", maxInst},
-		{"Spawnable", spawnVal},
-		{"Max Parallel", maxPar},
 	}
 
 	for i, item := range items {
@@ -355,7 +273,7 @@ func (m AppModel) viewProfileMenu() string {
 	// Save item
 	lines = append(lines, "")
 	saveLabel := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render("Save")
-	if m.profileMenuSel == 10 {
+	if m.profileMenuSel == 7 {
 		cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render("> ")
 		lines = append(lines, cursor+saveLabel)
 	} else {
@@ -539,7 +457,7 @@ func (m AppModel) updateCustomModelInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // transitionToReasoningOrFinish moves to reasoning level selection if the agent
-// supports it, otherwise skips to role selection.
+// supports it, otherwise skips directly to intelligence input.
 func (m AppModel) transitionToReasoningOrFinish() (tea.Model, tea.Cmd) {
 	selectedAgent := m.profileAgents[m.profileAgentSel]
 	agentsCfg, _ := agent.LoadAgentsConfig()
@@ -560,7 +478,9 @@ func (m AppModel) transitionToReasoningOrFinish() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.profileSelectedReasoning = ""
-	return m.transitionToRole()
+	m.profileIntelInput = ""
+	m.state = stateProfileIntel
+	return m, nil
 }
 
 // updateProfileReasoning handles reasoning level selection.
@@ -584,7 +504,9 @@ func (m AppModel) updateProfileReasoning(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.state = stateProfileMenu
 					return m, nil
 				}
-				return m.transitionToRole()
+				m.profileIntelInput = ""
+				m.state = stateProfileIntel
+				return m, nil
 			}
 		case "esc":
 			if m.profileEditing {
@@ -592,61 +514,6 @@ func (m AppModel) updateProfileReasoning(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.state = stateProfileModel
-		}
-	}
-	return m, nil
-}
-
-// transitionToRole moves to role selection.
-func (m AppModel) transitionToRole() (tea.Model, tea.Cmd) {
-	m.profileRoleSel = 2 // default to "junior" (index 2)
-	// When editing, pre-select existing role.
-	if m.profileEditing {
-		prof := m.globalCfg.FindProfile(m.profileEditName)
-		if prof != nil {
-			roles := config.AllRoles()
-			effectiveRole := config.EffectiveRole(prof.Role)
-			for i, r := range roles {
-				if r == effectiveRole {
-					m.profileRoleSel = i
-					break
-				}
-			}
-		}
-	}
-	m.state = stateProfileRole
-	return m, nil
-}
-
-// updateProfileRole handles role selection.
-func (m AppModel) updateProfileRole(msg tea.Msg) (tea.Model, tea.Cmd) {
-	roles := config.AllRoles()
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "j", "down":
-			m.profileRoleSel = (m.profileRoleSel + 1) % len(roles)
-		case "k", "up":
-			m.profileRoleSel = (m.profileRoleSel - 1 + len(roles)) % len(roles)
-		case "enter":
-			if m.profileEditing {
-				m.state = stateProfileMenu
-				return m, nil
-			}
-			// Move to intelligence input.
-			m.profileIntelInput = ""
-			m.state = stateProfileIntel
-		case "esc":
-			if m.profileEditing {
-				m.state = stateProfileMenu
-				return m, nil
-			}
-			// Go back to reasoning or model.
-			if len(m.profileReasoningLevels) > 0 {
-				m.state = stateProfileReasoning
-			} else {
-				m.state = stateProfileModel
-			}
 		}
 	}
 	return m, nil
@@ -670,7 +537,11 @@ func (m AppModel) updateProfileIntel(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = stateProfileMenu
 				return m, nil
 			}
-			m.state = stateProfileRole
+			if len(m.profileReasoningLevels) > 0 {
+				m.state = stateProfileReasoning
+			} else {
+				m.state = stateProfileModel
+			}
 		case "backspace":
 			if len(m.profileIntelInput) > 0 {
 				m.profileIntelInput = m.profileIntelInput[:len(m.profileIntelInput)-1]
@@ -726,11 +597,6 @@ func (m AppModel) updateProfileMaxInst(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = stateProfileMenu
 				return m, nil
 			}
-			roles := config.AllRoles()
-			selectedRole := roles[m.profileRoleSel]
-			if config.CanSpawn(selectedRole) {
-				return m.transitionToSpawnable()
-			}
 			return m.finishProfileCreation()
 		case "esc":
 			if m.profileEditing {
@@ -752,105 +618,9 @@ func (m AppModel) updateProfileMaxInst(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// transitionToSpawnable shows the spawnable profile multi-select.
-func (m AppModel) transitionToSpawnable() (tea.Model, tea.Cmd) {
-	// Build list of other profile names.
-	m.profileSpawnableOptions = nil
-	m.profileSpawnableSelected = make(map[int]bool)
-	m.profileSpawnableSel = 0
-	for _, p := range m.globalCfg.Profiles {
-		if !strings.EqualFold(p.Name, m.profileNameInput) {
-			m.profileSpawnableOptions = append(m.profileSpawnableOptions, p.Name)
-		}
-	}
-	// When editing, pre-select existing spawnable profiles.
-	if m.profileEditing {
-		prof := m.globalCfg.FindProfile(m.profileEditName)
-		if prof != nil {
-			for i, name := range m.profileSpawnableOptions {
-				for _, sp := range prof.SpawnableProfiles {
-					if strings.EqualFold(name, sp) {
-						m.profileSpawnableSelected[i] = true
-						break
-					}
-				}
-			}
-		}
-	}
-	m.state = stateProfileSpawnable
-	return m, nil
-}
-
-// updateProfileSpawnable handles multi-select of spawnable profiles.
-func (m AppModel) updateProfileSpawnable(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "j", "down":
-			if len(m.profileSpawnableOptions) > 0 {
-				m.profileSpawnableSel = (m.profileSpawnableSel + 1) % len(m.profileSpawnableOptions)
-			}
-		case "k", "up":
-			if len(m.profileSpawnableOptions) > 0 {
-				m.profileSpawnableSel = (m.profileSpawnableSel - 1 + len(m.profileSpawnableOptions)) % len(m.profileSpawnableOptions)
-			}
-		case " ":
-			// Toggle selection.
-			m.profileSpawnableSelected[m.profileSpawnableSel] = !m.profileSpawnableSelected[m.profileSpawnableSel]
-		case "enter":
-			if m.profileEditing {
-				m.state = stateProfileMenu
-				return m, nil
-			}
-			m.profileMaxParInput = "2"
-			m.state = stateProfileMaxPar
-		case "esc":
-			if m.profileEditing {
-				m.state = stateProfileMenu
-				return m, nil
-			}
-			m.state = stateProfileMaxInst
-		}
-	}
-	return m, nil
-}
-
-// updateProfileMaxPar handles max parallel input.
-func (m AppModel) updateProfileMaxPar(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
-			if m.profileEditing {
-				m.state = stateProfileMenu
-				return m, nil
-			}
-			return m.finishProfileCreation()
-		case "esc":
-			if m.profileEditing {
-				m.state = stateProfileMenu
-				return m, nil
-			}
-			m.state = stateProfileSpawnable
-		case "backspace":
-			if len(m.profileMaxParInput) > 0 {
-				m.profileMaxParInput = m.profileMaxParInput[:len(m.profileMaxParInput)-1]
-			}
-		default:
-			ch := msg.String()
-			if len(ch) == 1 && ch >= "0" && ch <= "9" && len(m.profileMaxParInput) < 2 {
-				m.profileMaxParInput += ch
-			}
-		}
-	}
-	return m, nil
-}
-
 // finishProfileCreation creates the profile, saves config, and returns to selector.
 func (m AppModel) finishProfileCreation() (tea.Model, tea.Cmd) {
 	selectedAgent := m.profileAgents[m.profileAgentSel]
-	roles := config.AllRoles()
-	selectedRole := roles[m.profileRoleSel]
 
 	intel := 0
 	if m.profileIntelInput != "" {
@@ -866,31 +636,14 @@ func (m AppModel) finishProfileCreation() (tea.Model, tea.Cmd) {
 		}
 	}
 
-	maxPar := 0
-	if m.profileMaxParInput != "" {
-		if v, err := strconv.Atoi(m.profileMaxParInput); err == nil && v > 0 {
-			maxPar = v
-		}
-	}
-
-	var spawnable []string
-	for i, selected := range m.profileSpawnableSelected {
-		if selected && i < len(m.profileSpawnableOptions) {
-			spawnable = append(spawnable, m.profileSpawnableOptions[i])
-		}
-	}
-
 	p := config.Profile{
-		Name:              m.profileNameInput,
-		Agent:             selectedAgent,
-		Model:             m.profileSelectedModel,
-		ReasoningLevel:    m.profileSelectedReasoning,
-		Role:              selectedRole,
-		Intelligence:      intel,
-		Description:       strings.TrimSpace(m.profileDescInput),
-		MaxInstances:      maxInst,
-		SpawnableProfiles: spawnable,
-		MaxParallel:       maxPar,
+		Name:           m.profileNameInput,
+		Agent:          selectedAgent,
+		Model:          m.profileSelectedModel,
+		ReasoningLevel: m.profileSelectedReasoning,
+		Intelligence:   intel,
+		Description:    strings.TrimSpace(m.profileDescInput),
+		MaxInstances:   maxInst,
 	}
 
 	if m.profileEditing {
@@ -926,9 +679,6 @@ func (m AppModel) finishProfileCreation() (tea.Model, tea.Cmd) {
 	m.profileDescInput = ""
 	m.profileIntelInput = ""
 	m.profileMaxInstInput = ""
-	m.profileMaxParInput = ""
-	m.profileSpawnableOptions = nil
-	m.profileSpawnableSelected = nil
 	m.state = stateSelector
 	return m, nil
 }
@@ -1109,47 +859,6 @@ func (m AppModel) viewProfileReasoning() string {
 	return header + "\n" + panel + "\n" + statusBar
 }
 
-// viewProfileRole renders the role selection screen.
-func (m AppModel) viewProfileRole() string {
-	header := m.renderHeader()
-	statusBar := m.renderStatusBar()
-	style, cw, ch := profileWizardPanel(m)
-
-	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
-	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-
-	var lines []string
-	lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Role"))
-	lines = append(lines, "")
-
-	roles := config.AllRoles()
-	roleDescs := map[string]string{
-		"manager":    "Breaks down tasks, delegates, reviews diffs",
-		"senior":     "Writes code and can delegate to juniors",
-		"junior":     "Focuses on assigned tasks, no spawning",
-		"supervisor": "Reviews progress, sends notes, no code",
-	}
-	for i, role := range roles {
-		label := role
-		if desc, ok := roleDescs[role]; ok {
-			label = fmt.Sprintf("%-12s %s", role, dimStyle.Render(desc))
-		}
-		if i == m.profileRoleSel {
-			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
-			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
-			lines = append(lines, cursor+styled)
-		} else {
-			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ColorText).Render(label))
-		}
-	}
-	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("j/k: navigate  enter: select  esc: back"))
-
-	content := fitLines(lines, cw, ch)
-	panel := style.Render(content)
-	return header + "\n" + panel + "\n" + statusBar
-}
-
 // viewProfileIntel renders the intelligence rating input.
 func (m AppModel) viewProfileIntel() string {
 	header := m.renderHeader()
@@ -1221,70 +930,6 @@ func (m AppModel) viewProfileMaxInst() string {
 
 	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
 	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(m.profileMaxInstInput)
-	lines = append(lines, "> "+inputText+cursor)
-	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("enter: continue  esc: back"))
-
-	content := fitLines(lines, cw, ch)
-	panel := style.Render(content)
-	return header + "\n" + panel + "\n" + statusBar
-}
-
-// viewProfileSpawnable renders the spawnable profiles multi-select.
-func (m AppModel) viewProfileSpawnable() string {
-	header := m.renderHeader()
-	statusBar := m.renderStatusBar()
-	style, cw, ch := profileWizardPanel(m)
-
-	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
-	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-
-	var lines []string
-	lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Spawnable Profiles"))
-	lines = append(lines, dimStyle.Render("Select profiles this agent can spawn (space to toggle):"))
-	lines = append(lines, "")
-
-	if len(m.profileSpawnableOptions) == 0 {
-		lines = append(lines, dimStyle.Render("No other profiles available."))
-	}
-	for i, name := range m.profileSpawnableOptions {
-		check := "[ ]"
-		if m.profileSpawnableSelected[i] {
-			check = lipgloss.NewStyle().Foreground(ColorGreen).Render("[x]")
-		}
-		if i == m.profileSpawnableSel {
-			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
-			nameStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(name)
-			lines = append(lines, cursor+check+" "+nameStyled)
-		} else {
-			lines = append(lines, "  "+check+" "+lipgloss.NewStyle().Foreground(ColorText).Render(name))
-		}
-	}
-	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("space: toggle  j/k: navigate  enter: continue  esc: back"))
-
-	content := fitLines(lines, cw, ch)
-	panel := style.Render(content)
-	return header + "\n" + panel + "\n" + statusBar
-}
-
-// viewProfileMaxPar renders the max parallel input.
-func (m AppModel) viewProfileMaxPar() string {
-	header := m.renderHeader()
-	statusBar := m.renderStatusBar()
-	style, cw, ch := profileWizardPanel(m)
-
-	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
-	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-
-	var lines []string
-	lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Max Parallel"))
-	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("Maximum concurrent sub-agents (default: 2):"))
-	lines = append(lines, "")
-
-	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(m.profileMaxParInput)
 	lines = append(lines, "> "+inputText+cursor)
 	lines = append(lines, "")
 	if m.profileEditing {

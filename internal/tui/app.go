@@ -31,19 +31,18 @@ const (
 	stateProfileAgent             // pick agent for new profile
 	stateProfileModel             // pick model for new profile
 	stateProfileReasoning         // pick reasoning level for new profile
-	stateProfileRole              // pick role for new profile
 	stateProfileIntel             // input intelligence rating (1-10)
 	stateProfileDesc              // input description text
 	stateProfileMaxInst           // input max concurrent instances
-	stateProfileSpawnable         // multi-select spawnable profiles
-	stateProfileMaxPar            // input max parallel
 	stateProfileMenu              // edit profile: field picker menu
 	stateLoopName                 // text input for loop name
 	stateLoopStepList             // list of steps, add/edit/remove/reorder
 	stateLoopStepProfile          // pick profile for a step
+	stateLoopStepRole             // pick role for a step
 	stateLoopStepTurns            // input turns for a step
 	stateLoopStepInstr            // input custom instructions for a step
 	stateLoopStepTools            // multi-select tools (stop, message, pushover)
+	stateLoopStepSpawn            // multi-select spawnable profiles for the step
 	stateLoopMenu                 // edit loop: field picker menu
 	stateSettings                 // settings screen (pushover credentials, etc.)
 	stateSettingsPushoverUserKey  // input pushover user key
@@ -98,15 +97,10 @@ type AppModel struct {
 	profileReasoningLevels   []agentmeta.ReasoningLevel
 	profileReasoningLevelSel int
 	profileSelectedReasoning string
-	profileRoleSel           int
 	profileIntelInput        string
 	profileDescInput         string
 	profileMenuSel           int
 	profileMaxInstInput      string
-	profileSpawnableOptions  []string // profile names available for selection
-	profileSpawnableSelected map[int]bool
-	profileSpawnableSel      int
-	profileMaxParInput       string
 
 	// Loop creation/editing wizard state.
 	loopEditing         bool
@@ -117,12 +111,16 @@ type AppModel struct {
 	loopStepEditIdx     int // which step is being edited (-1 = adding new)
 	loopStepProfileOpts []string
 	loopStepProfileSel  int
+	loopStepRoleSel     int
 	loopStepTurnsInput  string
 	loopStepInstrInput  string
 	loopStepCanStop     bool
 	loopStepCanMsg      bool
 	loopStepCanPushover bool
 	loopStepToolsSel    int // cursor position in the tools multi-select
+	loopStepSpawnOpts   []string
+	loopStepSpawnSel    int
+	loopStepSpawnSelect map[int]bool
 	loopMenuSel         int
 
 	// Confirm delete state.
@@ -273,18 +271,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateProfileModel(msg)
 	case stateProfileReasoning:
 		return m.updateProfileReasoning(msg)
-	case stateProfileRole:
-		return m.updateProfileRole(msg)
 	case stateProfileIntel:
 		return m.updateProfileIntel(msg)
 	case stateProfileDesc:
 		return m.updateProfileDesc(msg)
 	case stateProfileMaxInst:
 		return m.updateProfileMaxInst(msg)
-	case stateProfileSpawnable:
-		return m.updateProfileSpawnable(msg)
-	case stateProfileMaxPar:
-		return m.updateProfileMaxPar(msg)
 	case stateProfileMenu:
 		return m.updateProfileMenu(msg)
 	case stateLoopName:
@@ -293,12 +285,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateLoopStepList(msg)
 	case stateLoopStepProfile:
 		return m.updateLoopStepProfile(msg)
+	case stateLoopStepRole:
+		return m.updateLoopStepRole(msg)
 	case stateLoopStepTurns:
 		return m.updateLoopStepTurns(msg)
 	case stateLoopStepInstr:
 		return m.updateLoopStepInstr(msg)
 	case stateLoopStepTools:
 		return m.updateLoopStepTools(msg)
+	case stateLoopStepSpawn:
+		return m.updateLoopStepSpawn(msg)
 	case stateLoopMenu:
 		return m.updateLoopMenu(msg)
 	case stateSettings:
@@ -811,7 +807,11 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 	loopDef := config.LoopDef{
 		Name: "profile:" + prof.Name,
 		Steps: []config.LoopStep{
-			{Profile: prof.Name, Turns: 1},
+			{
+				Profile: prof.Name,
+				Role:    config.EffectiveStepRole("", prof),
+				Turns:   1,
+			},
 		},
 	}
 	return m.startLoopSession(loopDef, []config.Profile{*prof}, prof.Name, prof.Agent, nil, 0)
@@ -840,18 +840,12 @@ func (m AppModel) View() string {
 		return m.viewProfileModel()
 	case stateProfileReasoning:
 		return m.viewProfileReasoning()
-	case stateProfileRole:
-		return m.viewProfileRole()
 	case stateProfileIntel:
 		return m.viewProfileIntel()
 	case stateProfileDesc:
 		return m.viewProfileDesc()
 	case stateProfileMaxInst:
 		return m.viewProfileMaxInst()
-	case stateProfileSpawnable:
-		return m.viewProfileSpawnable()
-	case stateProfileMaxPar:
-		return m.viewProfileMaxPar()
 	case stateProfileMenu:
 		return m.viewProfileMenu()
 	case stateLoopName:
@@ -860,12 +854,16 @@ func (m AppModel) View() string {
 		return m.viewLoopStepList()
 	case stateLoopStepProfile:
 		return m.viewLoopStepProfile()
+	case stateLoopStepRole:
+		return m.viewLoopStepRole()
 	case stateLoopStepTurns:
 		return m.viewLoopStepTurns()
 	case stateLoopStepInstr:
 		return m.viewLoopStepInstr()
 	case stateLoopStepTools:
 		return m.viewLoopStepTools()
+	case stateLoopStepSpawn:
+		return m.viewLoopStepSpawn()
 	case stateLoopMenu:
 		return m.viewLoopMenu()
 	case stateSettings:

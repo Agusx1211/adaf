@@ -46,7 +46,6 @@ func TestRenderSelectorKeepsFixedPanelHeight(t *testing.T) {
 			Name:  "alpha",
 			Agent: "codex",
 			Model: strings.Repeat("gpt-5-codex-", 10),
-			Role:  "junior",
 			Caps: []string{
 				"plan", "edit", "tools", strings.Repeat("feature-", 12),
 			},
@@ -55,7 +54,6 @@ func TestRenderSelectorKeepsFixedPanelHeight(t *testing.T) {
 			Name:  "beta",
 			Agent: "claude",
 			Model: strings.Repeat("claude-sonnet-", 8),
-			Role:  "senior",
 			Caps: []string{
 				"reasoning", "files", strings.Repeat("capability-", 10),
 			},
@@ -64,7 +62,6 @@ func TestRenderSelectorKeepsFixedPanelHeight(t *testing.T) {
 			Name:  "gamma",
 			Agent: "gemini",
 			Model: strings.Repeat("gemini-2.5-pro-", 8),
-			Role:  "manager",
 			Caps: []string{
 				"stream", "exec", strings.Repeat("tooling-", 14),
 			},
