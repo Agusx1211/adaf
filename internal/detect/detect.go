@@ -24,11 +24,11 @@ var semverRE = regexp.MustCompile(`(?i)\bv?(\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.
 
 // DetectedAgent describes an installed agent tool discovered on the machine.
 type DetectedAgent struct {
-	Name            string                   `json:"name"`
-	Path            string                   `json:"path"`
-	Version         string                   `json:"version"`
-	Capabilities    []string                 `json:"capabilities,omitempty"`
-	SupportedModels []string                 `json:"supported_models,omitempty"`
+	Name            string                     `json:"name"`
+	Path            string                     `json:"path"`
+	Version         string                     `json:"version"`
+	Capabilities    []string                   `json:"capabilities,omitempty"`
+	SupportedModels []string                   `json:"supported_models,omitempty"`
 	ReasoningLevels []agentmeta.ReasoningLevel `json:"reasoning_levels,omitempty"`
 }
 
@@ -333,15 +333,31 @@ func resolveClaudeCLIJS(binPath string) string {
 // --- Vibe model discovery ---
 
 // vibeModelAliasRE extracts alias values from [[models]] sections in config.toml.
+// In vibe's TOML config, each [[models]] entry has name, provider, and alias fields.
+// The alias is what the user passes to VIBE_ACTIVE_MODEL to select a model.
 var vibeModelAliasRE = regexp.MustCompile(`(?m)^alias\s*=\s*"([^"]+)"`)
 
-func probeVibeModels() []string {
+// vibeConfigPath returns the path to vibe's config.toml.
+// It respects the VIBE_HOME environment variable (which vibe itself honours)
+// and falls back to ~/.vibe/config.toml.
+func vibeConfigPath() string {
+	if vibeHome := os.Getenv("VIBE_HOME"); vibeHome != "" {
+		return filepath.Join(vibeHome, "config.toml")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".vibe", "config.toml")
+}
+
+func probeVibeModels() []string {
+	configPath := vibeConfigPath()
+	if configPath == "" {
 		return nil
 	}
 
-	data, err := os.ReadFile(filepath.Join(home, ".vibe", "config.toml"))
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil
 	}

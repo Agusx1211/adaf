@@ -63,11 +63,15 @@ var builtin = map[string]Info{
 		Capabilities: []string{"prompt-arg", "model-select", "auto-approve", "json-output"},
 	},
 	"vibe": {
-		Name:            "vibe",
-		Binary:          "vibe",
-		DefaultModel:    "default",
-		SupportedModels: []string{"default"},
-		Capabilities:    []string{"stdin-prompt", "stream-output"},
+		Name:         "vibe",
+		Binary:       "vibe",
+		DefaultModel: "devstral-2",
+		SupportedModels: []string{
+			"devstral-2",
+			"devstral-small",
+			"local",
+		},
+		Capabilities: []string{"prompt-arg", "auto-approve", "model-select"},
 	},
 	"opencode": {
 		Name:         "opencode",
@@ -82,11 +86,11 @@ var builtin = map[string]Info{
 		Capabilities: []string{"stdin-prompt", "model-select", "multi-provider", "stream-output"},
 	},
 	"gemini": {
-		Name:         "gemini",
-		Binary:       "gemini",
-		DefaultModel: "gemini-2.5-pro",
+		Name:            "gemini",
+		Binary:          "gemini",
+		DefaultModel:    "gemini-2.5-pro",
 		SupportedModels: []string{"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"},
-		Capabilities: []string{"prompt-arg", "model-select", "auto-approve", "stream-output"},
+		Capabilities:    []string{"prompt-arg", "model-select", "auto-approve", "stream-output"},
 	},
 	"generic": {
 		Name:         "generic",
