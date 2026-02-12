@@ -52,8 +52,8 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 	// Build arguments: force non-interactive exec mode, then configured flags.
 	args := make([]string, 0, len(cfg.Args)+8)
 	if cfg.ResumeSessionID != "" {
-		// Resume a previous thread using "exec resume --last".
-		args = append(args, "exec", "resume", "--last")
+		// Resume a previous thread by its ID.
+		args = append(args, "exec", "resume", cfg.ResumeSessionID)
 	} else {
 		args = append(args, "exec")
 	}

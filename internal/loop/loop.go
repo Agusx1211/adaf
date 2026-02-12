@@ -163,32 +163,42 @@ func (l *Loop) Run(ctx context.Context) error {
 				cfg.Env["ADAF_PROJECT_DIR"] = projectDir
 			}
 		}
-		var supervisorNotes []store.SupervisorNote
-		if l.PromptFunc != nil && l.Store != nil {
-			notes, err := l.Store.NotesByTurn(turnID)
-			if err != nil {
-				fmt.Printf("warning: failed to load supervisor notes for turn %d: %v\n", turnID, err)
-			} else {
-				supervisorNotes = notes
-			}
-		}
-		if l.PromptFunc != nil {
-			cfg.Prompt = l.PromptFunc(turnID, supervisorNotes)
-		}
+		// Determine if we're resuming a previous agent session.
+		isResume := l.lastAgentSessionID != ""
 
-		// Inject interrupt message from a previous guardrail violation.
-		if l.lastInterruptMsg != "" {
-			cfg.Prompt += "\n## Guardrail Interrupt\n\n" + l.lastInterruptMsg + "\n\n"
+		if isResume {
+			// When resuming, the agent already has the full system prompt
+			// and conversation context from the previous turn. Send only
+			// new information (wait results, interrupt messages, supervisor
+			// notes) as a continuation message — NOT the full system prompt.
+			cfg.ResumeSessionID = l.lastAgentSessionID
+			l.lastAgentSessionID = "" // consume after use
+			cfg.Prompt = buildResumePrompt(l.lastWaitResults, l.lastInterruptMsg, l.loadSupervisorNotes(turnID))
+			l.lastWaitResults = nil
 			l.lastInterruptMsg = ""
-		}
-
-		// Inject wait results from a previous wait-for-spawns cycle.
-		if len(l.lastWaitResults) > 0 {
-			cfg.Prompt += "\n## Spawn Wait Results\n\nThe spawns you waited for have completed:\n\n"
-			for _, wr := range l.lastWaitResults {
-				cfg.Prompt += formatWaitResult(wr)
+		} else {
+			var supervisorNotes []store.SupervisorNote
+			if l.PromptFunc != nil && l.Store != nil {
+				supervisorNotes = l.loadSupervisorNotes(turnID)
 			}
-			l.lastWaitResults = nil // Clear after injecting.
+			if l.PromptFunc != nil {
+				cfg.Prompt = l.PromptFunc(turnID, supervisorNotes)
+			}
+
+			// Inject interrupt message from a previous guardrail violation.
+			if l.lastInterruptMsg != "" {
+				cfg.Prompt += "\n## Guardrail Interrupt\n\n" + l.lastInterruptMsg + "\n\n"
+				l.lastInterruptMsg = ""
+			}
+
+			// Inject wait results from a previous wait-for-spawns cycle.
+			if len(l.lastWaitResults) > 0 {
+				cfg.Prompt += "\n## Spawn Wait Results\n\nThe spawns you waited for have completed:\n\n"
+				for _, wr := range l.lastWaitResults {
+					cfg.Prompt += formatWaitResult(wr)
+				}
+				l.lastWaitResults = nil // Clear after injecting.
+			}
 		}
 
 		// Notify listener.
@@ -202,6 +212,9 @@ func (l *Loop) Run(ctx context.Context) error {
 		rec.RecordMeta("turn", fmt.Sprintf("%d", turn+1))
 		rec.RecordMeta("start_time", time.Now().UTC().Format(time.RFC3339))
 		rec.RecordMeta("turn_hex_id", turnHexID)
+		if isResume {
+			rec.RecordMeta("resume_session_id", cfg.ResumeSessionID)
+		}
 		if l.LoopRunHexID != "" {
 			rec.RecordMeta("loop_run_hex_id", l.LoopRunHexID)
 		}
@@ -214,13 +227,6 @@ func (l *Loop) Run(ctx context.Context) error {
 		turnCtx, turnCancel := context.WithCancel(ctx)
 		if l.OnTurnContext != nil {
 			l.OnTurnContext(turnCancel)
-		}
-
-		// Resume the previous agent session if we have a session ID
-		// (e.g. continuing after a wait-for-spawns cycle).
-		if l.lastAgentSessionID != "" {
-			cfg.ResumeSessionID = l.lastAgentSessionID
-			l.lastAgentSessionID = "" // consume after use
 		}
 
 		// Run the agent.
@@ -353,6 +359,51 @@ func (l *Loop) drainInterrupt() string {
 	default:
 		return ""
 	}
+}
+
+// loadSupervisorNotes loads supervisor notes for the given turn ID.
+func (l *Loop) loadSupervisorNotes(turnID int) []store.SupervisorNote {
+	if l.Store == nil {
+		return nil
+	}
+	notes, err := l.Store.NotesByTurn(turnID)
+	if err != nil {
+		fmt.Printf("warning: failed to load supervisor notes for turn %d: %v\n", turnID, err)
+		return nil
+	}
+	return notes
+}
+
+// buildResumePrompt constructs a minimal continuation prompt for a resumed
+// agent session. Unlike a fresh turn, the agent already has the full system
+// prompt and conversation history — we only send new information.
+func buildResumePrompt(waitResults []WaitResult, interruptMsg string, supervisorNotes []store.SupervisorNote) string {
+	var b strings.Builder
+
+	b.WriteString("Continue from where you left off.\n\n")
+
+	if interruptMsg != "" {
+		b.WriteString("## Guardrail Interrupt\n\n")
+		b.WriteString(interruptMsg)
+		b.WriteString("\n\n")
+	}
+
+	if len(waitResults) > 0 {
+		b.WriteString("## Spawn Wait Results\n\nThe spawns you waited for have completed:\n\n")
+		for _, wr := range waitResults {
+			b.WriteString(formatWaitResult(wr))
+		}
+	}
+
+	if len(supervisorNotes) > 0 {
+		b.WriteString("## Supervisor Notes\n\n")
+		for _, note := range supervisorNotes {
+			fmt.Fprintf(&b, "- [%s] %s: %s\n", note.CreatedAt.Format("15:04:05"), note.Author, note.Note)
+		}
+		b.WriteString("\n")
+	}
+
+	return b.String()
 }
 
 // formatWaitResult formats a single WaitResult for injection into the prompt.
