@@ -401,8 +401,12 @@ func probeOpencodeModels() []string {
 // --- Gemini model discovery ---
 
 // geminiSettings represents the relevant parts of ~/.gemini/settings.json.
+// The Gemini CLI stores user settings at ~/.gemini/settings.json with the
+// model name nested under model.name (e.g. {"model":{"name":"gemini-2.5-pro"}}).
 type geminiSettings struct {
-	Model string `json:"model"`
+	Model struct {
+		Name string `json:"name"`
+	} `json:"model"`
 }
 
 func probeGeminiModels() ([]string, []agentmeta.ReasoningLevel) {
@@ -421,11 +425,7 @@ func probeGeminiModels() ([]string, []agentmeta.ReasoningLevel) {
 		return nil, nil
 	}
 
-	if settings.Model == "" {
-		return nil, nil
-	}
-
-	// Start with the configured model, then add defaults if different.
+	// Start with the configured model (if any), then add well-known models.
 	seen := make(map[string]struct{})
 	var models []string
 	add := func(m string) {
@@ -437,10 +437,21 @@ func probeGeminiModels() ([]string, []agentmeta.ReasoningLevel) {
 		models = append(models, m)
 	}
 
-	add(settings.Model)
+	if settings.Model.Name != "" {
+		add(settings.Model.Name)
+	}
 
-	// Always include the well-known models.
-	for _, m := range []string{"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"} {
+	// Always include the well-known models. The Gemini CLI now defaults to
+	// "auto-gemini-3" which resolves to gemini-3-pro-preview. Include both
+	// the latest generation and the stable 2.x models.
+	for _, m := range []string{
+		"gemini-3-pro-preview",
+		"gemini-3-flash-preview",
+		"gemini-2.5-pro",
+		"gemini-2.5-flash",
+		"gemini-2.5-flash-lite",
+		"gemini-2.0-flash",
+	} {
 		add(m)
 	}
 

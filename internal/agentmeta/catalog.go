@@ -67,7 +67,14 @@ var builtin = map[string]Info{
 		Name:         "gemini",
 		Binary:       "gemini",
 		DefaultModel: "gemini-2.5-pro",
-		SupportedModels: []string{"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"},
+		SupportedModels: []string{
+			"gemini-3-pro-preview",
+			"gemini-3-flash-preview",
+			"gemini-2.5-pro",
+			"gemini-2.5-flash",
+			"gemini-2.5-flash-lite",
+			"gemini-2.0-flash",
+		},
 		Capabilities: []string{"prompt-arg", "model-select", "auto-approve", "stream-output"},
 	},
 	"generic": {

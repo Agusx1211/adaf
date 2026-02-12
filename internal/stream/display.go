@@ -119,6 +119,14 @@ func (d *Display) Handle(ev ClaudeEvent) {
 			fmt.Fprintf(d.w, "\033[1;32m[result]\033[0m done\n")
 		}
 
+	case "error":
+		d.finishLine()
+		msg := ev.ResultText
+		if msg == "" {
+			msg = "unknown error"
+		}
+		fmt.Fprintf(d.w, "\033[1;31m[error]\033[0m %s\n", msg)
+
 	case "message":
 		// message start/stop — ignore silently
 

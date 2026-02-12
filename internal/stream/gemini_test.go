@@ -7,29 +7,36 @@ import (
 	"testing"
 )
 
-const testGeminiNDJSON = `{"type":"init","session_id":"gem-123","model":"gemini-2.5-pro"}
-{"type":"message","role":"assistant","content":"Hello from Gemini!","thought":false,"delta":false}
-{"type":"result","stats":{"total_tokens":200,"input_tokens":120,"output_tokens":80,"duration_ms":1500,"tool_calls":0}}
+// Test data uses the actual Gemini CLI stream-json output format.
+// See references/gemini-cli/packages/core/src/output/types.ts for event schemas.
+
+const testGeminiNDJSON = `{"type":"init","timestamp":"2025-01-01T00:00:00.000Z","session_id":"gem-123","model":"gemini-2.5-pro"}
+{"type":"message","timestamp":"2025-01-01T00:00:01.000Z","role":"assistant","content":"Hello from Gemini!"}
+{"type":"result","timestamp":"2025-01-01T00:00:02.000Z","status":"success","stats":{"total_tokens":200,"input_tokens":120,"output_tokens":80,"cached":0,"input":120,"duration_ms":1500,"tool_calls":0}}
 `
 
-const testGeminiDelta = `{"type":"init","session_id":"gem-delta","model":"gemini-2.5-flash"}
-{"type":"message","role":"assistant","content":"Hel","thought":false,"delta":true}
-{"type":"message","role":"assistant","content":"lo ","thought":false,"delta":true}
-{"type":"message","role":"assistant","content":"world","thought":false,"delta":true}
-{"type":"result","stats":{"total_tokens":50,"input_tokens":30,"output_tokens":20,"duration_ms":500}}
+const testGeminiDelta = `{"type":"init","timestamp":"2025-01-01T00:00:00.000Z","session_id":"gem-delta","model":"gemini-2.5-flash"}
+{"type":"message","timestamp":"2025-01-01T00:00:01.000Z","role":"assistant","content":"Hel","delta":true}
+{"type":"message","timestamp":"2025-01-01T00:00:01.100Z","role":"assistant","content":"lo ","delta":true}
+{"type":"message","timestamp":"2025-01-01T00:00:01.200Z","role":"assistant","content":"world","delta":true}
+{"type":"result","timestamp":"2025-01-01T00:00:02.000Z","status":"success","stats":{"total_tokens":50,"input_tokens":30,"output_tokens":20,"cached":0,"input":30,"duration_ms":500,"tool_calls":0}}
 `
 
-const testGeminiThinking = `{"type":"init","session_id":"gem-think","model":"gemini-2.5-pro"}
-{"type":"message","role":"assistant","content":"Let me think about this...","thought":true,"delta":false}
-{"type":"message","role":"assistant","content":"The answer is 42.","thought":false,"delta":false}
-{"type":"result","stats":{"total_tokens":100,"input_tokens":60,"output_tokens":40,"duration_ms":2000}}
+// testGeminiMultiMessage tests multiple non-delta assistant messages.
+// The Gemini CLI's stream-json format does NOT have a "thought" field --
+// all assistant content is emitted as regular "message" events with
+// role="assistant" and optional delta=true for streaming chunks.
+const testGeminiMultiMessage = `{"type":"init","timestamp":"2025-01-01T00:00:00.000Z","session_id":"gem-multi","model":"gemini-2.5-pro"}
+{"type":"message","timestamp":"2025-01-01T00:00:01.000Z","role":"assistant","content":"Let me think about this..."}
+{"type":"message","timestamp":"2025-01-01T00:00:02.000Z","role":"assistant","content":"The answer is 42."}
+{"type":"result","timestamp":"2025-01-01T00:00:03.000Z","status":"success","stats":{"total_tokens":100,"input_tokens":60,"output_tokens":40,"cached":0,"input":60,"duration_ms":2000,"tool_calls":0}}
 `
 
-const testGeminiToolUse = `{"type":"init","session_id":"gem-tool","model":"gemini-2.5-pro"}
-{"type":"tool_use","tool_name":"shell","tool_id":"call_1","parameters":{"command":"ls -la"}}
-{"type":"tool_result","tool_id":"call_1","output":"file1.txt\nfile2.txt"}
-{"type":"message","role":"assistant","content":"I found two files.","thought":false,"delta":false}
-{"type":"result","stats":{"total_tokens":150,"input_tokens":80,"output_tokens":70,"duration_ms":3000,"tool_calls":1}}
+const testGeminiToolUse = `{"type":"init","timestamp":"2025-01-01T00:00:00.000Z","session_id":"gem-tool","model":"gemini-2.5-pro"}
+{"type":"tool_use","timestamp":"2025-01-01T00:00:01.000Z","tool_name":"shell","tool_id":"call_1","parameters":{"command":"ls -la"}}
+{"type":"tool_result","timestamp":"2025-01-01T00:00:02.000Z","tool_id":"call_1","status":"success","output":"file1.txt\nfile2.txt"}
+{"type":"message","timestamp":"2025-01-01T00:00:03.000Z","role":"assistant","content":"I found two files."}
+{"type":"result","timestamp":"2025-01-01T00:00:04.000Z","status":"success","stats":{"total_tokens":150,"input_tokens":80,"output_tokens":70,"cached":0,"input":80,"duration_ms":3000,"tool_calls":1}}
 `
 
 func TestParseGeminiNDJSON(t *testing.T) {
@@ -138,8 +145,8 @@ func TestParseGeminiDelta(t *testing.T) {
 	}
 }
 
-func TestParseGeminiThinking(t *testing.T) {
-	ch := ParseGemini(context.Background(), strings.NewReader(testGeminiThinking))
+func TestParseGeminiMultiMessage(t *testing.T) {
+	ch := ParseGemini(context.Background(), strings.NewReader(testGeminiMultiMessage))
 
 	var events []RawEvent
 	for ev := range ch {
@@ -153,31 +160,34 @@ func TestParseGeminiThinking(t *testing.T) {
 		t.Fatalf("expected 4 events, got %d", len(events))
 	}
 
-	// Check thinking event.
-	think := events[1].Parsed
-	if think.Type != "assistant" {
-		t.Errorf("thinking event type = %q, want %q", think.Type, "assistant")
+	// Both messages should be plain text content blocks (no thinking in Gemini stream-json).
+	msg1 := events[1].Parsed
+	if msg1.Type != "assistant" {
+		t.Errorf("msg1 event type = %q, want %q", msg1.Type, "assistant")
 	}
-	if think.AssistantMessage == nil {
-		t.Fatal("thinking AssistantMessage is nil")
+	if msg1.AssistantMessage == nil {
+		t.Fatal("msg1 AssistantMessage is nil")
 	}
-	if len(think.AssistantMessage.Content) != 1 {
-		t.Fatalf("thinking content length = %d, want 1", len(think.AssistantMessage.Content))
+	if len(msg1.AssistantMessage.Content) != 1 {
+		t.Fatalf("msg1 content length = %d, want 1", len(msg1.AssistantMessage.Content))
 	}
-	if think.AssistantMessage.Content[0].Type != "thinking" {
-		t.Errorf("thinking content type = %q, want %q", think.AssistantMessage.Content[0].Type, "thinking")
+	if msg1.AssistantMessage.Content[0].Type != "text" {
+		t.Errorf("msg1 content type = %q, want %q", msg1.AssistantMessage.Content[0].Type, "text")
 	}
-	if think.AssistantMessage.Content[0].Text != "Let me think about this..." {
-		t.Errorf("thinking content text = %q", think.AssistantMessage.Content[0].Text)
+	if msg1.AssistantMessage.Content[0].Text != "Let me think about this..." {
+		t.Errorf("msg1 content text = %q", msg1.AssistantMessage.Content[0].Text)
 	}
 
 	// Check regular text event follows.
-	text := events[2].Parsed
-	if text.Type != "assistant" {
-		t.Errorf("text event type = %q, want %q", text.Type, "assistant")
+	msg2 := events[2].Parsed
+	if msg2.Type != "assistant" {
+		t.Errorf("msg2 event type = %q, want %q", msg2.Type, "assistant")
 	}
-	if text.AssistantMessage.Content[0].Type != "text" {
-		t.Errorf("text content type = %q, want %q", text.AssistantMessage.Content[0].Type, "text")
+	if msg2.AssistantMessage.Content[0].Type != "text" {
+		t.Errorf("msg2 content type = %q, want %q", msg2.AssistantMessage.Content[0].Type, "text")
+	}
+	if msg2.AssistantMessage.Content[0].Text != "The answer is 42." {
+		t.Errorf("msg2 content text = %q", msg2.AssistantMessage.Content[0].Text)
 	}
 }
 
@@ -221,6 +231,71 @@ func TestParseGeminiToolUse(t *testing.T) {
 	}
 }
 
+func TestParseGeminiErrorEvent(t *testing.T) {
+	ndjson := `{"type":"init","timestamp":"2025-01-01T00:00:00.000Z","session_id":"gem-err","model":"gemini-2.5-pro"}
+{"type":"error","timestamp":"2025-01-01T00:00:01.000Z","severity":"warning","message":"Loop detected, stopping execution"}
+{"type":"result","timestamp":"2025-01-01T00:00:02.000Z","status":"success","stats":{"total_tokens":10,"input_tokens":5,"output_tokens":5,"cached":0,"input":5,"duration_ms":100,"tool_calls":0}}
+`
+	ch := ParseGemini(context.Background(), strings.NewReader(ndjson))
+
+	var events []RawEvent
+	for ev := range ch {
+		if ev.Err != nil {
+			t.Fatalf("unexpected error: %v", ev.Err)
+		}
+		events = append(events, ev)
+	}
+
+	if len(events) != 3 {
+		t.Fatalf("expected 3 events, got %d", len(events))
+	}
+
+	// Check error event carries the message.
+	errEv := events[1].Parsed
+	if errEv.Type != "error" {
+		t.Errorf("error event type = %q, want %q", errEv.Type, "error")
+	}
+	if errEv.ResultText != "Loop detected, stopping execution" {
+		t.Errorf("error event ResultText = %q, want %q", errEv.ResultText, "Loop detected, stopping execution")
+	}
+}
+
+func TestParseGeminiResultError(t *testing.T) {
+	ndjson := `{"type":"init","timestamp":"2025-01-01T00:00:00.000Z","session_id":"gem-reserr","model":"gemini-2.5-pro"}
+{"type":"result","timestamp":"2025-01-01T00:00:01.000Z","status":"error","error":{"type":"MaxSessionTurnsError","message":"Maximum session turns exceeded"},"stats":{"total_tokens":100,"input_tokens":50,"output_tokens":50,"cached":30,"input":20,"duration_ms":1200,"tool_calls":0}}
+`
+	ch := ParseGemini(context.Background(), strings.NewReader(ndjson))
+
+	var events []RawEvent
+	for ev := range ch {
+		if ev.Err != nil {
+			t.Fatalf("unexpected error: %v", ev.Err)
+		}
+		events = append(events, ev)
+	}
+
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+
+	res := events[1].Parsed
+	if res.Type != "result" {
+		t.Errorf("result type = %q, want %q", res.Type, "result")
+	}
+	if !res.IsError {
+		t.Error("result IsError should be true for status=error")
+	}
+	if res.ResultText != "Maximum session turns exceeded" {
+		t.Errorf("result ResultText = %q, want error message", res.ResultText)
+	}
+	if res.Usage == nil {
+		t.Fatal("result usage is nil")
+	}
+	if res.Usage.InputTokens != 50 {
+		t.Errorf("result input_tokens = %d, want 50", res.Usage.InputTokens)
+	}
+}
+
 func TestGeminiDisplayIntegration(t *testing.T) {
 	var buf bytes.Buffer
 	d := NewDisplay(&buf)
@@ -249,5 +324,31 @@ func TestGeminiDisplayIntegration(t *testing.T) {
 	}
 	if !strings.Contains(output, "[result]") {
 		t.Errorf("display output missing [result], got:\n%s", output)
+	}
+}
+
+func TestGeminiDisplayErrorEvent(t *testing.T) {
+	var buf bytes.Buffer
+	d := NewDisplay(&buf)
+
+	ndjson := `{"type":"error","timestamp":"2025-01-01T00:00:01.000Z","severity":"warning","message":"Loop detected, stopping execution"}
+`
+	ch := ParseGemini(context.Background(), strings.NewReader(ndjson))
+	for ev := range ch {
+		if ev.Err != nil {
+			t.Fatalf("parse error: %v", ev.Err)
+		}
+		if ev.Parsed.Type != "" {
+			d.Handle(ev.Parsed)
+		}
+	}
+	d.Finish()
+
+	output := buf.String()
+	if !strings.Contains(output, "[error]") {
+		t.Errorf("display output missing [error], got:\n%s", output)
+	}
+	if !strings.Contains(output, "Loop detected") {
+		t.Errorf("display output missing error message, got:\n%s", output)
 	}
 }

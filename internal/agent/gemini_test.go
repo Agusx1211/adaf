@@ -13,11 +13,12 @@ import (
 )
 
 // fake-gemini script that emits canned NDJSON matching Gemini's stream-json format.
+// Event schema matches references/gemini-cli/packages/core/src/output/types.ts.
 const fakeGemini = `#!/usr/bin/env sh
 # Emit NDJSON lines simulating Gemini stream-json output.
-printf '{"type":"init","session_id":"gem-test","model":"gemini-2.5-pro"}\n'
-printf '{"type":"message","role":"assistant","content":"Hello from fake gemini!","thought":false,"delta":false}\n'
-printf '{"type":"result","stats":{"total_tokens":200,"input_tokens":120,"output_tokens":80,"duration_ms":1500,"tool_calls":0}}\n'
+printf '{"type":"init","timestamp":"2025-01-01T00:00:00.000Z","session_id":"gem-test","model":"gemini-2.5-pro"}\n'
+printf '{"type":"message","timestamp":"2025-01-01T00:00:01.000Z","role":"assistant","content":"Hello from fake gemini!","delta":true}\n'
+printf '{"type":"result","timestamp":"2025-01-01T00:00:02.000Z","status":"success","stats":{"total_tokens":200,"input_tokens":120,"output_tokens":80,"cached":0,"input":120,"duration_ms":1500,"tool_calls":0}}\n'
 `
 
 func TestGeminiRunStreamJSON(t *testing.T) {
