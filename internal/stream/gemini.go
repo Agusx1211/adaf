@@ -9,6 +9,14 @@ import (
 
 // GeminiEvent represents a single event from the Gemini CLI's
 // --output-format stream-json NDJSON output.
+//
+// Event types and their fields (from the Gemini CLI source):
+//   - init:        session_id, model
+//   - message:     role ("user"|"assistant"), content, delta (bool)
+//   - tool_use:    tool_name, tool_id, parameters
+//   - tool_result: tool_id, status ("success"|"error"), output, error
+//   - error:       severity ("warning"|"error"), message
+//   - result:      status ("success"|"error"), error, stats
 type GeminiEvent struct {
 	Type      string            `json:"type"`
 	Timestamp string            `json:"timestamp,omitempty"`
@@ -16,7 +24,6 @@ type GeminiEvent struct {
 	Model     string            `json:"model,omitempty"`
 	Role      string            `json:"role,omitempty"`
 	Content   string            `json:"content,omitempty"`
-	Thought   bool              `json:"thought,omitempty"`
 	Delta     bool              `json:"delta,omitempty"`
 	ToolName  string            `json:"tool_name,omitempty"`
 	ToolID    string            `json:"tool_id,omitempty"`
@@ -24,7 +31,15 @@ type GeminiEvent struct {
 	Status    string            `json:"status,omitempty"`
 	Output    string            `json:"output,omitempty"`
 	Message   string            `json:"message,omitempty"`
+	Severity  string            `json:"severity,omitempty"`
+	Error     *GeminiErrorInfo  `json:"error,omitempty"`
 	Stats     *GeminiStreamStats `json:"stats,omitempty"`
+}
+
+// GeminiErrorInfo holds error details from tool_result or result events.
+type GeminiErrorInfo struct {
+	Type    string `json:"type,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // GeminiStreamStats holds usage/performance statistics from a Gemini result event.
@@ -32,6 +47,8 @@ type GeminiStreamStats struct {
 	TotalTokens  int     `json:"total_tokens,omitempty"`
 	InputTokens  int     `json:"input_tokens,omitempty"`
 	OutputTokens int     `json:"output_tokens,omitempty"`
+	Cached       int     `json:"cached,omitempty"`
+	Input        int     `json:"input,omitempty"`
 	DurationMS   float64 `json:"duration_ms,omitempty"`
 	ToolCalls    int     `json:"tool_calls,omitempty"`
 }
@@ -50,25 +67,12 @@ func GeminiToClaudeEvent(ge GeminiEvent) (ClaudeEvent, bool) {
 
 	case "message":
 		if ge.Role != "assistant" {
-			// Skip user/tool_result messages.
+			// Skip user messages.
 			return ClaudeEvent{}, false
 		}
 
-		if ge.Thought {
-			// Thinking content block.
-			return ClaudeEvent{
-				Type: "assistant",
-				AssistantMessage: &AssistantMessage{
-					Role: "assistant",
-					Content: []ContentBlock{
-						{Type: "thinking", Text: ge.Content},
-					},
-				},
-			}, true
-		}
-
 		if ge.Delta {
-			// Streaming text delta.
+			// Streaming text delta (most common assistant event).
 			return ClaudeEvent{
 				Type: "content_block_delta",
 				Delta: &Delta{
@@ -78,7 +82,7 @@ func GeminiToClaudeEvent(ge GeminiEvent) (ClaudeEvent, bool) {
 			}, true
 		}
 
-		// Full text message.
+		// Full text message (non-delta).
 		return ClaudeEvent{
 			Type: "assistant",
 			AssistantMessage: &AssistantMessage{
@@ -113,6 +117,10 @@ func GeminiToClaudeEvent(ge GeminiEvent) (ClaudeEvent, bool) {
 		ev := ClaudeEvent{
 			Type: "result",
 		}
+		if ge.Status == "error" && ge.Error != nil {
+			ev.IsError = true
+			ev.ResultText = ge.Error.Message
+		}
 		if ge.Stats != nil {
 			ev.DurationMS = ge.Stats.DurationMS
 			ev.Usage = &Usage{
@@ -123,10 +131,16 @@ func GeminiToClaudeEvent(ge GeminiEvent) (ClaudeEvent, bool) {
 		return ev, true
 
 	case "error":
-		// Render as a generic event so Display.Handle prints it.
-		return ClaudeEvent{
+		// The Gemini error event has severity ("warning"|"error") and message fields.
+		// Render as a system event with the message for Display.Handle.
+		ev := ClaudeEvent{
 			Type: "error",
-		}, true
+		}
+		// Stash the error message in ResultText so Display can show it.
+		if ge.Message != "" {
+			ev.ResultText = ge.Message
+		}
+		return ev, true
 
 	default:
 		return ClaudeEvent{}, false

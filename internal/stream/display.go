@@ -142,6 +142,14 @@ func (d *Display) Handle(ev ClaudeEvent) {
 		// User/tool result events — silently ignore in display.
 		// The tool results are embedded in subsequent assistant messages.
 
+	case "error":
+		d.finishLine()
+		msg := ev.ResultText
+		if msg == "" {
+			msg = "unknown error"
+		}
+		fmt.Fprintf(d.w, "\033[1;31m[error]\033[0m %s\n", msg)
+
 	case "message":
 		// message start/stop — ignore silently
 
