@@ -3,11 +3,13 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/agusx1211/adaf/internal/recording"
@@ -28,32 +30,77 @@ func (o *OpencodeAgent) Name() string {
 
 // Run executes the opencode CLI with the given configuration.
 //
-// The prompt is piped to stdin and additional flags can be supplied via cfg.Args.
+// The prompt is passed via the "run" subcommand as a positional argument,
+// which activates OpenCode's non-interactive mode. In this mode, OpenCode
+// executes the prompt, streams output, and exits when done. Permission
+// requests are automatically rejected.
+//
+// The SST fork (actively maintained, installed via npm) uses:
+//
+//	opencode run [message..] [--model provider/model] [--format json]
+//
+// The archived Go version used:
+//
+//	opencode -p "prompt" [-f json]
+//
+// We target the SST fork since that is what users install today.
+//
+// OpenCode is a Bun-compiled native binary distributed via npm. The npm
+// package includes a Node.js shim that finds and spawns the platform-
+// specific binary. Because of this two-layer process tree, we set Setpgid
+// and kill the entire process group on cancellation to avoid orphans.
 func (o *OpencodeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Recorder) (*Result, error) {
 	cmdName := cfg.Command
 	if cmdName == "" {
 		cmdName = "opencode"
 	}
 
-	args := make([]string, len(cfg.Args))
-	copy(args, cfg.Args)
+	// Build arguments: "run" subcommand, then configured flags, then prompt.
+	args := make([]string, 0, len(cfg.Args)+4)
+	args = append(args, "run")
+	args = append(args, cfg.Args...)
+
+	if cfg.Prompt != "" {
+		args = append(args, cfg.Prompt)
+		recorder.RecordStdin(cfg.Prompt)
+	}
 
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
 
+	// Start the process in its own process group. OpenCode is distributed
+	// as a Node.js shim that spawns a compiled Bun binary, which in turn
+	// may spawn MCP servers and other children. Without process group
+	// kill, cancellation would only kill the shim, leaving the real
+	// binary and its children running.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		return nil
+	}
+	cmd.WaitDelay = 5 * time.Second
+
+	// Environment: inherit + overlay.
 	cmd.Env = os.Environ()
 	for k, v := range cfg.Env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
 
-	if cfg.Prompt != "" {
-		cmd.Stdin = strings.NewReader(cfg.Prompt)
-		recorder.RecordStdin(cfg.Prompt)
+	// Determine stdout/stderr writers, respecting cfg overrides.
+	stdoutW := cfg.Stdout
+	if stdoutW == nil {
+		stdoutW = os.Stdout
+	}
+	stderrW := cfg.Stderr
+	if stderrW == nil {
+		stderrW = os.Stderr
 	}
 
 	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = io.MultiWriter(&stdoutBuf, recorder.WrapWriter(os.Stdout, "stdout"))
-	cmd.Stderr = io.MultiWriter(&stderrBuf, recorder.WrapWriter(os.Stderr, "stderr"))
+	cmd.Stdout = io.MultiWriter(&stdoutBuf, recorder.WrapWriter(stdoutW, "stdout"))
+	cmd.Stderr = io.MultiWriter(&stderrBuf, recorder.WrapWriter(stderrW, "stderr"))
 
 	recorder.RecordMeta("agent", "opencode")
 	recorder.RecordMeta("command", cmdName+" "+strings.Join(args, " "))
@@ -65,7 +112,8 @@ func (o *OpencodeAgent) Run(ctx context.Context, cfg Config, recorder *recording
 
 	exitCode := 0
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			return nil, fmt.Errorf("opencode agent: failed to run command: %w", err)

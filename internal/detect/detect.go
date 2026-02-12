@@ -386,27 +386,66 @@ func probeVibeModels() []string {
 
 // --- OpenCode model discovery ---
 
-// opencodeConfig represents the relevant parts of ~/.config/opencode/opencode.json.
+// opencodeConfig represents the relevant parts of the OpenCode config file.
+//
+// The SST fork (actively maintained) uses opencode.json or opencode.jsonc
+// stored at $XDG_CONFIG_HOME/opencode/ (typically ~/.config/opencode/).
+// It also supports a project-local opencode.json in the working directory.
+//
+// Key fields:
+//   - "model": default model in "provider/model" format (e.g. "anthropic/claude-sonnet-4")
+//   - "provider": map of provider configs, each with optional "models" sub-map
+//
+// The archived Go version used .opencode.json at $HOME or
+// $HOME/.config/opencode/ with a different schema ("providers" key with
+// apiKey/disabled, models defined in code). We only parse the SST format
+// since that is what users install today.
 type opencodeConfig struct {
-	Provider map[string]opencodeProvider `json:"provider"`
+	Model    string                        `json:"model"`
+	Provider map[string]opencodeProvider   `json:"provider"`
 }
 
 type opencodeProvider struct {
-	Models map[string]opencodeModel `json:"models"`
+	Models map[string]json.RawMessage `json:"models"`
 }
 
-type opencodeModel struct {
-	Name string `json:"name"`
+// opencodeConfigPaths returns candidate paths for the OpenCode config file.
+// It checks $XDG_CONFIG_HOME/opencode/ first, then falls back to
+// ~/.config/opencode/, matching the SST fork's Global.Path.config logic.
+func opencodeConfigPaths() []string {
+	var dirs []string
+
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		dirs = append(dirs, filepath.Join(xdg, "opencode"))
+	}
+
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, filepath.Join(home, ".config", "opencode"))
+	}
+
+	var paths []string
+	for _, dir := range dirs {
+		// SST fork checks opencode.jsonc first, then opencode.json.
+		// Also check config.json for legacy global config.
+		paths = append(paths,
+			filepath.Join(dir, "opencode.jsonc"),
+			filepath.Join(dir, "opencode.json"),
+			filepath.Join(dir, "config.json"),
+		)
+	}
+	return paths
 }
 
 func probeOpencodeModels() []string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
+	var data []byte
+	for _, path := range opencodeConfigPaths() {
+		var err error
+		data, err = os.ReadFile(path)
+		if err == nil {
+			break
+		}
 	}
-
-	data, err := os.ReadFile(filepath.Join(home, ".config", "opencode", "opencode.json"))
-	if err != nil {
+	if data == nil {
 		return nil
 	}
 
@@ -418,16 +457,26 @@ func probeOpencodeModels() []string {
 	seen := make(map[string]struct{})
 	var models []string
 
+	add := func(qualified string) {
+		lower := strings.ToLower(qualified)
+		if _, dup := seen[lower]; dup {
+			return
+		}
+		seen[lower] = struct{}{}
+		models = append(models, qualified)
+	}
+
+	// The top-level "model" field is the user's configured default
+	// in provider/model format (e.g. "anthropic/claude-sonnet-4").
+	if cfg.Model != "" && strings.Contains(cfg.Model, "/") {
+		add(cfg.Model)
+	}
+
+	// Extract models from provider configs. Each provider entry can
+	// define custom models via its "models" sub-map.
 	for providerID, provider := range cfg.Provider {
 		for modelID := range provider.Models {
-			// Use provider/model format for custom providers.
-			qualified := providerID + "/" + modelID
-			lower := strings.ToLower(qualified)
-			if _, dup := seen[lower]; dup {
-				continue
-			}
-			seen[lower] = struct{}{}
-			models = append(models, qualified)
+			add(providerID + "/" + modelID)
 		}
 	}
 

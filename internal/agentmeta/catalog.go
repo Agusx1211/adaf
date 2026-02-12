@@ -76,14 +76,17 @@ var builtin = map[string]Info{
 	"opencode": {
 		Name:         "opencode",
 		Binary:       "opencode",
-		DefaultModel: "openai/gpt-4.1",
+		DefaultModel: "anthropic/claude-sonnet-4",
 		SupportedModels: []string{
-			"openai/gpt-4.1",
-			"anthropic/claude-sonnet-4.5",
+			"anthropic/claude-sonnet-4",
 			"anthropic/claude-opus-4",
+			"anthropic/claude-haiku-4.5",
+			"openai/gpt-5",
+			"openai/gpt-5-mini",
 			"google/gemini-2.5-pro",
+			"google/gemini-2.5-flash",
 		},
-		Capabilities: []string{"stdin-prompt", "model-select", "multi-provider", "stream-output"},
+		Capabilities: []string{"prompt-arg", "model-select", "multi-provider", "auto-approve"},
 	},
 	"gemini": {
 		Name:         "gemini",
