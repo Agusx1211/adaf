@@ -19,18 +19,19 @@ type AgentRawOutputMsg struct {
 
 // AgentStartedMsg signals that a new agent session has begun.
 type AgentStartedMsg struct {
-	SessionID  int
-	TurnHexID  string
-	StepHexID  string
-	RunHexID   string
+	SessionID int
+	TurnHexID string
+	StepHexID string
+	RunHexID  string
 }
 
 // AgentFinishedMsg signals that a single agent session completed.
 type AgentFinishedMsg struct {
-	SessionID int
-	TurnHexID string
-	Result    *agent.Result
-	Err       error
+	SessionID     int
+	TurnHexID     string
+	WaitForSpawns bool
+	Result        *agent.Result
+	Err           error
 }
 
 // AgentLoopDoneMsg signals the entire loop has completed.
@@ -54,10 +55,11 @@ type SpawnStatusMsg struct {
 
 // SpawnInfo describes a spawn entry for the hierarchy view.
 type SpawnInfo struct {
-	ID       int
-	Profile  string
-	Status   string // "queued", "running", "awaiting_input", "completed", "failed", "merged", "rejected"
-	Question string // pending question when status is "awaiting_input"
+	ID           int
+	ParentTurnID int
+	Profile      string
+	Status       string // "queued", "running", "awaiting_input", "completed", "failed", "merged", "rejected"
+	Question     string // pending question when status is "awaiting_input"
 }
 
 // LoopStepStartMsg signals that a loop step has started.

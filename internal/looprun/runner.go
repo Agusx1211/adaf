@@ -296,10 +296,12 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 						<-pollDone
 						pollDone = nil
 					}
+					waitingForSpawns := cfg.Store != nil && cfg.Store.IsWaiting(turnID)
 					eventCh <- runtui.AgentFinishedMsg{
-						SessionID: turnID,
-						TurnHexID: turnHexID,
-						Result:    result,
+						SessionID:     turnID,
+						TurnHexID:     turnHexID,
+						WaitForSpawns: waitingForSpawns,
+						Result:        result,
 					}
 				},
 				OnWait: func(turnID int) []loop.WaitResult {
@@ -380,9 +382,10 @@ func pollSpawnStatus(ctx context.Context, s *store.Store, parentTurnID int, even
 		spawns := make([]runtui.SpawnInfo, 0, len(records))
 		for _, rec := range records {
 			info := runtui.SpawnInfo{
-				ID:      rec.ID,
-				Profile: rec.ChildProfile,
-				Status:  rec.Status,
+				ID:           rec.ID,
+				ParentTurnID: rec.ParentTurnID,
+				Profile:      rec.ChildProfile,
+				Status:       rec.Status,
 			}
 			if rec.Status == "awaiting_input" {
 				if ask, err := s.PendingAsk(rec.ID); err == nil && ask != nil {
@@ -495,7 +498,7 @@ func spawnSnapshotFingerprint(spawns []runtui.SpawnInfo) string {
 	}
 	var b strings.Builder
 	for _, sp := range spawns {
-		b.WriteString(fmt.Sprintf("%d|%s|%s|%s;", sp.ID, sp.Profile, sp.Status, sp.Question))
+		b.WriteString(fmt.Sprintf("%d|%d|%s|%s|%s;", sp.ID, sp.ParentTurnID, sp.Profile, sp.Status, sp.Question))
 	}
 	return b.String()
 }
