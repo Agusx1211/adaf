@@ -93,13 +93,13 @@ type Model struct {
 	autoScroll bool
 	focus      paneFocus
 
-	// Streaming delta accumulator. Raw text is collected here and flushed
-	// to m.lines when a newline appears or the content block ends.
-	streamBuf    strings.Builder
+	// Streaming delta accumulator. Use pointers so Model value copies do not
+	// trip strings.Builder copy checks in Bubble Tea update cycles.
+	streamBuf    *strings.Builder
 	currentScope string
 
 	// Tool input accumulator: collects partial_json deltas for parsing on block stop.
-	toolInputBuf strings.Builder
+	toolInputBuf *strings.Builder
 
 	// Current streaming block state.
 	currentBlockType string
@@ -153,6 +153,8 @@ func NewModel(projectName string, plan *store.Plan, agentName, modelName string,
 		focus:          focusDetail,
 		eventCh:        eventCh,
 		cancelFunc:     cancel,
+		streamBuf:      &strings.Builder{},
+		toolInputBuf:   &strings.Builder{},
 		sessions:       make(map[int]*sessionStatus),
 		spawnFirstSeen: make(map[int]time.Time),
 		spawnStatus:    make(map[int]string),
@@ -891,6 +893,20 @@ func (m *Model) addScopedLine(scope, line string) {
 	}
 }
 
+func (m *Model) ensureStreamBuf() *strings.Builder {
+	if m.streamBuf == nil {
+		m.streamBuf = &strings.Builder{}
+	}
+	return m.streamBuf
+}
+
+func (m *Model) ensureToolInputBuf() *strings.Builder {
+	if m.toolInputBuf == nil {
+		m.toolInputBuf = &strings.Builder{}
+	}
+	return m.toolInputBuf
+}
+
 func (m *Model) switchStreamScope(scope string) {
 	if m.currentScope == scope {
 		return
@@ -899,7 +915,7 @@ func (m *Model) switchStreamScope(scope string) {
 	m.currentScope = scope
 	m.currentBlockType = ""
 	m.currentToolName = ""
-	m.toolInputBuf.Reset()
+	m.ensureToolInputBuf().Reset()
 }
 
 func (m *Model) ensureSession(sessionID int) *sessionStatus {
@@ -940,7 +956,7 @@ func (m *Model) setSessionAction(sessionID int, action string) {
 
 // flushStream flushes the streaming buffer to a completed line.
 func (m *Model) flushStream() {
-	if m.streamBuf.Len() == 0 {
+	if m.streamBuf == nil || m.streamBuf.Len() == 0 {
 		return
 	}
 	styled := m.styleDelta(m.streamBuf.String())
@@ -950,11 +966,12 @@ func (m *Model) flushStream() {
 
 // appendDelta processes streaming delta text and flushes completed lines.
 func (m *Model) appendDelta(text string) {
+	buf := m.ensureStreamBuf()
 	for _, r := range text {
 		if r == '\n' {
 			m.flushStream()
 		} else {
-			m.streamBuf.WriteRune(r)
+			buf.WriteRune(r)
 		}
 	}
 	if m.autoScroll && m.scopeVisible(m.currentScope) {
@@ -1311,7 +1328,7 @@ func (m *Model) handleEvent(ev stream.ClaudeEvent) {
 
 	case "content_block_start":
 		m.flushStream()
-		m.toolInputBuf.Reset()
+		m.ensureToolInputBuf().Reset()
 		if ev.ContentBlock != nil {
 			m.currentBlockType = ev.ContentBlock.Type
 			m.currentToolName = ev.ContentBlock.Name
@@ -1342,7 +1359,7 @@ func (m *Model) handleEvent(ev stream.ClaudeEvent) {
 		if ev.Delta != nil {
 			if ev.Delta.PartialJSON != "" {
 				// Accumulate tool JSON silently — will format on block stop.
-				m.toolInputBuf.WriteString(ev.Delta.PartialJSON)
+				m.ensureToolInputBuf().WriteString(ev.Delta.PartialJSON)
 			} else if ev.Delta.Text != "" {
 				m.appendDelta(ev.Delta.Text)
 			}
@@ -1350,13 +1367,13 @@ func (m *Model) handleEvent(ev stream.ClaudeEvent) {
 
 	case "content_block_stop":
 		m.flushStream()
-		if m.currentBlockType == "tool_use" && m.toolInputBuf.Len() > 0 {
+		if m.currentBlockType == "tool_use" && m.toolInputBuf != nil && m.toolInputBuf.Len() > 0 {
 			m.renderToolInput(scope, m.currentToolName, m.toolInputBuf.String())
 		}
 		m.addScopedLine(scope, "")
 		m.currentBlockType = ""
 		m.currentToolName = ""
-		m.toolInputBuf.Reset()
+		m.ensureToolInputBuf().Reset()
 		if sessionID > 0 {
 			m.setSessionAction(sessionID, "waiting")
 		}
@@ -1907,7 +1924,7 @@ func (m Model) detailLines(width int) []string {
 	}
 
 	lines := append([]string(nil), m.filteredLines()...)
-	if m.streamBuf.Len() > 0 && m.scopeVisible(m.currentScope) {
+	if m.streamBuf != nil && m.streamBuf.Len() > 0 && m.scopeVisible(m.currentScope) {
 		prefixAll := m.shouldPrefixAllOutput()
 		partial := m.styleDelta(m.streamBuf.String())
 		lines = append(lines, m.maybePrefixedLine(m.currentScope, partial, prefixAll))

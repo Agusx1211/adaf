@@ -11,6 +11,7 @@ import (
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/store"
+	"github.com/agusx1211/adaf/internal/stream"
 )
 
 func TestWrapRenderableLinesWordWrap(t *testing.T) {
@@ -207,6 +208,53 @@ func TestIssueSelectionWithKeyboard(t *testing.T) {
 	}
 	if got.selectedScope() != "" {
 		t.Fatalf("selectedScope = %q, want empty in issue mode", got.selectedScope())
+	}
+}
+
+func TestStreamingDeltaAfterModelCopyDoesNotPanic(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+
+	// Bubble Tea app models are value types; this simulates parent-model copying.
+	copied := m
+
+	start := AgentEventMsg{
+		Event: stream.ClaudeEvent{
+			Type:         "content_block_start",
+			ContentBlock: &stream.ContentBlock{Type: "text"},
+		},
+	}
+	delta := AgentEventMsg{
+		Event: stream.ClaudeEvent{
+			Type:  "content_block_delta",
+			Delta: &stream.Delta{Text: "hello"},
+		},
+	}
+
+	updated, _ := copied.Update(start)
+	m2, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("updated model type = %T, want runtui.Model", updated)
+	}
+
+	updated, _ = m2.Update(delta)
+	m3, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("updated model type = %T, want runtui.Model", updated)
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("unexpected panic after model copy: %v", r)
+		}
+	}()
+
+	updated, _ = m3.Update(delta)
+	m4, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("updated model type = %T, want runtui.Model", updated)
+	}
+	if m4.streamBuf == nil || m4.streamBuf.Len() == 0 {
+		t.Fatal("expected streaming buffer to contain accumulated delta text")
 	}
 }
 
