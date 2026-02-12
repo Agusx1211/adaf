@@ -39,6 +39,10 @@ type BuildOpts struct {
 	Store   *store.Store
 	Project *store.ProjectConfig
 
+	// PlanID overrides the plan context for this prompt.
+	// If empty and Task is also empty, ActivePlanID from Project is used.
+	PlanID string
+
 	// Profile is the profile of the agent being prompted.
 	Profile *config.Profile
 
@@ -94,7 +98,40 @@ func Build(opts BuildOpts) (string, error) {
 		return "Explore the codebase and address any open issues.", nil
 	}
 
-	plan, _ := s.LoadPlan()
+	effectivePlanID := strings.TrimSpace(opts.PlanID)
+	if effectivePlanID == "" && opts.Task == "" {
+		effectivePlanID = strings.TrimSpace(project.ActivePlanID)
+	}
+
+	var plan *store.Plan
+	if effectivePlanID == "" && opts.Task == "" {
+		// Backward compatibility path: LoadPlan triggers legacy single-plan migration.
+		loaded, _ := s.LoadPlan()
+		if loaded != nil && loaded.ID != "" {
+			if loaded.Status == "" {
+				loaded.Status = "active"
+			}
+			if loaded.Status == "active" {
+				plan = loaded
+				effectivePlanID = loaded.ID
+			}
+		}
+	}
+	if effectivePlanID != "" && (plan == nil || plan.ID != effectivePlanID) {
+		plan, _ = s.GetPlan(effectivePlanID)
+		if plan != nil {
+			if plan.Status == "" {
+				plan.Status = "active"
+			}
+			if plan.Status != "active" {
+				plan = nil
+				effectivePlanID = ""
+			}
+		} else {
+			effectivePlanID = ""
+		}
+	}
+
 	latest, _ := s.LatestLog()
 
 	// Role-specific header.
@@ -115,6 +152,13 @@ func Build(opts BuildOpts) (string, error) {
 	// Objective.
 	b.WriteString("# Objective\n\n")
 	b.WriteString("Project: " + project.Name + "\n\n")
+	if plan != nil {
+		fmt.Fprintf(&b, "You are working on plan: **%s**", plan.ID)
+		if plan.Title != "" {
+			fmt.Fprintf(&b, " — %s", plan.Title)
+		}
+		b.WriteString("\n\n")
+	}
 
 	if opts.Task != "" {
 		b.WriteString(opts.Task + "\n\n")
@@ -191,7 +235,12 @@ func Build(opts BuildOpts) (string, error) {
 		b.WriteString("\n")
 	}
 
-	issues, _ := s.ListIssues()
+	var issues []store.Issue
+	if effectivePlanID != "" {
+		issues, _ = s.ListIssuesForPlan(effectivePlanID)
+	} else {
+		issues, _ = s.ListSharedIssues()
+	}
 	var relevant []store.Issue
 	for _, iss := range issues {
 		if iss.Status == "open" || iss.Status == "in_progress" {

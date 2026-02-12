@@ -81,6 +81,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	planID := strings.TrimSpace(os.Getenv("ADAF_PLAN_ID"))
 
 	delegation, err := resolveCurrentDelegation(parentProfile)
 	if err != nil {
@@ -96,6 +97,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		ParentSessionID: parentSessionID,
 		ParentProfile:   parentProfile,
 		ChildProfile:    profileName,
+		PlanID:          planID,
 		Task:            task,
 		ReadOnly:        readOnly,
 		Wait:            wait,

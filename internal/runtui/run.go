@@ -22,6 +22,7 @@ type RunConfig struct {
 	Agent           agent.Agent
 	AgentCfg        agent.Config
 	PromptBuildOpts *promptpkg.BuildOpts
+	PlanID          string
 	Plan            *store.Plan
 	ProjectName     string
 	ProfileName     string
@@ -129,6 +130,7 @@ func runAgentLoop(ctx context.Context, cfg RunConfig, eventCh chan any, streamCh
 		Store:       cfg.Store,
 		Agent:       cfg.Agent,
 		Config:      agentCfg,
+		PlanID:      cfg.PlanID,
 		PromptFunc:  promptFunc,
 		ProfileName: cfg.ProfileName,
 		OnStart: func(sessionID int) {

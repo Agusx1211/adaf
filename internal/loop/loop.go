@@ -38,6 +38,9 @@ type Loop struct {
 	// ProfileName is the name of the profile that launched this loop.
 	ProfileName string
 
+	// PlanID tracks the plan context for this loop/session.
+	PlanID string
+
 	// OnStart is called at the beginning of each iteration, before the agent runs.
 	// The sessionID of the upcoming run is passed as an argument.
 	OnStart func(sessionID int)
@@ -91,6 +94,7 @@ func (l *Loop) Run(ctx context.Context) error {
 		sessionLog := &store.SessionLog{
 			Agent:       l.Agent.Name(),
 			ProfileName: l.ProfileName,
+			PlanID:      l.PlanID,
 			Objective:   objective,
 		}
 		if err := l.Store.CreateLog(sessionLog); err != nil {
@@ -111,6 +115,9 @@ func (l *Loop) Run(ctx context.Context) error {
 		cfg.Env["ADAF_SESSION_ID"] = fmt.Sprintf("%d", sessionID)
 		if strings.TrimSpace(l.ProfileName) != "" {
 			cfg.Env["ADAF_PROFILE"] = l.ProfileName
+		}
+		if strings.TrimSpace(l.PlanID) != "" {
+			cfg.Env["ADAF_PLAN_ID"] = l.PlanID
 		}
 		if l.Store != nil {
 			projectDir := strings.TrimSpace(filepath.Dir(l.Store.Root()))

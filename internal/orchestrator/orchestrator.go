@@ -22,6 +22,7 @@ type SpawnRequest struct {
 	ParentSessionID int
 	ParentProfile   string
 	ChildProfile    string
+	PlanID          string
 	Task            string
 	ReadOnly        bool
 	Wait            bool                     // if true, Spawn blocks until child completes
@@ -289,11 +290,18 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 
 	// Build child prompt.
 	projCfg, _ := o.store.LoadProject()
+	parentPlanID := req.PlanID
+	if parentPlanID == "" {
+		if parentLog, err := o.store.GetLog(req.ParentSessionID); err == nil && parentLog != nil {
+			parentPlanID = parentLog.PlanID
+		}
+	}
 	childPrompt, _ := promptpkg.Build(promptpkg.BuildOpts{
 		Store:           o.store,
 		Project:         projCfg,
 		Profile:         childProf,
 		GlobalCfg:       o.globalCfg,
+		PlanID:          parentPlanID,
 		Task:            req.Task,
 		ReadOnly:        req.ReadOnly,
 		ParentSessionID: req.ParentSessionID,
@@ -310,6 +318,9 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 		"ADAF_SESSION_ID":     fmt.Sprintf("%d", rec.ID),
 		"ADAF_PROFILE":        childProf.Name,
 		"ADAF_PARENT_SESSION": fmt.Sprintf("%d", req.ParentSessionID),
+	}
+	if parentPlanID != "" {
+		agentEnv["ADAF_PLAN_ID"] = parentPlanID
 	}
 	modelOverride := childProf.Model
 	switch childProf.Agent {
@@ -439,6 +450,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 			Store:  o.store,
 			Agent:  agentInstance,
 			Config: agentCfg,
+			PlanID: parentPlanID,
 			OnStart: func(sessionID int) {
 				rec.ChildSessionID = sessionID
 				o.store.UpdateSpawn(rec)
@@ -453,6 +465,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 					Project:         projCfg,
 					Profile:         childProf,
 					GlobalCfg:       o.globalCfg,
+					PlanID:          parentPlanID,
 					Task:            req.Task,
 					ReadOnly:        req.ReadOnly,
 					ParentSessionID: req.ParentSessionID,

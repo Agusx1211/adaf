@@ -55,6 +55,7 @@ Examples:
 func init() {
 	runCmd.Flags().String("agent", "claude", "Agent to run (claude, codex, vibe, opencode, generic)")
 	runCmd.Flags().String("prompt", "", "Prompt to send to the agent (default: built from project context)")
+	runCmd.Flags().String("plan", "", "Plan ID override for this run (defaults to active plan)")
 	runCmd.Flags().Int("max-turns", 0, "Maximum number of agent turns (0 = unlimited)")
 	runCmd.Flags().String("model", "", "Model override for the agent")
 	runCmd.Flags().String("command", "", "Custom command path (for generic agent)")
@@ -71,6 +72,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 
 	agentName, _ := cmd.Flags().GetString("agent")
 	prompt, _ := cmd.Flags().GetString("prompt")
+	planFlag, _ := cmd.Flags().GetString("plan")
 	maxTurns, _ := cmd.Flags().GetInt("max-turns")
 	modelFlag, _ := cmd.Flags().GetString("model")
 	customCmd, _ := cmd.Flags().GetString("command")
@@ -117,6 +119,10 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("loading project: %w", err)
 	}
+	effectivePlanID, err := resolveEffectivePlanID(s, projCfg, planFlag, cmd.Flags().Changed("plan"))
+	if err != nil {
+		return err
+	}
 
 	workDir := projCfg.RepoPath
 	if workDir == "" {
@@ -130,6 +136,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		opts := promptpkg.BuildOpts{
 			Store:   s,
 			Project: projCfg,
+			PlanID:  effectivePlanID,
 		}
 		built, err := promptpkg.Build(opts)
 		if err != nil {
@@ -187,15 +194,15 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		if session.IsAgentContext() {
 			return fmt.Errorf("session mode is not available inside an agent context")
 		}
-		return runAsSession(agentName, agentCfg, projCfg, workDir, promptBuildOpts != nil)
+		return runAsSession(agentName, agentCfg, projCfg, workDir, effectivePlanID, promptBuildOpts != nil)
 	}
 
 	// Default: inline output.
-	return runInline(cmd, s, agentInstance, agentCfg, projCfg, defaultModel, maxTurns, promptBuildOpts)
+	return runInline(cmd, s, agentInstance, agentCfg, projCfg, defaultModel, maxTurns, effectivePlanID, promptBuildOpts)
 }
 
 // runAsSession starts the agent as a background session daemon and prints the session ID.
-func runAsSession(agentName string, agentCfg agent.Config, projCfg *store.ProjectConfig, workDir string, useDefaultPrompt bool) error {
+func runAsSession(agentName string, agentCfg agent.Config, projCfg *store.ProjectConfig, workDir string, planID string, useDefaultPrompt bool) error {
 	dcfg := session.DaemonConfig{
 		AgentName:        agentName,
 		AgentCommand:     agentCfg.Command,
@@ -207,6 +214,7 @@ func runAsSession(agentName string, agentCfg agent.Config, projCfg *store.Projec
 		ProjectDir:       workDir,
 		ProfileName:      agentName,
 		ProjectName:      projCfg.Name,
+		PlanID:           planID,
 		UseDefaultPrompt: useDefaultPrompt,
 	}
 
@@ -228,7 +236,7 @@ func runAsSession(agentName string, agentCfg agent.Config, projCfg *store.Projec
 }
 
 // runInline prints inline output suitable for CI/pipes.
-func runInline(cmd *cobra.Command, s *store.Store, agentInstance agent.Agent, agentCfg agent.Config, projCfg *store.ProjectConfig, defaultModel string, maxTurns int, promptBuildOpts *promptpkg.BuildOpts) error {
+func runInline(cmd *cobra.Command, s *store.Store, agentInstance agent.Agent, agentCfg agent.Config, projCfg *store.ProjectConfig, defaultModel string, maxTurns int, planID string, promptBuildOpts *promptpkg.BuildOpts) error {
 	workDir := agentCfg.WorkDir
 
 	// Print run header
@@ -240,6 +248,9 @@ func runInline(cmd *cobra.Command, s *store.Store, agentInstance agent.Agent, ag
 	printField("Project", projCfg.Name)
 	printField("Repo", workDir)
 	printField("Agent", agentCfg.Name)
+	if planID != "" {
+		printField("Plan", planID)
+	}
 	if defaultModel != "" {
 		printField("Default Model", defaultModel)
 	}
@@ -272,6 +283,7 @@ func runInline(cmd *cobra.Command, s *store.Store, agentInstance agent.Agent, ag
 		Store:  s,
 		Agent:  agentInstance,
 		Config: agentCfg,
+		PlanID: planID,
 		OnStart: func(sessionID int) {
 			fmt.Printf("  %s>>> Session #%d starting%s\n", styleBoldGreen, sessionID, colorReset)
 		},
@@ -303,6 +315,31 @@ func runInline(cmd *cobra.Command, s *store.Store, agentInstance agent.Agent, ag
 
 	fmt.Printf("\n  %sAgent loop finished.%s\n\n", styleBoldGreen, colorReset)
 	return nil
+}
+
+func resolveEffectivePlanID(s *store.Store, projCfg *store.ProjectConfig, planFlag string, explicit bool) (string, error) {
+	planID := strings.TrimSpace(planFlag)
+	if !explicit {
+		planID = strings.TrimSpace(projCfg.ActivePlanID)
+	}
+	if planID == "" {
+		return "", nil
+	}
+
+	plan, err := s.GetPlan(planID)
+	if err != nil {
+		return "", fmt.Errorf("loading plan %q: %w", planID, err)
+	}
+	if plan == nil {
+		return "", fmt.Errorf("plan %q not found", planID)
+	}
+	if plan.Status != "" && plan.Status != "active" {
+		if explicit {
+			return "", fmt.Errorf("plan %q is %q; only active plans can be used", planID, plan.Status)
+		}
+		return "", nil
+	}
+	return planID, nil
 }
 
 func agentNames() []string {

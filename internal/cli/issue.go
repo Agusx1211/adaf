@@ -62,11 +62,14 @@ var issueUpdateCmd = &cobra.Command{
 
 func init() {
 	issueListCmd.Flags().String("status", "", "Filter by status (open, in_progress, resolved, wontfix)")
+	issueListCmd.Flags().String("plan", "", "Filter for a plan context (shared + plan-scoped)")
+	issueListCmd.Flags().Bool("shared", false, "Show shared issues only")
 
 	issueCreateCmd.Flags().String("title", "", "Issue title (required)")
 	issueCreateCmd.Flags().String("description", "", "Issue description")
 	issueCreateCmd.Flags().String("priority", "medium", "Priority (critical, high, medium, low)")
 	issueCreateCmd.Flags().StringSlice("labels", nil, "Labels (comma-separated)")
+	issueCreateCmd.Flags().String("plan", "", "Plan scope for this issue (empty = shared)")
 	issueCreateCmd.Flags().Int("session", 0, "Associated session ID (optional; defaults to current agent session)")
 	_ = issueCreateCmd.MarkFlagRequired("title")
 
@@ -74,6 +77,7 @@ func init() {
 	issueUpdateCmd.Flags().String("title", "", "New title")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().StringSlice("labels", nil, "Replace labels")
+	issueUpdateCmd.Flags().String("plan", "", "Move issue to a plan scope (empty = shared)")
 
 	issueCmd.AddCommand(issueListCmd)
 	issueCmd.AddCommand(issueCreateCmd)
@@ -89,8 +93,34 @@ func runIssueList(cmd *cobra.Command, args []string) error {
 	}
 
 	statusFilter, _ := cmd.Flags().GetString("status")
+	planFilter, _ := cmd.Flags().GetString("plan")
+	sharedOnly, _ := cmd.Flags().GetBool("shared")
 
-	issues, err := s.ListIssues()
+	issues := []store.Issue{}
+	switch {
+	case sharedOnly:
+		issues, err = s.ListSharedIssues()
+	case strings.TrimSpace(planFilter) != "":
+		planFilter = strings.TrimSpace(planFilter)
+		if err := validatePlanID(planFilter); err != nil {
+			return err
+		}
+		plan, err := s.GetPlan(planFilter)
+		if err != nil {
+			return fmt.Errorf("loading plan %q: %w", planFilter, err)
+		}
+		if plan == nil {
+			return fmt.Errorf("plan %q not found", planFilter)
+		}
+		issues, err = s.ListIssuesForPlan(planFilter)
+	default:
+		project, _ := s.LoadProject()
+		if project != nil && project.ActivePlanID != "" {
+			issues, err = s.ListIssuesForPlan(project.ActivePlanID)
+		} else {
+			issues, err = s.ListSharedIssues()
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("listing issues: %w", err)
 	}
@@ -118,13 +148,18 @@ func runIssueList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	headers := []string{"ID", "STATUS", "PRI", "TITLE", "CREATED"}
+	headers := []string{"ID", "STATUS", "PRI", "PLAN", "TITLE", "CREATED"}
 	var rows [][]string
 	for _, iss := range issues {
+		scope := "shared"
+		if iss.PlanID != "" {
+			scope = iss.PlanID
+		}
 		rows = append(rows, []string{
 			fmt.Sprintf("#%d", iss.ID),
 			statusBadge(iss.Status),
 			priorityBadge(iss.Priority),
+			scope,
 			truncate(iss.Title, 50),
 			iss.Created.Format("2006-01-02"),
 		})
@@ -145,10 +180,24 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 	description, _ := cmd.Flags().GetString("description")
 	priority, _ := cmd.Flags().GetString("priority")
 	labels, _ := cmd.Flags().GetStringSlice("labels")
+	planID, _ := cmd.Flags().GetString("plan")
+	planID = strings.TrimSpace(planID)
 	sessionFlag, _ := cmd.Flags().GetInt("session")
 	sessionID, err := resolveOptionalSessionID(sessionFlag)
 	if err != nil {
 		return err
+	}
+	if planID != "" {
+		if err := validatePlanID(planID); err != nil {
+			return err
+		}
+		plan, err := s.GetPlan(planID)
+		if err != nil {
+			return fmt.Errorf("loading plan %q: %w", planID, err)
+		}
+		if plan == nil {
+			return fmt.Errorf("plan %q not found", planID)
+		}
 	}
 
 	// Validate priority
@@ -167,6 +216,7 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 		Description: description,
 		Priority:    priority,
 		Labels:      labels,
+		PlanID:      planID,
 		SessionID:   sessionID,
 	}
 
@@ -179,6 +229,11 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 	printField("Title", issue.Title)
 	printField("Priority", issue.Priority)
 	printField("Status", issue.Status)
+	if issue.PlanID != "" {
+		printField("Plan", issue.PlanID)
+	} else {
+		printField("Plan", "shared")
+	}
 	if issue.SessionID > 0 {
 		printField("Session", fmt.Sprintf("#%d", issue.SessionID))
 	}
@@ -212,6 +267,11 @@ func runIssueShow(cmd *cobra.Command, args []string) error {
 	printFieldColored("Priority", issue.Priority, statusColor(issue.Priority))
 	printField("Created", issue.Created.Format("2006-01-02 15:04:05"))
 	printField("Updated", issue.Updated.Format("2006-01-02 15:04:05"))
+	if issue.PlanID != "" {
+		printField("Plan", issue.PlanID)
+	} else {
+		printField("Plan", "shared")
+	}
 
 	if len(issue.Labels) > 0 {
 		printField("Labels", strings.Join(issue.Labels, ", "))
@@ -292,8 +352,27 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		changed = true
 	}
 
+	if cmd.Flags().Changed("plan") {
+		planID, _ := cmd.Flags().GetString("plan")
+		planID = strings.TrimSpace(planID)
+		if planID != "" {
+			if err := validatePlanID(planID); err != nil {
+				return err
+			}
+			plan, err := s.GetPlan(planID)
+			if err != nil {
+				return fmt.Errorf("loading plan %q: %w", planID, err)
+			}
+			if plan == nil {
+				return fmt.Errorf("plan %q not found", planID)
+			}
+		}
+		issue.PlanID = planID
+		changed = true
+	}
+
 	if !changed {
-		return fmt.Errorf("no fields to update (use --status, --title, --priority, or --labels)")
+		return fmt.Errorf("no fields to update (use --status, --title, --priority, --labels, or --plan)")
 	}
 
 	if err := s.UpdateIssue(issue); err != nil {
@@ -305,6 +384,11 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	printField("Title", issue.Title)
 	printFieldColored("Status", issue.Status, statusColor(issue.Status))
 	printFieldColored("Priority", issue.Priority, statusColor(issue.Priority))
+	if issue.PlanID != "" {
+		printField("Plan", issue.PlanID)
+	} else {
+		printField("Plan", "shared")
+	}
 	fmt.Println()
 
 	return nil

@@ -30,7 +30,7 @@ func TestStoreInit(t *testing.T) {
 	}
 
 	// Check directories were created
-	for _, sub := range []string{"logs", "records", "docs", "issues", "decisions"} {
+	for _, sub := range []string{"logs", "records", "plans", "docs", "issues", "decisions"} {
 		path := filepath.Join(dir, AdafDir, sub)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			t.Errorf("expected directory %s to exist", sub)
@@ -167,6 +167,179 @@ func TestPlan(t *testing.T) {
 	}
 }
 
+func TestPlansMultiAPI(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := New(dir)
+	s.Init(ProjectConfig{Name: "test", RepoPath: "/tmp"})
+
+	auth := &Plan{
+		ID:          "auth-system",
+		Title:       "Auth System",
+		Description: "Authentication and authorization",
+		Phases: []PlanPhase{
+			{ID: "p1", Title: "JWT", Status: "not_started"},
+		},
+	}
+	if err := s.CreatePlan(auth); err != nil {
+		t.Fatalf("CreatePlan(auth): %v", err)
+	}
+
+	data := &Plan{
+		ID:    "data-layer",
+		Title: "Data Layer",
+	}
+	if err := s.CreatePlan(data); err != nil {
+		t.Fatalf("CreatePlan(data): %v", err)
+	}
+
+	plans, err := s.ListPlans()
+	if err != nil {
+		t.Fatalf("ListPlans: %v", err)
+	}
+	if len(plans) != 2 {
+		t.Fatalf("expected 2 plans, got %d", len(plans))
+	}
+
+	if err := s.SetActivePlan("auth-system"); err != nil {
+		t.Fatalf("SetActivePlan(auth-system): %v", err)
+	}
+	active, err := s.ActivePlan()
+	if err != nil {
+		t.Fatalf("ActivePlan: %v", err)
+	}
+	if active == nil || active.ID != "auth-system" {
+		t.Fatalf("expected active plan auth-system, got %#v", active)
+	}
+
+	authLoaded, err := s.GetPlan("auth-system")
+	if err != nil {
+		t.Fatalf("GetPlan(auth-system): %v", err)
+	}
+	authLoaded.Status = "done"
+	if err := s.UpdatePlan(authLoaded); err != nil {
+		t.Fatalf("UpdatePlan(auth-system): %v", err)
+	}
+
+	if err := s.DeletePlan("auth-system"); err != nil {
+		t.Fatalf("DeletePlan(auth-system): %v", err)
+	}
+	deleted, err := s.GetPlan("auth-system")
+	if err != nil {
+		t.Fatalf("GetPlan(auth-system) after delete: %v", err)
+	}
+	if deleted != nil {
+		t.Fatalf("expected deleted plan to be nil")
+	}
+}
+
+func TestLegacyPlanMigration(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := New(dir)
+	if err := s.Init(ProjectConfig{Name: "test", RepoPath: "/tmp"}); err != nil {
+		t.Fatal(err)
+	}
+
+	legacyPath := filepath.Join(dir, AdafDir, "plan.json")
+	legacy := `{"title":"Legacy Plan","description":"old","phases":[{"id":"p1","title":"phase","status":"not_started","priority":1}]}`
+	if err := os.WriteFile(legacyPath, []byte(legacy), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.EnsureDirs(); err != nil {
+		t.Fatalf("EnsureDirs: %v", err)
+	}
+
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		t.Fatalf("expected legacy plan to be removed, stat err=%v", err)
+	}
+
+	plan, err := s.GetPlan("default")
+	if err != nil {
+		t.Fatalf("GetPlan(default): %v", err)
+	}
+	if plan == nil {
+		t.Fatal("expected migrated default plan")
+	}
+	if plan.Title != "Legacy Plan" {
+		t.Fatalf("expected migrated title Legacy Plan, got %q", plan.Title)
+	}
+	if plan.Status != "active" {
+		t.Fatalf("expected migrated status active, got %q", plan.Status)
+	}
+
+	project, err := s.LoadProject()
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+	if project.ActivePlanID != "default" {
+		t.Fatalf("expected active plan default, got %q", project.ActivePlanID)
+	}
+}
+
+func TestIssuePlanFiltering(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := New(dir)
+	s.Init(ProjectConfig{Name: "test", RepoPath: "/tmp"})
+
+	if err := s.CreateIssue(&Issue{Title: "shared", Priority: "medium"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateIssue(&Issue{Title: "auth", Priority: "high", PlanID: "auth-system"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateIssue(&Issue{Title: "data", Priority: "low", PlanID: "data-layer"}); err != nil {
+		t.Fatal(err)
+	}
+
+	shared, err := s.ListSharedIssues()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shared) != 1 || shared[0].Title != "shared" {
+		t.Fatalf("unexpected shared issues: %#v", shared)
+	}
+
+	authIssues, err := s.ListIssuesForPlan("auth-system")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(authIssues) != 2 {
+		t.Fatalf("expected 2 auth-visible issues (shared+auth), got %d", len(authIssues))
+	}
+}
+
+func TestDocPlanFiltering(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := New(dir)
+	s.Init(ProjectConfig{Name: "test", RepoPath: "/tmp"})
+
+	if err := s.CreateDoc(&Doc{ID: "shared", Title: "Shared", Content: "s"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateDoc(&Doc{ID: "auth", Title: "Auth", Content: "a", PlanID: "auth-system"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateDoc(&Doc{ID: "data", Title: "Data", Content: "d", PlanID: "data-layer"}); err != nil {
+		t.Fatal(err)
+	}
+
+	shared, err := s.ListSharedDocs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shared) != 1 || shared[0].ID != "shared" {
+		t.Fatalf("unexpected shared docs: %#v", shared)
+	}
+
+	authDocs, err := s.ListDocsForPlan("auth-system")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(authDocs) != 2 {
+		t.Fatalf("expected 2 auth-visible docs (shared+auth), got %d", len(authDocs))
+	}
+}
+
 func TestDocs(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := New(dir)
@@ -245,9 +418,9 @@ func TestGetDecision(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		id       int
-		wantErr  bool
+		name      string
+		id        int
+		wantErr   bool
 		wantTitle string
 	}{
 		{

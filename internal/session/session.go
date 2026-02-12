@@ -40,6 +40,7 @@ type DaemonConfig struct {
 	ProjectDir       string            `json:"project_dir"`
 	ProfileName      string            `json:"profile_name"`
 	ProjectName      string            `json:"project_name"`
+	PlanID           string            `json:"plan_id,omitempty"`
 }
 
 // Dir returns the global sessions directory (~/.adaf/sessions/), creating it if needed.

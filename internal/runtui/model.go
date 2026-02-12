@@ -178,11 +178,27 @@ func (m *Model) reloadProjectData() {
 	if m.projectStore == nil {
 		return
 	}
-	if issues, err := m.projectStore.ListIssues(); err == nil {
-		m.issues = issues
+	planID := ""
+	if m.plan != nil {
+		status := strings.TrimSpace(m.plan.Status)
+		if status == "" || status == "active" {
+			planID = strings.TrimSpace(m.plan.ID)
+		}
 	}
-	if docs, err := m.projectStore.ListDocs(); err == nil {
-		m.docs = docs
+	if planID != "" {
+		if issues, err := m.projectStore.ListIssuesForPlan(planID); err == nil {
+			m.issues = issues
+		}
+		if docs, err := m.projectStore.ListDocsForPlan(planID); err == nil {
+			m.docs = docs
+		}
+	} else {
+		if issues, err := m.projectStore.ListSharedIssues(); err == nil {
+			m.issues = issues
+		}
+		if docs, err := m.projectStore.ListSharedDocs(); err == nil {
+			m.docs = docs
+		}
 	}
 	if run, err := m.projectStore.ActiveLoopRun(); err == nil {
 		m.activeLoop = run

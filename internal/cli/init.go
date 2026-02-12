@@ -32,7 +32,7 @@ Examples:
 
   # Initialize for a different repo
   adaf init --repo /path/to/other/repo`,
-	RunE:  runInit,
+	RunE: runInit,
 }
 
 func init() {
@@ -137,6 +137,7 @@ notes/
 	fmt.Println()
 	fmt.Printf("  %sCreated:%s\n", colorDim, colorReset)
 	fmt.Printf("    %s/.adaf/project.json\n", absRepo)
+	fmt.Printf("    %s/.adaf/plans/\n", absRepo)
 	fmt.Printf("    %s/.adaf/logs/\n", absRepo)
 	fmt.Printf("    %s/.adaf/issues/\n", absRepo)
 	fmt.Printf("    %s/.adaf/docs/\n", absRepo)
@@ -152,7 +153,7 @@ notes/
 		printField("Agents found", fmt.Sprintf("%d (run 'adaf agents' to list)", detected))
 	}
 	fmt.Println()
-	fmt.Printf("  Next: run %sadaf plan set <plan-file>%s to set your project plan.\n", styleBoldWhite, colorReset)
+	fmt.Printf("  Next: run %sadaf plan create --id default --title \"Initial Plan\"%s.\n", styleBoldWhite, colorReset)
 
 	// If the repo path differs from cwd, print a hint
 	cwd, _ := os.Getwd()

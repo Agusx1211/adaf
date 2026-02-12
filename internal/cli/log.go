@@ -59,9 +59,12 @@ var logCreateCmd = &cobra.Command{
 }
 
 func init() {
+	logListCmd.Flags().String("plan", "", "Filter logs by plan ID")
+
 	logCreateCmd.Flags().String("agent", "", "Agent name (required)")
 	logCreateCmd.Flags().String("model", "", "Agent model")
 	logCreateCmd.Flags().String("commit", "", "Commit hash")
+	logCreateCmd.Flags().String("plan", "", "Plan ID associated with this session")
 	logCreateCmd.Flags().String("objective", "", "Session objective (required)")
 	logCreateCmd.Flags().String("built", "", "What was built")
 	logCreateCmd.Flags().String("decisions", "", "Key decisions made")
@@ -86,10 +89,26 @@ func runLogList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	planFilter, _ := cmd.Flags().GetString("plan")
+	planFilter = strings.TrimSpace(planFilter)
+	if planFilter != "" {
+		if err := validatePlanID(planFilter); err != nil {
+			return err
+		}
+	}
 
 	logs, err := s.ListLogs()
 	if err != nil {
 		return fmt.Errorf("listing logs: %w", err)
+	}
+	if planFilter != "" {
+		var filtered []store.SessionLog
+		for _, l := range logs {
+			if l.PlanID == planFilter {
+				filtered = append(filtered, l)
+			}
+		}
+		logs = filtered
 	}
 
 	printHeader("Session Logs")
@@ -99,13 +118,18 @@ func runLogList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	headers := []string{"ID", "DATE", "AGENT", "OBJECTIVE", "BUILD"}
+	headers := []string{"ID", "DATE", "AGENT", "PLAN", "OBJECTIVE", "BUILD"}
 	var rows [][]string
 	for _, l := range logs {
+		plan := "shared"
+		if l.PlanID != "" {
+			plan = l.PlanID
+		}
 		rows = append(rows, []string{
 			fmt.Sprintf("#%d", l.ID),
 			l.Date.Format("2006-01-02 15:04"),
 			l.Agent,
+			plan,
 			truncate(l.Objective, 45),
 			truncate(l.BuildState, 15),
 		})
@@ -166,6 +190,20 @@ func runLogCreate(cmd *cobra.Command, args []string) error {
 	agent, _ := cmd.Flags().GetString("agent")
 	model, _ := cmd.Flags().GetString("model")
 	commit, _ := cmd.Flags().GetString("commit")
+	planID, _ := cmd.Flags().GetString("plan")
+	planID = strings.TrimSpace(planID)
+	if planID != "" {
+		if err := validatePlanID(planID); err != nil {
+			return err
+		}
+		plan, err := s.GetPlan(planID)
+		if err != nil {
+			return fmt.Errorf("loading plan %q: %w", planID, err)
+		}
+		if plan == nil {
+			return fmt.Errorf("plan %q not found", planID)
+		}
+	}
 	objective, _ := cmd.Flags().GetString("objective")
 	built, _ := cmd.Flags().GetString("built")
 	decisions, _ := cmd.Flags().GetString("decisions")
@@ -180,6 +218,7 @@ func runLogCreate(cmd *cobra.Command, args []string) error {
 		Agent:        agent,
 		AgentModel:   model,
 		CommitHash:   commit,
+		PlanID:       planID,
 		Objective:    objective,
 		WhatWasBuilt: built,
 		KeyDecisions: decisions,
@@ -198,6 +237,9 @@ func runLogCreate(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Printf("  %sSession log #%d created.%s\n", styleBoldGreen, log.ID, colorReset)
 	printField("Agent", log.Agent)
+	if log.PlanID != "" {
+		printField("Plan", log.PlanID)
+	}
 	printField("Objective", log.Objective)
 	fmt.Println()
 
@@ -222,6 +264,9 @@ func printSessionLog(log *store.SessionLog) {
 	}
 	if log.BuildState != "" {
 		printField("Build State", log.BuildState)
+	}
+	if log.PlanID != "" {
+		printField("Plan", log.PlanID)
 	}
 
 	printLogSection("Objective", log.Objective)

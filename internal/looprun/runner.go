@@ -27,6 +27,7 @@ type RunConfig struct {
 	LoopDef   *config.LoopDef
 	Project   *store.ProjectConfig
 	AgentsCfg *agent.AgentsConfig
+	PlanID    string
 
 	// WorkDir is the working directory for agent processes.
 	WorkDir string
@@ -71,6 +72,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 
 	run := &store.LoopRun{
 		LoopName:        loopDef.Name,
+		PlanID:          cfg.PlanID,
 		Steps:           steps,
 		Status:          "running",
 		StepLastSeenMsg: make(map[int]int),
@@ -159,6 +161,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				Project:     cfg.Project,
 				Profile:     prof,
 				GlobalCfg:   cfg.GlobalCfg,
+				PlanID:      cfg.PlanID,
 				LoopContext: loopCtx,
 				Delegation:  stepDef.Delegation,
 				Handoffs:    handoffs,
@@ -204,6 +207,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				Store:  cfg.Store,
 				Agent:  agentInstance,
 				Config: agentCfg,
+				PlanID: cfg.PlanID,
 				PromptFunc: func(sessionID int, supervisorNotes []store.SupervisorNote) string {
 					opts := promptOpts
 					opts.SupervisorNotes = supervisorNotes

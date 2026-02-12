@@ -6,6 +6,7 @@ import "time"
 type LoopRun struct {
 	ID              int           `json:"id"`
 	LoopName        string        `json:"loop_name"`
+	PlanID          string        `json:"plan_id,omitempty"`
 	Steps           []LoopRunStep `json:"steps"`      // snapshot of loop definition
 	Status          string        `json:"status"`     // "running", "stopped", "cancelled"
 	Cycle           int           `json:"cycle"`      // current cycle (0-indexed)

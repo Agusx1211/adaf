@@ -336,6 +336,7 @@ func (b *broadcaster) runAgentLoop(ctx context.Context, sessionID int, cfg *Daem
 					Project:         projCfg,
 					Profile:         prof,
 					GlobalCfg:       globalCfg,
+					PlanID:          cfg.PlanID,
 					SupervisorNotes: supervisorNotes,
 				})
 				if err != nil {
@@ -385,6 +386,7 @@ func (b *broadcaster) runAgentLoop(ctx context.Context, sessionID int, cfg *Daem
 		Store:      s,
 		Agent:      agentInstance,
 		Config:     agentCfg,
+		PlanID:     cfg.PlanID,
 		PromptFunc: promptFunc,
 		OnStart: func(sid int) {
 			line, _ := EncodeMsg(MsgStarted, WireStarted{SessionID: sid})

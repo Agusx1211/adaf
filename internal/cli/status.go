@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/agusx1211/adaf/internal/store"
 	"github.com/spf13/cobra"
@@ -11,16 +12,9 @@ var statusCmd = &cobra.Command{
 	Use:     "status",
 	Aliases: []string{"info", "state", "st"},
 	Short:   "Show comprehensive project status",
-	Long: `Display a comprehensive summary of the project including plan progress,
-open issues, session history, architectural decisions, and documents.
-
-Shows a progress bar for plan phases, highlights critical/high priority
-issues, and displays the most recent session details.
-
-Examples:
-  adaf status
-  adaf st          # short alias`,
-	RunE:  runStatus,
+	Long: `Display a comprehensive summary of the project including plans, issues,
+session history, architectural decisions, and documents.`,
+	RunE: runStatus,
 }
 
 func init() {
@@ -32,7 +26,6 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-
 	return runStatusFull(s)
 }
 
@@ -43,151 +36,165 @@ func runStatusBrief(s *store.Store) error {
 		return fmt.Errorf("loading project: %w", err)
 	}
 
-	fmt.Println()
-	fmt.Printf("  %sadaf%s - %s%s%s\n", styleBoldCyan, colorReset, colorBold, config.Name, colorReset)
-	fmt.Printf("  %s%s%s\n", colorDim, config.RepoPath, colorReset)
-	fmt.Println()
+	activePlan, _ := s.ActivePlan()
+	plans, _ := s.ListPlans()
 
-	// Quick issue count
-	issues, _ := s.ListIssues()
+	var issues []store.Issue
+	if config.ActivePlanID != "" {
+		issues, _ = s.ListIssuesForPlan(config.ActivePlanID)
+	} else {
+		issues, _ = s.ListSharedIssues()
+	}
 	openCount := 0
 	for _, iss := range issues {
 		if iss.Status == "open" || iss.Status == "in_progress" {
 			openCount++
 		}
 	}
+
+	fmt.Println()
+	fmt.Printf("  %sadaf%s - %s%s%s\n", styleBoldCyan, colorReset, colorBold, config.Name, colorReset)
+	fmt.Printf("  %s%s%s\n", colorDim, config.RepoPath, colorReset)
+	fmt.Println()
+
 	if openCount > 0 {
 		fmt.Printf("  %s%d open issue(s)%s", colorYellow, openCount, colorReset)
 	} else {
 		fmt.Printf("  %sNo open issues%s", colorGreen, colorReset)
 	}
 
-	// Quick plan count
-	plan, _ := s.LoadPlan()
-	if plan != nil && len(plan.Phases) > 0 {
+	if len(plans) > 0 {
+		fmt.Printf("  |  Plans: %d", len(plans))
+	}
+	if activePlan != nil {
 		done := 0
-		for _, p := range plan.Phases {
+		for _, p := range activePlan.Phases {
 			if p.Status == "complete" {
 				done++
 			}
 		}
-		fmt.Printf("  |  Plan: %d/%d phases complete", done, len(plan.Phases))
+		fmt.Printf("  |  Active: %s (%d/%d phases)", activePlan.ID, done, len(activePlan.Phases))
+	} else if strings.TrimSpace(config.ActivePlanID) != "" {
+		fmt.Printf("  |  Active: %s", config.ActivePlanID)
+	} else {
+		fmt.Printf("  |  Active: none")
 	}
 
-	// Quick session count
 	logs, _ := s.ListLogs()
 	fmt.Printf("  |  %d session(s)\n", len(logs))
 
 	fmt.Println()
 	fmt.Printf("  Run %sadaf status%s for full details.\n\n", styleBoldWhite, colorReset)
-
 	return nil
 }
 
-// runStatusFull shows the comprehensive project status.
 func runStatusFull(s *store.Store) error {
 	config, err := s.LoadProject()
 	if err != nil {
 		return fmt.Errorf("loading project: %w", err)
 	}
 
-	// === Project Info ===
+	plans, _ := s.ListPlans()
+	activePlan, _ := s.ActivePlan()
+
 	printHeader("Project")
 	printField("Name", config.Name)
 	printField("Repo", config.RepoPath)
 	printField("Created", config.Created.Format("2006-01-02 15:04:05"))
-
-	// === Plan ===
-	plan, _ := s.LoadPlan()
-	printHeader("Plan")
-
-	if plan == nil || (plan.Title == "" && len(plan.Phases) == 0) {
-		fmt.Printf("  %sNo plan set.%s\n", colorDim, colorReset)
+	if config.ActivePlanID != "" {
+		printField("Active Plan", config.ActivePlanID)
 	} else {
-		if plan.Title != "" {
-			printField("Title", plan.Title)
+		printField("Active Plan", "(none)")
+	}
+
+	printHeader("Plans")
+	if len(plans) == 0 {
+		fmt.Printf("  %sNo plans.%s\n", colorDim, colorReset)
+	} else {
+		headers := []string{"ID", "STATUS", "PHASES", "TITLE"}
+		var rows [][]string
+		for _, p := range plans {
+			complete := 0
+			for _, ph := range p.Phases {
+				if ph.Status == "complete" {
+					complete++
+				}
+			}
+			id := p.ID
+			if p.ID == config.ActivePlanID {
+				id = "● " + id
+			}
+			rows = append(rows, []string{
+				id,
+				statusBadge(p.Status),
+				fmt.Sprintf("%d/%d", complete, len(p.Phases)),
+				truncate(p.Title, 48),
+			})
 		}
+		printTable(headers, rows)
+	}
 
-		counts := map[string]int{}
-		for _, p := range plan.Phases {
-			counts[p.Status]++
+	printHeader("Active Plan")
+	if activePlan == nil {
+		fmt.Printf("  %sNo active plan selected.%s\n", colorDim, colorReset)
+	} else {
+		complete := 0
+		inProgress := 0
+		blocked := 0
+		notStarted := 0
+		for _, p := range activePlan.Phases {
+			switch p.Status {
+			case "complete":
+				complete++
+			case "in_progress":
+				inProgress++
+			case "blocked":
+				blocked++
+			default:
+				notStarted++
+			}
 		}
-		total := len(plan.Phases)
-
-		complete := counts["complete"]
-		inProgress := counts["in_progress"]
-		blocked := counts["blocked"]
-		notStarted := counts["not_started"]
-
-		// Progress bar
+		total := len(activePlan.Phases)
+		printField("ID", activePlan.ID)
+		if activePlan.Title != "" {
+			printField("Title", activePlan.Title)
+		}
+		printFieldColored("Status", activePlan.Status, statusColor(activePlan.Status))
 		if total > 0 {
 			barWidth := 30
 			filled := barWidth * complete / total
 			fmt.Printf("  Progress:      [%s%s%s%s] %d/%d phases\n",
-				colorGreen, repeatChar('#', filled), colorDim, repeatChar('-', barWidth-filled),
-				complete, total)
+				colorGreen, repeatChar('#', filled), colorDim, repeatChar('-', barWidth-filled), complete, total)
 			fmt.Print(colorReset)
 		}
-
-		fmt.Printf("  ")
-		if complete > 0 {
-			fmt.Printf("%s%d complete%s  ", colorGreen, complete, colorReset)
-		}
-		if inProgress > 0 {
-			fmt.Printf("%s%d in-progress%s  ", colorYellow, inProgress, colorReset)
-		}
-		if blocked > 0 {
-			fmt.Printf("%s%d blocked%s  ", colorRed, blocked, colorReset)
-		}
-		if notStarted > 0 {
-			fmt.Printf("%s%d not-started%s  ", colorBlue, notStarted, colorReset)
-		}
-		fmt.Println()
+		fmt.Printf("  %s%d complete%s  %s%d in-progress%s  %s%d blocked%s  %s%d not-started%s\n",
+			colorGreen, complete, colorReset,
+			colorYellow, inProgress, colorReset,
+			colorRed, blocked, colorReset,
+			colorBlue, notStarted, colorReset,
+		)
 	}
 
-	// === Issues ===
-	issues, _ := s.ListIssues()
 	printHeader("Issues")
-
-	if len(issues) == 0 {
-		fmt.Printf("  %sNo issues.%s\n", colorDim, colorReset)
+	if activePlan == nil {
+		sharedIssues, _ := s.ListSharedIssues()
+		printIssueSummary(sharedIssues, "shared")
 	} else {
-		issueCounts := map[string]int{}
-		for _, iss := range issues {
-			issueCounts[iss.Status]++
-		}
-
-		fmt.Printf("  ")
-		if c := issueCounts["open"]; c > 0 {
-			fmt.Printf("%s%d open%s  ", colorBlue, c, colorReset)
-		}
-		if c := issueCounts["in_progress"]; c > 0 {
-			fmt.Printf("%s%d in-progress%s  ", colorYellow, c, colorReset)
-		}
-		if c := issueCounts["resolved"]; c > 0 {
-			fmt.Printf("%s%d resolved%s  ", colorGreen, c, colorReset)
-		}
-		if c := issueCounts["wontfix"]; c > 0 {
-			fmt.Printf("%s%d wontfix%s  ", colorDim, c, colorReset)
-		}
-		fmt.Printf("(%d total)\n", len(issues))
-
-		// Show critical/high priority open issues
-		for _, iss := range issues {
-			if (iss.Status == "open" || iss.Status == "in_progress") &&
-				(iss.Priority == "critical" || iss.Priority == "high") {
-				fmt.Printf("  %s!%s #%d %s %s\n",
-					colorRed, colorReset, iss.ID, priorityBadge(iss.Priority), iss.Title)
+		visibleIssues, _ := s.ListIssuesForPlan(activePlan.ID)
+		sharedIssues, _ := s.ListSharedIssues()
+		sharedOpen := 0
+		for _, iss := range sharedIssues {
+			if iss.Status == "open" || iss.Status == "in_progress" {
+				sharedOpen++
 			}
 		}
+		printIssueSummary(visibleIssues, activePlan.ID)
+		fmt.Printf("  %sShared open issues:%s %d\n", colorDim, colorReset, sharedOpen)
 	}
 
-	// === Sessions ===
 	logs, _ := s.ListLogs()
 	printHeader("Sessions")
-
 	fmt.Printf("  Total: %d session(s)\n", len(logs))
-
 	if len(logs) > 0 {
 		latest := logs[len(logs)-1]
 		fmt.Println()
@@ -196,6 +203,9 @@ func runStatusFull(s *store.Store) error {
 		printField("Agent", latest.Agent)
 		if latest.AgentModel != "" {
 			printField("Model", latest.AgentModel)
+		}
+		if latest.PlanID != "" {
+			printField("Plan", latest.PlanID)
 		}
 		printField("Objective", truncate(latest.Objective, 60))
 		if latest.BuildState != "" {
@@ -206,12 +216,10 @@ func runStatusFull(s *store.Store) error {
 		}
 	}
 
-	// === Decisions ===
 	decisions, _ := s.ListDecisions()
 	if len(decisions) > 0 {
 		printHeader("Decisions")
 		fmt.Printf("  %d architectural decision(s) recorded.\n", len(decisions))
-		// Show last 3
 		start := 0
 		if len(decisions) > 3 {
 			start = len(decisions) - 3
@@ -222,18 +230,56 @@ func runStatusFull(s *store.Store) error {
 		}
 	}
 
-	// === Docs ===
-	docs, _ := s.ListDocs()
-	if len(docs) > 0 {
-		printHeader("Documents")
-		fmt.Printf("  %d document(s)\n", len(docs))
-		for _, d := range docs {
-			fmt.Printf("  %s[%s]%s %s\n", colorCyan, d.ID, colorReset, d.Title)
+	printHeader("Documents")
+	sharedDocs, _ := s.ListSharedDocs()
+	if activePlan == nil {
+		fmt.Printf("  %d shared document(s)\n", len(sharedDocs))
+	} else {
+		visibleDocs, _ := s.ListDocsForPlan(activePlan.ID)
+		planScoped := 0
+		for _, d := range visibleDocs {
+			if d.PlanID == activePlan.ID {
+				planScoped++
+			}
 		}
+		fmt.Printf("  %d shared doc(s), %d plan-scoped doc(s)\n", len(sharedDocs), planScoped)
 	}
 
 	fmt.Println()
 	return nil
+}
+
+func printIssueSummary(issues []store.Issue, label string) {
+	if len(issues) == 0 {
+		fmt.Printf("  %sNo issues for %s.%s\n", colorDim, label, colorReset)
+		return
+	}
+
+	counts := map[string]int{}
+	for _, iss := range issues {
+		counts[iss.Status]++
+	}
+
+	fmt.Printf("  ")
+	if c := counts["open"]; c > 0 {
+		fmt.Printf("%s%d open%s  ", colorBlue, c, colorReset)
+	}
+	if c := counts["in_progress"]; c > 0 {
+		fmt.Printf("%s%d in-progress%s  ", colorYellow, c, colorReset)
+	}
+	if c := counts["resolved"]; c > 0 {
+		fmt.Printf("%s%d resolved%s  ", colorGreen, c, colorReset)
+	}
+	if c := counts["wontfix"]; c > 0 {
+		fmt.Printf("%s%d wontfix%s  ", colorDim, c, colorReset)
+	}
+	fmt.Printf("(%d total for %s)\n", len(issues), label)
+
+	for _, iss := range issues {
+		if (iss.Status == "open" || iss.Status == "in_progress") && (iss.Priority == "critical" || iss.Priority == "high") {
+			fmt.Printf("  %s!%s #%d %s %s\n", colorRed, colorReset, iss.ID, priorityBadge(iss.Priority), iss.Title)
+		}
+	}
 }
 
 func repeatChar(ch byte, count int) string {

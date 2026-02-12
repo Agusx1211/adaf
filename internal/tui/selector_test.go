@@ -96,6 +96,7 @@ func TestRenderSelectorKeepsFixedPanelHeight(t *testing.T) {
 			nil,
 			nil,
 			nil,
+			nil,
 			width,
 			height,
 		)

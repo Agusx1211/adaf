@@ -52,7 +52,8 @@ var rootCmd = &cobra.Command{
 
 ` + colorBold + `Getting Started:` + colorReset + `
   adaf init --name my-project     Initialize a project
-  adaf plan set plan.json         Load a project plan
+  adaf plan create --id core --title "Core"
+  adaf plan switch core           Select active plan
   adaf run --agent claude         Run an agent session
   adaf status                     Show project overview
   adaf                            Launch interactive TUI

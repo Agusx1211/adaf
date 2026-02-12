@@ -59,17 +59,17 @@ var loopStopCmd = &cobra.Command{
 	Use:     "stop",
 	Aliases: []string{"halt", "cancel", "end"},
 	Short:   "Signal the current loop to stop",
-	Long:  "Reads ADAF_LOOP_RUN_ID from environment and signals the loop to stop after the current step.",
-	RunE:  loopStop,
+	Long:    "Reads ADAF_LOOP_RUN_ID from environment and signals the loop to stop after the current step.",
+	RunE:    loopStop,
 }
 
 var loopMessageCmd = &cobra.Command{
 	Use:     "message <text>",
 	Aliases: []string{"msg", "send"},
 	Short:   "Post a message to subsequent loop steps",
-	Long:  "Reads ADAF_LOOP_RUN_ID and ADAF_LOOP_STEP_INDEX from environment.",
-	Args:  cobra.ExactArgs(1),
-	RunE:  loopMessage,
+	Long:    "Reads ADAF_LOOP_RUN_ID and ADAF_LOOP_STEP_INDEX from environment.",
+	Args:    cobra.ExactArgs(1),
+	RunE:    loopMessage,
 }
 
 var loopNotifyCmd = &cobra.Command{
@@ -95,6 +95,7 @@ var loopStatusCmd = &cobra.Command{
 }
 
 func init() {
+	loopStartCmd.Flags().String("plan", "", "Plan ID override for this loop run (defaults to active plan)")
 	loopNotifyCmd.Flags().IntP("priority", "p", 0, "Notification priority (-2 to 1)")
 	loopCmd.AddCommand(loopListCmd, loopStartCmd, loopStopCmd, loopMessageCmd, loopNotifyCmd, loopStatusCmd)
 	rootCmd.AddCommand(loopCmd)
@@ -145,6 +146,7 @@ func loopList(cmd *cobra.Command, args []string) error {
 
 func loopStart(cmd *cobra.Command, args []string) error {
 	loopName := args[0]
+	planFlag, _ := cmd.Flags().GetString("plan")
 
 	s, err := openStoreRequired()
 	if err != nil {
@@ -170,6 +172,10 @@ func loopStart(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("loading project: %w", err)
 	}
+	effectivePlanID, err := resolveEffectivePlanID(s, projCfg, planFlag, cmd.Flags().Changed("plan"))
+	if err != nil {
+		return err
+	}
 
 	agentsCfg, _ := agent.LoadAgentsConfig(s.Root())
 	agent.PopulateFromConfig(agentsCfg)
@@ -186,6 +192,9 @@ func loopStart(cmd *cobra.Command, args []string) error {
 	fmt.Println(styleBoldCyan + "  ==============================================" + colorReset)
 	fmt.Println()
 	printField("Project", projCfg.Name)
+	if effectivePlanID != "" {
+		printField("Plan", effectivePlanID)
+	}
 	printField("Loop", loopDef.Name)
 	printField("Steps", fmt.Sprintf("%d", len(loopDef.Steps)))
 	for i, step := range loopDef.Steps {
@@ -208,6 +217,7 @@ func loopStart(cmd *cobra.Command, args []string) error {
 		LoopDef:   loopDef,
 		Project:   projCfg,
 		AgentsCfg: agentsCfg,
+		PlanID:    effectivePlanID,
 		WorkDir:   workDir,
 	}
 

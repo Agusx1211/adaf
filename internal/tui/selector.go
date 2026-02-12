@@ -90,6 +90,7 @@ func renderSelector(
 	selected int,
 	project *store.ProjectConfig,
 	plan *store.Plan,
+	plans []store.Plan,
 	issues []store.Issue,
 	docs []store.Doc,
 	logs []store.SessionLog,
@@ -117,6 +118,7 @@ func renderSelector(
 		selected,
 		project,
 		plan,
+		plans,
 		issues,
 		docs,
 		logs,
@@ -214,6 +216,7 @@ func renderProjectPanel(
 	selected int,
 	project *store.ProjectConfig,
 	plan *store.Plan,
+	plans []store.Plan,
 	issues []store.Issue,
 	docs []store.Doc,
 	logs []store.SessionLog,
@@ -257,10 +260,16 @@ func renderProjectPanel(
 			}
 			lines = append(lines, labelStyle.Render("Repo")+valueStyle.Render(path))
 		}
+		activeID := strings.TrimSpace(project.ActivePlanID)
+		if activeID == "" {
+			lines = append(lines, labelStyle.Render("Active Plan")+dimStyle.Render("(none)"))
+		} else {
+			lines = append(lines, labelStyle.Render("Active Plan")+valueStyle.Render(activeID))
+		}
 	}
 
-	// Plan progress
-	if plan != nil && len(plan.Phases) > 0 {
+	// Plan progress and overview.
+	if plan != nil {
 		done := 0
 		for _, p := range plan.Phases {
 			if p.Status == "complete" {
@@ -268,7 +277,39 @@ func renderProjectPanel(
 			}
 		}
 		lines = append(lines, labelStyle.Render("Plan")+valueStyle.Render(
-			fmt.Sprintf("%d/%d phases done", done, len(plan.Phases))))
+			fmt.Sprintf("%s (%d/%d phases)", plan.ID, done, len(plan.Phases))))
+	}
+	if len(plans) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, sectionStyle.Render("Plans"))
+		limit := len(plans)
+		if limit > 5 {
+			limit = 5
+		}
+		activeID := ""
+		if project != nil {
+			activeID = strings.TrimSpace(project.ActivePlanID)
+		}
+		for i := 0; i < limit; i++ {
+			p := plans[i]
+			id := p.ID
+			if p.ID == activeID {
+				id = "● " + id
+			}
+			status := p.Status
+			if status == "" {
+				status = "active"
+			}
+			statusText := selectorRuntimeStatusStyle(status).Render("[" + status + "]")
+			title := p.Title
+			if title == "" {
+				title = "(untitled)"
+			}
+			lines = append(lines, "  "+valueStyle.Render(truncateInputForDisplay(id+" "+title, cw-16))+" "+statusText)
+		}
+		if len(plans) > limit {
+			lines = append(lines, dimStyle.Render(fmt.Sprintf("  ... +%d more", len(plans)-limit)))
+		}
 	}
 
 	// Issues count

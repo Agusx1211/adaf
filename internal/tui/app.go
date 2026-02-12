@@ -25,6 +25,9 @@ type appState int
 const (
 	stateSelector appState = iota
 	stateRunning
+	statePlanMenu                 // manage plans (switch/create/status/delete)
+	statePlanCreateID             // text input for new plan ID
+	statePlanCreateTitle          // text input for new plan title
 	stateProfileName              // text input for new profile name
 	stateProfileAgent             // pick agent for new profile
 	stateProfileModel             // pick model for new profile
@@ -71,6 +74,13 @@ type AppModel struct {
 	// Selector state.
 	profiles []profileEntry
 	selected int
+	plans    []store.Plan
+	planSel  int
+
+	// Plan creation state.
+	planCreateIDInput    string
+	planCreateTitleInput string
+	planActionMsg        string
 
 	// Profile creation/editing wizard state.
 	profileEditing           bool   // true = editing existing, false = creating new
@@ -163,9 +173,27 @@ func NewApp(s *store.Store) AppModel {
 
 func (m *AppModel) loadProjectData() {
 	m.project, _ = m.store.LoadProject()
-	m.plan, _ = m.store.LoadPlan()
-	m.issues, _ = m.store.ListIssues()
-	m.docs, _ = m.store.ListDocs()
+	m.plans, _ = m.store.ListPlans()
+	m.project, _ = m.store.LoadProject() // refresh after potential lazy migration
+	m.plan, _ = m.store.ActivePlan()
+	activePlanID := ""
+	if m.project != nil {
+		activePlanID = strings.TrimSpace(m.project.ActivePlanID)
+	}
+	if m.plan != nil {
+		status := strings.TrimSpace(m.plan.Status)
+		if status != "" && status != "active" {
+			m.plan = nil
+			activePlanID = ""
+		}
+	}
+	if activePlanID != "" {
+		m.issues, _ = m.store.ListIssuesForPlan(activePlanID)
+		m.docs, _ = m.store.ListDocsForPlan(activePlanID)
+	} else {
+		m.issues, _ = m.store.ListSharedIssues()
+		m.docs, _ = m.store.ListSharedDocs()
+	}
 	m.logs, _ = m.store.ListLogs()
 	m.loadStats()
 	m.loadRuntimeData()
@@ -229,6 +257,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSelector(msg)
 	case stateRunning:
 		return m.updateRunning(msg)
+	case statePlanMenu:
+		return m.updatePlanMenu(msg)
+	case statePlanCreateID:
+		return m.updatePlanCreateID(msg)
+	case statePlanCreateTitle:
+		return m.updatePlanCreateTitle(msg)
 	case stateProfileName:
 		return m.updateProfileName(msg)
 	case stateProfileAgent:
@@ -349,6 +383,18 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.settingsPushoverUserKey = m.globalCfg.Pushover.UserKey
 			m.settingsPushoverAppToken = m.globalCfg.Pushover.AppToken
 			m.state = stateSettings
+			return m, nil
+		case "p":
+			return m.openPlanManager()
+		case "[":
+			if err := m.cycleActivePlan(-1); err == nil {
+				m.loadProjectData()
+			}
+			return m, nil
+		case "]":
+			if err := m.cycleActivePlan(1); err == nil {
+				m.loadProjectData()
+			}
 			return m, nil
 		}
 	}
@@ -472,6 +518,7 @@ func (m AppModel) startLoop(loopName string) (tea.Model, tea.Cmd) {
 		LoopDef:   loopDef,
 		Project:   m.project,
 		AgentsCfg: agentsCfg,
+		PlanID:    activePlanID(m.project, m.plan),
 		WorkDir:   workDir,
 	}
 
@@ -718,6 +765,13 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 	}
 	promptOpts := buildPromptOpts(m.store, m.project, prof, m.globalCfg)
 	prompt, _ := promptpkg.Build(promptOpts)
+	planID := ""
+	if m.plan != nil {
+		planID = m.plan.ID
+	}
+	if planID == "" && m.project != nil {
+		planID = m.project.ActivePlanID
+	}
 
 	projectName := ""
 	if m.project != nil {
@@ -735,6 +789,7 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 		ProjectDir:       workDir,
 		ProfileName:      p.Name,
 		ProjectName:      projectName,
+		PlanID:           planID,
 		UseDefaultPrompt: true,
 	}
 
@@ -859,6 +914,13 @@ func (m AppModel) startAgentInline(p profileEntry, projectName string) (tea.Mode
 	}
 	promptOpts := buildPromptOpts(m.store, m.project, prof, m.globalCfg)
 	prompt, _ := promptpkg.Build(promptOpts)
+	planID := ""
+	if m.plan != nil {
+		planID = m.plan.ID
+	}
+	if planID == "" && m.project != nil {
+		planID = m.project.ActivePlanID
+	}
 
 	agentCfg := agent.Config{
 		Name:    p.Agent,
@@ -875,6 +937,7 @@ func (m AppModel) startAgentInline(p profileEntry, projectName string) (tea.Mode
 		Agent:           agentInstance,
 		AgentCfg:        agentCfg,
 		PromptBuildOpts: &promptOpts,
+		PlanID:          planID,
 		Plan:            m.plan,
 		ProjectName:     projectName,
 		ProfileName:     p.Name,
@@ -899,6 +962,12 @@ func (m AppModel) View() string {
 	switch m.state {
 	case stateRunning:
 		return m.runModel.View()
+	case statePlanMenu:
+		return m.viewPlanMenu()
+	case statePlanCreateID:
+		return m.viewPlanCreateID()
+	case statePlanCreateTitle:
+		return m.viewPlanCreateTitle()
 	case stateProfileName:
 		return m.viewProfileName()
 	case stateProfileAgent:
@@ -962,6 +1031,7 @@ func (m AppModel) viewSelector() string {
 		m.selected,
 		m.project,
 		m.plan,
+		m.plans,
 		m.issues,
 		m.docs,
 		m.logs,
@@ -979,6 +1049,9 @@ func (m AppModel) renderHeader() string {
 	title := " adaf"
 	if m.project != nil && m.project.Name != "" {
 		title += " — " + m.project.Name
+	}
+	if id := activePlanID(m.project, m.plan); id != "" {
+		title += " [" + id + "]"
 	}
 	title += " "
 	return lipgloss.NewStyle().
@@ -1004,6 +1077,8 @@ func (m AppModel) renderStatusBar() string {
 	if m.state == stateSelector {
 		add("n", "new profile")
 		add("l", "new loop")
+		add("p", "plans")
+		add("[/]", "cycle plan")
 		add("e", "edit")
 		add("d", "delete")
 		add("s", "sessions")
@@ -1030,10 +1105,25 @@ func RunApp(s *store.Store) error {
 }
 
 func buildPromptOpts(s *store.Store, project *store.ProjectConfig, profile *config.Profile, globalCfg *config.GlobalConfig) promptpkg.BuildOpts {
+	planID := ""
+	if project != nil {
+		planID = project.ActivePlanID
+	}
 	return promptpkg.BuildOpts{
 		Store:     s,
 		Project:   project,
 		Profile:   profile,
 		GlobalCfg: globalCfg,
+		PlanID:    planID,
 	}
+}
+
+func activePlanID(project *store.ProjectConfig, plan *store.Plan) string {
+	if plan != nil && strings.TrimSpace(plan.ID) != "" {
+		return strings.TrimSpace(plan.ID)
+	}
+	if project != nil {
+		return strings.TrimSpace(project.ActivePlanID)
+	}
+	return ""
 }

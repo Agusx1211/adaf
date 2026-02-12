@@ -30,6 +30,9 @@ func openStoreRequired() (*store.Store, error) {
 	if !s.Exists() {
 		return nil, fmt.Errorf("no adaf project found (run 'adaf init' first)")
 	}
+	if err := s.EnsureDirs(); err != nil {
+		return nil, fmt.Errorf("ensuring project store dirs: %w", err)
+	}
 	return s, nil
 }
 
