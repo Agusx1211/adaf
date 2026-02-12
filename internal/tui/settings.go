@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/agusx1211/adaf/internal/buildinfo"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/pushover"
 )
@@ -51,6 +52,12 @@ func (m AppModel) viewSettings() string {
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render("Settings"))
+	lines = append(lines, "")
+
+	info := buildinfo.Current()
+	lines = append(lines, sectionStyle.Render("Build Info"))
+	lines = append(lines, labelStyle.Render("Build Date")+valueStyle.Render(info.BuildDate))
+	lines = append(lines, labelStyle.Render("Commit Hash")+valueStyle.Render(info.CommitHash))
 	lines = append(lines, "")
 
 	// Pushover status.

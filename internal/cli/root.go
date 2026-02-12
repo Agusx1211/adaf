@@ -7,12 +7,11 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	"github.com/agusx1211/adaf/internal/buildinfo"
 	"github.com/agusx1211/adaf/internal/tui"
 )
 
 const (
-	Version = "0.1.0"
-
 	// ANSI color codes
 	colorReset  = "\033[0m"
 	colorBold   = "\033[1m"
@@ -43,7 +42,7 @@ var rootCmd = &cobra.Command{
   / ___ \ (_| | (_| |  _|
  /_/   \_\__,_|\__,_|_|` + colorReset + `
 
-  ` + styleBoldCyan + `Autonomous Developer Agent Flow` + colorReset + ` v` + Version + `
+  ` + styleBoldCyan + `Autonomous Developer Agent Flow` + colorReset + ` v` + buildinfo.Current().Version + `
 
   Orchestrate AI agents to build, plan, and maintain software projects.
   adaf tracks plans, issues, decisions, session logs, and recordings

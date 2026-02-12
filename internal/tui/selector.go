@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/agusx1211/adaf/internal/agent"
 	cfgpkg "github.com/agusx1211/adaf/internal/config"
@@ -17,23 +18,23 @@ const selectorLeftWidth = 28
 
 // profileEntry holds display info for a profile or loop in the selector list.
 type profileEntry struct {
-	Name          string
-	Agent         string
-	Model         string
-	ReasoningLevel string // thinking budget value from profile
-	Role          string // "manager", "senior", "junior", "supervisor"
-	Intelligence  int
-	Description   string
-	MaxInstances  int    // max concurrent instances (0 = unlimited)
-	Detected      bool
-	IsNew         bool   // sentinel "+ New Profile" entry
-	IsNewLoop     bool   // sentinel "+ New Loop" entry
+	Name            string
+	Agent           string
+	Model           string
+	ReasoningLevel  string // thinking budget value from profile
+	Role            string // "manager", "senior", "junior", "supervisor"
+	Intelligence    int
+	Description     string
+	MaxInstances    int // max concurrent instances (0 = unlimited)
+	Detected        bool
+	IsNew           bool              // sentinel "+ New Profile" entry
+	IsNewLoop       bool              // sentinel "+ New Loop" entry
 	IsLoop          bool              // true if this represents a loop definition
 	LoopName        string            // loop name (when IsLoop)
 	LoopSteps       int               // number of steps (when IsLoop)
 	LoopStepDetails []cfgpkg.LoopStep // step details for rendering (when IsLoop)
 	IsSeparator     bool              // separator line between sections
-	Caps          []string
+	Caps            []string
 }
 
 // buildProfileList builds a list from saved profiles, loops, and sentinel entries.
@@ -408,18 +409,18 @@ func truncateInputForDisplay(input string, maxWidth int) string {
 
 // fitLines is equivalent to runtui's fitToSize: exactly w cols and h lines.
 func fitLines(lines []string, w, h int) string {
-	truncator := lipgloss.NewStyle().MaxWidth(w)
 	emptyLine := strings.Repeat(" ", w)
 	result := make([]string, h)
 
-	for i := range h {
+	for i := 0; i < h; i++ {
 		if i < len(lines) {
 			line := lines[i]
-			lw := lipgloss.Width(line)
-			if lw > w {
-				line = truncator.Render(line)
-				lw = lipgloss.Width(line)
+			parts := splitRenderableLines(line)
+			if len(parts) > 0 {
+				line = parts[0]
 			}
+			line = ansi.Truncate(line, w, "")
+			lw := lipgloss.Width(line)
 			if pad := w - lw; pad > 0 {
 				line += strings.Repeat(" ", pad)
 			}
@@ -429,6 +430,16 @@ func fitLines(lines []string, w, h int) string {
 		}
 	}
 	return strings.Join(result, "\n")
+}
+
+func splitRenderableLines(s string) []string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	parts := strings.Split(s, "\n")
+	if len(parts) == 0 {
+		return []string{""}
+	}
+	return parts
 }
 
 // formatSelectorTimeAgo returns a short human-readable time-ago string for the TUI.
