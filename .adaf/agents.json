@@ -1,5 +1,5 @@
 {
-  "updated": "2026-02-11T15:54:37.734686029Z",
+  "updated": "2026-02-12T03:28:11.23088544Z",
   "agents": {
     "claude": {
       "name": "claude",
@@ -12,15 +12,24 @@
         "stream-output"
       ],
       "supported_models": [
-        "opus-4-6",
-        "opus-4-5",
-        "opus-4",
-        "sonnet-4",
-        "haiku-4",
         "opus",
         "haiku",
         "sonnet",
-        "opus-4-1"
+        "claude-sonnet-4",
+        "claude-haiku-4-5",
+        "claude-opus-4-1",
+        "claude-opus-4",
+        "claude-sonnet-4-5",
+        "claude-sonnet-4-5-20250929",
+        "claude-haiku-4",
+        "claude-opus-4-5",
+        "claude-opus-4-6",
+        "claude-haiku-4-5-20251001",
+        "claude-sonnet-4-20250514",
+        "claude-opus-4-20250514",
+        "claude-opus-4-1-20250805",
+        "claude-opus-4-5-20251101",
+        "claude-opus-4-0"
       ],
       "reasoning_levels": [
         {
@@ -38,7 +47,7 @@
       ],
       "default_model": "sonnet",
       "detected": true,
-      "detected_at": "2026-02-11T15:54:37.734678945Z"
+      "detected_at": "2026-02-12T03:28:11.230871274Z"
     },
     "codex": {
       "name": "codex",
@@ -71,19 +80,28 @@
           "name": "xhigh"
         }
       ],
+      "default_model": "o4-mini",
       "detected": true,
-      "detected_at": "2026-02-11T15:54:37.734678945Z"
+      "detected_at": "2026-02-12T03:28:11.230871274Z"
     },
     "gemini": {
       "name": "gemini",
       "path": "/home/agusx1211/.nvm/versions/node/v22.3.0/lib/node_modules/@google/gemini-cli/dist/index.js",
-      "version": "0.22.4",
+      "version": "unknown",
       "capabilities": [
-        "stdin-prompt",
+        "prompt-arg",
+        "model-select",
+        "auto-approve",
         "stream-output"
       ],
+      "supported_models": [
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash"
+      ],
+      "default_model": "gemini-2.5-pro",
       "detected": true,
-      "detected_at": "2026-02-11T15:54:37.734678945Z"
+      "detected_at": "2026-02-12T03:28:11.230871274Z"
     },
     "goose": {
       "name": "goose",
@@ -94,7 +112,7 @@
         "stream-output"
       ],
       "detected": true,
-      "detected_at": "2026-02-11T15:54:37.734678945Z"
+      "detected_at": "2026-02-12T03:28:11.230871274Z"
     },
     "opencode": {
       "name": "opencode",
@@ -107,24 +125,24 @@
         "stream-output"
       ],
       "supported_models": [
+        "lmstudio/qwen3-vl-2b-instruct",
+        "lmstudio/qwen/qwen3-vl-8b",
+        "lmstudio/openai/gpt-oss-120b",
+        "lmstudio/qwen/qwen3-vl-4b",
+        "lmstudio/google/gemma-3n-e4b",
+        "lmstudio/text-embedding-nomic-embed-text-v1.5",
         "lmstudio/thedrummer_behemoth-r1-123b-v2",
+        "lmstudio/wan2.1-t2v-14b",
         "lmstudio/gpt-oss-120b-derestricted",
         "lmstudio/gpt-oss-120b-derestricted_moe",
-        "lmstudio/openai/gpt-oss-120b",
         "lmstudio/qwen3-vl-235b-a22b-thinking",
         "lmstudio/qwen/qwen3-vl-30b",
         "lmstudio/devstral-2-123b-instruct-2512",
-        "lmstudio/qwen3-vl-2b-thinking",
-        "lmstudio/google/gemma-3n-e4b",
-        "lmstudio/text-embedding-nomic-embed-text-v1.5",
-        "lmstudio/wan2.1-t2v-14b",
-        "lmstudio/qwen3-vl-2b-instruct",
-        "lmstudio/qwen/qwen3-vl-4b",
-        "lmstudio/qwen/qwen3-vl-8b"
+        "lmstudio/qwen3-vl-2b-thinking"
       ],
       "default_model": "openai/gpt-4.1",
       "detected": true,
-      "detected_at": "2026-02-11T15:54:37.734678945Z"
+      "detected_at": "2026-02-12T03:28:11.230871274Z"
     },
     "vibe": {
       "name": "vibe",
@@ -144,7 +162,7 @@
       ],
       "default_model": "default",
       "detected": true,
-      "detected_at": "2026-02-11T15:54:37.734678945Z"
+      "detected_at": "2026-02-12T03:28:11.230871274Z"
     }
   }
 }

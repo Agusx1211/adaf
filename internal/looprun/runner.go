@@ -5,8 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/agusx1211/adaf/internal/agent"
@@ -280,14 +278,13 @@ func buildAgentConfig(cfg RunConfig, prof *config.Profile, runID, stepIndex int)
 		}
 		agentArgs = append(agentArgs, "-y")
 	case "vibe":
-		// Vibe has no --model flag. Model selection is done via the
-		// active_model field in its config. To override it we generate
-		// a persistent agent TOML in ~/.vibe/agents/_adaf_<alias>.toml
-		// and pass --agent _adaf_<alias> so vibe loads it.
+		// Vibe has no --model flag. It uses pydantic-settings with
+		// env_prefix="VIBE_", so any config field can be overridden via
+		// environment variables. VIBE_ACTIVE_MODEL sets the active model
+		// alias while preserving the full config (providers, models, etc.)
+		// from ~/.vibe/config.toml.
 		if modelOverride != "" {
-			if agentName := ensureVibeAgentTOML(modelOverride); agentName != "" {
-				agentArgs = append(agentArgs, "--agent", agentName)
-			}
+			agentEnv["VIBE_ACTIVE_MODEL"] = modelOverride
 		}
 	}
 
@@ -325,52 +322,4 @@ func gatherUnseenMessages(s *store.Store, run *store.LoopRun, stepIndex int) []s
 		}
 	}
 	return unseen
-}
-
-// ensureVibeAgentTOML writes a minimal agent TOML file to ~/.vibe/agents/
-// so that vibe can be launched with --agent <name> to override its active model.
-// The file is named _adaf_<sanitized-alias>.toml to avoid conflicts with
-// user-created agent configs. Returns the agent name (without .toml) or ""
-// on failure.
-func ensureVibeAgentTOML(modelAlias string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-
-	agentsDir := filepath.Join(home, ".vibe", "agents")
-	if err := os.MkdirAll(agentsDir, 0755); err != nil {
-		return ""
-	}
-
-	// Sanitize alias for use as a filename.
-	safe := sanitizeVibeAgentName(modelAlias)
-	agentName := "_adaf_" + safe
-	path := filepath.Join(agentsDir, agentName+".toml")
-
-	// Only write if missing or content changed.
-	content := fmt.Sprintf("active_model = %q\n", modelAlias)
-	existing, _ := os.ReadFile(path)
-	if string(existing) == content {
-		return agentName
-	}
-
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		return ""
-	}
-	return agentName
-}
-
-// sanitizeVibeAgentName replaces non-alphanumeric chars with underscores.
-func sanitizeVibeAgentName(s string) string {
-	var b []byte
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' {
-			b = append(b, c)
-		} else {
-			b = append(b, '_')
-		}
-	}
-	return string(b)
 }
