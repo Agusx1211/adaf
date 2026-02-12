@@ -28,21 +28,39 @@ func (v *VibeAgent) Name() string {
 
 // Run executes the vibe CLI with the given configuration.
 //
-// The prompt is passed via the -p flag for programmatic (non-interactive) mode.
-// Additional flags can be supplied via cfg.Args.
+// The prompt is passed via the -p flag which activates programmatic mode.
+// In programmatic mode vibe auto-approves all tool executions and exits
+// after completing the response (equivalent to using the "auto-approve"
+// agent profile).
+//
+// We explicitly pass --output text to ensure deterministic plain-text
+// output. Vibe also supports --output json (all messages at end) and
+// --output streaming (NDJSON per message), but we use text mode to keep
+// the buffer-agent pattern simple.
+//
+// Model selection is done via the VIBE_ACTIVE_MODEL environment variable
+// (set in cfg.Env) rather than a --model flag, because vibe uses
+// pydantic-settings with env_prefix="VIBE_" to override any config field.
+//
+// Additional flags (e.g. --max-turns, --max-price) can be supplied via
+// cfg.Args.
 func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Recorder) (*Result, error) {
 	cmdName := cfg.Command
 	if cmdName == "" {
 		cmdName = "vibe"
 	}
 
-	// Build arguments: start with configured defaults, then append the prompt
-	// via the -p flag for programmatic mode.
-	args := make([]string, 0, len(cfg.Args)+2)
+	// Build arguments: start with configured defaults, then append
+	// programmatic-mode flags and the prompt.
+	args := make([]string, 0, len(cfg.Args)+4)
 	args = append(args, cfg.Args...)
 
 	if cfg.Prompt != "" {
 		args = append(args, "-p", cfg.Prompt)
+		// Request explicit text output so we get clean human-readable
+		// output rather than depending on vibe's default, which could
+		// change across versions.
+		args = append(args, "--output", "text")
 		recorder.RecordStdin(cfg.Prompt)
 	}
 
