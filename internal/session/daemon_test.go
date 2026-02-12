@@ -476,3 +476,113 @@ func TestBroadcasterConcurrentAttachAndBroadcast(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleClientControlRequest(t *testing.T) {
+	eventsPath := filepath.Join(t.TempDir(), "events.jsonl")
+	eventsFile, err := os.OpenFile(eventsPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		t.Fatalf("open events file: %v", err)
+	}
+	defer eventsFile.Close()
+
+	b := &broadcaster{
+		eventsFile: eventsFile,
+		meta:       WireMeta{SessionID: 11},
+	}
+	b.setControlHandler(func(req WireControl) WireControlResult {
+		if req.Action != "spawn" {
+			return WireControlResult{Action: req.Action, OK: false, Error: "unexpected action"}
+		}
+		return WireControlResult{
+			Action:  "spawn",
+			OK:      true,
+			SpawnID: 42,
+		}
+	})
+
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+
+	doneCh := make(chan struct{})
+	go func() {
+		b.handleClient(serverConn, func() {})
+		close(doneCh)
+	}()
+
+	sc := bufio.NewScanner(clientConn)
+	sc.Buffer(make([]byte, 1024), 1024*1024)
+
+	// Wait until replay is complete and the connection is live.
+	liveSeen := false
+	for sc.Scan() {
+		msg, err := DecodeMsg(sc.Bytes())
+		if err != nil {
+			t.Fatalf("DecodeMsg: %v", err)
+		}
+		if msg.Type == MsgLive {
+			liveSeen = true
+			break
+		}
+	}
+	if err := sc.Err(); err != nil {
+		t.Fatalf("scanner error waiting for live marker: %v", err)
+	}
+	if !liveSeen {
+		t.Fatal("missing MsgLive")
+	}
+
+	line, err := EncodeMsg(MsgControl, WireControl{
+		Action: "spawn",
+		Spawn: &WireControlSpawn{
+			ParentTurnID:  1,
+			ParentProfile: "manager",
+			ChildProfile:  "devstral2",
+			Task:          "check files",
+		},
+	})
+	if err != nil {
+		t.Fatalf("EncodeMsg(control): %v", err)
+	}
+	if _, err := clientConn.Write(line); err != nil {
+		t.Fatalf("writing control request: %v", err)
+	}
+
+	var got *WireControlResult
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !sc.Scan() {
+			if err := sc.Err(); err != nil {
+				t.Fatalf("scanner error reading control response: %v", err)
+			}
+			t.Fatal("connection closed before control response")
+		}
+		msg, err := DecodeMsg(sc.Bytes())
+		if err != nil {
+			continue
+		}
+		if msg.Type != MsgControlResult {
+			continue
+		}
+		got, err = DecodeData[WireControlResult](msg)
+		if err != nil {
+			t.Fatalf("DecodeData[WireControlResult]: %v", err)
+		}
+		break
+	}
+	if got == nil {
+		t.Fatal("did not receive MsgControlResult")
+	}
+	if !got.OK {
+		t.Fatalf("control response ok=false, error=%q", got.Error)
+	}
+	if got.SpawnID != 42 {
+		t.Fatalf("spawn_id = %d, want 42", got.SpawnID)
+	}
+
+	_ = clientConn.Close()
+	select {
+	case <-doneCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handleClient did not exit")
+	}
+}

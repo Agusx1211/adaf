@@ -14,6 +14,7 @@ import (
 
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/orchestrator"
+	"github.com/agusx1211/adaf/internal/session"
 	"github.com/agusx1211/adaf/internal/store"
 )
 
@@ -86,6 +87,37 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	delegation, err := resolveCurrentDelegation(parentProfile)
 	if err != nil {
 		return err
+	}
+
+	if daemonSessionID, ok := currentDaemonSessionID(); ok {
+		resp, err := session.RequestSpawn(daemonSessionID, session.WireControlSpawn{
+			ParentTurnID:  parentTurnID,
+			ParentProfile: parentProfile,
+			ChildProfile:  profileName,
+			PlanID:        planID,
+			Task:          task,
+			ReadOnly:      readOnly,
+			Wait:          wait,
+			Delegation:    delegation,
+		})
+		if err != nil {
+			return fmt.Errorf("spawn failed: %w", err)
+		}
+		if resp == nil || !resp.OK {
+			if resp != nil && strings.TrimSpace(resp.Error) != "" {
+				return fmt.Errorf("spawn failed: %s", resp.Error)
+			}
+			return fmt.Errorf("spawn failed: daemon returned an empty response")
+		}
+
+		fmt.Printf("Spawned sub-agent #%d (profile=%s)\n", resp.SpawnID, profileName)
+		if wait {
+			fmt.Printf("Spawn #%d completed: status=%s exit_code=%d\n", resp.SpawnID, resp.Status, resp.ExitCode)
+			if strings.TrimSpace(resp.Result) != "" {
+				fmt.Printf("Result: %s\n", resp.Result)
+			}
+		}
+		return nil
 	}
 
 	o, err := ensureOrchestrator()
@@ -627,6 +659,18 @@ func getTurnContext() (int, string, error) {
 	}
 
 	return turnID, profile, nil
+}
+
+func currentDaemonSessionID() (int, bool) {
+	raw := strings.TrimSpace(os.Getenv("ADAF_SESSION_ID"))
+	if raw == "" {
+		return 0, false
+	}
+	id, err := strconv.Atoi(raw)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
 }
 
 func ensureOrchestrator() (*orchestrator.Orchestrator, error) {

@@ -20,6 +20,7 @@ import (
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/looprun"
+	"github.com/agusx1211/adaf/internal/orchestrator"
 	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/store"
 )
@@ -171,6 +172,7 @@ func RunDaemon(sessionID int) error {
 	if err := SaveMeta(sessionID, meta); err != nil {
 		return fmt.Errorf("saving meta: %w", err)
 	}
+	_ = os.Setenv("ADAF_SESSION_ID", fmt.Sprintf("%d", sessionID))
 
 	// Open the events file for replay logging.
 	eventsFile, err := os.OpenFile(EventsPath(sessionID), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -247,6 +249,9 @@ type broadcaster struct {
 	nextSeq          int64
 	maxReplayEvents  int
 	eventsWriteError bool
+
+	controlMu      sync.RWMutex
+	controlHandler func(WireControl) WireControlResult
 }
 
 type clientConn struct {
@@ -316,16 +321,58 @@ func (b *broadcaster) handleClient(conn net.Conn, cancelAgent context.CancelFunc
 
 	// Read control messages from the client.
 	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 1024*1024), 2*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == CtrlCancel {
 			cancelAgent()
+			continue
 		}
+
+		msg, err := DecodeMsg([]byte(line))
+		if err != nil || msg.Type != MsgControl {
+			continue
+		}
+
+		req, err := DecodeData[WireControl](msg)
+		resp := WireControlResult{
+			Action: "unknown",
+			OK:     false,
+		}
+		if err != nil {
+			resp.Error = fmt.Sprintf("invalid control payload: %v", err)
+		} else {
+			resp = b.runControl(*req)
+		}
+		respLine, _ := EncodeMsg(MsgControlResult, resp)
+		cc.writeLine(respLine)
+		cc.flush()
 	}
 
 	// Client disconnected.
 	b.removeClient(cc)
 	conn.Close()
+}
+
+func (b *broadcaster) setControlHandler(h func(WireControl) WireControlResult) {
+	b.controlMu.Lock()
+	b.controlHandler = h
+	b.controlMu.Unlock()
+}
+
+func (b *broadcaster) runControl(req WireControl) WireControlResult {
+	b.controlMu.RLock()
+	h := b.controlHandler
+	b.controlMu.RUnlock()
+
+	if h == nil {
+		return WireControlResult{
+			Action: req.Action,
+			OK:     false,
+			Error:  "daemon control handler is not ready",
+		}
+	}
+	return h(req)
 }
 
 func (b *broadcaster) removeClient(cc *clientConn) {
@@ -559,6 +606,53 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 		workDir = projCfg.RepoPath
 	}
 
+	orch := orchestrator.Init(s, globalCfg, workDir)
+	b.setControlHandler(func(req WireControl) WireControlResult {
+		resp := WireControlResult{
+			Action: req.Action,
+			OK:     false,
+		}
+
+		switch req.Action {
+		case "spawn":
+			if req.Spawn == nil {
+				resp.Error = "missing spawn request payload"
+				return resp
+			}
+
+			spawnReq := orchestrator.SpawnRequest{
+				ParentTurnID:  req.Spawn.ParentTurnID,
+				ParentProfile: req.Spawn.ParentProfile,
+				ChildProfile:  req.Spawn.ChildProfile,
+				PlanID:        req.Spawn.PlanID,
+				Task:          req.Spawn.Task,
+				ReadOnly:      req.Spawn.ReadOnly,
+				Wait:          req.Spawn.Wait,
+				Delegation:    req.Spawn.Delegation,
+			}
+
+			spawnID, err := orch.Spawn(ctx, spawnReq)
+			if err != nil {
+				resp.Error = err.Error()
+				return resp
+			}
+
+			resp.OK = true
+			resp.SpawnID = spawnID
+			if req.Spawn.Wait {
+				result := orch.WaitOne(spawnID)
+				resp.Status = result.Status
+				resp.ExitCode = result.ExitCode
+				resp.Result = result.Result
+			}
+			return resp
+		default:
+			resp.Error = fmt.Sprintf("unsupported control action %q", req.Action)
+			return resp
+		}
+	})
+	defer b.setControlHandler(nil)
+
 	eventCh := make(chan any, 256)
 	forwardDone := make(chan struct{})
 	loopRunID := 0
@@ -657,6 +751,7 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 		Project:   projCfg,
 		AgentsCfg: agentsCfg,
 		PlanID:    cfg.PlanID,
+		SessionID: b.meta.SessionID,
 		WorkDir:   workDir,
 		MaxCycles: cfg.MaxCycles,
 	}, eventCh)

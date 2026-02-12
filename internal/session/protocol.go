@@ -3,6 +3,8 @@ package session
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/agusx1211/adaf/internal/config"
 )
 
 // Wire message types sent over the Unix socket.
@@ -13,6 +15,8 @@ const (
 	MsgRaw           = "raw"             // Raw text output (non-Claude agents)
 	MsgFinished      = "finished"        // Single agent session finished
 	MsgSpawn         = "spawn"           // Spawn hierarchy update
+	MsgControl       = "control"         // Client -> daemon control request
+	MsgControlResult = "control_result"  // Daemon -> client control response
 	MsgLoopStepStart = "loop_step_start" // Loop step started
 	MsgLoopStepEnd   = "loop_step_end"   // Loop step ended
 	MsgLoopDone      = "loop_done"       // Loop finished
@@ -120,6 +124,35 @@ type WireLoopDone struct {
 // WireDone signals the entire agent loop has completed.
 type WireDone struct {
 	Error string `json:"error,omitempty"`
+}
+
+// WireControl is a client -> daemon control request.
+type WireControl struct {
+	Action string            `json:"action"`
+	Spawn  *WireControlSpawn `json:"spawn,omitempty"`
+}
+
+// WireControlSpawn carries a spawn request executed by the daemon.
+type WireControlSpawn struct {
+	ParentTurnID  int                      `json:"parent_turn_id"`
+	ParentProfile string                   `json:"parent_profile"`
+	ChildProfile  string                   `json:"child_profile"`
+	PlanID        string                   `json:"plan_id,omitempty"`
+	Task          string                   `json:"task"`
+	ReadOnly      bool                     `json:"read_only,omitempty"`
+	Wait          bool                     `json:"wait,omitempty"`
+	Delegation    *config.DelegationConfig `json:"delegation,omitempty"`
+}
+
+// WireControlResult is a daemon -> client reply for a control request.
+type WireControlResult struct {
+	Action   string `json:"action"`
+	OK       bool   `json:"ok"`
+	Error    string `json:"error,omitempty"`
+	SpawnID  int    `json:"spawn_id,omitempty"`
+	Status   string `json:"status,omitempty"`
+	ExitCode int    `json:"exit_code,omitempty"`
+	Result   string `json:"result,omitempty"`
 }
 
 // EncodeMsg creates a JSON line from a message type and payload.

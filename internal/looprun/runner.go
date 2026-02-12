@@ -35,6 +35,8 @@ type RunConfig struct {
 	Project   *store.ProjectConfig
 	AgentsCfg *agent.AgentsConfig
 	PlanID    string
+	// SessionID is the owning daemon session ID (0 when not daemon-backed).
+	SessionID int
 
 	// WorkDir is the working directory for agent processes.
 	WorkDir string
@@ -512,6 +514,9 @@ func buildAgentConfig(cfg RunConfig, prof *config.Profile, runID, stepIndex int,
 	// Set loop environment variables.
 	agentEnv["ADAF_LOOP_RUN_ID"] = fmt.Sprintf("%d", runID)
 	agentEnv["ADAF_LOOP_STEP_INDEX"] = fmt.Sprintf("%d", stepIndex)
+	if cfg.SessionID > 0 {
+		agentEnv["ADAF_SESSION_ID"] = fmt.Sprintf("%d", cfg.SessionID)
+	}
 	if runHexID != "" {
 		agentEnv["ADAF_LOOP_RUN_HEX_ID"] = runHexID
 	}
