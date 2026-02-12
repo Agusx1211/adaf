@@ -1,10 +1,12 @@
-# Raw session I/O recordings
-recordings/
-records/
+# Ignore everything in .adaf by default.
+/*
 
-# Session logs (ephemeral per-run artifacts)
-logs/
+# Keep this rule file.
+!/.gitignore
 
-# Orchestration state
-spawns/
-notes/
+# Keep project knowledge and planning artifacts.
+!/docs/
+!/issues/
+!/plans/
+!/decisions/
+!/decissions/

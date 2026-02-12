@@ -97,18 +97,20 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("initializing project: %w", err)
 	}
 
-	// Write a .gitignore inside .adaf/ to keep recordings out of version control.
+	// Write a .gitignore inside .adaf/ that tracks only long-lived planning artifacts.
 	gitignorePath := filepath.Join(absRepo, store.AdafDir, ".gitignore")
-	gitignoreContent := `# Raw session I/O recordings
-recordings/
-records/
+	gitignoreContent := `# Ignore everything in .adaf by default.
+/*
 
-# Turn logs (ephemeral per-run artifacts)
-logs/
+# Keep this rule file.
+!/.gitignore
 
-# Orchestration state
-spawns/
-notes/
+# Keep project knowledge and planning artifacts.
+!/docs/
+!/issues/
+!/plans/
+!/decisions/
+!/decissions/
 `
 
 	// Ensure .adaf-worktrees/ is in the repo-level .gitignore.
