@@ -20,27 +20,30 @@ type Store struct {
 	mu   sync.RWMutex
 }
 
+var requiredProjectSubdirs = []string{
+	"logs",
+	"records",
+	"plans",
+	"docs",
+	"issues",
+	"decisions",
+	"spawns",
+	"notes",
+	"messages",
+	"loopruns",
+	"stats",
+	"stats/profiles",
+	"stats/loops",
+}
+
 func New(projectDir string) (*Store, error) {
 	root := filepath.Join(projectDir, AdafDir)
 	return &Store{root: root}, nil
 }
 
 func (s *Store) Init(config ProjectConfig) error {
-	dirs := []string{
-		s.root,
-		filepath.Join(s.root, "logs"),
-		filepath.Join(s.root, "records"),
-		filepath.Join(s.root, "plans"),
-		filepath.Join(s.root, "docs"),
-		filepath.Join(s.root, "issues"),
-		filepath.Join(s.root, "decisions"),
-		filepath.Join(s.root, "spawns"),
-		filepath.Join(s.root, "notes"),
-	}
-	for _, d := range dirs {
-		if err := os.MkdirAll(d, 0755); err != nil {
-			return fmt.Errorf("creating directory %s: %w", d, err)
-		}
+	if _, err := s.ensureProjectDirs(); err != nil {
+		return fmt.Errorf("creating project store directories: %w", err)
 	}
 
 	config.Created = time.Now().UTC()
@@ -1055,12 +1058,43 @@ func (s *Store) UnreadMessages(spawnID int, direction string) ([]SpawnMessage, e
 
 // EnsureDirs creates directories that may be missing from older projects.
 func (s *Store) EnsureDirs() error {
-	for _, sub := range []string{"spawns", "notes", "messages", "loopruns", "stats", "stats/profiles", "stats/loops", "plans"} {
-		if err := os.MkdirAll(filepath.Join(s.root, sub), 0755); err != nil {
-			return err
+	_, err := s.Repair()
+	return err
+}
+
+// Repair recreates missing project store directories and runs legacy migrations.
+// It returns a list of created relative directory paths (for reporting).
+func (s *Store) Repair() ([]string, error) {
+	created, err := s.ensureProjectDirs()
+	if err != nil {
+		return nil, err
+	}
+	if err := s.migrateLegacyPlan(); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+func (s *Store) ensureProjectDirs() ([]string, error) {
+	if err := os.MkdirAll(s.root, 0755); err != nil {
+		return nil, err
+	}
+
+	created := make([]string, 0, len(requiredProjectSubdirs))
+	for _, sub := range requiredProjectSubdirs {
+		path := filepath.Join(s.root, sub)
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				created = append(created, filepath.Join(AdafDir, sub))
+			} else {
+				return nil, err
+			}
+		}
+		if err := os.MkdirAll(path, 0755); err != nil {
+			return nil, err
 		}
 	}
-	return s.migrateLegacyPlan()
+	return created, nil
 }
 
 // --- Loop Runs ---

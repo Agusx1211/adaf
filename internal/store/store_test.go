@@ -277,6 +277,75 @@ func TestLegacyPlanMigration(t *testing.T) {
 	}
 }
 
+func TestEnsureDirsRestoresMissingLegacyDirectories(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := New(dir)
+	if err := s.Init(ProjectConfig{Name: "test", RepoPath: "/tmp"}); err != nil {
+		t.Fatal(err)
+	}
+
+	missing := []string{"logs", "records", "docs", "issues"}
+	for _, sub := range missing {
+		if err := os.RemoveAll(filepath.Join(dir, AdafDir, sub)); err != nil {
+			t.Fatalf("RemoveAll(%s): %v", sub, err)
+		}
+	}
+
+	if err := s.EnsureDirs(); err != nil {
+		t.Fatalf("EnsureDirs: %v", err)
+	}
+
+	for _, sub := range missing {
+		if _, err := os.Stat(filepath.Join(dir, AdafDir, sub)); err != nil {
+			t.Fatalf("expected %s to be restored, stat err=%v", sub, err)
+		}
+	}
+}
+
+func TestRepairReportsCreatedDirectories(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := New(dir)
+	if err := s.Init(ProjectConfig{Name: "test", RepoPath: "/tmp"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.RemoveAll(filepath.Join(dir, AdafDir, "logs")); err != nil {
+		t.Fatalf("RemoveAll(logs): %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, AdafDir, "stats")); err != nil {
+		t.Fatalf("RemoveAll(stats): %v", err)
+	}
+
+	created, err := s.Repair()
+	if err != nil {
+		t.Fatalf("Repair: %v", err)
+	}
+	if len(created) == 0 {
+		t.Fatal("Repair created no directories, want recreated directories reported")
+	}
+	if !containsString(created, filepath.Join(AdafDir, "logs")) {
+		t.Fatalf("created dirs = %#v, want %q", created, filepath.Join(AdafDir, "logs"))
+	}
+	if !containsString(created, filepath.Join(AdafDir, "stats")) {
+		t.Fatalf("created dirs = %#v, want %q", created, filepath.Join(AdafDir, "stats"))
+	}
+	if !containsString(created, filepath.Join(AdafDir, "stats", "profiles")) {
+		t.Fatalf("created dirs = %#v, want %q", created, filepath.Join(AdafDir, "stats", "profiles"))
+	}
+	if !containsString(created, filepath.Join(AdafDir, "stats", "loops")) {
+		t.Fatalf("created dirs = %#v, want %q", created, filepath.Join(AdafDir, "stats", "loops"))
+	}
+}
+
+func containsString(haystack []string, want string) bool {
+	for _, v := range haystack {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestIssuePlanFiltering(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := New(dir)

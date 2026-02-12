@@ -2,6 +2,7 @@ package session
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -47,20 +48,108 @@ func StartDaemon(sessionID int) error {
 		return fmt.Errorf("starting daemon: %w", err)
 	}
 
-	// Detach: we don't wait for the daemon to exit.
-	go cmd.Wait()
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmd.Wait()
+	}()
 
 	// Wait for the socket to appear.
 	sockPath := SocketPath(sessionID)
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	for {
 		if _, err := os.Stat(sockPath); err == nil {
 			return nil
 		}
+		select {
+		case waitErr := <-waitCh:
+			return buildDaemonStartupError(sessionID, "daemon exited before creating socket", waitErr)
+		default:
+		}
+		if time.Now().After(deadline) {
+			return buildDaemonStartupError(sessionID, "daemon did not create socket within 10 seconds", nil)
+		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
 
-	return fmt.Errorf("daemon did not create socket within 10 seconds")
+func buildDaemonStartupError(sessionID int, base string, waitErr error) error {
+	logPath := DaemonLogPath(sessionID)
+	lastLogLine := lastDaemonLogLine(logPath)
+	message := fmt.Sprintf("%s (session #%d)", base, sessionID)
+	if lastLogLine != "" {
+		message += ": " + lastLogLine
+	} else if waitErr != nil {
+		message += fmt.Sprintf(": %v", waitErr)
+	}
+	message += fmt.Sprintf(" (daemon log: %s)", logPath)
+	message += "; try 'adaf repair' to restore missing project metadata directories"
+	return errors.New(message)
+}
+
+func lastDaemonLogLine(path string) string {
+	const maxReadBytes int64 = 32 * 1024
+
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	stat, err := f.Stat()
+	if err != nil {
+		return ""
+	}
+
+	start := stat.Size() - maxReadBytes
+	if start < 0 {
+		start = 0
+	}
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return ""
+	}
+
+	data, err := io.ReadAll(f)
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	if start > 0 {
+		if idx := bytes.IndexByte(data, '\n'); idx >= 0 && idx+1 < len(data) {
+			data = data[idx+1:]
+		}
+	}
+
+	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(stripANSI(lines[i]))
+		if line == "" {
+			continue
+		}
+		const maxLineLen = 320
+		if len(line) > maxLineLen {
+			line = line[:maxLineLen-3] + "..."
+		}
+		return line
+	}
+	return ""
+}
+
+func stripANSI(s string) string {
+	var out strings.Builder
+	inEscape := false
+	for _, r := range s {
+		if r == '\x1b' {
+			inEscape = true
+			continue
+		}
+		if inEscape {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+			continue
+		}
+		out.WriteRune(r)
+	}
+	return out.String()
 }
 
 // RunDaemon is the main entry point for the daemon process.

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -96,6 +97,60 @@ func TestNormalizeDaemonExit(t *testing.T) {
 	expected := errors.New("boom")
 	if err := normalizeDaemonExit(expected); !errors.Is(err, expected) {
 		t.Fatalf("normalizeDaemonExit(non-cancelled) = %v, want %v", err, expected)
+	}
+}
+
+func TestBuildDaemonStartupErrorIncludesLogSummary(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := os.MkdirAll(SessionDir(42), 0755); err != nil {
+		t.Fatalf("MkdirAll(SessionDir): %v", err)
+	}
+	logPath := DaemonLogPath(42)
+	logLine := "\x1b[31mError: step 0 failed: open .adaf/logs/1.json: no such file or directory\x1b[0m\n"
+	if err := os.WriteFile(logPath, []byte(logLine), 0644); err != nil {
+		t.Fatalf("WriteFile(logPath): %v", err)
+	}
+
+	err := buildDaemonStartupError(42, "daemon did not create socket within 10 seconds", nil)
+	if err == nil {
+		t.Fatal("buildDaemonStartupError returned nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "step 0 failed: open .adaf/logs/1.json: no such file or directory") {
+		t.Fatalf("error missing log summary: %q", msg)
+	}
+	if strings.Contains(msg, "\x1b[31m") {
+		t.Fatalf("error contains ANSI escapes: %q", msg)
+	}
+	if !strings.Contains(msg, "adaf repair") {
+		t.Fatalf("error missing repair hint: %q", msg)
+	}
+	if !strings.Contains(msg, logPath) {
+		t.Fatalf("error missing daemon log path: %q", msg)
+	}
+}
+
+func TestBuildDaemonStartupErrorFallsBackToWaitErr(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := os.MkdirAll(SessionDir(7), 0755); err != nil {
+		t.Fatalf("MkdirAll(SessionDir): %v", err)
+	}
+
+	waitErr := errors.New("exit status 1")
+	err := buildDaemonStartupError(7, "daemon exited before creating socket", waitErr)
+	if err == nil {
+		t.Fatal("buildDaemonStartupError returned nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "exit status 1") {
+		t.Fatalf("error missing waitErr details: %q", msg)
+	}
+	if !strings.Contains(msg, "session #7") {
+		t.Fatalf("error missing session id: %q", msg)
 	}
 }
 
