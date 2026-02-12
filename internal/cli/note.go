@@ -36,7 +36,7 @@ var noteListCmd = &cobra.Command{
 }
 
 func init() {
-	noteAddCmd.Flags().Int("session", 0, "Target session ID (required)")
+	noteAddCmd.Flags().Int("session", 0, "Target session ID (optional in agent context)")
 	noteAddCmd.Flags().String("note", "", "Note text (required)")
 	noteAddCmd.Flags().String("author", "supervisor", "Author name")
 
@@ -48,12 +48,13 @@ func init() {
 }
 
 func runNoteAdd(cmd *cobra.Command, args []string) error {
-	sessionID, _ := cmd.Flags().GetInt("session")
+	sessionFlag, _ := cmd.Flags().GetInt("session")
 	noteText, _ := cmd.Flags().GetString("note")
 	author, _ := cmd.Flags().GetString("author")
 
-	if sessionID == 0 {
-		return fmt.Errorf("--session is required")
+	sessionID, err := resolveRequiredSessionID(sessionFlag)
+	if err != nil {
+		return err
 	}
 	if noteText == "" {
 		return fmt.Errorf("--note is required")

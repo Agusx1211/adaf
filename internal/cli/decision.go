@@ -120,7 +120,11 @@ func runDecisionCreate(cmd *cobra.Command, args []string) error {
 	decision, _ := cmd.Flags().GetString("decision")
 	rationale, _ := cmd.Flags().GetString("rationale")
 	alternatives, _ := cmd.Flags().GetString("alternatives")
-	sessionID, _ := cmd.Flags().GetInt("session")
+	sessionFlag, _ := cmd.Flags().GetInt("session")
+	sessionID, err := resolveOptionalSessionID(sessionFlag)
+	if err != nil {
+		return err
+	}
 
 	dec := &store.Decision{
 		Title:        title,

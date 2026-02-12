@@ -10,6 +10,10 @@ import (
 
 // openStore creates a Store for the current directory.
 func openStore() (*store.Store, error) {
+	if projectDir := strings.TrimSpace(os.Getenv("ADAF_PROJECT_DIR")); projectDir != "" {
+		return store.New(projectDir)
+	}
+
 	dir, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("getting working directory: %w", err)
@@ -24,7 +28,7 @@ func openStoreRequired() (*store.Store, error) {
 		return nil, err
 	}
 	if !s.Exists() {
-		return nil, fmt.Errorf("no adaf project found in current directory (run 'adaf init' first)")
+		return nil, fmt.Errorf("no adaf project found (run 'adaf init' first)")
 	}
 	return s, nil
 }

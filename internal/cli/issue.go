@@ -67,6 +67,7 @@ func init() {
 	issueCreateCmd.Flags().String("description", "", "Issue description")
 	issueCreateCmd.Flags().String("priority", "medium", "Priority (critical, high, medium, low)")
 	issueCreateCmd.Flags().StringSlice("labels", nil, "Labels (comma-separated)")
+	issueCreateCmd.Flags().Int("session", 0, "Associated session ID (optional; defaults to current agent session)")
 	_ = issueCreateCmd.MarkFlagRequired("title")
 
 	issueUpdateCmd.Flags().String("status", "", "New status")
@@ -144,6 +145,11 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 	description, _ := cmd.Flags().GetString("description")
 	priority, _ := cmd.Flags().GetString("priority")
 	labels, _ := cmd.Flags().GetStringSlice("labels")
+	sessionFlag, _ := cmd.Flags().GetInt("session")
+	sessionID, err := resolveOptionalSessionID(sessionFlag)
+	if err != nil {
+		return err
+	}
 
 	// Validate priority
 	validPriorities := map[string]bool{
@@ -161,6 +167,7 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 		Description: description,
 		Priority:    priority,
 		Labels:      labels,
+		SessionID:   sessionID,
 	}
 
 	if err := s.CreateIssue(issue); err != nil {
@@ -172,6 +179,9 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 	printField("Title", issue.Title)
 	printField("Priority", issue.Priority)
 	printField("Status", issue.Status)
+	if issue.SessionID > 0 {
+		printField("Session", fmt.Sprintf("#%d", issue.SessionID))
+	}
 	if len(issue.Labels) > 0 {
 		printField("Labels", strings.Join(issue.Labels, ", "))
 	}

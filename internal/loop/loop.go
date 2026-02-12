@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -81,6 +82,16 @@ func (l *Loop) Run(ctx context.Context) error {
 			cfg.Env = make(map[string]string)
 		}
 		cfg.Env["ADAF_AGENT"] = "1"
+		cfg.Env["ADAF_SESSION_ID"] = fmt.Sprintf("%d", sessionID)
+		if strings.TrimSpace(l.ProfileName) != "" {
+			cfg.Env["ADAF_PROFILE"] = l.ProfileName
+		}
+		if l.Store != nil {
+			projectDir := strings.TrimSpace(filepath.Dir(l.Store.Root()))
+			if projectDir != "" {
+				cfg.Env["ADAF_PROJECT_DIR"] = projectDir
+			}
+		}
 		if l.PromptFunc != nil {
 			cfg.Prompt = l.PromptFunc(sessionID)
 		}

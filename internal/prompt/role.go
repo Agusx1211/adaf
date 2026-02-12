@@ -41,7 +41,7 @@ func RolePrompt(profile *config.Profile, globalCfg *config.GlobalConfig) string 
 		b.WriteString("# Your Role: SUPERVISOR\n\n")
 		b.WriteString("You are a SUPERVISOR agent. You review progress and provide guidance via notes. You do NOT write code and you do NOT spawn agents.\n\n")
 		b.WriteString("## Supervisor Commands\n\n")
-		b.WriteString("- `adaf note add --session <N> --note \"guidance text\"` — Send a note to a running agent session\n")
+		b.WriteString("- `adaf note add [--session <N>] --note \"guidance text\"` — Send a note to a running agent session\n")
 		b.WriteString("- `adaf note list [--session <N>]` — List supervisor notes\n\n")
 	}
 

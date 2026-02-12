@@ -81,10 +81,8 @@ type Model struct {
 	focus      paneFocus
 
 	// Streaming delta accumulator. Raw text is collected here and flushed
-	// to m.lines when a newline appears, the line exceeds viewport width,
-	// or the content block ends.
+	// to m.lines when a newline appears or the content block ends.
 	streamBuf    strings.Builder
-	streamBufLen int // approximate visual width
 	currentScope string
 
 	// Tool input accumulator: collects partial_json deltas for parsing on block stop.
@@ -526,11 +524,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // totalLines returns the count of visible lines including a partial streaming line.
 func (m Model) totalLines() int {
-	n := len(m.filteredLines())
-	if m.streamBuf.Len() > 0 && m.scopeVisible(m.currentScope) {
-		n++
-	}
-	return n
+	return len(m.detailLines(m.rcWidth()))
 }
 
 func (m *Model) scrollDown(n int) {
@@ -791,24 +785,15 @@ func (m *Model) flushStream() {
 	styled := m.styleDelta(m.streamBuf.String())
 	m.addScopedLine(m.currentScope, styled)
 	m.streamBuf.Reset()
-	m.streamBufLen = 0
 }
 
-// appendDelta processes streaming delta text with line wrapping.
+// appendDelta processes streaming delta text and flushes completed lines.
 func (m *Model) appendDelta(text string) {
-	cw := m.rcWidth()
-	if cw < 1 {
-		cw = 80
-	}
 	for _, r := range text {
 		if r == '\n' {
 			m.flushStream()
 		} else {
 			m.streamBuf.WriteRune(r)
-			m.streamBufLen++
-			if m.streamBufLen >= cw {
-				m.flushStream()
-			}
 		}
 	}
 	if m.autoScroll && m.scopeVisible(m.currentScope) {
@@ -1548,19 +1533,16 @@ func (m Model) renderRightPanel(outerW, outerH int) string {
 		ch = 1
 	}
 
-	visible := m.getVisibleLines(ch)
+	visible := m.getVisibleLines(ch, cw)
 	content := fitToSize(visible, cw, ch)
 	return rightPanelStyle.Render(content)
 }
 
 // getVisibleLines returns the slice of lines visible in the viewport,
 // including a partial streaming line if present.
-func (m Model) getVisibleLines(height int) []string {
-	filtered := m.filteredLines()
-	total := len(filtered)
-	if m.streamBuf.Len() > 0 && m.scopeVisible(m.currentScope) {
-		total++
-	}
+func (m Model) getVisibleLines(height, width int) []string {
+	wrapped := m.detailLines(width)
+	total := len(wrapped)
 	if total == 0 {
 		return nil
 	}
@@ -1578,18 +1560,17 @@ func (m Model) getVisibleLines(height int) []string {
 		end = total
 	}
 
-	result := make([]string, 0, end-start)
-	prefixAll := m.shouldPrefixAllOutput()
-	for i := start; i < end; i++ {
-		if i < len(filtered) {
-			result = append(result, filtered[i])
-		} else if i == len(filtered) && m.streamBuf.Len() > 0 && m.scopeVisible(m.currentScope) {
-			partial := m.styleDelta(m.streamBuf.String())
-			partial = m.maybePrefixedLine(m.currentScope, partial, prefixAll)
-			result = append(result, partial)
-		}
+	return wrapped[start:end]
+}
+
+func (m Model) detailLines(width int) []string {
+	lines := append([]string(nil), m.filteredLines()...)
+	if m.streamBuf.Len() > 0 && m.scopeVisible(m.currentScope) {
+		prefixAll := m.shouldPrefixAllOutput()
+		partial := m.styleDelta(m.streamBuf.String())
+		lines = append(lines, m.maybePrefixedLine(m.currentScope, partial, prefixAll))
 	}
-	return result
+	return wrapRenderableLines(lines, width)
 }
 
 // --- Utility ---
@@ -1620,6 +1601,24 @@ func fitToSize(lines []string, w, h int) string {
 		}
 	}
 	return strings.Join(result, "\n")
+}
+
+func wrapRenderableLines(lines []string, width int) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	if width < 1 {
+		width = 1
+	}
+
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		for _, part := range splitRenderableLines(line) {
+			wrapped := ansi.Wrap(part, width, " ")
+			out = append(out, splitRenderableLines(wrapped)...)
+		}
+	}
+	return out
 }
 
 func compactWhitespace(s string) string {
