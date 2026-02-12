@@ -17,15 +17,15 @@ var (
 	ColorSubtext0 = theme.ColorSubtext0
 	ColorSubtext1 = theme.ColorSubtext1
 
-	ColorRed       = theme.ColorRed
-	ColorGreen     = theme.ColorGreen
-	ColorYellow    = theme.ColorYellow
-	ColorBlue      = theme.ColorBlue
-	ColorMauve     = theme.ColorMauve
-	ColorTeal      = theme.ColorTeal
-	ColorPeach     = theme.ColorPeach
-	ColorFlamingo  = theme.ColorFlamingo
-	ColorLavender  = theme.ColorLavender
+	ColorRed      = theme.ColorRed
+	ColorGreen    = theme.ColorGreen
+	ColorYellow   = theme.ColorYellow
+	ColorBlue     = theme.ColorBlue
+	ColorMauve    = theme.ColorMauve
+	ColorTeal     = theme.ColorTeal
+	ColorPeach    = theme.ColorPeach
+	ColorFlamingo = theme.ColorFlamingo
+	ColorLavender = theme.ColorLavender
 )
 
 // Header styles
@@ -192,9 +192,9 @@ var (
 // Badge/tag styles
 var (
 	BadgeStyle = lipgloss.NewStyle().
-			Padding(0, 1).
-			Foreground(theme.ColorBase).
-			Background(theme.ColorMauve)
+		Padding(0, 1).
+		Foreground(theme.ColorBase).
+		Background(theme.ColorMauve)
 )
 
 // Misc

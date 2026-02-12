@@ -80,6 +80,9 @@ type BuildOpts struct {
 
 	// Handoffs from previous loop step, injected into the prompt.
 	Handoffs []store.HandoffInfo
+
+	// Guardrails indicates that runtime guardrails are active for this step.
+	Guardrails bool
 }
 
 // WaitResultInfo describes the result of a spawn that was waited on.
@@ -151,6 +154,20 @@ func Build(opts BuildOpts) (string, error) {
 	if opts.ReadOnly {
 		b.WriteString(ReadOnlyPrompt())
 		b.WriteString("\n")
+	}
+
+	// Guardrails notice.
+	effectiveRole := ""
+	if opts.Profile != nil {
+		effectiveRole = config.EffectiveStepRole(opts.Role, opts.Profile)
+	}
+	if opts.Guardrails && !config.CanWriteCode(effectiveRole) {
+		b.WriteString("# Guardrails Active\n\n")
+		b.WriteString("**Runtime guardrails are enabled for your role.** ")
+		b.WriteString("You are NOT allowed to write or modify files. ")
+		b.WriteString("Any attempt to use write/edit tools (Write, Edit, Bash with redirects, etc.) ")
+		b.WriteString("will immediately interrupt your current turn and you will lose progress. ")
+		b.WriteString("Delegate all coding work to sub-agents instead.\n\n")
 	}
 
 	// Objective.

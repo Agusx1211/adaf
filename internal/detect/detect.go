@@ -401,8 +401,8 @@ func probeVibeModels() []string {
 // apiKey/disabled, models defined in code). We only parse the SST format
 // since that is what users install today.
 type opencodeConfig struct {
-	Model    string                        `json:"model"`
-	Provider map[string]opencodeProvider   `json:"provider"`
+	Model    string                      `json:"model"`
+	Provider map[string]opencodeProvider `json:"provider"`
 }
 
 type opencodeProvider struct {

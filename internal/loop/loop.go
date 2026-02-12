@@ -62,8 +62,17 @@ type Loop struct {
 	// interrupted (e.g. parent sends an interrupt message).
 	InterruptCh <-chan string
 
+	// OnTurnContext is called at the start of each turn with the turn-scoped
+	// cancel function. This allows external code (e.g. guardrail monitors) to
+	// cancel only the current turn without stopping the entire loop.
+	OnTurnContext func(cancel context.CancelFunc)
+
 	// lastWaitResults holds results from a wait cycle, injected into the next prompt.
 	lastWaitResults []WaitResult
+
+	// lastInterruptMsg holds the message from the last interrupt, injected
+	// into the next turn's prompt.
+	lastInterruptMsg string
 }
 
 // Run executes the agent loop. It will run the agent up to Config.MaxTurns times
@@ -138,6 +147,12 @@ func (l *Loop) Run(ctx context.Context) error {
 			cfg.Prompt = l.PromptFunc(turnID, supervisorNotes)
 		}
 
+		// Inject interrupt message from a previous guardrail violation.
+		if l.lastInterruptMsg != "" {
+			cfg.Prompt += "\n## Guardrail Interrupt\n\n" + l.lastInterruptMsg + "\n\n"
+			l.lastInterruptMsg = ""
+		}
+
 		// Inject wait results from a previous wait-for-spawns cycle.
 		if len(l.lastWaitResults) > 0 {
 			cfg.Prompt += "\n## Spawn Wait Results\n\nThe spawns you waited for have completed:\n\n"
@@ -164,8 +179,16 @@ func (l *Loop) Run(ctx context.Context) error {
 		rec.RecordMeta("turn", fmt.Sprintf("%d", turn+1))
 		rec.RecordMeta("start_time", time.Now().UTC().Format(time.RFC3339))
 
+		// Create a turn-scoped context so guardrails can cancel just the
+		// current turn without stopping the entire loop.
+		turnCtx, turnCancel := context.WithCancel(ctx)
+		if l.OnTurnContext != nil {
+			l.OnTurnContext(turnCancel)
+		}
+
 		// Run the agent.
-		result, runErr := l.Agent.Run(ctx, cfg, rec)
+		result, runErr := l.Agent.Run(turnCtx, cfg, rec)
+		turnCancel() // ensure turn context is always cleaned up
 
 		// Record completion metadata.
 		rec.RecordMeta("end_time", time.Now().UTC().Format(time.RFC3339))
@@ -218,8 +241,17 @@ func (l *Loop) Run(ctx context.Context) error {
 		// stop the loop — unless it was an interrupt.
 		if runErr != nil {
 			if errors.Is(runErr, context.Canceled) {
-				if l.checkInterrupt() {
-					// Interrupted by parent — continue to next turn with interrupt message.
+				if msg := l.drainInterrupt(); msg != "" {
+					// Interrupted (e.g. guardrail violation or parent signal) —
+					// continue to next turn with the interrupt message injected.
+					l.lastInterruptMsg = msg
+					turn++
+					continue
+				}
+				// If the parent context is still alive and we have turn-scoped
+				// cancel support (OnTurnContext), this was a turn-only cancel
+				// (e.g. guardrail) that raced with drainInterrupt.
+				if l.OnTurnContext != nil && ctx.Err() == nil {
 					turn++
 					continue
 				}
@@ -246,16 +278,20 @@ func (l *Loop) Run(ctx context.Context) error {
 	}
 }
 
-// checkInterrupt checks if there's a pending interrupt and drains the channel.
-func (l *Loop) checkInterrupt() bool {
+// drainInterrupt checks if there's a pending interrupt and drains the channel.
+// Returns the interrupt message, or "" if no interrupt was pending.
+func (l *Loop) drainInterrupt() string {
 	if l.InterruptCh == nil {
-		return false
+		return ""
 	}
 	select {
-	case <-l.InterruptCh:
-		return true
+	case msg := <-l.InterruptCh:
+		if msg == "" {
+			msg = "interrupted"
+		}
+		return msg
 	default:
-		return false
+		return ""
 	}
 }
 

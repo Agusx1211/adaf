@@ -11,14 +11,14 @@ import (
 
 // Config holds the configuration for running an agent.
 type Config struct {
-	Name      string            // agent name: "claude", "codex", "vibe", or custom
-	Command   string            // path to the CLI binary
-	Args      []string          // default arguments appended to every invocation
-	WorkDir   string            // target repository directory (cwd for the process)
-	Env       map[string]string // extra environment variables
-	Prompt    string            // the prompt/message to send (piped to stdin or passed as arg)
-	MaxTurns  int               // max loop iterations (0 = infinite)
-	TurnID    int               // current turn ID for recording
+	Name     string            // agent name: "claude", "codex", "vibe", or custom
+	Command  string            // path to the CLI binary
+	Args     []string          // default arguments appended to every invocation
+	WorkDir  string            // target repository directory (cwd for the process)
+	Env      map[string]string // extra environment variables
+	Prompt   string            // the prompt/message to send (piped to stdin or passed as arg)
+	MaxTurns int               // max loop iterations (0 = infinite)
+	TurnID   int               // current turn ID for recording
 
 	// EventSink, when set, receives parsed Claude stream events instead of
 	// displaying them to stdout. Used by the TUI to render events in its

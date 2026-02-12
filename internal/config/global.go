@@ -39,6 +39,7 @@ type LoopStep struct {
 	CanStop      bool              `json:"can_stop,omitempty"`     // can this step signal loop stop?
 	CanMessage   bool              `json:"can_message,omitempty"`  // can this step send messages to subsequent steps?
 	CanPushover  bool              `json:"can_pushover,omitempty"` // can this step send Pushover notifications?
+	Guardrails   bool              `json:"guardrails,omitempty"`   // runtime guardrails for role enforcement
 	Delegation   *DelegationConfig `json:"delegation,omitempty"`   // spawn capabilities for this step
 }
 

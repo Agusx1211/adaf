@@ -18,22 +18,22 @@ import (
 //   - error:       severity ("warning"|"error"), message
 //   - result:      status ("success"|"error"), error, stats
 type GeminiEvent struct {
-	Type      string            `json:"type"`
-	Timestamp string            `json:"timestamp,omitempty"`
-	TurnID    string            `json:"session_id,omitempty"`
-	Model     string            `json:"model,omitempty"`
-	Role      string            `json:"role,omitempty"`
-	Content   string            `json:"content,omitempty"`
-	Delta     bool              `json:"delta,omitempty"`
-	ToolName  string            `json:"tool_name,omitempty"`
-	ToolID    string            `json:"tool_id,omitempty"`
-	Parameters json.RawMessage  `json:"parameters,omitempty"`
-	Status    string            `json:"status,omitempty"`
-	Output    string            `json:"output,omitempty"`
-	Message   string            `json:"message,omitempty"`
-	Severity  string            `json:"severity,omitempty"`
-	Error     *GeminiErrorInfo  `json:"error,omitempty"`
-	Stats     *GeminiStreamStats `json:"stats,omitempty"`
+	Type       string             `json:"type"`
+	Timestamp  string             `json:"timestamp,omitempty"`
+	TurnID     string             `json:"session_id,omitempty"`
+	Model      string             `json:"model,omitempty"`
+	Role       string             `json:"role,omitempty"`
+	Content    string             `json:"content,omitempty"`
+	Delta      bool               `json:"delta,omitempty"`
+	ToolName   string             `json:"tool_name,omitempty"`
+	ToolID     string             `json:"tool_id,omitempty"`
+	Parameters json.RawMessage    `json:"parameters,omitempty"`
+	Status     string             `json:"status,omitempty"`
+	Output     string             `json:"output,omitempty"`
+	Message    string             `json:"message,omitempty"`
+	Severity   string             `json:"severity,omitempty"`
+	Error      *GeminiErrorInfo   `json:"error,omitempty"`
+	Stats      *GeminiStreamStats `json:"stats,omitempty"`
 }
 
 // GeminiErrorInfo holds error details from tool_result or result events.

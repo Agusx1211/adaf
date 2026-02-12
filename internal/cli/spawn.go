@@ -94,14 +94,14 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	}
 
 	spawnID, err := o.Spawn(context.Background(), orchestrator.SpawnRequest{
-		ParentTurnID: parentTurnID,
-		ParentProfile:   parentProfile,
-		ChildProfile:    profileName,
-		PlanID:          planID,
-		Task:            task,
-		ReadOnly:        readOnly,
-		Wait:            wait,
-		Delegation:      delegation,
+		ParentTurnID:  parentTurnID,
+		ParentProfile: parentProfile,
+		ChildProfile:  profileName,
+		PlanID:        planID,
+		Task:          task,
+		ReadOnly:      readOnly,
+		Wait:          wait,
+		Delegation:    delegation,
 	})
 	if err != nil {
 		return fmt.Errorf("spawn failed: %w", err)

@@ -247,14 +247,14 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 
 	// Create spawn record.
 	rec := &store.SpawnRecord{
-		ParentTurnID: req.ParentTurnID,
-		ParentProfile:   req.ParentProfile,
-		ChildProfile:    req.ChildProfile,
-		Task:            req.Task,
-		ReadOnly:        req.ReadOnly,
-		Status:          "running",
-		Handoff:         handoff,
-		Speed:           speed,
+		ParentTurnID:  req.ParentTurnID,
+		ParentProfile: req.ParentProfile,
+		ChildProfile:  req.ChildProfile,
+		Task:          req.Task,
+		ReadOnly:      req.ReadOnly,
+		Status:        "running",
+		Handoff:       handoff,
+		Speed:         speed,
 	}
 
 	var wtPath string
@@ -297,13 +297,13 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 		}
 	}
 	childPrompt, _ := promptpkg.Build(promptpkg.BuildOpts{
-		Store:           o.store,
-		Project:         projCfg,
-		Profile:         childProf,
-		GlobalCfg:       o.globalCfg,
-		PlanID:          parentPlanID,
-		Task:            req.Task,
-		ReadOnly:        req.ReadOnly,
+		Store:        o.store,
+		Project:      projCfg,
+		Profile:      childProf,
+		GlobalCfg:    o.globalCfg,
+		PlanID:       parentPlanID,
+		Task:         req.Task,
+		ReadOnly:     req.ReadOnly,
 		ParentTurnID: req.ParentTurnID,
 	})
 
@@ -315,9 +315,9 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 	// Build agent args (similar to startAgent in TUI).
 	var agentArgs []string
 	agentEnv := map[string]string{
-		"ADAF_TURN_ID":      fmt.Sprintf("%d", rec.ID),
-		"ADAF_PROFILE":      childProf.Name,
-		"ADAF_PARENT_TURN":  fmt.Sprintf("%d", req.ParentTurnID),
+		"ADAF_TURN_ID":     fmt.Sprintf("%d", rec.ID),
+		"ADAF_PROFILE":     childProf.Name,
+		"ADAF_PARENT_TURN": fmt.Sprintf("%d", req.ParentTurnID),
 	}
 	if parentPlanID != "" {
 		agentEnv["ADAF_PLAN_ID"] = parentPlanID
@@ -468,7 +468,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 					PlanID:          parentPlanID,
 					Task:            req.Task,
 					ReadOnly:        req.ReadOnly,
-					ParentTurnID: req.ParentTurnID,
+					ParentTurnID:    req.ParentTurnID,
 					SupervisorNotes: supervisorNotes,
 					Messages:        msgs,
 				})

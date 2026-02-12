@@ -82,5 +82,11 @@ type LoopDoneMsg struct {
 	Err    error
 }
 
+// GuardrailViolationMsg signals that a guardrail violation was detected.
+type GuardrailViolationMsg struct {
+	Tool string
+	Role string
+}
+
 // tickMsg is sent every second to update the elapsed time display.
 type tickMsg struct{}

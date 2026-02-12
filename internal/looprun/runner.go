@@ -9,8 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"sync"
+
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
+	"github.com/agusx1211/adaf/internal/guardrail"
 	"github.com/agusx1211/adaf/internal/loop"
 	"github.com/agusx1211/adaf/internal/orchestrator"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
@@ -51,6 +54,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			CanStop:      s.CanStop,
 			CanMessage:   s.CanMessage,
 			CanPushover:  s.CanPushover,
+			Guardrails:   s.Guardrails,
 		}
 	}
 
@@ -155,6 +159,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				LoopContext: loopCtx,
 				Delegation:  stepDef.Delegation,
 				Handoffs:    handoffs,
+				Guardrails:  stepDef.Guardrails,
 			}
 
 			prompt, err := promptpkg.Build(promptOpts)
@@ -166,6 +171,15 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 
 			// Run the agent for this step using the existing loop infrastructure.
 			streamCh := make(chan stream.RawEvent, 64)
+
+			// Set up guardrail monitor for this step.
+			effectiveRole := config.EffectiveStepRole(stepDef.Role, prof)
+			monitor := guardrail.NewMonitor(effectiveRole, stepDef.Guardrails)
+			interruptCh := make(chan string, 1)
+
+			// Track the current turn's cancel function (mutex-protected).
+			var turnCancelMu sync.Mutex
+			var currentTurnCancel context.CancelFunc
 
 			// Bridge stream events to the TUI event channel.
 			bridgeDone := make(chan struct{})
@@ -179,6 +193,26 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 						continue
 					}
 					eventCh <- runtui.AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw}
+
+					// Guardrail check on parsed events.
+					if monitor != nil {
+						if toolName := monitor.CheckEvent(ev.Parsed); toolName != "" {
+							eventCh <- runtui.GuardrailViolationMsg{
+								Tool: toolName,
+								Role: effectiveRole,
+							}
+							msg := guardrail.WarningMessage(effectiveRole, toolName, monitor.Violations())
+							select {
+							case interruptCh <- msg:
+							default:
+							}
+							turnCancelMu.Lock()
+							if currentTurnCancel != nil {
+								currentTurnCancel()
+							}
+							turnCancelMu.Unlock()
+						}
+					}
 				}
 				close(bridgeDone)
 			}()
@@ -208,6 +242,12 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 					return built
 				},
 				ProfileName: prof.Name,
+				InterruptCh: interruptCh,
+				OnTurnContext: func(cancel context.CancelFunc) {
+					turnCancelMu.Lock()
+					currentTurnCancel = cancel
+					turnCancelMu.Unlock()
+				},
 				OnStart: func(turnID int) {
 					if !handoffsReparented && len(handoffs) > 0 {
 						reparentHandoffs(cfg.Store, handoffs, turnID)

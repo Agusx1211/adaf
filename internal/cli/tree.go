@@ -12,7 +12,7 @@ import (
 var treeCmd = &cobra.Command{
 	Use:     "tree",
 	Aliases: []string{"hierarchy", "spawn-tree", "spawn_tree"},
-	Short: "Show agent hierarchy tree",
+	Short:   "Show agent hierarchy tree",
 	Long: `Display the hierarchical tree of spawned sub-agents.
 
 Shows parent-child relationships, status, elapsed time, and task descriptions

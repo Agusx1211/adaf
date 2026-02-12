@@ -106,21 +106,21 @@ type AppModel struct {
 	profileSpeedSel          int
 
 	// Loop creation/editing wizard state.
-	loopEditing         bool
-	loopEditName        string
-	loopNameInput       string
-	loopSteps           []config.LoopStep
-	loopStepSel         int
-	loopStepEditIdx     int // which step is being edited (-1 = adding new)
-	loopStepProfileOpts []string
-	loopStepProfileSel  int
-	loopStepRoleSel     int
-	loopStepTurnsInput  string
-	loopStepInstrInput  string
-	loopStepCanStop     bool
-	loopStepCanMsg      bool
-	loopStepCanPushover bool
-	loopStepToolsSel    int // cursor position in the tools multi-select
+	loopEditing          bool
+	loopEditName         string
+	loopNameInput        string
+	loopSteps            []config.LoopStep
+	loopStepSel          int
+	loopStepEditIdx      int // which step is being edited (-1 = adding new)
+	loopStepProfileOpts  []string
+	loopStepProfileSel   int
+	loopStepRoleSel      int
+	loopStepTurnsInput   string
+	loopStepInstrInput   string
+	loopStepCanStop      bool
+	loopStepCanMsg       bool
+	loopStepCanPushover  bool
+	loopStepToolsSel     int // cursor position in the tools multi-select
 	loopStepSpawnOpts    []string
 	loopStepSpawnSel     int
 	loopStepSpawnSelect  map[int]bool

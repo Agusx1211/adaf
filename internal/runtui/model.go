@@ -307,6 +307,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spawnStatus = nextStatus
 		return m, waitForEvent(m.eventCh)
 
+	case GuardrailViolationMsg:
+		m.addLine(lipgloss.NewStyle().Foreground(theme.ColorRed).Bold(true).Render(
+			fmt.Sprintf("[guardrail] %s attempted %s — turn interrupted", msg.Role, msg.Tool)))
+		return m, waitForEvent(m.eventCh)
+
 	case AgentStartedMsg:
 		m.sessionID = msg.SessionID
 		now := time.Now()

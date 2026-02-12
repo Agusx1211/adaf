@@ -11,10 +11,10 @@ type ProfileStats struct {
 	TotalCostUSD   float64        `json:"total_cost_usd"`
 	TotalInputTok  int            `json:"total_input_tokens"`
 	TotalOutputTok int            `json:"total_output_tokens"`
-	ToolCalls      map[string]int `json:"tool_calls"`      // tool_name -> count
-	SpawnsCreated  int            `json:"spawns_created"`  // times this profile spawned sub-agents
-	SpawnedBy      map[string]int `json:"spawned_by"`      // parent_profile -> count
-	TurnIDs     []int          `json:"session_ids"`     // all session IDs for this profile
+	ToolCalls      map[string]int `json:"tool_calls"`     // tool_name -> count
+	SpawnsCreated  int            `json:"spawns_created"` // times this profile spawned sub-agents
+	SpawnedBy      map[string]int `json:"spawned_by"`     // parent_profile -> count
+	TurnIDs        []int          `json:"session_ids"`    // all session IDs for this profile
 	SuccessCount   int            `json:"success_count"`
 	FailureCount   int            `json:"failure_count"`
 	LastRunAt      time.Time      `json:"last_run_at,omitempty"`
@@ -29,7 +29,7 @@ type LoopStats struct {
 	TotalCostUSD  float64        `json:"total_cost_usd"`
 	TotalDuration int            `json:"total_duration_secs"`
 	StepStats     map[string]int `json:"step_stats"` // profile_name -> total runs in this loop
-	TurnIDs    []int          `json:"session_ids"`
+	TurnIDs       []int          `json:"session_ids"`
 	LastRunAt     time.Time      `json:"last_run_at,omitempty"`
 	UpdatedAt     time.Time      `json:"updated_at"`
 }

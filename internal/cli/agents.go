@@ -18,7 +18,7 @@ import (
 var agentsCmd = &cobra.Command{
 	Use:     "agents",
 	Aliases: []string{"agent"},
-	Short: "Manage agent tool configuration",
+	Short:   "Manage agent tool configuration",
 	Long: `Detect, list, configure, and health-check AI agent tools.
 
 adaf wraps existing CLI tools (claude, codex, vibe, opencode, gemini) and
@@ -373,4 +373,3 @@ func healthCheckArgs(agentName, modelOverride string) []string {
 	}
 	return args
 }
-

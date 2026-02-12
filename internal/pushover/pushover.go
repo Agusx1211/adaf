@@ -23,10 +23,10 @@ const (
 
 // Priority levels for Pushover notifications.
 const (
-	PriorityLowest  = -2
-	PriorityLow     = -1
-	PriorityNormal  = 0
-	PriorityHigh    = 1
+	PriorityLowest = -2
+	PriorityLow    = -1
+	PriorityNormal = 0
+	PriorityHigh   = 1
 )
 
 // Message represents a Pushover notification to send.
