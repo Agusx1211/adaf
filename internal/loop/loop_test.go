@@ -32,6 +32,13 @@ type waitImmediateStopStubAgent struct {
 	firstTurnID int
 }
 
+type waitSeenTrackingStubAgent struct {
+	store     *store.Store
+	runs      []agent.Config
+	turnOrder []int
+	turnRuns  map[int]int
+}
+
 func (a *stubAgent) Name() string { return "stub" }
 
 func (a *stubAgent) Run(ctx context.Context, cfg agent.Config, recorder *recording.Recorder) (*agent.Result, error) {
@@ -94,6 +101,45 @@ func (a *waitImmediateStopStubAgent) Run(ctx context.Context, cfg agent.Config, 
 		ExitCode:       0,
 		Duration:       time.Millisecond,
 		AgentSessionID: "sess-456",
+	}, nil
+}
+
+func (a *waitSeenTrackingStubAgent) Name() string { return "stub" }
+
+func (a *waitSeenTrackingStubAgent) Run(ctx context.Context, cfg agent.Config, recorder *recording.Recorder) (*agent.Result, error) {
+	cloned := cfg
+	cloned.Env = make(map[string]string, len(cfg.Env))
+	for k, v := range cfg.Env {
+		cloned.Env[k] = v
+	}
+	a.runs = append(a.runs, cloned)
+
+	if a.turnRuns == nil {
+		a.turnRuns = make(map[int]int)
+	}
+	if _, ok := a.turnRuns[cfg.TurnID]; !ok {
+		a.turnOrder = append(a.turnOrder, cfg.TurnID)
+	}
+	a.turnRuns[cfg.TurnID]++
+	runInTurn := a.turnRuns[cfg.TurnID]
+
+	shouldWait := false
+	if len(a.turnOrder) > 0 && cfg.TurnID == a.turnOrder[0] && runInTurn <= 2 {
+		shouldWait = true
+	}
+	if len(a.turnOrder) > 1 && cfg.TurnID == a.turnOrder[1] && runInTurn <= 1 {
+		shouldWait = true
+	}
+	if shouldWait {
+		if err := a.store.SignalWait(cfg.TurnID); err != nil {
+			return nil, err
+		}
+	}
+
+	return &agent.Result{
+		ExitCode:       0,
+		Duration:       time.Millisecond,
+		AgentSessionID: fmt.Sprintf("sess-%d-%d", cfg.TurnID, runInTurn),
 	}, nil
 }
 
@@ -260,7 +306,7 @@ func TestLoopWaitForSpawnsResumesSameTurn(t *testing.T) {
 			Prompt:   "base",
 			MaxTurns: 1,
 		},
-		OnWait: func(turnID int) ([]WaitResult, bool) {
+		OnWait: func(turnID int, alreadySeen map[int]struct{}) ([]WaitResult, bool) {
 			waited = append(waited, turnID)
 			return []WaitResult{
 				{SpawnID: 7, Profile: "scout", Status: "completed", Summary: "done"},
@@ -330,7 +376,7 @@ func TestLoopWaitForSpawnsStopsTurnImmediately(t *testing.T) {
 			Prompt:   "base",
 			MaxTurns: 1,
 		},
-		OnWait: func(turnID int) ([]WaitResult, bool) {
+		OnWait: func(turnID int, alreadySeen map[int]struct{}) ([]WaitResult, bool) {
 			waited = append(waited, turnID)
 			return []WaitResult{{SpawnID: 11, Profile: "scout", Status: "completed", Summary: "done"}}, false
 		},
@@ -353,6 +399,73 @@ func TestLoopWaitForSpawnsStopsTurnImmediately(t *testing.T) {
 	}
 	if s.IsWaiting(a.firstTurnID) {
 		t.Fatalf("wait signal for turn %d was not cleared", a.firstTurnID)
+	}
+}
+
+func TestLoopOnWaitSeenSpawnIDsAccumulateAndResetByTurn(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "test", RepoPath: dir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
+	}
+
+	a := &waitSeenTrackingStubAgent{store: s}
+	var waited []int
+	var seenCounts []int
+	firstTurnID := 0
+
+	l := &Loop{
+		Store: s,
+		Agent: a,
+		Config: agent.Config{
+			Prompt:   "base",
+			MaxTurns: 2,
+		},
+		OnWait: func(turnID int, alreadySeen map[int]struct{}) ([]WaitResult, bool) {
+			waited = append(waited, turnID)
+			seenCounts = append(seenCounts, len(alreadySeen))
+
+			if firstTurnID == 0 {
+				firstTurnID = turnID
+				if len(alreadySeen) != 0 {
+					t.Fatalf("first wait alreadySeen size = %d, want 0", len(alreadySeen))
+				}
+				return []WaitResult{{SpawnID: 101, Profile: "scout", Status: "completed", Summary: "first"}}, true
+			}
+			if turnID == firstTurnID {
+				if len(alreadySeen) != 1 {
+					t.Fatalf("second wait alreadySeen size = %d, want 1", len(alreadySeen))
+				}
+				if _, ok := alreadySeen[101]; !ok {
+					t.Fatalf("second wait alreadySeen missing spawn 101")
+				}
+				return []WaitResult{{SpawnID: 102, Profile: "scout", Status: "completed", Summary: "second"}}, false
+			}
+			if len(alreadySeen) != 0 {
+				t.Fatalf("new turn alreadySeen size = %d, want 0", len(alreadySeen))
+			}
+			return []WaitResult{{SpawnID: 201, Profile: "scout", Status: "completed", Summary: "third"}}, false
+		},
+	}
+
+	if err := l.Run(context.Background()); err != nil {
+		t.Fatalf("Loop.Run() error = %v", err)
+	}
+
+	if len(waited) != 3 {
+		t.Fatalf("OnWait calls = %d, want 3", len(waited))
+	}
+	if waited[0] != waited[1] {
+		t.Fatalf("first two OnWait turn IDs differ: %v", waited)
+	}
+	if waited[2] == waited[0] {
+		t.Fatalf("third OnWait turn ID did not reset: %v", waited)
+	}
+	if len(seenCounts) != 3 || seenCounts[0] != 0 || seenCounts[1] != 1 || seenCounts[2] != 0 {
+		t.Fatalf("seen counts = %v, want [0 1 0]", seenCounts)
 	}
 }
 

@@ -490,9 +490,9 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 				})
 				return newPrompt
 			},
-			OnWait: func(turnID int) ([]loop.WaitResult, bool) {
+			OnWait: func(turnID int, alreadySeen map[int]struct{}) ([]loop.WaitResult, bool) {
 				// Wait for at least one of this child's own spawns to complete.
-				results, morePending := o.WaitAny(turnID)
+				results, morePending := o.WaitAny(turnID, alreadySeen)
 				var wr []loop.WaitResult
 				for _, r := range results {
 					childRec, _ := o.store.GetSpawn(r.SpawnID)
@@ -834,16 +834,25 @@ func (o *Orchestrator) Wait(parentTurnID int) []SpawnResult {
 	return results
 }
 
-// WaitAny blocks until at least one non-terminal spawn for the given parent
-// turn reaches a terminal state, then returns results for all completed spawns.
-// The bool return indicates whether more spawns are still running.
-func (o *Orchestrator) WaitAny(parentTurnID int) ([]SpawnResult, bool) {
-	debug.LogKV("orch", "WaitAny() called", "parent_turn", parentTurnID)
+// WaitAny blocks until at least one unseen non-terminal spawn for the given
+// parent turn reaches a terminal state, then returns newly completed results
+// only. alreadySeen contains spawn IDs returned in prior wait cycles for this
+// turn. The bool return indicates whether more spawns are still running.
+func (o *Orchestrator) WaitAny(parentTurnID int, alreadySeen map[int]struct{}) ([]SpawnResult, bool) {
+	debug.LogKV("orch", "WaitAny() called",
+		"parent_turn", parentTurnID,
+		"already_seen", len(alreadySeen),
+	)
 	records, _ := o.store.SpawnsByParent(parentTurnID)
 	pending := make(map[int]struct{})
 	var completed []int
+	seenCompleted := 0
 	for _, r := range records {
 		if isTerminalSpawnStatus(r.Status) {
+			if _, seen := alreadySeen[r.ID]; seen {
+				seenCompleted++
+				continue
+			}
 			completed = append(completed, r.ID)
 		} else {
 			pending[r.ID] = struct{}{}
@@ -852,34 +861,49 @@ func (o *Orchestrator) WaitAny(parentTurnID int) ([]SpawnResult, bool) {
 	debug.LogKV("orch", "WaitAny initial state",
 		"parent_turn", parentTurnID,
 		"total_spawns", len(records),
-		"already_completed", len(completed),
+		"already_seen", len(alreadySeen),
+		"seen_completed", seenCompleted,
+		"newly_completed", len(completed),
 		"pending", len(pending),
 	)
 	if len(pending) == 0 && len(completed) == 0 {
 		return nil, false
 	}
 
-	// Poll until at least one pending spawn reaches a terminal state.
+	// Poll until at least one pending spawn reaches a terminal state that
+	// has not already been delivered, or all spawns are terminal.
 	if len(completed) == 0 && len(pending) > 0 {
-		debug.LogKV("orch", "WaitAny polling for first completion", "parent_turn", parentTurnID, "pending", len(pending))
+		debug.LogKV("orch", "WaitAny polling",
+			"parent_turn", parentTurnID,
+			"already_seen", len(alreadySeen),
+			"pending", len(pending),
+		)
 		waitStart := time.Now()
 		ticker := time.NewTicker(250 * time.Millisecond)
 		defer ticker.Stop()
 
-		for len(completed) == 0 {
+		for len(completed) == 0 && len(pending) > 0 {
 			<-ticker.C
 			for id := range pending {
 				rec, err := o.store.GetSpawn(id)
-				if err != nil || isTerminalSpawnStatus(rec.Status) {
-					completed = append(completed, id)
+				if err != nil {
 					delete(pending, id)
+					continue
+				}
+				if isTerminalSpawnStatus(rec.Status) {
+					delete(pending, id)
+					if _, seen := alreadySeen[id]; seen {
+						continue
+					}
+					completed = append(completed, id)
 				}
 			}
 		}
-		debug.LogKV("orch", "WaitAny first completion detected",
+		debug.LogKV("orch", "WaitAny poll complete",
 			"parent_turn", parentTurnID,
 			"wait_duration", time.Since(waitStart),
-			"completed", len(completed),
+			"already_seen", len(alreadySeen),
+			"newly_completed", len(completed),
 			"still_pending", len(pending),
 		)
 	}
@@ -902,6 +926,7 @@ func (o *Orchestrator) WaitAny(parentTurnID int) ([]SpawnResult, bool) {
 	}
 	debug.LogKV("orch", "WaitAny returning",
 		"parent_turn", parentTurnID,
+		"already_seen", len(alreadySeen),
 		"results", len(results),
 		"more_pending", len(pending) > 0,
 	)
