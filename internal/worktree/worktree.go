@@ -43,6 +43,26 @@ func BranchName(parentSession int, childProfile string) string {
 	return fmt.Sprintf("adaf/%d/%s/%s", parentSession, sanitize(childProfile), ts)
 }
 
+// CreateDetached creates a worktree with a detached HEAD at the current commit.
+// Used for read-only spawns that need an isolated working directory without a branch.
+func (m *Manager) CreateDetached(ctx context.Context, name string) (string, error) {
+	base := filepath.Join(m.repoRoot, worktreeDir)
+	if err := os.MkdirAll(base, 0755); err != nil {
+		return "", fmt.Errorf("creating worktree dir: %w", err)
+	}
+
+	wtPath := filepath.Join(base, sanitize(name))
+
+	if _, err := m.git(ctx, "worktree", "add", "--detach", wtPath); err != nil {
+		return "", fmt.Errorf("worktree add --detach: %w", err)
+	}
+
+	// Symlink .adaf/ so sub-agents share the store.
+	m.symlinkAdaf(wtPath)
+
+	return wtPath, nil
+}
+
 // Create creates a new worktree for the given branch.
 // It returns the worktree path on disk.
 func (m *Manager) Create(ctx context.Context, branchName string) (string, error) {
@@ -72,16 +92,8 @@ func (m *Manager) Create(ctx context.Context, branchName string) (string, error)
 		return "", fmt.Errorf("worktree add: %w", err)
 	}
 
-	// Symlink .adaf/ from the main repo into the worktree so sub-agents share the store.
-	adafSrc := filepath.Join(m.repoRoot, ".adaf")
-	adafDst := filepath.Join(wtPath, ".adaf")
-	if _, err := os.Stat(adafSrc); err == nil {
-		os.Remove(adafDst) // remove if exists
-		if err := os.Symlink(adafSrc, adafDst); err != nil {
-			// Non-fatal: sub-agent will still work, just without shared store.
-			fmt.Fprintf(os.Stderr, "warning: failed to symlink .adaf into worktree: %v\n", err)
-		}
-	}
+	// Symlink .adaf/ so sub-agents share the store.
+	m.symlinkAdaf(wtPath)
 
 	return wtPath, nil
 }
@@ -237,6 +249,51 @@ func (m *Manager) CleanupAll(ctx context.Context) error {
 	os.RemoveAll(base)
 	m.git(ctx, "worktree", "prune")
 	return nil
+}
+
+// CleanupStale removes worktrees that are older than maxAge or whose paths
+// match entries in the deadPaths set (e.g. worktrees belonging to completed/failed spawns).
+// It is safe to call on every startup.
+func (m *Manager) CleanupStale(ctx context.Context, maxAge time.Duration, deadPaths map[string]bool) (removed int, _ error) {
+	active, err := m.ListActive(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	for _, wt := range active {
+		shouldRemove := deadPaths[wt.Path]
+
+		if !shouldRemove && maxAge > 0 {
+			if info, err := os.Stat(wt.Path); err == nil {
+				if time.Since(info.ModTime()) > maxAge {
+					shouldRemove = true
+				}
+			}
+		}
+
+		if !shouldRemove {
+			continue
+		}
+
+		m.RemoveWithBranch(ctx, wt.Path, wt.Branch)
+		removed++
+	}
+
+	if removed > 0 {
+		m.git(ctx, "worktree", "prune")
+	}
+	return removed, nil
+}
+
+func (m *Manager) symlinkAdaf(wtPath string) {
+	adafSrc := filepath.Join(m.repoRoot, ".adaf")
+	adafDst := filepath.Join(wtPath, ".adaf")
+	if _, err := os.Stat(adafSrc); err == nil {
+		os.Remove(adafDst)
+		if err := os.Symlink(adafSrc, adafDst); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to symlink .adaf into worktree: %v\n", err)
+		}
+	}
 }
 
 // git runs a git command in the repo root and returns combined output.

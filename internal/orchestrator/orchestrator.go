@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
 
@@ -268,6 +269,16 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 		}
 		rec.Branch = branchName
 		rec.WorktreePath = wtPath
+	} else {
+		// Read-only spawns get an isolated worktree (detached HEAD) so
+		// concurrent agents don't contend for lock files in the same directory.
+		// Note: these worktrees are at HEAD and won't see uncommitted changes.
+		name := "ro-" + worktree.BranchName(req.ParentTurnID, req.ChildProfile)
+		if p, err := o.worktrees.CreateDetached(ctx, name); err == nil {
+			wtPath = p
+			rec.WorktreePath = wtPath
+		}
+		// If creation fails, fall back to repoRoot (legacy behavior).
 	}
 
 	if err := o.store.CreateSpawn(rec); err != nil {
@@ -305,6 +316,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 		Task:         req.Task,
 		ReadOnly:     req.ReadOnly,
 		ParentTurnID: req.ParentTurnID,
+		Delegation:   req.Delegation,
 	})
 
 	workDir := o.repoRoot
@@ -431,6 +443,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 					Task:            req.Task,
 					ReadOnly:        req.ReadOnly,
 					ParentTurnID:    req.ParentTurnID,
+					Delegation:      req.Delegation,
 					SupervisorNotes: supervisorNotes,
 					Messages:        msgs,
 				})
@@ -473,6 +486,12 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 			result = appendSpawnResult(result, fmt.Sprintf("auto-commit fallback failed: %v", autoCommitErr))
 		} else if autoCommitNote != "" {
 			result = appendSpawnResult(result, autoCommitNote)
+		}
+		// Clean up read-only worktrees immediately — there's nothing to merge.
+		if rec.ReadOnly && rec.WorktreePath != "" {
+			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			o.worktrees.Remove(cleanCtx, rec.WorktreePath, false)
+			cleanCancel()
 		}
 		rec.Status = status
 		rec.ExitCode = exitCode
@@ -798,6 +817,38 @@ func (o *Orchestrator) CleanupAll(ctx context.Context) error {
 	return o.worktrees.CleanupAll(ctx)
 }
 
+// staleWorktreeMaxAge is the TTL after which any worktree is considered stale,
+// regardless of spawn status. Covers crashed sessions that never updated the record.
+const staleWorktreeMaxAge = 24 * time.Hour
+
+// cleanupStaleWorktrees removes worktrees from completed/failed spawns and
+// worktrees older than staleWorktreeMaxAge. Best-effort, errors are logged.
+func (o *Orchestrator) cleanupStaleWorktrees() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Build set of worktree paths that belong to terminal spawns.
+	deadPaths := make(map[string]bool)
+	spawns, _ := o.store.ListSpawns()
+	for _, rec := range spawns {
+		if rec.WorktreePath == "" {
+			continue
+		}
+		switch rec.Status {
+		case "completed", "failed", "merged", "rejected":
+			deadPaths[rec.WorktreePath] = true
+		}
+	}
+
+	removed, err := o.worktrees.CleanupStale(ctx, staleWorktreeMaxAge, deadPaths)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: stale worktree cleanup: %v\n", err)
+	}
+	if removed > 0 {
+		fmt.Fprintf(os.Stderr, "cleaned up %d stale worktree(s)\n", removed)
+	}
+}
+
 // ReparentSpawn updates a spawn's parent turn ID, used for handoff across loop steps.
 func (o *Orchestrator) ReparentSpawn(spawnID, newParentTurnID int) error {
 	rec, err := o.store.GetSpawn(spawnID)
@@ -848,11 +899,13 @@ var (
 	globalOrchMu sync.Mutex
 )
 
-// Init initializes the global orchestrator singleton.
+// Init initializes the global orchestrator singleton and cleans up stale
+// worktrees left behind by previous sessions (crashed, killed, etc.).
 func Init(s *store.Store, globalCfg *config.GlobalConfig, repoRoot string) *Orchestrator {
 	globalOrchMu.Lock()
 	defer globalOrchMu.Unlock()
 	globalOrch = New(s, globalCfg, repoRoot)
+	globalOrch.cleanupStaleWorktrees()
 	return globalOrch
 }
 

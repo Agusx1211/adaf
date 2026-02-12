@@ -10,9 +10,9 @@ import (
 func TestDelegationSection_IncludesQuickstartWhenDelegationEnabled(t *testing.T) {
 	got := delegationSection(&config.DelegationConfig{}, nil)
 
-	hasQuickstart := strings.Contains(got, "Default flow (token-efficient):")
-	if !hasQuickstart {
-		t.Fatalf("expected quickstart guidance in delegation section\nprompt:\n%s", got)
+	hasSpawnFlow := strings.Contains(got, "ALWAYS use this pattern")
+	if !hasSpawnFlow {
+		t.Fatalf("expected spawn flow guidance in delegation section\nprompt:\n%s", got)
 	}
 
 	hasWaitFlow := strings.Contains(got, "adaf wait-for-spawns")
@@ -20,9 +20,14 @@ func TestDelegationSection_IncludesQuickstartWhenDelegationEnabled(t *testing.T)
 		t.Fatalf("expected quickstart guidance to include wait-for-spawns flow\nprompt:\n%s", got)
 	}
 
-	hasNoPollingNudge := strings.Contains(got, "Avoid idle polling while children run.")
-	if !hasNoPollingNudge {
-		t.Fatalf("expected guidance to avoid idle polling in delegation section\nprompt:\n%s", got)
+	hasAntiWait := strings.Contains(got, "burns tokens while you idle")
+	if !hasAntiWait {
+		t.Fatalf("expected guidance against --wait in delegation section\nprompt:\n%s", got)
+	}
+
+	hasScouts := strings.Contains(got, "Scouts (read-only sub-agents)")
+	if !hasScouts {
+		t.Fatalf("expected scout guidance in delegation section\nprompt:\n%s", got)
 	}
 }
 

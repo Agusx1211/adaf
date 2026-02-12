@@ -50,15 +50,25 @@ You have access to the ` + "`adaf`" + ` CLI for managing project state. Use it t
 - ` + "`adaf doc show <id>`" + ` — Read a document
 
 ### Agent Orchestration (when delegation is enabled for your loop step)
-- Preferred flow: spawn independent tasks without ` + "`--wait`" + `, then call ` + "`adaf wait-for-spawns`" + ` once and finish your current turn
-- Use ` + "`--wait`" + ` only when a child result is required before you can continue in the same turn
-- Avoid repeatedly polling ` + "`adaf spawn-status`" + ` while waiting, unless diagnosing a stuck child
-- ` + "`adaf spawn --profile <name> --task \"...\" [--read-only] [--wait]`" + ` — Spawn a sub-agent
+
+**Required flow — do NOT use ` + "`--wait`" + `:**
+1. Spawn all independent tasks at once (without ` + "`--wait`" + `)
+2. Call ` + "`adaf wait-for-spawns`" + ` once
+3. Finish your turn immediately — you resume automatically when children complete
+
+` + "`wait-for-spawns`" + ` suspends your session at zero token cost. ` + "`--wait`" + ` keeps your session alive and wastes tokens. Only use ` + "`--wait`" + ` when you need a child's output to spawn the next task in the same turn.
+
+Use ` + "`--read-only`" + ` scouts for any information gathering (repo structure, file contents, git history, test status). Note: read-only scouts run in an isolated worktree snapshot at HEAD — they do NOT see uncommitted or staged changes.
+
+- ` + "`adaf spawn --profile <name> --task \"...\" [--read-only]`" + ` — Spawn a sub-agent (non-blocking)
+- ` + "`adaf spawn --profile <name> --task-file <path> [--read-only]`" + ` — Spawn with detailed task from file
+- ` + "`adaf wait-for-spawns`" + ` — Suspend until all spawns complete (zero-cost wait)
 - ` + "`adaf spawn-status [--spawn-id N]`" + ` — Check spawn status
-- ` + "`adaf spawn-wait [--spawn-id N]`" + ` — Wait for spawn(s) to complete
 - ` + "`adaf spawn-diff --spawn-id N`" + ` — View diff of spawn's changes
 - ` + "`adaf spawn-merge --spawn-id N [--squash]`" + ` — Merge spawn's changes
 - ` + "`adaf spawn-reject --spawn-id N`" + ` — Reject spawn's changes
+- ` + "`adaf spawn-message --spawn-id N \"guidance\"`" + ` — Send async message to running child
+- ` + "`adaf spawn-message --spawn-id N --interrupt \"new instructions\"`" + ` — Redirect a running child
 
 ### Supervisor Notes
 - ` + "`adaf note add --session N --note \"guidance text\"`" + ` — Send a note to a running session
