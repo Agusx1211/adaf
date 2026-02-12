@@ -36,6 +36,7 @@ func StartDaemon(sessionID int) error {
 	}
 
 	cmd := exec.Command(exe, "_session-daemon", "--id", fmt.Sprintf("%d", sessionID))
+	cmd.Env = debug.PropagatedEnv(os.Environ(), fmt.Sprintf("session-daemon:%d", sessionID))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdin = nil
 	logFile, err := os.OpenFile(DaemonLogPath(sessionID), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)

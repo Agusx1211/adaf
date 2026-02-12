@@ -94,7 +94,7 @@ func init() {
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		debugFlag, _ := cmd.Flags().GetBool("debug")
-		if !debugFlag {
+		if !debugFlag && !debug.ShouldEnableFromEnv() {
 			return nil
 		}
 		logPath, err := debug.Init()
