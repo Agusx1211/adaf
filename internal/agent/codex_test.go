@@ -63,17 +63,28 @@ printf 'ok\n'
 	if result.ExitCode != 0 {
 		t.Fatalf("Run() exit code = %d, want 0; stderr = %q", result.ExitCode, result.Error)
 	}
-	if !strings.Contains(result.Output, "args:exec --skip-git-repo-check --full-auto") {
-		t.Fatalf("Run() output missing expected arg sequence, got %q", result.Output)
-	}
 	if strings.Contains(result.Output, "PING") {
 		t.Fatalf("Run() output should not contain prompt in args, got %q", result.Output)
 	}
 
 	events := rec.Events()
+	foundCommandMeta := false
 	for _, ev := range events {
-		if ev.Type == "meta" && strings.HasPrefix(ev.Data, "command=") && strings.Contains(ev.Data, "PING") {
+		if ev.Type != "meta" || !strings.HasPrefix(ev.Data, "command=") {
+			continue
+		}
+		foundCommandMeta = true
+		if strings.Contains(ev.Data, "PING") {
 			t.Fatalf("command metadata leaked prompt into argv: %q", ev.Data)
 		}
+		if !strings.Contains(ev.Data, "exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --json") {
+			t.Fatalf("command metadata missing expected arg sequence: %q", ev.Data)
+		}
+		if strings.Contains(ev.Data, "--full-auto") {
+			t.Fatalf("command metadata should not include --full-auto: %q", ev.Data)
+		}
+	}
+	if !foundCommandMeta {
+		t.Fatal("expected command metadata event")
 	}
 }

@@ -52,7 +52,7 @@ func TestCodexIntegrationBasicPrompt(t *testing.T) {
 
 	result, err := agent.Run(ctx, Config{
 		Command: codexBinary,
-		Args:    []string{"--full-auto", "--skip-git-repo-check"},
+		Args:    []string{"--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"},
 		WorkDir: workDir,
 		Prompt:  "Respond with exactly: HELLO_CODEX_TEST_OK",
 	}, rec)
@@ -94,7 +94,7 @@ func TestCodexIntegrationExitCode(t *testing.T) {
 
 	result, err := agent.Run(ctx, Config{
 		Command: codexBinary,
-		Args:    []string{"--full-auto", "--skip-git-repo-check"},
+		Args:    []string{"--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"},
 		WorkDir: workDir,
 		Prompt:  "Say hello",
 	}, rec)
@@ -125,7 +125,7 @@ func TestCodexIntegrationRecordingEvents(t *testing.T) {
 
 	_, err := agent.Run(ctx, Config{
 		Command: codexBinary,
-		Args:    []string{"--full-auto", "--skip-git-repo-check"},
+		Args:    []string{"--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"},
 		WorkDir: workDir,
 		Prompt:  "Say OK",
 	}, rec)
@@ -208,7 +208,7 @@ func TestCodexIntegrationContextCancel(t *testing.T) {
 	start := time.Now()
 	result, err := agent.Run(ctx, Config{
 		Command: codexBinary,
-		Args:    []string{"--full-auto", "--skip-git-repo-check"},
+		Args:    []string{"--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"},
 		WorkDir: workDir,
 		Prompt:  "Write a 10000 word essay about the history of computing. Include all major milestones from 1940 to 2024.",
 	}, rec)

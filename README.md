@@ -44,7 +44,7 @@ When you run AI coding agents (Claude, Codex, Gemini, etc.) on a project, each s
 | Agent | CLI Tool | Invocation |
 |-------|----------|------------|
 | **claude** | `claude` | `claude -p <prompt> --output-format stream-json --verbose` |
-| **codex** | `codex` | `codex exec <prompt> --full-auto` |
+| **codex** | `codex` | `codex exec <prompt> --dangerously-bypass-approvals-and-sandbox --json` |
 | **gemini** | `gemini` | `gemini <prompt> -y` |
 | **vibe** | `vibe` | `vibe <prompt>` (stdin) |
 | **opencode** | `opencode` | `opencode` |

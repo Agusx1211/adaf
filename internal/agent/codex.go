@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/agusx1211/adaf/internal/recording"
+	"github.com/agusx1211/adaf/internal/stream"
 )
 
 // CodexAgent runs OpenAI's codex CLI tool.
@@ -32,8 +32,15 @@ func (c *CodexAgent) Name() string {
 //
 // ADAF runs codex in non-interactive mode via "codex exec" so the underlying
 // TUI does not take over the terminal. The exec subcommand defaults to
-// never asking for approvals. Additional flags (e.g. --model, --full-auto,
+// never asking for approvals. Additional flags (e.g. --model,
 // --dangerously-bypass-approvals-and-sandbox) can be supplied via cfg.Args.
+//
+// To avoid Codex workspace sandbox restrictions blocking delegated sub-agents,
+// ADAF enforces --dangerously-bypass-approvals-and-sandbox unless the caller
+// already supplied it (or --yolo).
+//
+// Output is requested in JSONL mode (--json) and parsed into the common stream
+// event format so TUI/CLI rendering is consistent with other stream agents.
 func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Recorder) (*Result, error) {
 	cmdName := cfg.Command
 	if cmdName == "" {
@@ -41,7 +48,7 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 	}
 
 	// Build arguments: force non-interactive exec mode, then configured flags.
-	args := make([]string, 0, len(cfg.Args)+4)
+	args := make([]string, 0, len(cfg.Args)+8)
 	args = append(args, "exec")
 
 	// Allow running outside a git repository since ADAF manages its own
@@ -50,7 +57,16 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 		args = append(args, "--skip-git-repo-check")
 	}
 
-	args = append(args, cfg.Args...)
+	// Full-auto still enables workspace sandboxing. ADAF must run without
+	// sandboxing, so remove --full-auto if present and force the danger flag.
+	userArgs := withoutFlag(cfg.Args, "--full-auto")
+	args = append(args, userArgs...)
+	if !hasFlag(userArgs, "--dangerously-bypass-approvals-and-sandbox") && !hasFlag(userArgs, "--yolo") {
+		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
+	}
+	if !hasFlag(userArgs, "--json") && !hasFlag(userArgs, "--experimental-json") {
+		args = append(args, "--json")
+	}
 
 	// codex exec accepts prompt via positional arg or stdin.
 	// We pass prompt through stdin to avoid argv size limits on long prompts.
@@ -85,25 +101,18 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
 
-	stdoutW := cfg.Stdout
-	if stdoutW == nil {
-		stdoutW = os.Stdout
+	// Set up stdout pipe for streaming JSONL parsing.
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("codex agent: stdout pipe: %w", err)
 	}
+
 	stderrW := cfg.Stderr
 	if stderrW == nil {
 		stderrW = os.Stderr
 	}
 
-	var stdoutBuf, stderrBuf bytes.Buffer
-	stdoutWriters := []io.Writer{
-		&stdoutBuf,
-		recorder.WrapWriter(stdoutW, "stdout"),
-	}
-	if w := newEventSinkWriter(cfg.EventSink, cfg.TurnID, ""); w != nil {
-		stdoutWriters = append(stdoutWriters, w)
-	}
-	cmd.Stdout = io.MultiWriter(stdoutWriters...)
-
+	var stderrBuf strings.Builder
 	stderrWriters := []io.Writer{
 		&stderrBuf,
 		recorder.WrapWriter(stderrW, "stderr"),
@@ -118,23 +127,94 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 	recorder.RecordMeta("workdir", cfg.WorkDir)
 
 	start := time.Now()
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("codex agent: failed to start command: %w", err)
+	}
+
+	events := stream.ParseCodex(ctx, stdoutPipe)
+	var textBuf strings.Builder
+
+	accumulateText := func(ev stream.ClaudeEvent) {
+		switch ev.Type {
+		case "assistant":
+			if ev.AssistantMessage != nil {
+				for _, block := range ev.AssistantMessage.Content {
+					if block.Type == "text" {
+						textBuf.WriteString(block.Text)
+					}
+				}
+			}
+		case "result":
+			if ev.ResultText != "" {
+				textBuf.Reset()
+				textBuf.WriteString(ev.ResultText)
+			}
+		}
+	}
+
+	if cfg.EventSink != nil {
+		for ev := range events {
+			if len(ev.Raw) > 0 {
+				recorder.RecordStream(string(ev.Raw))
+			}
+			if ev.Err != nil || ev.Parsed.Type == "" {
+				continue
+			}
+			ev.TurnID = cfg.TurnID
+			cfg.EventSink <- ev
+			accumulateText(ev.Parsed)
+		}
+	} else {
+		stdoutW := cfg.Stdout
+		if stdoutW == nil {
+			stdoutW = os.Stdout
+		}
+		display := stream.NewDisplay(stdoutW)
+
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case ev, ok := <-events:
+				if !ok {
+					goto done
+				}
+				if len(ev.Raw) > 0 {
+					recorder.RecordStream(string(ev.Raw))
+				}
+				if ev.Err != nil || ev.Parsed.Type == "" {
+					continue
+				}
+				display.Handle(ev.Parsed)
+				accumulateText(ev.Parsed)
+			case <-ticker.C:
+				elapsed := time.Since(start).Round(time.Second)
+				fmt.Fprintf(stderrW, "\033[2m[status]\033[0m agent running for %s...\n", elapsed)
+			}
+		}
+
+	done:
+		display.Finish()
+	}
+
+	waitErr := cmd.Wait()
 	duration := time.Since(start)
 
 	exitCode := 0
-	if err != nil {
+	if waitErr != nil {
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if errors.As(waitErr, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
-			return nil, fmt.Errorf("codex agent: failed to run command: %w", err)
+			return nil, fmt.Errorf("codex agent: failed to run command: %w", waitErr)
 		}
 	}
 
 	return &Result{
 		ExitCode: exitCode,
 		Duration: duration,
-		Output:   stdoutBuf.String(),
+		Output:   textBuf.String(),
 		Error:    stderrBuf.String(),
 	}, nil
 }
@@ -147,4 +227,19 @@ func hasFlag(args []string, flag string) bool {
 		}
 	}
 	return false
+}
+
+// withoutFlag returns a copy of args with exact matches to flag removed.
+func withoutFlag(args []string, flag string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == flag {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }

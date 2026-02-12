@@ -339,7 +339,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 		if childProf.ReasoningLevel != "" {
 			agentArgs = append(agentArgs, "-c", `model_reasoning_effort="`+childProf.ReasoningLevel+`"`)
 		}
-		agentArgs = append(agentArgs, "--full-auto")
+		agentArgs = append(agentArgs, "--dangerously-bypass-approvals-and-sandbox")
 	case "opencode":
 		if modelOverride != "" {
 			agentArgs = append(agentArgs, "--model", modelOverride)

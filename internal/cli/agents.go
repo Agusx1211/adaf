@@ -360,7 +360,7 @@ func healthCheckArgs(agentName, modelOverride string) []string {
 		if modelOverride != "" {
 			args = append(args, "--model", modelOverride)
 		}
-		args = append(args, "--full-auto")
+		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	case "opencode":
 		if modelOverride != "" {
 			args = append(args, "--model", modelOverride)

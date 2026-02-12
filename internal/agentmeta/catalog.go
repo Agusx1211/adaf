@@ -60,7 +60,7 @@ var builtin = map[string]Info{
 			{Name: "high"},
 			{Name: "xhigh"},
 		},
-		Capabilities: []string{"prompt-arg", "model-select", "auto-approve", "json-output"},
+		Capabilities: []string{"prompt-arg", "model-select", "auto-approve", "json-output", "stream-output"},
 	},
 	"vibe": {
 		Name:         "vibe",

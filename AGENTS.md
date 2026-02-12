@@ -53,7 +53,7 @@ git clone https://github.com/google-gemini/gemini-cli references/gemini-cli
 | Area | Reference | What to verify |
 |------|-----------|----------------|
 | `internal/agent/claude.go` | `references/claude-code/` | CLI flags, `--output-format stream-json` schema, model IDs |
-| `internal/agent/codex.go` | `references/codex/` | `exec` subcommand, `--full-auto`, model slugs |
+| `internal/agent/codex.go` | `references/codex/` | `exec` subcommand, `--json`, `--dangerously-bypass-approvals-and-sandbox`, model slugs |
 | `internal/agent/vibe.go` | `references/vibe/` | `-p` flag, config.toml format, model aliases |
 | `internal/agent/gemini.go` | `references/gemini-cli/` | `-p` flag, `--output-format stream-json`, `-y` auto-approve |
 | `internal/detect/detect.go` | All | Version flags, install paths, config file locations, model discovery |

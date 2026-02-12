@@ -431,7 +431,7 @@ func buildAgentConfig(cfg RunConfig, prof *config.Profile, runID, stepIndex int)
 		if reasoningLevel != "" {
 			agentArgs = append(agentArgs, "-c", `model_reasoning_effort="`+reasoningLevel+`"`)
 		}
-		agentArgs = append(agentArgs, "--full-auto")
+		agentArgs = append(agentArgs, "--dangerously-bypass-approvals-and-sandbox")
 	case "opencode":
 		if modelOverride != "" {
 			agentArgs = append(agentArgs, "--model", modelOverride)
