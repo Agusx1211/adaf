@@ -522,8 +522,18 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 		Pushover: cfg.Pushover,
 	}
 	if loaded, err := config.Load(); err == nil && loaded != nil {
-		if len(globalCfg.Profiles) == 0 {
-			globalCfg.Profiles = append([]config.Profile(nil), loaded.Profiles...)
+		// Merge any profiles from disk that are missing in the snapshot.
+		// The snapshot should already include all needed profiles, but
+		// merging from disk acts as a safety net (e.g. for delegation
+		// profiles that a caller might have missed).
+		existing := make(map[string]struct{}, len(globalCfg.Profiles))
+		for _, p := range globalCfg.Profiles {
+			existing[strings.ToLower(p.Name)] = struct{}{}
+		}
+		for _, p := range loaded.Profiles {
+			if _, ok := existing[strings.ToLower(p.Name)]; !ok {
+				globalCfg.Profiles = append(globalCfg.Profiles, p)
+			}
 		}
 		if globalCfg.Pushover.UserKey == "" && globalCfg.Pushover.AppToken == "" {
 			globalCfg.Pushover = loaded.Pushover

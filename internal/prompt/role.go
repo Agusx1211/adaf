@@ -79,6 +79,9 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 	// Wait-for-spawns command.
 	b.WriteString("- `adaf wait-for-spawns` — Signal that you want to wait for all spawns to complete, then get results in your next turn\n\n")
 
+	// Task quality guidance.
+	b.WriteString("When spawning, write a thorough task description — sub-agents only see what you give them. Include relevant context, goals, constraints, and what \"done\" looks like. Use `--task-file` for anything non-trivial.\n\n")
+
 	// Available profiles.
 	if len(deleg.Profiles) > 0 && globalCfg != nil {
 		b.WriteString("## Available Profiles to Spawn\n\n")
