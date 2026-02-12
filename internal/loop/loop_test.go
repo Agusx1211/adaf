@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +19,11 @@ type stubAgent struct {
 
 type errStubAgent struct {
 	err error
+}
+
+type waitResumeStubAgent struct {
+	store *store.Store
+	runs  []agent.Config
 }
 
 func (a *stubAgent) Name() string { return "stub" }
@@ -36,6 +42,28 @@ func (a *errStubAgent) Name() string { return "stub" }
 
 func (a *errStubAgent) Run(ctx context.Context, cfg agent.Config, recorder *recording.Recorder) (*agent.Result, error) {
 	return nil, a.err
+}
+
+func (a *waitResumeStubAgent) Name() string { return "stub" }
+
+func (a *waitResumeStubAgent) Run(ctx context.Context, cfg agent.Config, recorder *recording.Recorder) (*agent.Result, error) {
+	cloned := cfg
+	cloned.Env = make(map[string]string, len(cfg.Env))
+	for k, v := range cfg.Env {
+		cloned.Env[k] = v
+	}
+	a.runs = append(a.runs, cloned)
+
+	if len(a.runs) == 1 {
+		if err := a.store.SignalWait(cfg.TurnID); err != nil {
+			return nil, err
+		}
+	}
+	return &agent.Result{
+		ExitCode:       0,
+		Duration:       time.Millisecond,
+		AgentSessionID: "sess-123",
+	}, nil
 }
 
 func TestLoopPromptFuncReceivesSupervisorNotesByTurn(t *testing.T) {
@@ -179,4 +207,83 @@ func TestLoopRunReturnsContextCanceledAndMarksCancelled(t *testing.T) {
 	if turns[0].BuildState != "cancelled" {
 		t.Fatalf("build state = %q, want %q", turns[0].BuildState, "cancelled")
 	}
+}
+
+func TestLoopWaitForSpawnsResumesSameTurn(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "test", RepoPath: dir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
+	}
+
+	a := &waitResumeStubAgent{store: s}
+	var waited []int
+
+	l := &Loop{
+		Store: s,
+		Agent: a,
+		Config: agent.Config{
+			Prompt:   "base",
+			MaxTurns: 1,
+		},
+		OnWait: func(turnID int) ([]WaitResult, bool) {
+			waited = append(waited, turnID)
+			return []WaitResult{
+				{SpawnID: 7, Profile: "scout", Status: "completed", Summary: "done"},
+			}, false
+		},
+	}
+
+	if err := l.Run(context.Background()); err != nil {
+		t.Fatalf("Loop.Run() error = %v", err)
+	}
+
+	if len(a.runs) != 2 {
+		t.Fatalf("agent runs = %d, want 2 (wait + resume)", len(a.runs))
+	}
+	if got, want := a.runs[0].TurnID, a.runs[1].TurnID; got != want {
+		t.Fatalf("turn IDs differ across wait resume: first=%d second=%d", got, want)
+	}
+	if got := a.runs[1].ResumeSessionID; got != "sess-123" {
+		t.Fatalf("resume session id = %q, want %q", got, "sess-123")
+	}
+	if got := a.runs[1].Env["ADAF_TURN_ID"]; got != a.runs[0].Env["ADAF_TURN_ID"] {
+		t.Fatalf("ADAF_TURN_ID changed across wait resume: first=%q second=%q", a.runs[0].Env["ADAF_TURN_ID"], got)
+	}
+	if got := a.runs[1].Prompt; got == "" || got == "base" {
+		t.Fatalf("resume prompt = %q, want continuation prompt", got)
+	}
+	if got := a.runs[1].Prompt; got != "" && !containsAll(got, "Continue from where you left off.", "Spawn #7") {
+		t.Fatalf("resume prompt missing continuation markers: %q", got)
+	}
+
+	if len(waited) != 1 {
+		t.Fatalf("OnWait calls = %d, want 1", len(waited))
+	}
+	if waited[0] != a.runs[0].TurnID {
+		t.Fatalf("OnWait turn ID = %d, want %d", waited[0], a.runs[0].TurnID)
+	}
+
+	turns, err := s.ListTurns()
+	if err != nil {
+		t.Fatalf("ListTurns() error = %v", err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("turns count = %d, want 1", len(turns))
+	}
+	if turns[0].BuildState != "success" {
+		t.Fatalf("final build state = %q, want %q", turns[0].BuildState, "success")
+	}
+}
+
+func containsAll(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if !strings.Contains(s, sub) {
+			return false
+		}
+	}
+	return true
 }

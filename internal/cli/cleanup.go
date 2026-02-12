@@ -90,4 +90,3 @@ func deadWorktreePaths(s *store.Store) map[string]bool {
 	}
 	return dead
 }
-

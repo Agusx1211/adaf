@@ -255,7 +255,7 @@ var waitForSpawnsCmd = &cobra.Command{
 	Long: `Signal the loop controller that this agent wants to pause and resume
 when all spawned sub-agents complete. The agent should exit/finish its
 current turn after calling this command. When spawns complete, the loop
-will start a new turn with spawn results in the prompt.
+will resume the same turn with spawn results in the prompt.
 
 This saves API costs by not keeping the agent running while waiting.`,
 	RunE: runWaitForSpawns,

@@ -199,6 +199,54 @@ func TestWaitForSpawnsTurnStatus(t *testing.T) {
 	}
 }
 
+func TestWaitForSpawnsResumeSameTurn(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+
+	updated, _ := m.Update(AgentStartedMsg{SessionID: 42})
+	m1 := updated.(Model)
+
+	updated, _ = m1.Update(AgentFinishedMsg{
+		SessionID:     42,
+		WaitForSpawns: true,
+		Result: &agent.Result{
+			ExitCode: 0,
+			Duration: time.Second,
+		},
+	})
+	m2 := updated.(Model)
+
+	updated, _ = m2.Update(AgentStartedMsg{SessionID: 42})
+	m3 := updated.(Model)
+
+	if len(m3.sessionOrder) != 1 {
+		t.Fatalf("session entries = %d, want 1", len(m3.sessionOrder))
+	}
+	s := m3.sessions[42]
+	if s == nil {
+		t.Fatal("expected session #42 to exist")
+	}
+	if s.Status != "running" {
+		t.Fatalf("status = %q, want %q", s.Status, "running")
+	}
+	if s.Action != "resumed" {
+		t.Fatalf("action = %q, want %q", s.Action, "resumed")
+	}
+	if !s.EndedAt.IsZero() {
+		t.Fatalf("ended_at should be reset on resume, got %v", s.EndedAt)
+	}
+
+	foundResumed := false
+	for _, line := range m3.lines {
+		if strings.Contains(ansi.Strip(line.text), "Turn #42 resumed") {
+			foundResumed = true
+			break
+		}
+	}
+	if !foundResumed {
+		t.Fatal("expected resume line to be rendered for same turn resume")
+	}
+}
+
 func TestCommandEntriesHierarchyAndCompletedTurnCap(t *testing.T) {
 	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
 	now := time.Now().Add(-10 * time.Minute)
