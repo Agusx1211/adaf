@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -15,6 +16,10 @@ type stubAgent struct {
 	runs []agent.Config
 }
 
+type errStubAgent struct {
+	err error
+}
+
 func (a *stubAgent) Name() string { return "stub" }
 
 func (a *stubAgent) Run(ctx context.Context, cfg agent.Config, recorder *recording.Recorder) (*agent.Result, error) {
@@ -25,6 +30,12 @@ func (a *stubAgent) Run(ctx context.Context, cfg agent.Config, recorder *recordi
 	}
 	a.runs = append(a.runs, cloned)
 	return &agent.Result{ExitCode: 0, Duration: time.Millisecond}, nil
+}
+
+func (a *errStubAgent) Name() string { return "stub" }
+
+func (a *errStubAgent) Run(ctx context.Context, cfg agent.Config, recorder *recording.Recorder) (*agent.Result, error) {
+	return nil, a.err
 }
 
 func TestLoopPromptFuncReceivesSupervisorNotesBySession(t *testing.T) {
@@ -131,5 +142,41 @@ func TestLoopPromptFuncReceivesSupervisorNotesBySession(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLoopRunReturnsContextCanceledAndMarksCancelled(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "test", RepoPath: dir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
+	}
+
+	l := &Loop{
+		Store: s,
+		Agent: &errStubAgent{err: fmt.Errorf("wrapped: %w", context.Canceled)},
+		Config: agent.Config{
+			Prompt:   "base",
+			MaxTurns: 1,
+		},
+	}
+
+	err = l.Run(context.Background())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Loop.Run() error = %v, want context canceled", err)
+	}
+
+	logs, err := s.ListLogs()
+	if err != nil {
+		t.Fatalf("ListLogs() error = %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("logs count = %d, want 1", len(logs))
+	}
+	if logs[0].BuildState != "cancelled" {
+		t.Fatalf("build state = %q, want %q", logs[0].BuildState, "cancelled")
 	}
 }

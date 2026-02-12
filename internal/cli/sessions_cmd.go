@@ -129,6 +129,8 @@ func formatSessionStatus(status string) string {
 		return styleBoldYellow + "starting" + colorReset
 	case "done":
 		return colorGreen + "done" + colorReset
+	case "cancelled":
+		return styleBoldYellow + "cancelled" + colorReset
 	case "error":
 		return styleBoldRed + "error" + colorReset
 	case "dead":

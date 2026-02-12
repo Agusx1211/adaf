@@ -20,7 +20,7 @@ type SessionMeta struct {
 	ProjectDir  string    `json:"project_dir"`
 	ProjectName string    `json:"project_name"`
 	PID         int       `json:"pid"`
-	Status      string    `json:"status"` // "starting", "running", "done", "error"
+	Status      string    `json:"status"` // "starting", "running", "done", "cancelled", "error", "dead"
 	StartedAt   time.Time `json:"started_at"`
 	EndedAt     time.Time `json:"ended_at,omitempty"`
 	Error       string    `json:"error,omitempty"`

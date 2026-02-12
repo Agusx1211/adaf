@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -196,16 +197,16 @@ func runAgent(cmd *cobra.Command, args []string) error {
 // runAsSession starts the agent as a background session daemon and prints the session ID.
 func runAsSession(agentName string, agentCfg agent.Config, projCfg *store.ProjectConfig, workDir string, useDefaultPrompt bool) error {
 	dcfg := session.DaemonConfig{
-		AgentName:    agentName,
-		AgentCommand: agentCfg.Command,
-		AgentArgs:    agentCfg.Args,
-		AgentEnv:     agentCfg.Env,
-		WorkDir:      workDir,
-		Prompt:       agentCfg.Prompt,
-		MaxTurns:     agentCfg.MaxTurns,
-		ProjectDir:   workDir,
-		ProfileName:  agentName,
-		ProjectName:  projCfg.Name,
+		AgentName:        agentName,
+		AgentCommand:     agentCfg.Command,
+		AgentArgs:        agentCfg.Args,
+		AgentEnv:         agentCfg.Env,
+		WorkDir:          workDir,
+		Prompt:           agentCfg.Prompt,
+		MaxTurns:         agentCfg.MaxTurns,
+		ProjectDir:       workDir,
+		ProfileName:      agentName,
+		ProjectName:      projCfg.Name,
 		UseDefaultPrompt: useDefaultPrompt,
 	}
 
@@ -296,7 +297,7 @@ func runInline(cmd *cobra.Command, s *store.Store, agentInstance agent.Agent, ag
 		}
 	}
 
-	if err := l.Run(ctx); err != nil && err != context.Canceled {
+	if err := l.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("agent loop: %w", err)
 	}
 

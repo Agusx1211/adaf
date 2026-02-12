@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -135,19 +136,14 @@ func RunDaemon(sessionID int) error {
 	meta, _ = LoadMeta(sessionID)
 	if meta != nil {
 		meta.EndedAt = time.Now().UTC()
-		if loopErr != nil {
-			meta.Status = "error"
-			meta.Error = loopErr.Error()
-		} else {
-			meta.Status = "done"
-		}
+		meta.Status, meta.Error = classifySessionEnd(loopErr)
 		SaveMeta(sessionID, meta)
 	}
 
 	// Wait a bit for clients to read final events, then shut down.
 	b.waitForClients(30 * time.Second)
 
-	return loopErr
+	return normalizeDaemonExit(loopErr)
 }
 
 // broadcaster manages client connections and event broadcasting.
@@ -409,14 +405,36 @@ func (b *broadcaster) runAgentLoop(ctx context.Context, sessionID int, cfg *Daem
 	close(streamCh)
 
 	// Send done.
-	wd := WireDone{}
-	if loopErr != nil && loopErr != context.Canceled {
-		wd.Error = loopErr.Error()
-	}
+	wd := WireDone{Error: donePayloadError(loopErr)}
 	line, _ := EncodeMsg(MsgDone, wd)
 	b.broadcast(line)
 	b.markDone()
 
+	return loopErr
+}
+
+func classifySessionEnd(loopErr error) (status string, errMsg string) {
+	switch {
+	case loopErr == nil:
+		return "done", ""
+	case errors.Is(loopErr, context.Canceled):
+		return "cancelled", ""
+	default:
+		return "error", loopErr.Error()
+	}
+}
+
+func donePayloadError(loopErr error) string {
+	if loopErr == nil || errors.Is(loopErr, context.Canceled) {
+		return ""
+	}
+	return loopErr.Error()
+}
+
+func normalizeDaemonExit(loopErr error) error {
+	if errors.Is(loopErr, context.Canceled) {
+		return nil
+	}
 	return loopErr
 }
 

@@ -188,7 +188,11 @@ func (l *Loop) Run(ctx context.Context) error {
 			}
 			sessionLog.CurrentState = fmt.Sprintf("Turn %d completed", turn+1)
 		} else {
-			sessionLog.BuildState = "error"
+			if errors.Is(runErr, context.Canceled) {
+				sessionLog.BuildState = "cancelled"
+			} else {
+				sessionLog.BuildState = "error"
+			}
 			if runErr != nil {
 				sessionLog.KnownIssues = runErr.Error()
 			}
@@ -206,10 +210,14 @@ func (l *Loop) Run(ctx context.Context) error {
 		// If the agent run failed with a hard error (not just non-zero exit),
 		// stop the loop — unless it was an interrupt.
 		if runErr != nil {
-			if errors.Is(runErr, context.Canceled) && l.checkInterrupt() {
-				// Interrupted by parent — continue to next turn with interrupt message.
-				turn++
-				continue
+			if errors.Is(runErr, context.Canceled) {
+				if l.checkInterrupt() {
+					// Interrupted by parent — continue to next turn with interrupt message.
+					turn++
+					continue
+				}
+				// Preserve cancellation semantics so callers can classify graceful stop.
+				return context.Canceled
 			}
 			return fmt.Errorf("agent run failed (session %d): %w", sessionID, runErr)
 		}

@@ -255,7 +255,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		s.StartedAt = now
 		s.LastUpdate = now
 		scope := m.sessionScope(msg.SessionID)
-		m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf(">>> Session #%d started", msg.SessionID)))
+		m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf(">>> Turn #%d started", msg.SessionID)))
 		return m, waitForEvent(m.eventCh)
 
 	case AgentFinishedMsg:
@@ -271,14 +271,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				s.Status = "failed"
 			}
 			s.Action = fmt.Sprintf("finished (exit=%d)", msg.Result.ExitCode)
-			m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf("<<< Session #%d finished (exit=%d, %s)",
+			m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf("<<< Turn #%d finished (exit=%d, %s)",
 				msg.SessionID, msg.Result.ExitCode, msg.Result.Duration.Round(time.Second))))
 		} else if msg.Err != nil {
 			s.EndedAt = s.LastUpdate
 			s.Status = "failed"
 			s.Action = "error"
 			m.addScopedLine(scope, lipgloss.NewStyle().Foreground(theme.ColorRed).Render(
-				fmt.Sprintf("<<< Session #%d error: %v", msg.SessionID, msg.Err)))
+				fmt.Sprintf("<<< Turn #%d error: %v", msg.SessionID, msg.Err)))
 		}
 		return m, waitForEvent(m.eventCh)
 
@@ -609,10 +609,10 @@ func (m Model) scopePrefix(scope string) string {
 		if sid := m.sessionIDForScope(scope); sid > 0 {
 			if s, ok := m.sessions[sid]; ok && s != nil {
 				if s.Profile != "" {
-					return fmt.Sprintf("[#%d:%s]", sid, s.Profile)
+					return fmt.Sprintf("[turn #%d:%s]", sid, s.Profile)
 				}
 			}
-			return fmt.Sprintf("[#%d]", sid)
+			return fmt.Sprintf("[turn #%d]", sid)
 		}
 	}
 	if strings.HasPrefix(scope, "spawn:") {
@@ -1367,9 +1367,9 @@ func (m Model) commandEntries() []commandEntry {
 		if s == nil {
 			continue
 		}
-		title := fmt.Sprintf("#%d %s", s.ID, s.Agent)
+		title := fmt.Sprintf("turn #%d %s", s.ID, s.Agent)
 		if s.Profile != "" {
-			title = fmt.Sprintf("#%d %s (%s)", s.ID, s.Profile, s.Agent)
+			title = fmt.Sprintf("turn #%d %s (%s)", s.ID, s.Profile, s.Agent)
 		}
 		if s.Model != "" {
 			title += " · " + s.Model
