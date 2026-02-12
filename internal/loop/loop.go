@@ -17,10 +17,11 @@ import (
 )
 
 // WaitCallback is called when the loop detects a wait signal.
-// It should block until at least one spawn completes (wait-for-any)
-// and return results for the completed spawns. The bool return indicates
-// whether more spawns are still pending.
-type WaitCallback func(turnID int) (results []WaitResult, morePending bool)
+// It should block until at least one unseen spawn completes (wait-for-any)
+// and return results for newly completed spawns. alreadySeen contains
+// spawn IDs returned in previous wait cycles for the same turn. The bool
+// return indicates whether more spawns are still pending.
+type WaitCallback func(turnID int, alreadySeen map[int]struct{}) (results []WaitResult, morePending bool)
 
 // WaitResult describes the outcome of a spawn that was waited on.
 type WaitResult struct {
@@ -100,6 +101,11 @@ type Loop struct {
 	// a new turn record for each wait cycle.
 	waitResumeTurnID    int
 	waitResumeTurnHexID string
+
+	// seenSpawnIDs tracks spawn IDs already returned to the parent while
+	// waiting on a specific turn. Reset when the turn changes.
+	seenSpawnIDs    map[int]struct{}
+	seenSpawnTurnID int
 
 	// lastInterruptMsg holds the message from the last interrupt, injected
 	// into the next turn's prompt.
@@ -205,6 +211,10 @@ func (l *Loop) Run(ctx context.Context) error {
 			"agent", l.Agent.Name(),
 			"profile", l.ProfileName,
 		)
+		if !resumingTurn && l.seenSpawnTurnID != 0 && l.seenSpawnTurnID != turnID {
+			l.seenSpawnTurnID = 0
+			l.seenSpawnIDs = nil
+		}
 
 		// Update config with the current turn ID.
 		cfg := l.Config
@@ -452,13 +462,21 @@ func (l *Loop) Run(ctx context.Context) error {
 				return ctx.Err()
 			}
 			if l.OnWait != nil {
-				debug.LogKV("loop", "blocking on OnWait callback", "turn_id", turnID)
+				seenSpawnIDs := l.ensureSeenSpawnIDs(turnID)
+				debug.LogKV("loop", "blocking on OnWait callback",
+					"turn_id", turnID,
+					"already_seen", len(seenSpawnIDs),
+				)
 				waitStart := time.Now()
-				l.lastWaitResults, l.moreSpawnsPending = l.OnWait(turnID)
+				l.lastWaitResults, l.moreSpawnsPending = l.OnWait(turnID, seenSpawnIDs)
+				for _, wr := range l.lastWaitResults {
+					seenSpawnIDs[wr.SpawnID] = struct{}{}
+				}
 				debug.LogKV("loop", "OnWait callback returned",
 					"turn_id", turnID,
 					"wait_duration", time.Since(waitStart),
 					"results_count", len(l.lastWaitResults),
+					"already_seen", len(seenSpawnIDs),
 					"more_pending", l.moreSpawnsPending,
 				)
 			}
@@ -548,6 +566,14 @@ func (l *Loop) loadSupervisorNotes(turnID int) []store.SupervisorNote {
 		return nil
 	}
 	return notes
+}
+
+func (l *Loop) ensureSeenSpawnIDs(turnID int) map[int]struct{} {
+	if l.seenSpawnTurnID != turnID || l.seenSpawnIDs == nil {
+		l.seenSpawnTurnID = turnID
+		l.seenSpawnIDs = make(map[int]struct{})
+	}
+	return l.seenSpawnIDs
 }
 
 // buildResumePrompt constructs a minimal continuation prompt for a resumed

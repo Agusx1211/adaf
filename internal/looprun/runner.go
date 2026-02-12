@@ -338,8 +338,8 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 						Result:        result,
 					}
 				},
-				OnWait: func(turnID int) ([]loop.WaitResult, bool) {
-					return waitForAnySessionSpawns(cfg.Store, turnID)
+				OnWait: func(turnID int, alreadySeen map[int]struct{}) ([]loop.WaitResult, bool) {
+					return waitForAnySessionSpawns(cfg.Store, turnID, alreadySeen)
 				},
 			}
 
@@ -624,22 +624,34 @@ func reparentHandoffs(s *store.Store, handoffs []store.HandoffInfo, newParentTur
 	}
 }
 
-// waitForAnySessionSpawns blocks until at least one non-terminal spawn under
-// parentTurnID reaches a terminal state, then returns results for all spawns
-// that have completed so far. The bool return indicates whether more spawns
-// are still running (wait-for-any semantics).
-func waitForAnySessionSpawns(s *store.Store, parentTurnID int) ([]loop.WaitResult, bool) {
-	debug.LogKV("looprun", "waitForAnySessionSpawns() called", "parent_turn", parentTurnID)
+// waitForAnySessionSpawns blocks until at least one unseen non-terminal spawn
+// under parentTurnID reaches a terminal state, then returns results for newly
+// completed spawns only. alreadySeen contains spawn IDs already returned in
+// prior wait cycles for this turn. The bool return indicates whether more
+// spawns are still running (wait-for-any semantics).
+func waitForAnySessionSpawns(s *store.Store, parentTurnID int, alreadySeen map[int]struct{}) ([]loop.WaitResult, bool) {
+	debug.LogKV("looprun", "waitForAnySessionSpawns() called",
+		"parent_turn", parentTurnID,
+		"already_seen", len(alreadySeen),
+	)
 	records, err := s.SpawnsByParent(parentTurnID)
 	if err != nil || len(records) == 0 {
-		debug.LogKV("looprun", "waitForAnySessionSpawns: no spawns found", "parent_turn", parentTurnID)
+		debug.LogKV("looprun", "waitForAnySessionSpawns: no spawns found",
+			"parent_turn", parentTurnID,
+			"already_seen", len(alreadySeen),
+		)
 		return nil, false
 	}
 
 	pending := make(map[int]struct{})
 	var completed []int
+	seenCompleted := 0
 	for _, rec := range records {
 		if isTerminalSpawnStatus(rec.Status) {
+			if _, seen := alreadySeen[rec.ID]; seen {
+				seenCompleted++
+				continue
+			}
 			completed = append(completed, rec.ID)
 		} else {
 			pending[rec.ID] = struct{}{}
@@ -648,33 +660,48 @@ func waitForAnySessionSpawns(s *store.Store, parentTurnID int) ([]loop.WaitResul
 	debug.LogKV("looprun", "waitForAnySessionSpawns initial state",
 		"parent_turn", parentTurnID,
 		"total_spawns", len(records),
-		"already_completed", len(completed),
+		"already_seen", len(alreadySeen),
+		"seen_completed", seenCompleted,
+		"newly_completed", len(completed),
 		"pending", len(pending),
 	)
 	if len(pending) == 0 && len(completed) == 0 {
 		return nil, false
 	}
 
-	// Poll until at least one pending spawn reaches a terminal state.
+	// Poll until at least one pending spawn reaches terminal and is not already
+	// seen, or until no spawns remain pending.
 	if len(completed) == 0 && len(pending) > 0 {
-		debug.LogKV("looprun", "waitForAnySessionSpawns polling", "parent_turn", parentTurnID, "pending", len(pending))
+		debug.LogKV("looprun", "waitForAnySessionSpawns polling",
+			"parent_turn", parentTurnID,
+			"already_seen", len(alreadySeen),
+			"pending", len(pending),
+		)
 		waitStart := time.Now()
 		ticker := time.NewTicker(250 * time.Millisecond)
 		defer ticker.Stop()
-		for len(completed) == 0 {
+		for len(completed) == 0 && len(pending) > 0 {
 			<-ticker.C
 			for id := range pending {
 				rec, err := s.GetSpawn(id)
-				if err != nil || isTerminalSpawnStatus(rec.Status) {
-					completed = append(completed, id)
+				if err != nil {
 					delete(pending, id)
+					continue
+				}
+				if isTerminalSpawnStatus(rec.Status) {
+					delete(pending, id)
+					if _, seen := alreadySeen[id]; seen {
+						continue
+					}
+					completed = append(completed, id)
 				}
 			}
 		}
-		debug.LogKV("looprun", "waitForAnySessionSpawns first completion",
+		debug.LogKV("looprun", "waitForAnySessionSpawns poll complete",
 			"parent_turn", parentTurnID,
 			"wait_duration", time.Since(waitStart),
-			"completed", len(completed),
+			"already_seen", len(alreadySeen),
+			"newly_completed", len(completed),
 			"still_pending", len(pending),
 		)
 	}
@@ -699,6 +726,7 @@ func waitForAnySessionSpawns(s *store.Store, parentTurnID int) ([]loop.WaitResul
 	}
 	debug.LogKV("looprun", "waitForAnySessionSpawns returning",
 		"parent_turn", parentTurnID,
+		"already_seen", len(alreadySeen),
 		"results", len(results),
 		"more_pending", len(pending) > 0,
 	)
