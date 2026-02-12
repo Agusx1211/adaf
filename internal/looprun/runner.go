@@ -239,6 +239,27 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 
 			var pollCancel context.CancelFunc
 			var pollDone chan struct{}
+			stopPoll := func() {
+				if pollCancel != nil {
+					pollCancel()
+					pollCancel = nil
+				}
+				if pollDone != nil {
+					<-pollDone
+					pollDone = nil
+				}
+			}
+			startPoll := func(turnID int) {
+				// Ensure only one parent-turn poller is active at a time.
+				stopPoll()
+				pollCtx, cancel := context.WithCancel(ctx)
+				pollCancel = cancel
+				pollDone = make(chan struct{})
+				go func() {
+					defer close(pollDone)
+					pollSpawnStatus(pollCtx, cfg.Store, turnID, eventCh)
+				}()
+			}
 			basePrompt := agentCfg.Prompt
 			stepTurnStart := len(run.TurnIDs)
 			handoffsReparented := false
@@ -281,23 +302,12 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 						RunHexID:  run.HexID,
 					}
 
-					pollCtx, cancel := context.WithCancel(ctx)
-					pollCancel = cancel
-					pollDone = make(chan struct{})
-					go func() {
-						defer close(pollDone)
-						pollSpawnStatus(pollCtx, cfg.Store, turnID, eventCh)
-					}()
+					startPoll(turnID)
 				},
 				OnEnd: func(turnID int, turnHexID string, result *agent.Result) {
-					if pollCancel != nil {
-						pollCancel()
-						pollCancel = nil
-					}
-					if pollDone != nil {
-						<-pollDone
-						pollDone = nil
-					}
+					// Keep the spawn poller alive here: if this turn entered
+					// wait-for-spawns, loop.OnWait will block next and we still
+					// need realtime child output/status updates in the TUI.
 					waitingForSpawns := cfg.Store != nil && cfg.Store.IsWaiting(turnID)
 					eventCh <- runtui.AgentFinishedMsg{
 						SessionID:     turnID,
@@ -312,12 +322,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			}
 
 			loopErr := l.Run(ctx)
-			if pollCancel != nil {
-				pollCancel()
-			}
-			if pollDone != nil {
-				<-pollDone
-			}
+			stopPoll()
 			close(streamCh)
 			<-bridgeDone
 
