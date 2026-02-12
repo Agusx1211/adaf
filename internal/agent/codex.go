@@ -3,11 +3,13 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/agusx1211/adaf/internal/recording"
@@ -50,6 +52,19 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
 
+	// Start the process in its own process group so that context
+	// cancellation can kill the entire tree (codex may spawn sandbox
+	// children that keep stdout/stderr pipes open).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			// Kill the entire process group (negative PID).
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		return nil
+	}
+	cmd.WaitDelay = 5 * time.Second
+
 	// Environment: inherit + overlay.
 	cmd.Env = os.Environ()
 	for k, v := range cfg.Env {
@@ -70,7 +85,8 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 
 	exitCode := 0
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			return nil, fmt.Errorf("codex agent: failed to run command: %w", err)

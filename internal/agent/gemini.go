@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/agusx1211/adaf/internal/recording"
@@ -54,6 +55,18 @@ func (g *GeminiAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
+
+	// Run the command in its own process group so that context cancellation
+	// kills the entire tree (important for Node.js-based CLIs that spawn
+	// child processes).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		// Send SIGKILL to the entire process group (negative PID).
+		if cmd.Process != nil {
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		return nil
+	}
 
 	// Environment: inherit + overlay.
 	cmd.Env = os.Environ()

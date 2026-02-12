@@ -24,19 +24,19 @@ var builtin = map[string]Info{
 	"claude": {
 		Name:         "claude",
 		Binary:       "claude",
-		DefaultModel: "sonnet",
+		DefaultModel: "sonnet-4.5",
 		SupportedModels: []string{
-			"opus",
-			"sonnet",
-			"haiku",
+			"opus-4",
+			"sonnet-4.5",
+			"haiku-4.5",
 		},
 		Capabilities: []string{"prompt-arg", "model-select", "auto-approve", "stream-output"},
 	},
 	"codex": {
 		Name:         "codex",
 		Binary:       "codex",
-		DefaultModel: "",
-		SupportedModels: []string{},
+		DefaultModel: "o4-mini",
+		SupportedModels: []string{"o4-mini", "o3", "gpt-4.1"},
 		ReasoningLevels: []ReasoningLevel{
 			{Name: "low"},
 			{Name: "medium"},
