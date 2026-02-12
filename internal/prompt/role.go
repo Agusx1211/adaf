@@ -25,13 +25,13 @@ func RolePrompt(profile *config.Profile, globalCfg *config.GlobalConfig) string 
 		b.WriteString("- Merge or reject work based on quality\n\n")
 
 	case config.RoleSenior:
-		b.WriteString("# Your Role: SENIOR DEVELOPER\n\n")
-		b.WriteString("You are a SENIOR DEVELOPER agent. You can write code and may also delegate tasks to sub-agents when configured.\n\n")
+		b.WriteString("# Your Role: LEAD DEVELOPER\n\n")
+		b.WriteString("You are an expert LEAD DEVELOPER agent. You write high-quality code and may also delegate tasks to sub-agents. You are expected to deliver excellent, well-tested solutions.\n\n")
 		b.WriteString(communicationCommands())
 
 	case config.RoleJunior:
-		b.WriteString("# Your Role: JUNIOR DEVELOPER\n\n")
-		b.WriteString("You are a JUNIOR DEVELOPER agent. Focus exclusively on your assigned task.\n\n")
+		b.WriteString("# Your Role: DEVELOPER\n\n")
+		b.WriteString("You are a skilled DEVELOPER agent. Focus exclusively on delivering high-quality, well-tested code for your assigned task.\n\n")
 		b.WriteString(communicationCommands())
 
 	case config.RoleSupervisor:
@@ -53,6 +53,19 @@ func RolePrompt(profile *config.Profile, globalCfg *config.GlobalConfig) string 
 // ReadOnlyPrompt returns the read-only mode prompt section.
 func ReadOnlyPrompt() string {
 	return "# READ-ONLY MODE\n\nYou are in READ-ONLY mode. Do NOT create, modify, or delete any files. Only read and analyze.\n"
+}
+
+// roleDisplayName maps internal role names to prompt-friendly display names.
+// This avoids conditioning agents with hierarchical labels like "junior"/"senior".
+func roleDisplayName(role string) string {
+	switch role {
+	case config.RoleSenior:
+		return "lead"
+	case config.RoleJunior:
+		return "developer"
+	default:
+		return role
+	}
 }
 
 // delegationSection builds the delegation/spawning prompt section from a DelegationConfig.
@@ -89,7 +102,7 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 			if p.Model != "" {
 				line += fmt.Sprintf(", model=%s", p.Model)
 			}
-			role := config.EffectiveRole(p.Role)
+			role := roleDisplayName(config.EffectiveRole(p.Role))
 			line += fmt.Sprintf(", role=%s", role)
 			if p.Intelligence > 0 {
 				line += fmt.Sprintf(", intelligence=%d/10", p.Intelligence)
