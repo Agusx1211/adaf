@@ -50,6 +50,9 @@ You have access to the ` + "`adaf`" + ` CLI for managing project state. Use it t
 - ` + "`adaf doc show <id>`" + ` — Read a document
 
 ### Agent Orchestration (when delegation is enabled for your loop step)
+- Preferred flow: spawn independent tasks without ` + "`--wait`" + `, then call ` + "`adaf wait-for-spawns`" + ` once and finish your current turn
+- Use ` + "`--wait`" + ` only when a child result is required before you can continue in the same turn
+- Avoid repeatedly polling ` + "`adaf spawn-status`" + ` while waiting, unless diagnosing a stuck child
 - ` + "`adaf spawn --profile <name> --task \"...\" [--read-only] [--wait]`" + ` — Spawn a sub-agent
 - ` + "`adaf spawn-status [--spawn-id N]`" + ` — Check spawn status
 - ` + "`adaf spawn-wait [--spawn-id N]`" + ` — Wait for spawn(s) to complete

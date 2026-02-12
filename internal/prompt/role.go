@@ -125,8 +125,9 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 func delegationCommands() string {
 	var b strings.Builder
 	b.WriteString("## Delegation Commands\n\n")
-	b.WriteString("- Quick scheduling flow: run `adaf spawn ...` for each independent task, then `adaf wait-for-spawns` once to resume on completion.\n")
-	b.WriteString("- Use `adaf spawn --profile <name> --task \"...\" --wait` for strictly sequential dependencies.\n")
+	b.WriteString("- Default flow (token-efficient): run `adaf spawn ...` for each independent task, then run `adaf wait-for-spawns` once and finish your current turn immediately.\n")
+	b.WriteString("- Avoid idle polling while children run. Do not loop on `adaf spawn-status` unless you are actively debugging or checking a stuck spawn.\n")
+	b.WriteString("- Use `adaf spawn --profile <name> --task \"...\" --wait` only for strictly sequential dependencies that must block.\n")
 	b.WriteString("- Review every completed child with `adaf spawn-diff --spawn-id N` before merge/reject.\n\n")
 	b.WriteString("- `adaf spawn --profile <name> --task \"task description\" [--read-only] [--wait]` — Spawn a sub-agent\n")
 	b.WriteString("- `adaf spawn --profile <name> --task-file <path> [--read-only] [--wait]` — Spawn with detailed task from file\n")
