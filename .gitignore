@@ -25,6 +25,9 @@ go.work.sum
 .DS_Store
 Thumbs.db
 
+# Reference repos (cloned for agent context, not part of this project)
+/references/
+
 # adaf project data (don't commit the orchestrator state into its own repo)
 # Users' project .adaf dirs are in their target repos, not here
 ~/.adaf
