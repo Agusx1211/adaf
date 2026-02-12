@@ -52,16 +52,19 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 
 	args = append(args, cfg.Args...)
 
-	// The prompt must be the final positional argument. If no prompt is
-	// provided and stdin is not a terminal, codex exec will attempt to
-	// read from stdin which would hang in a piped context.
+	// codex exec accepts prompt via positional arg or stdin.
+	// We pass prompt through stdin to avoid argv size limits on long prompts.
+	var stdinReader io.Reader
 	if cfg.Prompt != "" {
-		args = append(args, cfg.Prompt)
+		stdinReader = strings.NewReader(cfg.Prompt)
 		recorder.RecordStdin(cfg.Prompt)
 	}
 
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
+	if stdinReader != nil {
+		cmd.Stdin = stdinReader
+	}
 
 	// Start the process in its own process group so that context
 	// cancellation can kill the entire tree (codex may spawn sandbox

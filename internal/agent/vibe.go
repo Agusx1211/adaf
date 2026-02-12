@@ -28,7 +28,9 @@ func (v *VibeAgent) Name() string {
 
 // Run executes the vibe CLI with the given configuration.
 //
-// The prompt is passed via the -p flag which activates programmatic mode.
+// The -p flag activates programmatic mode. We prefer passing prompt text via
+// stdin to avoid argv size limits, and fall back to argv when stdin mode is
+// unsupported by the runtime environment (e.g. no controlling TTY).
 // In programmatic mode vibe auto-approves all tool executions and exits
 // after completing the response (equivalent to using the "auto-approve"
 // agent profile).
@@ -50,12 +52,21 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 	}
 
 	// Build arguments: start with configured defaults, then append
-	// programmatic-mode flags and the prompt.
+	// programmatic-mode flags.
 	args := make([]string, 0, len(cfg.Args)+4)
 	args = append(args, cfg.Args...)
 
+	var stdinReader io.Reader
 	if cfg.Prompt != "" {
-		args = append(args, "-p", cfg.Prompt)
+		if canUseVibeStdinPrompt() {
+			// Passing -p with no value makes vibe read prompt from stdin.
+			args = append(args, "-p")
+			stdinReader = strings.NewReader(cfg.Prompt)
+		} else {
+			// Fallback for environments where vibe stdin prompt mode fails
+			// (for example when /dev/tty is unavailable).
+			args = append(args, "-p", cfg.Prompt)
+		}
 		outputMode := "text"
 		if cfg.EventSink != nil {
 			outputMode = "streaming"
@@ -68,6 +79,9 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
+	if stdinReader != nil {
+		cmd.Stdin = stdinReader
+	}
 
 	// Environment: inherit + overlay.
 	cmd.Env = os.Environ()
@@ -128,4 +142,13 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 		Output:   stdoutBuf.String(),
 		Error:    stderrBuf.String(),
 	}, nil
+}
+
+func canUseVibeStdinPrompt() bool {
+	tty, err := os.Open("/dev/tty")
+	if err != nil {
+		return false
+	}
+	_ = tty.Close()
+	return true
 }

@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/agusx1211/adaf/internal/agent"
@@ -56,10 +57,14 @@ func (l *Loop) Run(ctx context.Context) error {
 		}
 
 		// Allocate a new session ID by creating a session log entry.
+		objective := summarizeObjectiveForLog(l.Config.Prompt)
+		if objective == "" {
+			objective = "Agent run"
+		}
 		sessionLog := &store.SessionLog{
 			Agent:       l.Agent.Name(),
 			ProfileName: l.ProfileName,
-			Objective:   l.Config.Prompt,
+			Objective:   objective,
 		}
 		if err := l.Store.CreateLog(sessionLog); err != nil {
 			return fmt.Errorf("creating session log: %w", err)
@@ -145,4 +150,44 @@ func (l *Loop) Run(ctx context.Context) error {
 
 		turn++
 	}
+}
+
+// summarizeObjectiveForLog extracts a compact objective summary from a full
+// generated prompt so session logs don't recursively store entire prior prompts.
+func summarizeObjectiveForLog(prompt string) string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return ""
+	}
+
+	const (
+		objectiveHeader = "# Objective"
+		rulesHeader     = "# Rules"
+		contextHeader   = "# Context"
+		maxLen          = 320
+	)
+
+	section := prompt
+	if idx := strings.Index(section, objectiveHeader); idx >= 0 {
+		section = section[idx+len(objectiveHeader):]
+	}
+	if idx := strings.Index(section, rulesHeader); idx >= 0 {
+		section = section[:idx]
+	}
+	if idx := strings.Index(section, contextHeader); idx >= 0 {
+		section = section[:idx]
+	}
+
+	section = strings.TrimSpace(section)
+	if section == "" {
+		section = prompt
+	}
+	section = strings.ReplaceAll(section, "\r", " ")
+	section = strings.ReplaceAll(section, "\n", " ")
+	section = strings.Join(strings.Fields(section), " ")
+
+	if len(section) > maxLen {
+		return section[:maxLen-3] + "..."
+	}
+	return section
 }

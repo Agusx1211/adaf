@@ -15,13 +15,18 @@ import (
 // the prompt. Files larger than this are referenced instead of inlined.
 const maxAgentsMDSize = 16 * 1024
 
+const (
+	maxLastSessionObjective = 500
+	maxLastSessionField     = 300
+)
+
 // LoopPromptContext provides loop-specific context for prompt generation.
 type LoopPromptContext struct {
 	LoopName     string
 	Cycle        int
 	StepIndex    int
 	TotalSteps   int
-	Instructions string             // step-specific custom instructions
+	Instructions string // step-specific custom instructions
 	CanStop      bool
 	CanMessage   bool
 	CanPushover  bool
@@ -153,16 +158,16 @@ func Build(opts BuildOpts) (string, error) {
 	if latest != nil {
 		b.WriteString("## Last Session\n")
 		if latest.Objective != "" {
-			fmt.Fprintf(&b, "- Objective: %s\n", latest.Objective)
+			fmt.Fprintf(&b, "- Objective: %s\n", summarizeForContext(latest.Objective, maxLastSessionObjective))
 		}
 		if latest.WhatWasBuilt != "" {
-			fmt.Fprintf(&b, "- Built: %s\n", latest.WhatWasBuilt)
+			fmt.Fprintf(&b, "- Built: %s\n", summarizeForContext(latest.WhatWasBuilt, maxLastSessionField))
 		}
 		if latest.NextSteps != "" {
-			fmt.Fprintf(&b, "- Next steps: %s\n", latest.NextSteps)
+			fmt.Fprintf(&b, "- Next steps: %s\n", summarizeForContext(latest.NextSteps, maxLastSessionField))
 		}
 		if latest.KnownIssues != "" {
-			fmt.Fprintf(&b, "- Known issues: %s\n", latest.KnownIssues)
+			fmt.Fprintf(&b, "- Known issues: %s\n", summarizeForContext(latest.KnownIssues, maxLastSessionField))
 		}
 		b.WriteString("\n")
 	}
@@ -263,4 +268,20 @@ func Build(opts BuildOpts) (string, error) {
 	}
 
 	return b.String(), nil
+}
+
+func summarizeForContext(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) <= max {
+		return s
+	}
+	if max <= 3 {
+		return s[:max]
+	}
+	return s[:max-3] + "..."
 }

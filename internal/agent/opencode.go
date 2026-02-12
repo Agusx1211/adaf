@@ -30,10 +30,8 @@ func (o *OpencodeAgent) Name() string {
 
 // Run executes the opencode CLI with the given configuration.
 //
-// The prompt is passed via the "run" subcommand as a positional argument,
-// which activates OpenCode's non-interactive mode. In this mode, OpenCode
-// executes the prompt, streams output, and exits when done. Permission
-// requests are automatically rejected.
+// It uses the "run" subcommand in non-interactive mode. Prompt text is passed
+// via stdin to avoid argv size limits on long prompts.
 //
 // The SST fork (actively maintained, installed via npm) uses:
 //
@@ -55,18 +53,22 @@ func (o *OpencodeAgent) Run(ctx context.Context, cfg Config, recorder *recording
 		cmdName = "opencode"
 	}
 
-	// Build arguments: "run" subcommand, then configured flags, then prompt.
+	// Build arguments: "run" subcommand, then configured flags.
 	args := make([]string, 0, len(cfg.Args)+4)
 	args = append(args, "run")
 	args = append(args, cfg.Args...)
 
+	var stdinReader io.Reader
 	if cfg.Prompt != "" {
-		args = append(args, cfg.Prompt)
+		stdinReader = strings.NewReader(cfg.Prompt)
 		recorder.RecordStdin(cfg.Prompt)
 	}
 
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
+	if stdinReader != nil {
+		cmd.Stdin = stdinReader
+	}
 
 	// Start the process in its own process group. OpenCode is distributed
 	// as a Node.js shim that spawns a compiled Bun binary, which in turn

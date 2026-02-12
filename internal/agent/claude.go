@@ -31,7 +31,7 @@ func (c *ClaudeAgent) Name() string {
 // Run executes the claude CLI with the given configuration.
 //
 // It uses --print (-p) to enable non-interactive mode and passes the prompt
-// as a positional argument. Additional flags such as --model and
+// via stdin. Additional flags such as --model and
 // --dangerously-skip-permissions can be supplied via cfg.Args.
 //
 // Output is streamed in real-time using --output-format stream-json --verbose,
@@ -44,8 +44,8 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 	}
 
 	// Build arguments: start with configured defaults, then append streaming
-	// flags and the prompt.
-	args := make([]string, 0, len(cfg.Args)+6)
+	// flags.
+	args := make([]string, 0, len(cfg.Args)+5)
 	args = append(args, cfg.Args...)
 
 	// --print (-p) enables non-interactive mode (print response and exit).
@@ -53,15 +53,19 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 	// --verbose is required by the CLI when using stream-json output format.
 	args = append(args, "--print", "--output-format", "stream-json", "--verbose")
 
-	// The prompt is a positional argument (not a flag value).
-	// In --print mode, the CLI requires either a positional prompt or stdin input.
+	// In --print mode, Claude accepts prompt via stdin or positional arg.
+	// We pass prompt through stdin to avoid argv size limits on long prompts.
+	var stdinReader io.Reader
 	if cfg.Prompt != "" {
-		args = append(args, cfg.Prompt)
+		stdinReader = strings.NewReader(cfg.Prompt)
 		recorder.RecordStdin(cfg.Prompt)
 	}
 
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
+	if stdinReader != nil {
+		cmd.Stdin = stdinReader
+	}
 
 	// Run the command in its own process group so that context cancellation
 	// kills the entire tree. Claude Code is Node.js-based and spawns child

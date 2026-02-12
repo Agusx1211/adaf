@@ -30,7 +30,8 @@ func (g *GeminiAgent) Name() string {
 
 // Run executes the gemini CLI with the given configuration.
 //
-// It uses the -p flag to pass the prompt directly as a command-line argument.
+// It passes prompt text via stdin (with an empty -p flag value to force
+// headless mode) to avoid argv size limits on long prompts.
 // Additional flags such as --model and -y can be supplied via cfg.Args.
 //
 // Output is streamed in real-time using --output-format stream-json,
@@ -42,19 +43,25 @@ func (g *GeminiAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 	}
 
 	// Build arguments: start with configured defaults, then append streaming
-	// flags and the prompt.
-	args := make([]string, 0, len(cfg.Args)+4)
+	// flags. Prompt (if any) is passed via stdin.
+	args := make([]string, 0, len(cfg.Args)+6)
 	args = append(args, cfg.Args...)
 	args = append(args, "--output-format", "stream-json")
 
-	// Pass the prompt via the -p flag.
+	// Keep -p with an empty value to force non-interactive mode while
+	// avoiding long prompt text in argv.
+	var stdinReader io.Reader
 	if cfg.Prompt != "" {
-		args = append(args, "-p", cfg.Prompt)
+		args = append(args, "-p", "")
+		stdinReader = strings.NewReader(cfg.Prompt)
 		recorder.RecordStdin(cfg.Prompt)
 	}
 
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
+	if stdinReader != nil {
+		cmd.Stdin = stdinReader
+	}
 
 	// Run the command in its own process group so that context cancellation
 	// kills the entire tree (important for Node.js-based CLIs that spawn
