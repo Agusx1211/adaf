@@ -293,7 +293,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 				rec.ChildSessionID = sessionID
 				o.store.UpdateSpawn(rec)
 			},
-			PromptFunc: func(sessionID int) string {
+			PromptFunc: func(sessionID int, supervisorNotes []store.SupervisorNote) string {
 				msgs, _ := o.store.UnreadMessages(rec.ID, "parent_to_child")
 				for _, m := range msgs {
 					o.store.MarkMessageRead(m.SpawnID, m.ID)
@@ -306,6 +306,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 					Task:            req.Task,
 					ReadOnly:        req.ReadOnly,
 					ParentSessionID: req.ParentSessionID,
+					SupervisorNotes: supervisorNotes,
 					Messages:        msgs,
 				})
 				return newPrompt

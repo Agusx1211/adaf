@@ -148,13 +148,15 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				RunID:        run.ID,
 			}
 
-			prompt, err := promptpkg.Build(promptpkg.BuildOpts{
+			promptOpts := promptpkg.BuildOpts{
 				Store:       cfg.Store,
 				Project:     cfg.Project,
 				Profile:     prof,
 				GlobalCfg:   cfg.GlobalCfg,
 				LoopContext: loopCtx,
-			})
+			}
+
+			prompt, err := promptpkg.Build(promptOpts)
 			if err != nil {
 				return fmt.Errorf("building prompt for step %d: %w", stepIdx, err)
 			}
@@ -186,11 +188,21 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 
 			var pollCancel context.CancelFunc
 			var pollDone chan struct{}
+			basePrompt := agentCfg.Prompt
 
 			l := &loop.Loop{
 				Store:       cfg.Store,
 				Agent:       agentInstance,
 				Config:      agentCfg,
+				PromptFunc: func(sessionID int, supervisorNotes []store.SupervisorNote) string {
+					opts := promptOpts
+					opts.SupervisorNotes = supervisorNotes
+					built, err := promptpkg.Build(opts)
+					if err != nil {
+						return basePrompt
+					}
+					return built
+				},
 				ProfileName: prof.Name,
 				OnStart: func(sessionID int) {
 					run.SessionIDs = append(run.SessionIDs, sessionID)

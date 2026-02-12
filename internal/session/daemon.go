@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/agusx1211/adaf/internal/agent"
+	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/loop"
+	promptpkg "github.com/agusx1211/adaf/internal/prompt"
 	"github.com/agusx1211/adaf/internal/recording"
 	"github.com/agusx1211/adaf/internal/store"
 	"github.com/agusx1211/adaf/internal/stream"
@@ -317,6 +319,32 @@ func (b *broadcaster) runAgentLoop(ctx context.Context, sessionID int, cfg *Daem
 	}
 	agentCfg.Env["ADAF_AGENT"] = "1"
 
+	var promptFunc func(sessionID int, supervisorNotes []store.SupervisorNote) string
+	if cfg.UseDefaultPrompt {
+		projCfg, err := s.LoadProject()
+		if err == nil && projCfg != nil {
+			globalCfg, _ := config.Load()
+			var prof *config.Profile
+			if globalCfg != nil && cfg.ProfileName != "" {
+				prof = globalCfg.FindProfile(cfg.ProfileName)
+			}
+			basePrompt := agentCfg.Prompt
+			promptFunc = func(sessionID int, supervisorNotes []store.SupervisorNote) string {
+				built, err := promptpkg.Build(promptpkg.BuildOpts{
+					Store:           s,
+					Project:         projCfg,
+					Profile:         prof,
+					GlobalCfg:       globalCfg,
+					SupervisorNotes: supervisorNotes,
+				})
+				if err != nil {
+					return basePrompt
+				}
+				return built
+			}
+		}
+	}
+
 	// Bridge goroutine: converts stream events to wire messages.
 	go func() {
 		for ev := range streamCh {
@@ -353,9 +381,10 @@ func (b *broadcaster) runAgentLoop(ctx context.Context, sessionID int, cfg *Daem
 
 	// Run the loop.
 	l := &loop.Loop{
-		Store:  s,
-		Agent:  agentInstance,
-		Config: agentCfg,
+		Store:      s,
+		Agent:      agentInstance,
+		Config:     agentCfg,
+		PromptFunc: promptFunc,
 		OnStart: func(sid int) {
 			line, _ := EncodeMsg(MsgStarted, WireStarted{SessionID: sid})
 			b.broadcast(line)

@@ -34,7 +34,7 @@ type Loop struct {
 
 	// PromptFunc, if set, is called before each turn to dynamically refresh the
 	// prompt (e.g. to inject supervisor notes). If nil, Config.Prompt is used.
-	PromptFunc func(sessionID int) string
+	PromptFunc func(sessionID int, supervisorNotes []store.SupervisorNote) string
 }
 
 // Run executes the agent loop. It will run the agent up to Config.MaxTurns times
@@ -92,8 +92,17 @@ func (l *Loop) Run(ctx context.Context) error {
 				cfg.Env["ADAF_PROJECT_DIR"] = projectDir
 			}
 		}
+		var supervisorNotes []store.SupervisorNote
+		if l.PromptFunc != nil && l.Store != nil {
+			notes, err := l.Store.NotesBySession(sessionID)
+			if err != nil {
+				fmt.Printf("warning: failed to load supervisor notes for session %d: %v\n", sessionID, err)
+			} else {
+				supervisorNotes = notes
+			}
+		}
 		if l.PromptFunc != nil {
-			cfg.Prompt = l.PromptFunc(sessionID)
+			cfg.Prompt = l.PromptFunc(sessionID, supervisorNotes)
 		}
 
 		// Notify listener.

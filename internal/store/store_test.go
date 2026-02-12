@@ -228,3 +228,57 @@ func TestRecordings(t *testing.T) {
 		t.Errorf("expected 2 events, got %d", len(loaded.Events))
 	}
 }
+
+func TestGetDecision(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := New(dir)
+	s.Init(ProjectConfig{Name: "test", RepoPath: "/tmp"})
+
+	dec := &Decision{
+		Title:     "Use X",
+		Context:   "Need a choice",
+		Decision:  "Use X for now",
+		Rationale: "Simpler",
+	}
+	if err := s.CreateDecision(dec); err != nil {
+		t.Fatalf("CreateDecision() error = %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		id       int
+		wantErr  bool
+		wantTitle string
+	}{
+		{
+			name:      "existing decision",
+			id:        dec.ID,
+			wantErr:   false,
+			wantTitle: "Use X",
+		},
+		{
+			name:    "missing decision",
+			id:      dec.ID + 1,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := s.GetDecision(tt.id)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("GetDecision(%d) error = nil, want error", tt.id)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("GetDecision(%d) error = %v", tt.id, err)
+			}
+			if got.Title != tt.wantTitle {
+				t.Fatalf("GetDecision(%d) title = %q, want %q", tt.id, got.Title, tt.wantTitle)
+			}
+		})
+	}
+}

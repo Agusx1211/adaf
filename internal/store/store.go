@@ -300,6 +300,14 @@ func (s *Store) CreateDecision(dec *Decision) error {
 	return s.writeJSON(filepath.Join(s.root, "decisions", fmt.Sprintf("%d.json", dec.ID)), dec)
 }
 
+func (s *Store) GetDecision(id int) (*Decision, error) {
+	var dec Decision
+	if err := s.readJSON(filepath.Join(s.root, "decisions", fmt.Sprintf("%d.json", id)), &dec); err != nil {
+		return nil, err
+	}
+	return &dec, nil
+}
+
 // Records (formerly "recordings")
 
 func (s *Store) SaveRecording(rec *SessionRecording) error {

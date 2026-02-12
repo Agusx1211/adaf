@@ -35,6 +35,7 @@ type DaemonConfig struct {
 	AgentEnv     map[string]string `json:"agent_env"`
 	WorkDir      string            `json:"work_dir"`
 	Prompt       string            `json:"prompt"`
+	UseDefaultPrompt bool          `json:"use_default_prompt,omitempty"`
 	MaxTurns     int               `json:"max_turns"`
 	ProjectDir   string            `json:"project_dir"`
 	ProfileName  string            `json:"profile_name"`

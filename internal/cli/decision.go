@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -159,22 +160,12 @@ func runDecisionShow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid decision ID %q: must be a number", args[0])
 	}
 
-	// Load by listing and finding (store doesn't have GetDecision)
-	decisions, err := s.ListDecisions()
+	dec, err := s.GetDecision(id)
 	if err != nil {
-		return fmt.Errorf("listing decisions: %w", err)
-	}
-
-	var dec *store.Decision
-	for i, d := range decisions {
-		if d.ID == id {
-			dec = &decisions[i]
-			break
+		if os.IsNotExist(err) {
+			return fmt.Errorf("decision #%d not found", id)
 		}
-	}
-
-	if dec == nil {
-		return fmt.Errorf("decision #%d not found", id)
+		return fmt.Errorf("loading decision #%d: %w", id, err)
 	}
 
 	printHeader(fmt.Sprintf("Decision #%d", dec.ID))

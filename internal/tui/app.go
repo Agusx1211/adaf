@@ -664,7 +664,8 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 	if found := m.globalCfg.FindProfile(p.Name); found != nil {
 		prof = found
 	}
-	prompt, _ := buildPrompt(m.store, m.project, prof, m.globalCfg)
+	promptOpts := buildPromptOpts(m.store, m.project, prof, m.globalCfg)
+	prompt, _ := promptpkg.Build(promptOpts)
 
 	projectName := ""
 	if m.project != nil {
@@ -682,6 +683,7 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 		ProjectDir:   workDir,
 		ProfileName:  p.Name,
 		ProjectName:  projectName,
+		UseDefaultPrompt: true,
 	}
 
 	// Allocate a session and start the daemon.
@@ -802,7 +804,8 @@ func (m AppModel) startAgentInline(p profileEntry, projectName string) (tea.Mode
 	if found := m.globalCfg.FindProfile(p.Name); found != nil {
 		prof = found
 	}
-	prompt, _ := buildPrompt(m.store, m.project, prof, m.globalCfg)
+	promptOpts := buildPromptOpts(m.store, m.project, prof, m.globalCfg)
+	prompt, _ := promptpkg.Build(promptOpts)
 
 	agentCfg := agent.Config{
 		Name:    p.Agent,
@@ -818,6 +821,7 @@ func (m AppModel) startAgentInline(p profileEntry, projectName string) (tea.Mode
 		Store:       m.store,
 		Agent:       agentInstance,
 		AgentCfg:    agentCfg,
+		PromptBuildOpts: &promptOpts,
 		Plan:        m.plan,
 		ProjectName: projectName,
 		ProfileName: p.Name,
@@ -957,12 +961,11 @@ func RunApp(s *store.Store) error {
 	return err
 }
 
-// buildPrompt constructs a default prompt from project context using the shared builder.
-func buildPrompt(s *store.Store, project *store.ProjectConfig, profile *config.Profile, globalCfg *config.GlobalConfig) (string, error) {
-	return promptpkg.Build(promptpkg.BuildOpts{
+func buildPromptOpts(s *store.Store, project *store.ProjectConfig, profile *config.Profile, globalCfg *config.GlobalConfig) promptpkg.BuildOpts {
+	return promptpkg.BuildOpts{
 		Store:     s,
 		Project:   project,
 		Profile:   profile,
 		GlobalCfg: globalCfg,
-	})
+	}
 }

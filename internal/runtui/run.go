@@ -11,6 +11,7 @@ import (
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/loop"
+	promptpkg "github.com/agusx1211/adaf/internal/prompt"
 	"github.com/agusx1211/adaf/internal/store"
 	"github.com/agusx1211/adaf/internal/stream"
 )
@@ -20,6 +21,7 @@ type RunConfig struct {
 	Store       *store.Store
 	Agent       agent.Agent
 	AgentCfg    agent.Config
+	PromptBuildOpts *promptpkg.BuildOpts
 	Plan        *store.Plan
 	ProjectName string
 	ProfileName string
@@ -108,10 +110,25 @@ func runAgentLoop(ctx context.Context, cfg RunConfig, eventCh chan any, streamCh
 	agentCfg.Stdout = io.Discard
 	agentCfg.Stderr = io.Discard
 
+	var promptFunc func(sessionID int, supervisorNotes []store.SupervisorNote) string
+	if cfg.PromptBuildOpts != nil {
+		basePrompt := agentCfg.Prompt
+		opts := *cfg.PromptBuildOpts
+		promptFunc = func(sessionID int, supervisorNotes []store.SupervisorNote) string {
+			opts.SupervisorNotes = supervisorNotes
+			built, err := promptpkg.Build(opts)
+			if err != nil {
+				return basePrompt
+			}
+			return built
+		}
+	}
+
 	l := &loop.Loop{
 		Store:       cfg.Store,
 		Agent:       cfg.Agent,
 		Config:      agentCfg,
+		PromptFunc:  promptFunc,
 		ProfileName: cfg.ProfileName,
 		OnStart: func(sessionID int) {
 			eventCh <- AgentStartedMsg{SessionID: sessionID}

@@ -122,16 +122,20 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		workDir, _ = os.Getwd()
 	}
 
+	var promptBuildOpts *promptpkg.BuildOpts
+
 	// If no explicit prompt was provided, build one from project context.
 	if prompt == "" {
-		built, err := promptpkg.Build(promptpkg.BuildOpts{
+		opts := promptpkg.BuildOpts{
 			Store:   s,
 			Project: projCfg,
-		})
+		}
+		built, err := promptpkg.Build(opts)
 		if err != nil {
 			return fmt.Errorf("building default prompt: %w", err)
 		}
 		prompt = built
+		promptBuildOpts = &opts
 	}
 
 	// Build agent args based on agent type.
@@ -182,15 +186,15 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		if session.IsAgentContext() {
 			return fmt.Errorf("session mode is not available inside an agent context")
 		}
-		return runAsSession(agentName, agentCfg, projCfg, workDir)
+		return runAsSession(agentName, agentCfg, projCfg, workDir, promptBuildOpts != nil)
 	}
 
 	// Default: inline output.
-	return runInline(cmd, s, agentInstance, agentCfg, projCfg, defaultModel, maxTurns)
+	return runInline(cmd, s, agentInstance, agentCfg, projCfg, defaultModel, maxTurns, promptBuildOpts)
 }
 
 // runAsSession starts the agent as a background session daemon and prints the session ID.
-func runAsSession(agentName string, agentCfg agent.Config, projCfg *store.ProjectConfig, workDir string) error {
+func runAsSession(agentName string, agentCfg agent.Config, projCfg *store.ProjectConfig, workDir string, useDefaultPrompt bool) error {
 	dcfg := session.DaemonConfig{
 		AgentName:    agentName,
 		AgentCommand: agentCfg.Command,
@@ -202,6 +206,7 @@ func runAsSession(agentName string, agentCfg agent.Config, projCfg *store.Projec
 		ProjectDir:   workDir,
 		ProfileName:  agentName,
 		ProjectName:  projCfg.Name,
+		UseDefaultPrompt: useDefaultPrompt,
 	}
 
 	sessionID, err := session.CreateSession(dcfg)
@@ -222,7 +227,7 @@ func runAsSession(agentName string, agentCfg agent.Config, projCfg *store.Projec
 }
 
 // runInline prints inline output suitable for CI/pipes.
-func runInline(cmd *cobra.Command, s *store.Store, agentInstance agent.Agent, agentCfg agent.Config, projCfg *store.ProjectConfig, defaultModel string, maxTurns int) error {
+func runInline(cmd *cobra.Command, s *store.Store, agentInstance agent.Agent, agentCfg agent.Config, projCfg *store.ProjectConfig, defaultModel string, maxTurns int, promptBuildOpts *promptpkg.BuildOpts) error {
 	workDir := agentCfg.WorkDir
 
 	// Print run header
@@ -277,6 +282,18 @@ func runInline(cmd *cobra.Command, s *store.Store, agentInstance agent.Agent, ag
 				fmt.Printf("  %s<<< Session #%d ended%s\n", styleBoldYellow, sessionID, colorReset)
 			}
 		},
+	}
+	if promptBuildOpts != nil {
+		basePrompt := agentCfg.Prompt
+		opts := *promptBuildOpts
+		l.PromptFunc = func(sessionID int, supervisorNotes []store.SupervisorNote) string {
+			opts.SupervisorNotes = supervisorNotes
+			built, err := promptpkg.Build(opts)
+			if err != nil {
+				return basePrompt
+			}
+			return built
+		}
 	}
 
 	if err := l.Run(ctx); err != nil && err != context.Canceled {
