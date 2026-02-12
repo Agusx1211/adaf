@@ -147,6 +147,119 @@ func TestTurnTerminologyInRunPanel(t *testing.T) {
 	}
 }
 
+func TestWaitForSpawnsTurnStatus(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+
+	updated, _ := m.Update(AgentStartedMsg{SessionID: 42})
+	m1, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("updated model type = %T, want runtui.Model", updated)
+	}
+
+	updated, _ = m1.Update(AgentFinishedMsg{
+		SessionID:     42,
+		WaitForSpawns: true,
+		Result: &agent.Result{
+			ExitCode: 0,
+			Duration: 2 * time.Second,
+		},
+	})
+	m2, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("updated model type = %T, want runtui.Model", updated)
+	}
+
+	s := m2.sessions[42]
+	if s == nil {
+		t.Fatal("expected session #42 to exist")
+	}
+	if s.Status != "waiting_for_spawns" {
+		t.Fatalf("status = %q, want %q", s.Status, "waiting_for_spawns")
+	}
+
+	entries := m2.commandEntries()
+	foundWaiting := false
+	for _, entry := range entries {
+		if entry.scope == "session:42" && entry.status == "waiting_for_spawns" {
+			foundWaiting = true
+			break
+		}
+	}
+	if !foundWaiting {
+		t.Fatal("expected command entries to show waiting_for_spawns status")
+	}
+
+	updated, _ = m2.Update(AgentStartedMsg{SessionID: 43})
+	m3, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("updated model type = %T, want runtui.Model", updated)
+	}
+	if got := m3.sessions[42]; got == nil || got.Status != "completed" {
+		t.Fatalf("session #42 status = %v, want completed after next turn starts", got)
+	}
+}
+
+func TestCommandEntriesHierarchyAndCompletedTurnCap(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+	now := time.Now().Add(-10 * time.Minute)
+	m.sessions = map[int]*sessionStatus{
+		1: {ID: 1, Agent: "codex", Status: "completed", StartedAt: now, EndedAt: now.Add(5 * time.Second)},
+		2: {ID: 2, Agent: "codex", Status: "completed", StartedAt: now, EndedAt: now.Add(6 * time.Second)},
+		3: {ID: 3, Agent: "codex", Status: "completed", StartedAt: now, EndedAt: now.Add(7 * time.Second)},
+		4: {ID: 4, Agent: "codex", Status: "completed", StartedAt: now, EndedAt: now.Add(8 * time.Second)},
+		5: {ID: 5, Agent: "codex", Status: "completed", StartedAt: now, EndedAt: now.Add(9 * time.Second)},
+		6: {ID: 6, Agent: "codex", Status: "running", StartedAt: now},
+	}
+	m.sessionOrder = []int{1, 2, 3, 4, 5, 6}
+	m.spawns = []SpawnInfo{
+		{ID: 10, ParentTurnID: 6, Profile: "reviewer", Status: "running"},
+	}
+	m.spawnFirstSeen[10] = time.Now().Add(-30 * time.Second)
+
+	entries := m.commandEntries()
+	completedCount := 0
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.scope, "session:") && entry.status == "completed" {
+			completedCount++
+		}
+	}
+	if completedCount != 3 {
+		t.Fatalf("completed entries = %d, want 3", completedCount)
+	}
+
+	for _, entry := range entries {
+		if entry.scope == "session:1" || entry.scope == "session:2" {
+			t.Fatalf("unexpected old completed session in entries: %q", entry.scope)
+		}
+	}
+
+	parentIdx, childIdx := -1, -1
+	for i, entry := range entries {
+		if entry.scope == "session:6" {
+			parentIdx = i
+		}
+		if entry.scope == "spawn:10" {
+			childIdx = i
+			if entry.depth != 1 {
+				t.Fatalf("spawn entry depth = %d, want 1", entry.depth)
+			}
+		}
+	}
+	if parentIdx == -1 || childIdx == -1 {
+		t.Fatalf("missing parent or child entries: parent=%d child=%d", parentIdx, childIdx)
+	}
+	if childIdx <= parentIdx {
+		t.Fatalf("spawn entry index = %d, want greater than parent index %d", childIdx, parentIdx)
+	}
+
+	var lines []string
+	m.appendAgentsList(&lines, 80, entries)
+	rendered := strings.Join(stripStyledLines(lines), "\n")
+	if !strings.Contains(rendered, "|- spawn #10 reviewer") {
+		t.Fatalf("agents list did not render hierarchy prefix; output:\n%s", rendered)
+	}
+}
+
 func TestIssueAndDocDetailModes(t *testing.T) {
 	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
 	m.issues = []store.Issue{

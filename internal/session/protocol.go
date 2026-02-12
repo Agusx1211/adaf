@@ -64,19 +64,21 @@ type WireRaw struct {
 
 // WireFinished signals that a single agent session completed.
 type WireFinished struct {
-	SessionID  int           `json:"session_id"`
-	TurnHexID  string        `json:"turn_hex_id,omitempty"`
-	ExitCode   int           `json:"exit_code"`
-	DurationNS time.Duration `json:"duration_ns"`
-	Error      string        `json:"error,omitempty"`
+	SessionID     int           `json:"session_id"`
+	TurnHexID     string        `json:"turn_hex_id,omitempty"`
+	WaitForSpawns bool          `json:"wait_for_spawns,omitempty"`
+	ExitCode      int           `json:"exit_code"`
+	DurationNS    time.Duration `json:"duration_ns"`
+	Error         string        `json:"error,omitempty"`
 }
 
 // WireSpawnInfo describes a spawn entry.
 type WireSpawnInfo struct {
-	ID       int    `json:"id"`
-	Profile  string `json:"profile"`
-	Status   string `json:"status"`
-	Question string `json:"question,omitempty"`
+	ID           int    `json:"id"`
+	ParentTurnID int    `json:"parent_turn_id,omitempty"`
+	Profile      string `json:"profile"`
+	Status       string `json:"status"`
+	Question     string `json:"question,omitempty"`
 }
 
 // WireSpawn carries spawn hierarchy updates.

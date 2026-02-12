@@ -18,7 +18,10 @@ import (
 	"github.com/agusx1211/adaf/internal/theme"
 )
 
-const leftPanelOuterWidth = 44
+const (
+	leftPanelOuterWidth      = 44
+	maxVisibleCompletedTurns = 3
+)
 
 type paneFocus int
 
@@ -58,6 +61,7 @@ type commandEntry struct {
 	status   string
 	action   string
 	duration string
+	depth    int
 }
 
 // Model is the bubbletea model for the adaf run TUI.
@@ -289,6 +293,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		now := time.Now()
 		nextSeen := make(map[int]time.Time, len(msg.Spawns))
 		nextStatus := make(map[int]string, len(msg.Spawns))
+		activeByParent := make(map[int]bool)
+		seenByParent := make(map[int]bool)
 		for _, sp := range msg.Spawns {
 			firstSeen, ok := m.spawnFirstSeen[sp.ID]
 			if !ok {
@@ -296,6 +302,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			nextSeen[sp.ID] = firstSeen
 			nextStatus[sp.ID] = sp.Status
+			if sp.ParentTurnID > 0 {
+				seenByParent[sp.ParentTurnID] = true
+				if !isTerminalSpawnStatus(sp.Status) {
+					activeByParent[sp.ParentTurnID] = true
+				}
+			}
 			prev, hadPrev := m.spawnStatus[sp.ID]
 			if !hadPrev || prev != sp.Status {
 				scope := m.spawnScope(sp.ID)
@@ -307,6 +319,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.spawnFirstSeen = nextSeen
 		m.spawnStatus = nextStatus
+		for _, sid := range m.sessionOrder {
+			s := m.sessions[sid]
+			if s == nil || !isWaitingSessionStatus(s.Status) {
+				continue
+			}
+			if !seenByParent[sid] || activeByParent[sid] {
+				continue
+			}
+			s.Status = "completed"
+			if s.Action == "" || strings.Contains(strings.ToLower(s.Action), "wait") {
+				s.Action = "wait complete"
+			}
+			s.LastUpdate = now
+		}
 		return m, waitForEvent(m.eventCh)
 
 	case GuardrailViolationMsg:
@@ -315,6 +341,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForEvent(m.eventCh)
 
 	case AgentStartedMsg:
+		m.finalizeWaitingSessions()
 		m.sessionID = msg.SessionID
 		now := time.Now()
 		s := m.ensureSession(msg.SessionID)
@@ -348,14 +375,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Result != nil {
 			s.EndedAt = s.LastUpdate
-			if msg.Result.ExitCode == 0 {
+			switch {
+			case msg.WaitForSpawns:
+				s.Status = "waiting_for_spawns"
+				s.Action = "waiting for spawns"
+			case msg.Result.ExitCode == 0:
 				s.Status = "completed"
-			} else {
+			default:
 				s.Status = "failed"
 			}
-			s.Action = fmt.Sprintf("finished (exit=%d)", msg.Result.ExitCode)
-			m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf("<<< Turn #%d%s finished (exit=%d, %s)",
-				msg.SessionID, hexTag, msg.Result.ExitCode, msg.Result.Duration.Round(time.Second))))
+			if !msg.WaitForSpawns {
+				s.Action = fmt.Sprintf("finished (exit=%d)", msg.Result.ExitCode)
+			}
+			if msg.WaitForSpawns {
+				m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf("<<< Turn #%d%s waiting for spawns (exit=%d, %s)",
+					msg.SessionID, hexTag, msg.Result.ExitCode, msg.Result.Duration.Round(time.Second))))
+			} else {
+				m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf("<<< Turn #%d%s finished (exit=%d, %s)",
+					msg.SessionID, hexTag, msg.Result.ExitCode, msg.Result.Duration.Round(time.Second))))
+			}
 		} else if msg.Err != nil {
 			s.EndedAt = s.LastUpdate
 			s.Status = "failed"
@@ -528,7 +566,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if entries[i].scope == "" {
 				continue
 			}
-			if entries[i].status == "running" || entries[i].status == "awaiting_input" {
+			if isActiveSessionStatus(entries[i].status) {
 				active = append(active, i)
 			}
 		}
@@ -991,6 +1029,51 @@ func (m *Model) setSessionAction(sessionID int, action string) {
 		s.Action = action
 	}
 	s.LastUpdate = time.Now()
+}
+
+func isWaitingSessionStatus(status string) bool {
+	switch status {
+	case "waiting_for_spawns", "waiting":
+		return true
+	default:
+		return false
+	}
+}
+
+func isActiveSessionStatus(status string) bool {
+	switch status {
+	case "running", "awaiting_input":
+		return true
+	default:
+		return isWaitingSessionStatus(status)
+	}
+}
+
+func isTerminalSpawnStatus(status string) bool {
+	switch status {
+	case "completed", "failed", "merged", "rejected":
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *Model) finalizeWaitingSessions() {
+	now := time.Now()
+	for _, sid := range m.sessionOrder {
+		s := m.sessions[sid]
+		if s == nil || !isWaitingSessionStatus(s.Status) {
+			continue
+		}
+		s.Status = "completed"
+		if s.Action == "" || strings.Contains(strings.ToLower(s.Action), "wait") {
+			s.Action = "wait complete"
+		}
+		if s.EndedAt.IsZero() {
+			s.EndedAt = now
+		}
+		s.LastUpdate = now
+	}
 }
 
 // flushStream flushes the streaming buffer to a completed line.
@@ -1583,7 +1666,7 @@ func shortcut(k, desc string) string {
 
 func statusStyle(status string) lipgloss.Style {
 	switch status {
-	case "running", "awaiting_input":
+	case "running", "awaiting_input", "waiting", "waiting_for_spawns":
 		return lipgloss.NewStyle().Foreground(theme.ColorYellow)
 	case "completed", "merged":
 		return lipgloss.NewStyle().Foreground(theme.ColorGreen)
@@ -1649,6 +1732,7 @@ func (m Model) commandEntries() []commandEntry {
 			status:   "running",
 			action:   m.loopStepProfile,
 			duration: m.elapsed.Round(time.Second).String(),
+			depth:    0,
 		},
 	}
 	if m.done {
@@ -1658,10 +1742,81 @@ func (m Model) commandEntries() []commandEntry {
 		entries[0].action = "monitoring"
 	}
 
+	spawnsByParent := make(map[int][]SpawnInfo)
+	if len(m.spawns) > 0 {
+		spawns := append([]SpawnInfo(nil), m.spawns...)
+		sort.Slice(spawns, func(i, j int) bool {
+			return spawns[i].ID < spawns[j].ID
+		})
+		for _, sp := range spawns {
+			spawnsByParent[sp.ParentTurnID] = append(spawnsByParent[sp.ParentTurnID], sp)
+		}
+	}
+
+	keepCompleted := make(map[int]struct{})
+	keptCompleted := 0
+	for i := len(m.sessionOrder) - 1; i >= 0; i-- {
+		if keptCompleted >= maxVisibleCompletedTurns {
+			break
+		}
+		sid := m.sessionOrder[i]
+		s := m.sessions[sid]
+		if s == nil {
+			continue
+		}
+		status := strings.TrimSpace(s.Status)
+		if status == "" {
+			status = "running"
+		}
+		if status != "completed" {
+			continue
+		}
+		keepCompleted[sid] = struct{}{}
+		keptCompleted++
+	}
+
+	now := time.Now()
+	appendSpawn := func(sp SpawnInfo, depth int, includeParentHint bool) {
+		started := m.spawnFirstSeen[sp.ID]
+		duration := ""
+		if !started.IsZero() {
+			d := now.Sub(started).Round(time.Second)
+			if d < 0 {
+				d = 0
+			}
+			duration = d.String()
+		}
+		action := "spawn"
+		if sp.Question != "" {
+			action = "awaiting input"
+		}
+		title := fmt.Sprintf("spawn #%d %s", sp.ID, sp.Profile)
+		if includeParentHint && sp.ParentTurnID > 0 {
+			title += fmt.Sprintf(" (turn #%d)", sp.ParentTurnID)
+		}
+		entries = append(entries, commandEntry{
+			scope:    m.spawnScope(sp.ID),
+			title:    title,
+			status:   sp.Status,
+			action:   action,
+			duration: duration,
+			depth:    depth,
+		})
+	}
+
 	for _, sid := range m.sessionOrder {
 		s := m.sessions[sid]
 		if s == nil {
 			continue
+		}
+		status := strings.TrimSpace(s.Status)
+		if status == "" {
+			status = "running"
+		}
+		if status == "completed" {
+			if _, ok := keepCompleted[sid]; !ok {
+				continue
+			}
 		}
 		title := fmt.Sprintf("turn #%d %s", s.ID, s.Agent)
 		if s.Profile != "" {
@@ -1672,7 +1827,7 @@ func (m Model) commandEntries() []commandEntry {
 		}
 		duration := "0s"
 		if !s.StartedAt.IsZero() {
-			end := time.Now()
+			end := now
 			if !s.EndedAt.IsZero() {
 				end = s.EndedAt
 			}
@@ -1681,10 +1836,6 @@ func (m Model) commandEntries() []commandEntry {
 				d = 0
 			}
 			duration = d.String()
-		}
-		status := s.Status
-		if status == "" {
-			status = "running"
 		}
 		action := s.Action
 		if action == "" {
@@ -1696,35 +1847,25 @@ func (m Model) commandEntries() []commandEntry {
 			status:   status,
 			action:   action,
 			duration: duration,
+			depth:    0,
 		})
+		children := spawnsByParent[s.ID]
+		for _, sp := range children {
+			appendSpawn(sp, 1, false)
+		}
+		delete(spawnsByParent, s.ID)
 	}
 
-	if len(m.spawns) > 0 {
-		spawns := append([]SpawnInfo(nil), m.spawns...)
-		sort.Slice(spawns, func(i, j int) bool {
-			return spawns[i].ID < spawns[j].ID
-		})
-		for _, sp := range spawns {
-			started := m.spawnFirstSeen[sp.ID]
-			duration := ""
-			if !started.IsZero() {
-				d := time.Since(started).Round(time.Second)
-				if d < 0 {
-					d = 0
-				}
-				duration = d.String()
+	if len(spawnsByParent) > 0 {
+		parentIDs := make([]int, 0, len(spawnsByParent))
+		for parentID := range spawnsByParent {
+			parentIDs = append(parentIDs, parentID)
+		}
+		sort.Ints(parentIDs)
+		for _, parentID := range parentIDs {
+			for _, sp := range spawnsByParent[parentID] {
+				appendSpawn(sp, 0, true)
 			}
-			action := "spawn"
-			if sp.Question != "" {
-				action = "awaiting input"
-			}
-			entries = append(entries, commandEntry{
-				scope:    m.spawnScope(sp.ID),
-				title:    fmt.Sprintf("spawn #%d %s", sp.ID, sp.Profile),
-				status:   sp.Status,
-				action:   action,
-				duration: duration,
-			})
 		}
 	}
 
@@ -1850,9 +1991,21 @@ func (m Model) appendAgentsList(lines *[]string, cw int, entries []commandEntry)
 			titleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.ColorTeal)
 		}
 		status := statusStyle(entry.status).Render(entry.status)
-		line := fmt.Sprintf("%s%s [%s]", prefix, titleStyle.Render(truncate(entry.title, cw-8)), status)
+		title := entry.title
+		if entry.depth > 0 {
+			title = strings.Repeat("  ", entry.depth) + "|- " + title
+		}
+		line := fmt.Sprintf("%s%s [%s]", prefix, titleStyle.Render(truncate(title, cw-8)), status)
 		*lines = append(*lines, line)
-		meta := dimStyle.Render("   " + truncate(entry.duration+" · "+entry.action, cw-3))
+		metaPrefix := "   "
+		if entry.depth > 0 {
+			metaPrefix += strings.Repeat("  ", entry.depth) + "   "
+		}
+		maxMetaWidth := cw - len(metaPrefix)
+		if maxMetaWidth < 1 {
+			maxMetaWidth = 1
+		}
+		meta := dimStyle.Render(metaPrefix + truncate(entry.duration+" · "+entry.action, maxMetaWidth))
 		*lines = append(*lines, meta)
 	}
 }

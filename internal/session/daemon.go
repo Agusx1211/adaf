@@ -578,6 +578,7 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 				b.broadcast(line)
 			case runtui.AgentFinishedMsg:
 				wf := WireFinished{SessionID: ev.SessionID, TurnHexID: ev.TurnHexID}
+				wf.WaitForSpawns = ev.WaitForSpawns
 				if ev.Result != nil {
 					wf.ExitCode = ev.Result.ExitCode
 					wf.DurationNS = ev.Result.Duration
@@ -601,10 +602,11 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 				spawns := make([]WireSpawnInfo, len(ev.Spawns))
 				for i, sp := range ev.Spawns {
 					spawns[i] = WireSpawnInfo{
-						ID:       sp.ID,
-						Profile:  sp.Profile,
-						Status:   sp.Status,
-						Question: sp.Question,
+						ID:           sp.ID,
+						ParentTurnID: sp.ParentTurnID,
+						Profile:      sp.Profile,
+						Status:       sp.Status,
+						Question:     sp.Question,
 					}
 				}
 				line, _ := EncodeMsg(MsgSpawn, WireSpawn{Spawns: spawns})

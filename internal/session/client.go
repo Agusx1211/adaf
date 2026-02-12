@@ -132,8 +132,9 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 				continue
 			}
 			eventCh <- runtui.AgentFinishedMsg{
-				SessionID: data.SessionID,
-				TurnHexID: data.TurnHexID,
+				SessionID:     data.SessionID,
+				TurnHexID:     data.TurnHexID,
+				WaitForSpawns: data.WaitForSpawns,
 				Result: &agent.Result{
 					ExitCode: data.ExitCode,
 					Duration: time.Duration(data.DurationNS),
@@ -148,10 +149,11 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 			spawns := make([]runtui.SpawnInfo, len(data.Spawns))
 			for i, s := range data.Spawns {
 				spawns[i] = runtui.SpawnInfo{
-					ID:       s.ID,
-					Profile:  s.Profile,
-					Status:   s.Status,
-					Question: s.Question,
+					ID:           s.ID,
+					ParentTurnID: s.ParentTurnID,
+					Profile:      s.Profile,
+					Status:       s.Status,
+					Question:     s.Question,
 				}
 			}
 			eventCh <- runtui.SpawnStatusMsg{Spawns: spawns}
