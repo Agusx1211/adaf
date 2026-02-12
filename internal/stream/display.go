@@ -28,10 +28,19 @@ func (d *Display) Handle(ev ClaudeEvent) {
 	switch ev.Type {
 	case "system":
 		d.finishLine()
-		model := ev.Model
-		sessionID := ev.SessionID
-		if model != "" || sessionID != "" {
-			fmt.Fprintf(d.w, "\033[2m[init]\033[0m session=%s model=%s\n", sessionID, model)
+		switch ev.Subtype {
+		case "init":
+			model := ev.Model
+			sessionID := ev.SessionID
+			if model != "" || sessionID != "" {
+				fmt.Fprintf(d.w, "\033[2m[init]\033[0m session=%s model=%s\n", sessionID, model)
+			}
+		case "api_error":
+			fmt.Fprintf(d.w, "\033[1;31m[api_error]\033[0m\n")
+		default:
+			// Other system subtypes (status, hook_started, hook_response,
+			// informational, compact_boundary, etc.) are silently ignored
+			// in the terminal display.
 		}
 
 	case "assistant":
@@ -100,6 +109,12 @@ func (d *Display) Handle(ev ClaudeEvent) {
 	case "result":
 		d.finishLine()
 		var parts []string
+		if ev.IsError {
+			parts = append(parts, "ERROR")
+		}
+		if ev.Subtype != "" && ev.Subtype != "success" {
+			parts = append(parts, ev.Subtype)
+		}
 		if ev.TotalCostUSD > 0 {
 			parts = append(parts, fmt.Sprintf("cost=$%.4f", ev.TotalCostUSD))
 		}
@@ -113,14 +128,25 @@ func (d *Display) Handle(ev ClaudeEvent) {
 			parts = append(parts, fmt.Sprintf("in=%d out=%d",
 				ev.Usage.InputTokens, ev.Usage.OutputTokens))
 		}
-		if len(parts) > 0 {
-			fmt.Fprintf(d.w, "\033[1;32m[result]\033[0m %s\n", strings.Join(parts, " "))
-		} else {
-			fmt.Fprintf(d.w, "\033[1;32m[result]\033[0m done\n")
+		color := "\033[1;32m" // green
+		if ev.IsError {
+			color = "\033[1;31m" // red
 		}
+		if len(parts) > 0 {
+			fmt.Fprintf(d.w, "%s[result]\033[0m %s\n", color, strings.Join(parts, " "))
+		} else {
+			fmt.Fprintf(d.w, "%s[result]\033[0m done\n", color)
+		}
+
+	case "user":
+		// User/tool result events — silently ignore in display.
+		// The tool results are embedded in subsequent assistant messages.
 
 	case "message":
 		// message start/stop — ignore silently
+
+	case "tool_use_summary", "tool_progress", "auth_status":
+		// These are informational events — silently ignore in display.
 
 	default:
 		if ev.Type != "" {

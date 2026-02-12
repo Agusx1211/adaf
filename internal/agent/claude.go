@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/agusx1211/adaf/internal/recording"
@@ -29,12 +30,13 @@ func (c *ClaudeAgent) Name() string {
 
 // Run executes the claude CLI with the given configuration.
 //
-// It uses the -p flag to pass the prompt directly as a command-line argument.
-// Additional flags such as --model and --dangerously-skip-permissions can be
-// supplied via cfg.Args.
+// It uses --print (-p) to enable non-interactive mode and passes the prompt
+// as a positional argument. Additional flags such as --model and
+// --dangerously-skip-permissions can be supplied via cfg.Args.
 //
 // Output is streamed in real-time using --output-format stream-json --verbose,
 // which produces NDJSON events that are parsed, displayed, and recorded.
+// The --verbose flag is required when using --output-format stream-json.
 func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Recorder) (*Result, error) {
 	cmdName := cfg.Command
 	if cmdName == "" {
@@ -45,18 +47,34 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 	// flags and the prompt.
 	args := make([]string, 0, len(cfg.Args)+6)
 	args = append(args, cfg.Args...)
-	args = append(args, "--output-format", "stream-json", "--verbose")
 
-	// Pass the prompt via the -p flag so claude treats it as a non-interactive
-	// prompt. If the prompt is empty we still run (claude may read from stdin
-	// or use its own interactive mode).
+	// --print (-p) enables non-interactive mode (print response and exit).
+	// --output-format stream-json produces NDJSON events on stdout.
+	// --verbose is required by the CLI when using stream-json output format.
+	args = append(args, "--print", "--output-format", "stream-json", "--verbose")
+
+	// The prompt is a positional argument (not a flag value).
+	// In --print mode, the CLI requires either a positional prompt or stdin input.
 	if cfg.Prompt != "" {
-		args = append(args, "-p", cfg.Prompt)
+		args = append(args, cfg.Prompt)
 		recorder.RecordStdin(cfg.Prompt)
 	}
 
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
+
+	// Run the command in its own process group so that context cancellation
+	// kills the entire tree. Claude Code is Node.js-based and spawns child
+	// processes for tool use (Bash, etc.); without Setpgid + process group
+	// kill, orphan processes will hold pipes open and hang the parent.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		// Send SIGKILL to the entire process group (negative PID).
+		if cmd.Process != nil {
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		return nil
+	}
 
 	// Environment: inherit + overlay.
 	cmd.Env = os.Environ()
@@ -94,6 +112,35 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 
 	var textBuf strings.Builder
 
+	// accumulateText extracts text content from a stream event.
+	// In stream-json mode, the CLI emits complete "assistant" events (not
+	// incremental content_block_delta events). The "result" event contains
+	// the final authoritative text in its "result" field.
+	accumulateText := func(ev stream.ClaudeEvent) {
+		switch ev.Type {
+		case "assistant":
+			if ev.AssistantMessage != nil {
+				for _, block := range ev.AssistantMessage.Content {
+					if block.Type == "text" {
+						textBuf.WriteString(block.Text)
+					}
+				}
+			}
+		case "content_block_delta":
+			// Only present when --include-partial-messages is used.
+			if ev.Delta != nil && ev.Delta.Type == "text_delta" {
+				textBuf.WriteString(ev.Delta.Text)
+			}
+		case "result":
+			// The result event contains the final text. If present, use it
+			// as the authoritative output (replacing accumulated text).
+			if ev.ResultText != "" {
+				textBuf.Reset()
+				textBuf.WriteString(ev.ResultText)
+			}
+		}
+	}
+
 	if cfg.EventSink != nil {
 		// TUI mode: forward events to the sink channel for the TUI to render.
 		for ev := range events {
@@ -109,19 +156,7 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 			// Forward to TUI.
 			cfg.EventSink <- ev
 
-			// Accumulate text for Result.Output.
-			if ev.Parsed.Type == "assistant" && ev.Parsed.AssistantMessage != nil {
-				for _, block := range ev.Parsed.AssistantMessage.Content {
-					if block.Type == "text" {
-						textBuf.WriteString(block.Text)
-					}
-				}
-			}
-			if ev.Parsed.Type == "content_block_delta" &&
-				ev.Parsed.Delta != nil &&
-				ev.Parsed.Delta.Type == "text_delta" {
-				textBuf.WriteString(ev.Parsed.Delta.Text)
-			}
+			accumulateText(ev.Parsed)
 		}
 	} else {
 		// Legacy mode: display formatted events in real-time.
@@ -153,20 +188,7 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 				}
 
 				display.Handle(ev.Parsed)
-
-				// Accumulate text for Result.Output.
-				if ev.Parsed.Type == "assistant" && ev.Parsed.AssistantMessage != nil {
-					for _, block := range ev.Parsed.AssistantMessage.Content {
-						if block.Type == "text" {
-							textBuf.WriteString(block.Text)
-						}
-					}
-				}
-				if ev.Parsed.Type == "content_block_delta" &&
-					ev.Parsed.Delta != nil &&
-					ev.Parsed.Delta.Type == "text_delta" {
-					textBuf.WriteString(ev.Parsed.Delta.Text)
-				}
+				accumulateText(ev.Parsed)
 
 			case <-ticker.C:
 				elapsed := time.Since(start).Round(time.Second)

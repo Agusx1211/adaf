@@ -217,14 +217,15 @@ func probeCodexModels() ([]string, []agentmeta.ReasoningLevel) {
 
 // --- Claude model discovery ---
 
-// claudeFullModelRE matches full model IDs like "claude-opus-4-6" or
-// "claude-sonnet-4-5-20250929" in the CLI bundle. These are the precise
-// identifiers the CLI accepts via --model.
-var claudeFullModelRE = regexp.MustCompile(`"(claude-(?:opus|sonnet|haiku)[-0-9]*)"`)
+// claudeFullModelRE matches full model IDs like "claude-opus-4-6",
+// "claude-sonnet-4-5-20250929", or "claude-opus-4-6-v1" in the CLI bundle.
+// These are the precise identifiers the CLI accepts via --model.
+var claudeFullModelRE = regexp.MustCompile(`"(claude-(?:opus|sonnet|haiku)[-0-9a-z]*)"`)
 
-// claudeAliasRE matches bare alias references like "opus", "sonnet", "haiku"
-// (without any version suffix) which the CLI also accepts as shortcuts for the latest.
-var claudeAliasRE = regexp.MustCompile(`"((?:opus|sonnet|haiku))"`)
+// claudeAliasRE matches bare alias references like "opus", "sonnet", "haiku",
+// "best", "opusplan" (without any version suffix) which the CLI also accepts
+// as shortcuts for the latest.
+var claudeAliasRE = regexp.MustCompile(`"((?:opus|sonnet|haiku|best|opusplan))"`)
 
 // claudeEffortRE matches the effort levels array, e.g. ["low","medium","high","max"]
 var claudeEffortRE = regexp.MustCompile(`\["low","medium","high"(?:,"max")?\]`)
@@ -284,6 +285,11 @@ func probeClaudeModels(binPath string) ([]string, []agentmeta.ReasoningLevel) {
 }
 
 // resolveClaudeCLIJS attempts to find the cli.js file from the claude binary path.
+//
+// The claude binary is typically either:
+//  1. A symlink into an npm/bun package's cli.js (e.g. ~/.bun/bin/claude -> .../node_modules/@anthropic-ai/claude-code/cli.js)
+//  2. A shell wrapper that invokes cli.js
+//  3. A native binary (in which case cli.js is in the same directory)
 func resolveClaudeCLIJS(binPath string) string {
 	// Resolve symlinks to find the real binary location.
 	resolved, err := filepath.EvalSymlinks(binPath)
@@ -291,7 +297,14 @@ func resolveClaudeCLIJS(binPath string) string {
 		resolved = binPath
 	}
 
-	// The claude npm package typically has cli.js in the same directory or parent.
+	// Check if the resolved path itself IS cli.js (common with bun/npm installs
+	// where the binary is a symlink directly to cli.js).
+	if filepath.Base(resolved) == "cli.js" {
+		if fi, err := os.Stat(resolved); err == nil && !fi.IsDir() {
+			return resolved
+		}
+	}
+
 	dir := filepath.Dir(resolved)
 
 	// Try common locations relative to the resolved binary.

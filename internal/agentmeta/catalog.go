@@ -29,8 +29,16 @@ var builtin = map[string]Info{
 			"opus",
 			"sonnet",
 			"haiku",
+			"best",
+			"opusplan",
 		},
-		Capabilities: []string{"prompt-arg", "model-select", "auto-approve", "stream-output"},
+		ReasoningLevels: []ReasoningLevel{
+			{Name: "low"},
+			{Name: "medium"},
+			{Name: "high"},
+			{Name: "max"},
+		},
+		Capabilities: []string{"prompt-arg", "model-select", "auto-approve", "stream-output", "max-turns"},
 	},
 	"codex": {
 		Name:         "codex",
