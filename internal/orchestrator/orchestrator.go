@@ -3,9 +3,12 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -521,14 +524,24 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 		)
 		rec.CompletedAt = time.Now().UTC()
 
-		// Capture child's output for parent consumption.
-		const maxSummarySize = 8000
-		if l.LastResult != nil && l.LastResult.Output != "" {
-			summary := l.LastResult.Output
-			if len(summary) > maxSummarySize {
-				summary = "...(truncated)\n" + summary[len(summary)-maxSummarySize:]
+		// Capture child's final report for parent consumption.
+		// Prefer the last assistant message when available (for models that
+		// stream JSON transcript lines), otherwise fall back to raw output.
+		if l.LastResult != nil {
+			report, reportErr := extractSpawnReport(l.LastResult.Output)
+			if reportErr != nil {
+				debug.LogKV("orch", "spawn report extraction failed",
+					"spawn_id", rec.ID,
+					"child_profile", rec.ChildProfile,
+					"error", reportErr,
+					"output_len", len(l.LastResult.Output),
+				)
+				rec.Summary = missingSpawnReportMessage(rec.ID, reportErr)
+			} else {
+				rec.Summary = report
 			}
-			rec.Summary = summary
+		} else {
+			rec.Summary = missingSpawnReportMessage(rec.ID, errors.New("child returned no result payload"))
 		}
 
 		status := "completed"
@@ -591,6 +604,103 @@ func appendSpawnResult(base, extra string) string {
 		return extra
 	}
 	return base + " | " + extra
+}
+
+// extractSpawnReport returns the child agent's last assistant message as-is.
+// If no assistant message can be extracted, it returns an error.
+func extractSpawnReport(output string) (string, error) {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return "", errors.New("child output is empty")
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	lastAssistant := ""
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasPrefix(line, "{") {
+			continue
+		}
+
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			continue
+		}
+		if msg := assistantMessageFromJSON(raw); msg != "" {
+			lastAssistant = msg
+		}
+	}
+
+	if strings.TrimSpace(lastAssistant) == "" {
+		return "", errors.New("no assistant message found in child output")
+	}
+	return lastAssistant, nil
+}
+
+func assistantMessageFromJSON(raw map[string]any) string {
+	// Common transcript form: {"role":"assistant","content":"..."}
+	if role, _ := raw["role"].(string); role == "assistant" {
+		if msg := assistantContentValue(raw["content"]); msg != "" {
+			return msg
+		}
+	}
+
+	// Claude-style event projection:
+	// {"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}}
+	if typ, _ := raw["type"].(string); typ == "assistant" {
+		if msg, ok := raw["message"].(map[string]any); ok {
+			if msgText := assistantContentValue(msg["content"]); msgText != "" {
+				return msgText
+			}
+		}
+	}
+
+	// Codex-style raw events:
+	// {"type":"item.completed","item":{"type":"agent_message","text":"..."}}
+	if typ, _ := raw["type"].(string); typ == "item.completed" {
+		if item, ok := raw["item"].(map[string]any); ok {
+			if itemType, _ := item["type"].(string); itemType == "agent_message" {
+				if text, _ := item["text"].(string); strings.TrimSpace(text) != "" {
+					return text
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
+func assistantContentValue(v any) string {
+	switch c := v.(type) {
+	case string:
+		return c
+	case []any:
+		var parts []string
+		for _, elem := range c {
+			obj, ok := elem.(map[string]any)
+			if !ok {
+				continue
+			}
+			blockType, _ := obj["type"].(string)
+			if blockType != "text" {
+				continue
+			}
+			text, _ := obj["text"].(string)
+			if text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "")
+	default:
+		return ""
+	}
+}
+
+func missingSpawnReportMessage(spawnID int, reason error) string {
+	return fmt.Sprintf(
+		"Report unavailable: automatic extraction failed (%v). Fetch it manually with `adaf spawn-inspect --spawn-id %d --last 200` or `adaf spawn-watch --spawn-id %d`.",
+		reason, spawnID, spawnID,
+	)
 }
 
 func shortHash(hash string) string {

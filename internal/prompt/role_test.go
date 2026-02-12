@@ -37,3 +37,14 @@ func TestDelegationSection_NoDelegation(t *testing.T) {
 		t.Fatalf("delegationSection(nil) = %q, want %q", got, "You cannot spawn sub-agents.\n\n")
 	}
 }
+
+func TestReadOnlyPrompt_RequiresFinalMessageReport(t *testing.T) {
+	got := ReadOnlyPrompt()
+
+	if !strings.Contains(got, "Do NOT write reports into repository files") {
+		t.Fatalf("expected read-only prompt to forbid writing reports to repo files\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "final assistant message") {
+		t.Fatalf("expected read-only prompt to require final assistant message reporting\nprompt:\n%s", got)
+	}
+}

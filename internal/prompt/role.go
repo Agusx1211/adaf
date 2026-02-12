@@ -60,7 +60,7 @@ func RolePrompt(profile *config.Profile, stepRole string, globalCfg *config.Glob
 
 // ReadOnlyPrompt returns the read-only mode prompt section.
 func ReadOnlyPrompt() string {
-	return "# READ-ONLY MODE\n\nYou are in READ-ONLY mode. Do NOT create, modify, or delete any files. Only read and analyze.\n"
+	return "# READ-ONLY MODE\n\nYou are in READ-ONLY mode. Do NOT create, modify, or delete any files. Only read and analyze.\n\nDo NOT write reports into repository files (for example `*.md`, `*.txt`, or TODO files). Return your report in your final assistant message.\n"
 }
 
 // delegationSection builds the delegation/spawning prompt section from a DelegationConfig.
@@ -145,7 +145,7 @@ func delegationCommands() string {
 	b.WriteString("**ALWAYS use this pattern:**\n")
 	b.WriteString("1. Spawn ALL independent tasks at once (without `--wait`)\n")
 	b.WriteString("2. Call `adaf wait-for-spawns` immediately after\n")
-	b.WriteString("3. Finish your current turn — you will be resumed automatically when all children complete\n\n")
+	b.WriteString("3. Stop immediately after that command. Do not run more commands in this turn — the loop will pause this turn and resume you automatically when children complete.\n\n")
 	b.WriteString("This is critical: `wait-for-spawns` suspends your session with zero token cost. ")
 	b.WriteString("Using `--wait` keeps your session alive and burns tokens while you idle. ")
 	b.WriteString("**Only use `--wait` when you absolutely need a child's output before you can spawn the next task in the same turn** (rare).\n\n")

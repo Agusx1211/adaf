@@ -257,7 +257,8 @@ when all spawned sub-agents complete. The agent should exit/finish its
 current turn after calling this command. When spawns complete, the loop
 will resume the same turn with spawn results in the prompt.
 
-This saves API costs by not keeping the agent running while waiting.`,
+This saves API costs by not keeping the agent running while waiting.
+After calling this command, stop immediately and run no further commands.`,
 	RunE: runWaitForSpawns,
 }
 
@@ -280,7 +281,7 @@ func runWaitForSpawns(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("signaling wait: %w", err)
 	}
 
-	fmt.Println("Wait signal created. Finish your current turn — the loop will resume when all spawns complete.")
+	fmt.Println("Wait signal created. Stop now and end this turn — the loop will resume when all spawns complete.")
 	return nil
 }
 

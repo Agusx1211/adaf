@@ -26,6 +26,12 @@ type waitResumeStubAgent struct {
 	runs  []agent.Config
 }
 
+type waitImmediateStopStubAgent struct {
+	store       *store.Store
+	runs        []agent.Config
+	firstTurnID int
+}
+
 func (a *stubAgent) Name() string { return "stub" }
 
 func (a *stubAgent) Run(ctx context.Context, cfg agent.Config, recorder *recording.Recorder) (*agent.Result, error) {
@@ -63,6 +69,31 @@ func (a *waitResumeStubAgent) Run(ctx context.Context, cfg agent.Config, recorde
 		ExitCode:       0,
 		Duration:       time.Millisecond,
 		AgentSessionID: "sess-123",
+	}, nil
+}
+
+func (a *waitImmediateStopStubAgent) Name() string { return "stub" }
+
+func (a *waitImmediateStopStubAgent) Run(ctx context.Context, cfg agent.Config, recorder *recording.Recorder) (*agent.Result, error) {
+	cloned := cfg
+	cloned.Env = make(map[string]string, len(cfg.Env))
+	for k, v := range cfg.Env {
+		cloned.Env[k] = v
+	}
+	a.runs = append(a.runs, cloned)
+
+	if len(a.runs) == 1 {
+		a.firstTurnID = cfg.TurnID
+		if err := a.store.SignalWait(cfg.TurnID); err != nil {
+			return nil, err
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return &agent.Result{
+		ExitCode:       0,
+		Duration:       time.Millisecond,
+		AgentSessionID: "sess-456",
 	}, nil
 }
 
@@ -276,6 +307,52 @@ func TestLoopWaitForSpawnsResumesSameTurn(t *testing.T) {
 	}
 	if turns[0].BuildState != "success" {
 		t.Fatalf("final build state = %q, want %q", turns[0].BuildState, "success")
+	}
+}
+
+func TestLoopWaitForSpawnsStopsTurnImmediately(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "test", RepoPath: dir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
+	}
+
+	a := &waitImmediateStopStubAgent{store: s}
+	var waited []int
+
+	l := &Loop{
+		Store: s,
+		Agent: a,
+		Config: agent.Config{
+			Prompt:   "base",
+			MaxTurns: 1,
+		},
+		OnWait: func(turnID int) ([]WaitResult, bool) {
+			waited = append(waited, turnID)
+			return []WaitResult{{SpawnID: 11, Profile: "scout", Status: "completed", Summary: "done"}}, false
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := l.Run(ctx); err != nil {
+		t.Fatalf("Loop.Run() error = %v", err)
+	}
+
+	if len(a.runs) != 2 {
+		t.Fatalf("agent runs = %d, want 2 (wait-cancel + resume)", len(a.runs))
+	}
+	if a.runs[0].TurnID != a.runs[1].TurnID {
+		t.Fatalf("turn IDs differ across wait resume: first=%d second=%d", a.runs[0].TurnID, a.runs[1].TurnID)
+	}
+	if len(waited) != 1 || waited[0] != a.firstTurnID {
+		t.Fatalf("OnWait turn IDs = %v, want [%d]", waited, a.firstTurnID)
+	}
+	if s.IsWaiting(a.firstTurnID) {
+		t.Fatalf("wait signal for turn %d was not cleared", a.firstTurnID)
 	}
 }
 

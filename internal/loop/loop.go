@@ -305,6 +305,34 @@ func (l *Loop) Run(ctx context.Context) error {
 		// Create a turn-scoped context so guardrails can cancel just the
 		// current turn without stopping the entire loop.
 		turnCtx, turnCancel := context.WithCancel(ctx)
+		// Enforce wait-for-spawns as immediate control flow: as soon as a
+		// wait signal exists for this turn, cancel the active agent turn.
+		waitSignalSeen := make(chan struct{}, 1)
+		waitWatcherDone := make(chan struct{})
+		if l.Store != nil {
+			go func(turnID int) {
+				defer close(waitWatcherDone)
+				ticker := time.NewTicker(100 * time.Millisecond)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-turnCtx.Done():
+						return
+					case <-ticker.C:
+						if l.Store.IsWaiting(turnID) {
+							select {
+							case waitSignalSeen <- struct{}{}:
+							default:
+							}
+							turnCancel()
+							return
+						}
+					}
+				}
+			}(turnID)
+		} else {
+			close(waitWatcherDone)
+		}
 		if l.OnTurnContext != nil {
 			l.OnTurnContext(turnCancel)
 		}
@@ -320,6 +348,13 @@ func (l *Loop) Run(ctx context.Context) error {
 		agentStart := time.Now()
 		result, runErr := l.Agent.Run(turnCtx, cfg, rec)
 		turnCancel() // ensure turn context is always cleaned up
+		<-waitWatcherDone
+		waitTriggeredMidTurn := false
+		select {
+		case <-waitSignalSeen:
+			waitTriggeredMidTurn = true
+		default:
+		}
 		debug.LogKV("loop", "agent.Run() finished",
 			"turn_id", turnID,
 			"duration", time.Since(agentStart),
@@ -362,6 +397,9 @@ func (l *Loop) Run(ctx context.Context) error {
 		}
 
 		waitingForSpawns := l.Store != nil && l.Store.IsWaiting(turnID)
+		if waitTriggeredMidTurn {
+			waitingForSpawns = true
+		}
 
 		// Update the turn with results.
 		if result != nil {
@@ -399,6 +437,36 @@ func (l *Loop) Run(ctx context.Context) error {
 		// Notify listener.
 		if l.OnEnd != nil {
 			l.OnEnd(turnID, turnHexID, result)
+		}
+
+		// Check for wait-for-spawns signal first. This is turn control flow,
+		// not a terminal error condition.
+		if waitingForSpawns {
+			debug.LogKV("loop", "wait-for-spawns signal detected", "turn_id", turnID)
+			if l.Store != nil {
+				if err := l.Store.ClearWait(turnID); err != nil {
+					fmt.Printf("warning: failed to clear wait signal for turn %d: %v\n", turnID, err)
+				}
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if l.OnWait != nil {
+				debug.LogKV("loop", "blocking on OnWait callback", "turn_id", turnID)
+				waitStart := time.Now()
+				l.lastWaitResults, l.moreSpawnsPending = l.OnWait(turnID)
+				debug.LogKV("loop", "OnWait callback returned",
+					"turn_id", turnID,
+					"wait_duration", time.Since(waitStart),
+					"results_count", len(l.lastWaitResults),
+					"more_pending", l.moreSpawnsPending,
+				)
+			}
+			l.waitResumeTurnID = turnID
+			l.waitResumeTurnHexID = turnHexID
+			// Don't increment turn count — the wait turn doesn't count toward the limit.
+			// Loop continues to next iteration with wait results in the prompt.
+			continue
 		}
 
 		// If the agent run failed with a hard error (not just non-zero exit),
@@ -441,30 +509,6 @@ func (l *Loop) Run(ctx context.Context) error {
 		// the orchestrator.
 		if ctx.Err() != nil {
 			return ctx.Err()
-		}
-
-		// Check for wait-for-spawns signal.
-		if waitingForSpawns {
-			debug.LogKV("loop", "wait-for-spawns signal detected", "turn_id", turnID)
-			if err := l.Store.ClearWait(turnID); err != nil {
-				fmt.Printf("warning: failed to clear wait signal for turn %d: %v\n", turnID, err)
-			}
-			if l.OnWait != nil {
-				debug.LogKV("loop", "blocking on OnWait callback", "turn_id", turnID)
-				waitStart := time.Now()
-				l.lastWaitResults, l.moreSpawnsPending = l.OnWait(turnID)
-				debug.LogKV("loop", "OnWait callback returned",
-					"turn_id", turnID,
-					"wait_duration", time.Since(waitStart),
-					"results_count", len(l.lastWaitResults),
-					"more_pending", l.moreSpawnsPending,
-				)
-			}
-			l.waitResumeTurnID = turnID
-			l.waitResumeTurnHexID = turnHexID
-			// Don't increment turn count — the wait turn doesn't count toward the limit.
-			// Loop continues to next iteration with wait results in the prompt.
-			continue
 		}
 
 		// Update profile stats from a fully completed turn.
