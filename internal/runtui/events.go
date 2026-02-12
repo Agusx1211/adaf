@@ -58,19 +58,21 @@ type SpawnInfo struct {
 
 // LoopStepStartMsg signals that a loop step has started.
 type LoopStepStartMsg struct {
-	RunID     int
-	Cycle     int
-	StepIndex int
-	Profile   string
-	Turns     int
+	RunID      int
+	Cycle      int
+	StepIndex  int
+	Profile    string
+	Turns      int
+	TotalSteps int
 }
 
 // LoopStepEndMsg signals that a loop step has ended.
 type LoopStepEndMsg struct {
-	RunID     int
-	Cycle     int
-	StepIndex int
-	Profile   string
+	RunID      int
+	Cycle      int
+	StepIndex  int
+	Profile    string
+	TotalSteps int
 }
 
 // LoopDoneMsg signals that the entire loop has finished.

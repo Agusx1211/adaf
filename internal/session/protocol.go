@@ -7,14 +7,17 @@ import (
 
 // Wire message types sent over the Unix socket.
 const (
-	MsgMeta     = "meta"     // Session metadata (sent first on connect)
-	MsgStarted  = "started"  // Agent session started
-	MsgEvent    = "event"    // Claude stream event
-	MsgRaw      = "raw"      // Raw text output (non-Claude agents)
-	MsgFinished = "finished" // Single agent session finished
-	MsgSpawn    = "spawn"    // Spawn hierarchy update
-	MsgDone     = "done"     // Entire agent loop completed
-	MsgLive     = "live"     // Marker: replay complete, now streaming live
+	MsgMeta          = "meta"            // Session metadata (sent first on connect)
+	MsgStarted       = "started"         // Agent session started
+	MsgEvent         = "event"           // Claude stream event
+	MsgRaw           = "raw"             // Raw text output (non-Claude agents)
+	MsgFinished      = "finished"        // Single agent session finished
+	MsgSpawn         = "spawn"           // Spawn hierarchy update
+	MsgLoopStepStart = "loop_step_start" // Loop step started
+	MsgLoopStepEnd   = "loop_step_end"   // Loop step ended
+	MsgLoopDone      = "loop_done"       // Loop finished
+	MsgDone          = "done"            // Entire agent loop completed
+	MsgLive          = "live"            // Marker: replay complete, now streaming live
 )
 
 // Client-to-daemon control messages.
@@ -35,6 +38,8 @@ type WireMeta struct {
 	ProfileName string `json:"profile"`
 	AgentName   string `json:"agent"`
 	ProjectName string `json:"project"`
+	LoopName    string `json:"loop_name,omitempty"`
+	LoopSteps   int    `json:"loop_steps,omitempty"`
 }
 
 // WireStarted signals that a new agent session has begun.
@@ -73,6 +78,32 @@ type WireSpawnInfo struct {
 // WireSpawn carries spawn hierarchy updates.
 type WireSpawn struct {
 	Spawns []WireSpawnInfo `json:"spawns"`
+}
+
+// WireLoopStepStart signals a loop step start.
+type WireLoopStepStart struct {
+	RunID      int    `json:"run_id"`
+	Cycle      int    `json:"cycle"`
+	StepIndex  int    `json:"step_index"`
+	Profile    string `json:"profile"`
+	Turns      int    `json:"turns"`
+	TotalSteps int    `json:"total_steps,omitempty"`
+}
+
+// WireLoopStepEnd signals a loop step end.
+type WireLoopStepEnd struct {
+	RunID      int    `json:"run_id"`
+	Cycle      int    `json:"cycle"`
+	StepIndex  int    `json:"step_index"`
+	Profile    string `json:"profile"`
+	TotalSteps int    `json:"total_steps,omitempty"`
+}
+
+// WireLoopDone signals the loop completion state.
+type WireLoopDone struct {
+	RunID  int    `json:"run_id,omitempty"`
+	Reason string `json:"reason,omitempty"` // "stopped", "cancelled", "error"
+	Error  string `json:"error,omitempty"`
 }
 
 // WireDone signals the entire agent loop has completed.

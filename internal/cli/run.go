@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -14,59 +13,52 @@ import (
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
-	"github.com/agusx1211/adaf/internal/loop"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
+	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/session"
 	"github.com/agusx1211/adaf/internal/store"
+	"github.com/agusx1211/adaf/internal/stream"
 )
 
 var runCmd = &cobra.Command{
 	Use:     "run",
 	Aliases: []string{"execute", "exec"},
-	Short:   "Run an agent loop against the project (inline output for CI/scripts)",
-	Long: `Run an AI agent against the project. The agent receives a prompt built from
-the current project context (plan, issues, decisions, session history) and
-works autonomously for the specified number of turns.
-
-Output is printed inline (suitable for CI/pipes). For the interactive TUI
-with real-time monitoring, run 'adaf' with no subcommand.
+	Short:   "Run an agent loop against the project (daemon-backed)",
+	Long: `Run an AI agent against the project. Execution is daemon-backed and follows
+the loop runtime model used throughout ADAF.
 
 Supported agents: claude, codex, vibe, opencode, gemini, generic
 
 Examples:
-  # Run claude for a single turn
   adaf run --agent claude --max-turns 1
-
-  # Run with a custom prompt
-  adaf run --agent claude --prompt "Fix the failing tests in auth/"
-
-  # Run codex with a specific model
   adaf run --agent codex --model gpt-5.1-codex-max
-
-  # Run as a detachable session (like tmux)
-  adaf run --agent claude -s
-  adaf attach <session-id>
-
-  # Run with extended reasoning
-  adaf run --agent claude --reasoning-level high`,
+  adaf run --agent claude --prompt "Fix the failing tests in auth/"
+  adaf run --agent claude -s`,
 	RunE: runAgent,
 }
 
 func init() {
 	runCmd.Flags().String("agent", "claude", "Agent to run (claude, codex, vibe, opencode, generic)")
-	runCmd.Flags().String("prompt", "", "Prompt to send to the agent (default: built from project context)")
+	runCmd.Flags().String("prompt", "", "Prompt/instructions for the run (default: built from project context)")
 	runCmd.Flags().String("plan", "", "Plan ID override for this run (defaults to active plan)")
-	runCmd.Flags().Int("max-turns", 0, "Maximum number of agent turns (0 = unlimited)")
+	runCmd.Flags().Int("max-turns", 0, "Maximum turns for this run (0 = unlimited)")
 	runCmd.Flags().String("model", "", "Model override for the agent")
-	runCmd.Flags().String("command", "", "Custom command path (for generic agent)")
+	runCmd.Flags().String("command", "", "Custom command path for the selected agent")
 	runCmd.Flags().String("reasoning-level", "", "Reasoning level (e.g. low, medium, high, xhigh)")
-	runCmd.Flags().BoolP("session", "s", false, "Run as a detachable session (use 'adaf attach' to reattach)")
+	runCmd.Flags().BoolP("session", "s", false, "Start and leave detached (use 'adaf attach' to connect)")
 	rootCmd.AddCommand(runCmd)
 }
 
 func runAgent(cmd *cobra.Command, args []string) error {
+	if session.IsAgentContext() {
+		return fmt.Errorf("run is not available inside an agent context")
+	}
+
 	s, err := openStoreRequired()
 	if err != nil {
+		return err
+	}
+	if err := s.EnsureDirs(); err != nil {
 		return err
 	}
 
@@ -77,12 +69,13 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	modelFlag, _ := cmd.Flags().GetString("model")
 	customCmd, _ := cmd.Flags().GetString("command")
 	reasoningLevel, _ := cmd.Flags().GetString("reasoning-level")
+	sessionMode, _ := cmd.Flags().GetBool("session")
+
 	modelFlag = strings.TrimSpace(modelFlag)
 	reasoningLevel = strings.TrimSpace(reasoningLevel)
+	customCmd = strings.TrimSpace(customCmd)
 
-	// Look up agent from registry.
-	agentInstance, ok := agent.Get(agentName)
-	if !ok {
+	if _, ok := agent.Get(agentName); !ok {
 		return fmt.Errorf("unknown agent %q (valid: %s)", agentName, strings.Join(agentNames(), ", "))
 	}
 
@@ -95,26 +88,15 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("loading agent configuration: %w", err)
 	}
-	if rec, ok := agentsCfg.Agents[agentName]; ok {
-		if customCmd == "" && rec.Path != "" {
-			customCmd = rec.Path
-		}
+	if rec, ok := agentsCfg.Agents[agentName]; ok && customCmd == "" && strings.TrimSpace(rec.Path) != "" {
+		customCmd = strings.TrimSpace(rec.Path)
 	}
-	defaultModel := agent.ResolveDefaultModel(agentsCfg, globalCfg, agentName)
+
 	modelOverride := agent.ResolveModelOverride(agentsCfg, globalCfg, agentName)
 	if modelFlag != "" {
 		modelOverride = modelFlag
-		defaultModel = modelFlag
-	}
-	if customCmd == "" {
-		switch agentName {
-		case "claude", "codex", "vibe", "opencode", "gemini", "generic":
-		default:
-			customCmd = agentName
-		}
 	}
 
-	// Load project config
 	projCfg, err := s.LoadProject()
 	if err != nil {
 		return fmt.Errorf("loading project: %w", err)
@@ -129,192 +111,164 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		workDir, _ = os.Getwd()
 	}
 
-	var promptBuildOpts *promptpkg.BuildOpts
-
-	// If no explicit prompt was provided, build one from project context.
 	if prompt == "" {
-		opts := promptpkg.BuildOpts{
+		built, err := promptpkg.Build(promptpkg.BuildOpts{
 			Store:   s,
 			Project: projCfg,
 			PlanID:  effectivePlanID,
-		}
-		built, err := promptpkg.Build(opts)
+		})
 		if err != nil {
 			return fmt.Errorf("building default prompt: %w", err)
 		}
 		prompt = built
-		promptBuildOpts = &opts
 	}
 
-	// Build agent args based on agent type.
-	var agentArgs []string
-	agentEnv := make(map[string]string)
-	switch agentName {
-	case "claude":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-		if reasoningLevel != "" {
-			agentEnv["CLAUDE_CODE_EFFORT_LEVEL"] = reasoningLevel
-		}
-		agentArgs = append(agentArgs, "--dangerously-skip-permissions")
-	case "codex":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-		if reasoningLevel != "" {
-			agentArgs = append(agentArgs, "-c", `model_reasoning_effort="`+reasoningLevel+`"`)
-		}
-		agentArgs = append(agentArgs, "--full-auto")
-	case "vibe":
-		// vibe reads prompt from cfg.Prompt via stdin, no extra args needed.
-	case "opencode":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-	case "gemini":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-		agentArgs = append(agentArgs, "-y")
+	profileName := fmt.Sprintf("run:%s", agentName)
+	runProfile := config.Profile{
+		Name:           profileName,
+		Agent:          agentName,
+		Model:          modelOverride,
+		ReasoningLevel: reasoningLevel,
 	}
 
-	agentCfg := agent.Config{
-		Name:     agentName,
-		Command:  customCmd,
-		Args:     agentArgs,
-		Env:      agentEnv,
-		WorkDir:  workDir,
-		Prompt:   prompt,
-		MaxTurns: maxTurns,
-	}
+	loopDef, maxCycles := buildRunLoopDefinition(agentName, profileName, prompt, maxTurns)
 
-	sessionMode, _ := cmd.Flags().GetBool("session")
-	if sessionMode {
-		if session.IsAgentContext() {
-			return fmt.Errorf("session mode is not available inside an agent context")
+	var commandOverrides map[string]string
+	if customCmd != "" {
+		commandOverrides = map[string]string{
+			agentName: customCmd,
 		}
-		return runAsSession(agentName, agentCfg, projCfg, workDir, effectivePlanID, promptBuildOpts != nil)
 	}
 
-	// Default: inline output.
-	return runInline(cmd, s, agentInstance, agentCfg, projCfg, defaultModel, maxTurns, effectivePlanID, promptBuildOpts)
-}
-
-// runAsSession starts the agent as a background session daemon and prints the session ID.
-func runAsSession(agentName string, agentCfg agent.Config, projCfg *store.ProjectConfig, workDir string, planID string, useDefaultPrompt bool) error {
 	dcfg := session.DaemonConfig{
-		AgentName:        agentName,
-		AgentCommand:     agentCfg.Command,
-		AgentArgs:        agentCfg.Args,
-		AgentEnv:         agentCfg.Env,
-		WorkDir:          workDir,
-		Prompt:           agentCfg.Prompt,
-		MaxTurns:         agentCfg.MaxTurns,
-		ProjectDir:       workDir,
-		ProfileName:      agentName,
-		ProjectName:      projCfg.Name,
-		PlanID:           planID,
-		UseDefaultPrompt: useDefaultPrompt,
+		ProjectDir:            workDir,
+		ProjectName:           projCfg.Name,
+		WorkDir:               workDir,
+		PlanID:                effectivePlanID,
+		ProfileName:           profileName,
+		AgentName:             agentName,
+		Loop:                  loopDef,
+		Profiles:              []config.Profile{runProfile},
+		Pushover:              globalCfg.Pushover,
+		MaxCycles:             maxCycles,
+		AgentCommandOverrides: commandOverrides,
 	}
 
 	sessionID, err := session.CreateSession(dcfg)
 	if err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}
-
 	if err := session.StartDaemon(sessionID); err != nil {
 		return fmt.Errorf("starting session daemon: %w", err)
 	}
 
-	fmt.Printf("\n  %sSession #%d started%s (agent=%s, project=%s)\n",
-		styleBoldGreen, sessionID, colorReset, agentName, projCfg.Name)
-	fmt.Printf("  Use %sadaf attach %d%s to connect.\n", styleBoldWhite, sessionID, colorReset)
-	fmt.Printf("  Use %sadaf sessions%s to list all sessions.\n\n", styleBoldWhite, colorReset)
+	if sessionMode {
+		fmt.Printf("\n  %sSession #%d started%s (agent=%s, project=%s)\n",
+			styleBoldGreen, sessionID, colorReset, agentName, projCfg.Name)
+		fmt.Printf("  Use %sadaf attach %d%s to connect.\n", styleBoldWhite, sessionID, colorReset)
+		fmt.Printf("  Use %sadaf sessions%s to list all sessions.\n\n", styleBoldWhite, colorReset)
+		return nil
+	}
 
-	return nil
+	return streamRunSession(cmd.Context(), sessionID, projCfg.Name, agentName, effectivePlanID)
 }
 
-// runInline prints inline output suitable for CI/pipes.
-func runInline(cmd *cobra.Command, s *store.Store, agentInstance agent.Agent, agentCfg agent.Config, projCfg *store.ProjectConfig, defaultModel string, maxTurns int, planID string, promptBuildOpts *promptpkg.BuildOpts) error {
-	workDir := agentCfg.WorkDir
+func buildRunLoopDefinition(agentName, profileName, prompt string, maxTurns int) (config.LoopDef, int) {
+	stepTurns, maxCycles := runTurnConfig(maxTurns)
+	return config.LoopDef{
+		Name: "run:" + agentName,
+		Steps: []config.LoopStep{
+			{
+				Profile:      profileName,
+				Turns:        stepTurns,
+				Instructions: prompt,
+			},
+		},
+	}, maxCycles
+}
 
-	// Print run header
+func runTurnConfig(maxTurns int) (stepTurns int, maxCycles int) {
+	stepTurns = 1
+	maxCycles = 0
+	if maxTurns > 0 {
+		stepTurns = maxTurns
+		maxCycles = 1
+	}
+	return stepTurns, maxCycles
+}
+
+func streamRunSession(parentCtx context.Context, sessionID int, projectName, agentName, planID string) error {
+	client, err := session.ConnectToSession(sessionID)
+	if err != nil {
+		session.AbortSessionStartup(sessionID, "cli attach failed: "+err.Error())
+		return fmt.Errorf("connecting to session %d: %w", sessionID, err)
+	}
+	defer client.Close()
+
 	fmt.Println()
 	fmt.Println(styleBoldCyan + "  ==============================================" + colorReset)
 	fmt.Println(styleBoldCyan + "   adaf agent run" + colorReset)
 	fmt.Println(styleBoldCyan + "  ==============================================" + colorReset)
 	fmt.Println()
-	printField("Project", projCfg.Name)
-	printField("Repo", workDir)
-	printField("Agent", agentCfg.Name)
+	printField("Project", projectName)
+	printField("Agent", agentName)
 	if planID != "" {
 		printField("Plan", planID)
 	}
-	if defaultModel != "" {
-		printField("Default Model", defaultModel)
-	}
-	printField("Prompt", agentCfg.Prompt)
-	if maxTurns > 0 {
-		printField("Max Turns", fmt.Sprintf("%d", maxTurns))
-	} else {
-		printField("Max Turns", "unlimited")
-	}
-	printField("Auto-Approve", "true")
+	printField("Session", fmt.Sprintf("#%d", sessionID))
 	printField("Started", time.Now().Format("2006-01-02 15:04:05"))
 	fmt.Println()
 	fmt.Println(colorDim + "  " + strings.Repeat("-", 46) + colorReset)
 	fmt.Println()
 
-	// Set up signal handling for graceful shutdown
-	ctx, cancel := context.WithCancel(cmd.Context())
+	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
 	go func() {
 		<-sigCh
-		fmt.Printf("\n  %sReceived interrupt, finishing current turn...%s\n", styleBoldYellow, colorReset)
+		fmt.Printf("\n  %sReceived interrupt, cancelling run...%s\n", styleBoldYellow, colorReset)
+		_ = client.Cancel()
 		cancel()
 	}()
 
-	// Create and run the loop
-	l := &loop.Loop{
-		Store:  s,
-		Agent:  agentInstance,
-		Config: agentCfg,
-		PlanID: planID,
-		OnStart: func(sessionID int) {
-			fmt.Printf("  %s>>> Session #%d starting%s\n", styleBoldGreen, sessionID, colorReset)
-		},
-		OnEnd: func(sessionID int, result *agent.Result) {
-			if result != nil {
-				fmt.Printf("  %s<<< Session #%d completed (exit=%d, %s)%s\n",
-					styleBoldGreen, sessionID, result.ExitCode, result.Duration.Round(time.Second), colorReset)
-			} else {
-				fmt.Printf("  %s<<< Session #%d ended%s\n", styleBoldYellow, sessionID, colorReset)
+	eventCh := make(chan any, 256)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.StreamEvents(eventCh, nil)
+	}()
+
+	display := stream.NewDisplay(os.Stdout)
+	defer display.Finish()
+
+	for {
+		select {
+		case <-ctx.Done():
+			_ = client.Cancel()
+		case msg, ok := <-eventCh:
+			if !ok {
+				if streamErr := <-errCh; streamErr != nil {
+					return streamErr
+				}
+				fmt.Printf("\n  %sAgent loop finished.%s\n\n", styleBoldGreen, colorReset)
+				return nil
 			}
-		},
-	}
-	if promptBuildOpts != nil {
-		basePrompt := agentCfg.Prompt
-		opts := *promptBuildOpts
-		l.PromptFunc = func(sessionID int, supervisorNotes []store.SupervisorNote) string {
-			opts.SupervisorNotes = supervisorNotes
-			built, err := promptpkg.Build(opts)
-			if err != nil {
-				return basePrompt
+			switch ev := msg.(type) {
+			case runtui.AgentRawOutputMsg:
+				if ev.Data != "" {
+					fmt.Print(ev.Data)
+				}
+			case runtui.AgentEventMsg:
+				display.Handle(ev.Event)
+			case runtui.LoopDoneMsg:
+				if ev.Err != nil && ev.Reason != "cancelled" {
+					return fmt.Errorf("loop error: %w", ev.Err)
+				}
 			}
-			return built
 		}
 	}
-
-	if err := l.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		return fmt.Errorf("agent loop: %w", err)
-	}
-
-	fmt.Printf("\n  %sAgent loop finished.%s\n\n", styleBoldGreen, colorReset)
-	return nil
 }
 
 func resolveEffectivePlanID(s *store.Store, projCfg *store.ProjectConfig, planFlag string, explicit bool) (string, error) {

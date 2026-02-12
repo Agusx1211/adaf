@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -9,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
 	"github.com/agusx1211/adaf/internal/agent"
@@ -16,7 +19,9 @@ import (
 	"github.com/agusx1211/adaf/internal/looprun"
 	"github.com/agusx1211/adaf/internal/pushover"
 	"github.com/agusx1211/adaf/internal/runtui"
+	"github.com/agusx1211/adaf/internal/session"
 	"github.com/agusx1211/adaf/internal/store"
+	"github.com/agusx1211/adaf/internal/stream"
 )
 
 var loopCmd = &cobra.Command{
@@ -50,7 +55,7 @@ var loopListCmd = &cobra.Command{
 var loopStartCmd = &cobra.Command{
 	Use:     "start <name>",
 	Aliases: []string{"run", "begin"},
-	Short:   "Start a loop (inline output)",
+	Short:   "Start a loop session",
 	Args:    cobra.ExactArgs(1),
 	RunE:    loopStart,
 }
@@ -96,6 +101,7 @@ var loopStatusCmd = &cobra.Command{
 
 func init() {
 	loopStartCmd.Flags().String("plan", "", "Plan ID override for this loop run (defaults to active plan)")
+	loopStartCmd.Flags().Bool("foreground", false, "Run inline in the current process (do not fork daemon)")
 	loopNotifyCmd.Flags().IntP("priority", "p", 0, "Notification priority (-2 to 1)")
 	loopCmd.AddCommand(loopListCmd, loopStartCmd, loopStopCmd, loopMessageCmd, loopNotifyCmd, loopStatusCmd)
 	rootCmd.AddCommand(loopCmd)
@@ -145,14 +151,21 @@ func loopList(cmd *cobra.Command, args []string) error {
 }
 
 func loopStart(cmd *cobra.Command, args []string) error {
+	if session.IsAgentContext() {
+		return fmt.Errorf("loop start is not available inside an agent context")
+	}
+
 	loopName := args[0]
 	planFlag, _ := cmd.Flags().GetString("plan")
+	foreground, _ := cmd.Flags().GetBool("foreground")
 
 	s, err := openStoreRequired()
 	if err != nil {
 		return err
 	}
-	s.EnsureDirs()
+	if err := s.EnsureDirs(); err != nil {
+		return err
+	}
 
 	globalCfg, err := config.Load()
 	if err != nil {
@@ -177,7 +190,61 @@ func loopStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	agentsCfg, _ := agent.LoadAgentsConfig(s.Root())
+	profiles, err := loopProfilesSnapshot(globalCfg, loopDef)
+	if err != nil {
+		return err
+	}
+
+	if foreground {
+		return runLoopForeground(cmd.Context(), s, globalCfg, loopDef, projCfg, effectivePlanID)
+	}
+
+	workDir := projCfg.RepoPath
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+
+	dcfg := session.DaemonConfig{
+		ProjectDir:  workDir,
+		ProjectName: projCfg.Name,
+		WorkDir:     workDir,
+		PlanID:      effectivePlanID,
+		ProfileName: loopDef.Name,
+		AgentName:   "loop",
+		Loop:        *loopDef,
+		Profiles:    profiles,
+		Pushover:    globalCfg.Pushover,
+	}
+
+	sessionID, err := session.CreateSession(dcfg)
+	if err != nil {
+		return fmt.Errorf("creating loop session: %w", err)
+	}
+	if err := session.StartDaemon(sessionID); err != nil {
+		session.AbortSessionStartup(sessionID, "loop start daemon failed: "+err.Error())
+		return fmt.Errorf("starting loop daemon: %w", err)
+	}
+
+	fmt.Printf("\n  %sLoop session #%d started%s (loop=%s, project=%s)\n",
+		styleBoldGreen, sessionID, colorReset, loopDef.Name, projCfg.Name)
+	if effectivePlanID != "" {
+		fmt.Printf("  Plan: %s%s%s\n", styleBoldWhite, effectivePlanID, colorReset)
+	}
+
+	if isatty.IsTerminal(os.Stdout.Fd()) {
+		return runAttach(cmd, []string{strconv.Itoa(sessionID)})
+	}
+
+	fmt.Printf("  Use %sadaf attach %d%s to connect.\n", styleBoldWhite, sessionID, colorReset)
+	fmt.Printf("  Use %sadaf sessions%s to list all sessions.\n\n", styleBoldWhite, colorReset)
+	return nil
+}
+
+func runLoopForeground(parentCtx context.Context, s *store.Store, globalCfg *config.GlobalConfig, loopDef *config.LoopDef, projCfg *store.ProjectConfig, planID string) error {
+	agentsCfg, err := agent.LoadAgentsConfig(s.Root())
+	if err != nil {
+		return fmt.Errorf("loading agent configuration: %w", err)
+	}
 	agent.PopulateFromConfig(agentsCfg)
 
 	workDir := projCfg.RepoPath
@@ -185,63 +252,74 @@ func loopStart(cmd *cobra.Command, args []string) error {
 		workDir, _ = os.Getwd()
 	}
 
-	// Print header.
 	fmt.Println()
 	fmt.Println(styleBoldCyan + "  ==============================================" + colorReset)
-	fmt.Println(styleBoldCyan + "   adaf loop — " + loopDef.Name + colorReset)
+	fmt.Println(styleBoldCyan + "   adaf loop (foreground) — " + loopDef.Name + colorReset)
 	fmt.Println(styleBoldCyan + "  ==============================================" + colorReset)
 	fmt.Println()
 	printField("Project", projCfg.Name)
-	if effectivePlanID != "" {
-		printField("Plan", effectivePlanID)
+	if planID != "" {
+		printField("Plan", planID)
 	}
 	printField("Loop", loopDef.Name)
 	printField("Steps", fmt.Sprintf("%d", len(loopDef.Steps)))
-	for i, step := range loopDef.Steps {
-		turns := step.Turns
-		if turns <= 0 {
-			turns = 1
-		}
-		printField(fmt.Sprintf("  Step %d", i+1), fmt.Sprintf("%s x%d", step.Profile, turns))
-	}
 	printField("Started", time.Now().Format("2006-01-02 15:04:05"))
 	fmt.Println()
 	fmt.Println(colorDim + "  " + strings.Repeat("-", 46) + colorReset)
 	fmt.Println()
 
-	eventCh := make(chan any, 256)
-
-	cfg := looprun.RunConfig{
-		Store:     s,
-		GlobalCfg: globalCfg,
-		LoopDef:   loopDef,
-		Project:   projCfg,
-		AgentsCfg: agentsCfg,
-		PlanID:    effectivePlanID,
-		WorkDir:   workDir,
-	}
-
-	// Run loop in a goroutine.
-	loopCancel := looprun.StartLoopRun(cfg, eventCh)
-	defer loopCancel()
-
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
 	go func() {
 		<-sigCh
-		fmt.Printf("\n  %sReceived interrupt, finishing current step...%s\n", styleBoldYellow, colorReset)
-		loopCancel()
+		fmt.Printf("\n  %sReceived interrupt, cancelling loop...%s\n", styleBoldYellow, colorReset)
+		cancel()
 	}()
 
-	// Consume events inline.
+	eventCh := make(chan any, 256)
+	runErrCh := make(chan error, 1)
+	go func() {
+		runErr := looprun.Run(ctx, looprun.RunConfig{
+			Store:     s,
+			GlobalCfg: globalCfg,
+			LoopDef:   loopDef,
+			Project:   projCfg,
+			AgentsCfg: agentsCfg,
+			PlanID:    planID,
+			WorkDir:   workDir,
+		}, eventCh)
+		runErrCh <- runErr
+		close(eventCh)
+	}()
+
+	display := stream.NewDisplay(os.Stdout)
+	defer display.Finish()
+
 	for msg := range eventCh {
 		switch ev := msg.(type) {
+		case runtui.AgentRawOutputMsg:
+			if ev.Data != "" {
+				fmt.Print(ev.Data)
+			}
+		case runtui.AgentEventMsg:
+			display.Handle(ev.Event)
 		case runtui.LoopStepStartMsg:
-			fmt.Printf("  %s>>> Cycle %d, Step %d: %s (x%d)%s\n",
-				styleBoldCyan, ev.Cycle+1, ev.StepIndex+1, ev.Profile, ev.Turns, colorReset)
+			totalSteps := ev.TotalSteps
+			if totalSteps <= 0 {
+				totalSteps = ev.StepIndex + 1
+			}
+			fmt.Printf("  %s[loop]%s cycle=%d step=%d/%d profile=%s turns=%d\n",
+				colorDim, colorReset, ev.Cycle+1, ev.StepIndex+1, totalSteps, ev.Profile, ev.Turns)
 		case runtui.LoopStepEndMsg:
-			fmt.Printf("  %s<<< Step %d: %s completed%s\n",
-				styleBoldGreen, ev.StepIndex+1, ev.Profile, colorReset)
+			totalSteps := ev.TotalSteps
+			if totalSteps <= 0 {
+				totalSteps = ev.StepIndex + 1
+			}
+			fmt.Printf("  %s[loop]%s step=%d/%d profile=%s completed\n",
+				colorDim, colorReset, ev.StepIndex+1, totalSteps, ev.Profile)
 		case runtui.AgentStartedMsg:
 			fmt.Printf("  %s>>> Session #%d starting%s\n", styleBoldGreen, ev.SessionID, colorReset)
 		case runtui.AgentFinishedMsg:
@@ -249,17 +327,42 @@ func loopStart(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  %s<<< Session #%d completed (exit=%d, %s)%s\n",
 					styleBoldGreen, ev.SessionID, ev.Result.ExitCode, ev.Result.Duration.Round(time.Second), colorReset)
 			}
-		case runtui.LoopDoneMsg:
-			if ev.Err != nil && ev.Reason != "cancelled" {
-				fmt.Printf("\n  %sLoop error: %v%s\n", styleBoldRed, ev.Err, colorReset)
-			} else {
-				fmt.Printf("\n  %sLoop finished (%s).%s\n", styleBoldGreen, ev.Reason, colorReset)
-			}
 		}
 	}
 
-	fmt.Println()
+	runErr := <-runErrCh
+	if runErr != nil && !errors.Is(runErr, context.Canceled) {
+		return fmt.Errorf("loop run failed: %w", runErr)
+	}
+
+	reason := "stopped"
+	if errors.Is(runErr, context.Canceled) {
+		reason = "cancelled"
+	}
+	fmt.Printf("\n  %sLoop finished (%s).%s\n\n", styleBoldGreen, reason, colorReset)
 	return nil
+}
+
+func loopProfilesSnapshot(globalCfg *config.GlobalConfig, loopDef *config.LoopDef) ([]config.Profile, error) {
+	seen := make(map[string]struct{}, len(loopDef.Steps))
+	profiles := make([]config.Profile, 0, len(loopDef.Steps))
+	for _, step := range loopDef.Steps {
+		name := strings.TrimSpace(step.Profile)
+		if name == "" {
+			return nil, fmt.Errorf("loop %q has a step with empty profile", loopDef.Name)
+		}
+		key := strings.ToLower(name)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		prof := globalCfg.FindProfile(name)
+		if prof == nil {
+			return nil, fmt.Errorf("profile %q not found for loop %q", name, loopDef.Name)
+		}
+		seen[key] = struct{}{}
+		profiles = append(profiles, *prof)
+	}
+	return profiles, nil
 }
 
 func loopStop(cmd *cobra.Command, args []string) error {

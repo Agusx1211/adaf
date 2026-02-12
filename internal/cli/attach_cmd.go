@@ -106,6 +106,15 @@ func runAttach(cmd *cobra.Command, args []string) error {
 		}
 	}
 	runModel.SetSessionMode(meta.ID)
+	loopName := meta.LoopName
+	loopSteps := meta.LoopSteps
+	if loopName == "" && client.Meta.LoopName != "" {
+		loopName = client.Meta.LoopName
+		loopSteps = client.Meta.LoopSteps
+	}
+	if loopName != "" {
+		runModel.SetLoopInfo(loopName, loopSteps)
+	}
 	model := newAttachModel(runModel)
 
 	p := tea.NewProgram(model, tea.WithAltScreen())

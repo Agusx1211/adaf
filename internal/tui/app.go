@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -12,8 +13,6 @@ import (
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/agentmeta"
 	"github.com/agusx1211/adaf/internal/config"
-	"github.com/agusx1211/adaf/internal/looprun"
-	promptpkg "github.com/agusx1211/adaf/internal/prompt"
 	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/session"
 	"github.com/agusx1211/adaf/internal/store"
@@ -49,6 +48,7 @@ const (
 	stateSettings                 // settings screen (pushover credentials, etc.)
 	stateSettingsPushoverUserKey  // input pushover user key
 	stateSettingsPushoverAppToken // input pushover app token
+	stateSessionPicker            // choose which active session to attach
 	stateConfirmDelete            // confirmation before deleting a profile/loop
 )
 
@@ -81,6 +81,8 @@ type AppModel struct {
 	planCreateIDInput    string
 	planCreateTitleInput string
 	planActionMsg        string
+	selectorMsg          string
+	sessionPickSel       int
 
 	// Profile creation/editing wizard state.
 	profileEditing           bool   // true = editing existing, false = creating new
@@ -305,6 +307,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSettingsPushoverUserKey(msg)
 	case stateSettingsPushoverAppToken:
 		return m.updateSettingsPushoverAppToken(msg)
+	case stateSessionPicker:
+		return m.updateSessionPicker(msg)
 	case stateConfirmDelete:
 		return m.updateConfirmDelete(msg)
 	}
@@ -493,10 +497,40 @@ func (m AppModel) startLoop(loopName string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.store.EnsureDirs()
+	profiles, ok := m.profilesForLoop(loopDef.Steps)
+	if !ok {
+		return m, nil
+	}
 
-	agentsCfg, _ := agent.LoadAgentsConfig(m.store.Root())
-	agent.PopulateFromConfig(agentsCfg)
+	return m.startLoopSession(*loopDef, profiles, loopDef.Name, "loop", nil, 0)
+}
+
+func (m AppModel) profilesForLoop(steps []config.LoopStep) ([]config.Profile, bool) {
+	seen := make(map[string]struct{}, len(steps))
+	profiles := make([]config.Profile, 0, len(steps))
+	for _, step := range steps {
+		name := strings.TrimSpace(step.Profile)
+		if name == "" {
+			return nil, false
+		}
+		if _, ok := seen[strings.ToLower(name)]; ok {
+			continue
+		}
+		prof := m.globalCfg.FindProfile(name)
+		if prof == nil {
+			return nil, false
+		}
+		seen[strings.ToLower(name)] = struct{}{}
+		profiles = append(profiles, *prof)
+	}
+	return profiles, true
+}
+
+func (m AppModel) startLoopSession(loopDef config.LoopDef, profiles []config.Profile, displayProfile, displayAgent string, cmdOverrides map[string]string, maxCycles int) (tea.Model, tea.Cmd) {
+	if err := m.store.EnsureDirs(); err != nil {
+		m.selectorMsg = "Start failed: " + err.Error()
+		return m, nil
+	}
 
 	workDir := ""
 	if m.project != nil {
@@ -511,29 +545,58 @@ func (m AppModel) startLoop(loopName string) (tea.Model, tea.Cmd) {
 		projectName = m.project.Name
 	}
 
-	eventCh := make(chan any, 256)
-	cfg := looprun.RunConfig{
-		Store:     m.store,
-		GlobalCfg: m.globalCfg,
-		LoopDef:   loopDef,
-		Project:   m.project,
-		AgentsCfg: agentsCfg,
-		PlanID:    activePlanID(m.project, m.plan),
-		WorkDir:   workDir,
+	dcfg := session.DaemonConfig{
+		ProjectDir:            workDir,
+		ProjectName:           projectName,
+		WorkDir:               workDir,
+		PlanID:                activePlanID(m.project, m.plan),
+		ProfileName:           displayProfile,
+		AgentName:             displayAgent,
+		Loop:                  loopDef,
+		Profiles:              profiles,
+		Pushover:              m.globalCfg.Pushover,
+		MaxCycles:             maxCycles,
+		AgentCommandOverrides: cmdOverrides,
 	}
 
-	cancel := looprun.StartLoopRun(cfg, eventCh)
+	sessionID, err := session.CreateSession(dcfg)
+	if err != nil {
+		m.selectorMsg = "Start failed: " + err.Error()
+		return m, nil
+	}
+	if err := session.StartDaemon(sessionID); err != nil {
+		session.AbortSessionStartup(sessionID, "tui start daemon failed: "+err.Error())
+		m.selectorMsg = "Start failed: " + err.Error()
+		return m, nil
+	}
 
+	client, err := session.ConnectToSession(sessionID)
+	if err != nil {
+		session.AbortSessionStartup(sessionID, "tui attach failed: "+err.Error())
+		m.selectorMsg = "Start failed: " + err.Error()
+		return m, nil
+	}
+
+	eventCh := make(chan any, 256)
+	cancelFunc := func() {
+		_ = client.Cancel()
+	}
+
+	go func() {
+		client.StreamEvents(eventCh, nil)
+	}()
+
+	m.selectorMsg = ""
 	m.state = stateRunning
-	m.runCancel = cancel
+	m.runCancel = cancelFunc
 	m.runEventCh = eventCh
-	m.runModel = runtui.NewModel(projectName, m.plan, "", "", eventCh, cancel)
+	m.sessionClient = client
+	m.sessionID = sessionID
+	m.runModel = runtui.NewModel(projectName, m.plan, displayAgent, "", eventCh, cancelFunc)
 	m.runModel.SetStore(m.store)
-	// Loop runs are in-process (not session-daemon backed), but should still
-	// support detach semantics like session mode.
-	m.runModel.SetSessionMode(1)
-	m.runModel.SetSize(m.width, m.height)
+	m.runModel.SetSessionMode(sessionID)
 	m.runModel.SetLoopInfo(loopDef.Name, len(loopDef.Steps))
+	m.runModel.SetSize(m.width, m.height)
 
 	return m, m.runModel.Init()
 }
@@ -558,38 +621,24 @@ func (m AppModel) startEditLoop() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// showSessions lists active sessions and attaches to the first one found, or
-// shows a message if none are active.
-func (m AppModel) showSessions() (tea.Model, tea.Cmd) {
-	if session.IsAgentContext() {
-		return m, nil
-	}
-
-	active, err := session.ListActiveSessions()
-	if err != nil || len(active) == 0 {
-		return m, nil
-	}
-
-	// If there's exactly one active session, attach to it directly.
-	// If multiple, attach to the most recent (first in list, which is sorted by ID desc).
-	target := active[0]
-
+func (m AppModel) attachToSession(target session.SessionMeta) (tea.Model, tea.Cmd) {
 	client, err := session.ConnectToSession(target.ID)
 	if err != nil {
+		m.selectorMsg = "Attach failed: " + err.Error()
+		m.state = stateSelector
 		return m, nil
 	}
 
 	eventCh := make(chan any, 256)
-	ctx, cancel := context.WithCancel(context.Background())
 	cancelFunc := func() {
-		client.Cancel()
-		cancel()
+		_ = client.Cancel()
 	}
 
 	go func() {
 		client.StreamEvents(eventCh, nil)
 	}()
 
+	m.selectorMsg = ""
 	m.state = stateRunning
 	m.runCancel = cancelFunc
 	m.runEventCh = eventCh
@@ -598,20 +647,92 @@ func (m AppModel) showSessions() (tea.Model, tea.Cmd) {
 	m.runModel = runtui.NewModel(target.ProjectName, m.plan, target.AgentName, "", eventCh, cancelFunc)
 	m.runModel.SetStore(m.store)
 	m.runModel.SetSessionMode(target.ID)
+	if target.LoopName != "" {
+		m.runModel.SetLoopInfo(target.LoopName, target.LoopSteps)
+	}
 	m.runModel.SetSize(m.width, m.height)
 
-	_ = ctx
 	return m, m.runModel.Init()
 }
 
-func (m AppModel) updateRunning(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if stepStart, ok := msg.(runtui.LoopStepStartMsg); ok {
-		// Bind detach mode to the concrete loop run ID once we know it.
-		if m.sessionClient == nil && stepStart.RunID > 0 && m.runModel.SessionMode() != stepStart.RunID {
-			m.runModel.SetSessionMode(stepStart.RunID)
-		}
+// showSessions opens a session picker when multiple active sessions exist.
+func (m AppModel) showSessions() (tea.Model, tea.Cmd) {
+	if session.IsAgentContext() {
+		return m, nil
 	}
 
+	active, err := session.ListActiveSessions()
+	if err != nil {
+		m.selectorMsg = "Load sessions failed: " + err.Error()
+		return m, nil
+	}
+	if len(active) == 0 {
+		m.selectorMsg = "No active sessions."
+		return m, nil
+	}
+
+	if len(active) == 1 {
+		return m.attachToSession(active[0])
+	}
+
+	m.activeSessions = active
+	if m.sessionPickSel < 0 || m.sessionPickSel >= len(active) {
+		m.sessionPickSel = 0
+	}
+	m.state = stateSessionPicker
+	return m, nil
+}
+
+func (m AppModel) updateSessionPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc", "q":
+			m.state = stateSelector
+			return m, nil
+		case "r":
+			active, err := session.ListActiveSessions()
+			if err != nil {
+				m.selectorMsg = "Refresh failed: " + err.Error()
+				return m, nil
+			}
+			if len(active) == 0 {
+				m.selectorMsg = "No active sessions."
+				m.state = stateSelector
+				return m, nil
+			}
+			m.activeSessions = active
+			if m.sessionPickSel >= len(m.activeSessions) {
+				m.sessionPickSel = len(m.activeSessions) - 1
+			}
+			if m.sessionPickSel < 0 {
+				m.sessionPickSel = 0
+			}
+			return m, nil
+		case "j", "down":
+			if len(m.activeSessions) > 0 {
+				m.sessionPickSel = (m.sessionPickSel + 1) % len(m.activeSessions)
+			}
+			return m, nil
+		case "k", "up":
+			if len(m.activeSessions) > 0 {
+				m.sessionPickSel = (m.sessionPickSel - 1 + len(m.activeSessions)) % len(m.activeSessions)
+			}
+			return m, nil
+		case "enter":
+			if len(m.activeSessions) == 0 {
+				m.selectorMsg = "No active sessions."
+				m.state = stateSelector
+				return m, nil
+			}
+			target := m.activeSessions[m.sessionPickSel]
+			return m.attachToSession(target)
+		}
+	}
+	return m, nil
+}
+
+func (m AppModel) updateRunning(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Intercept BackToSelectorMsg to return to selector.
 	if _, ok := msg.(runtui.BackToSelectorMsg); ok {
 		// Cancel any remaining agent context.
@@ -632,7 +753,6 @@ func (m AppModel) updateRunning(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Intercept DetachMsg to detach from the session without stopping the agent.
 	if detach, ok := msg.(runtui.DetachMsg); ok {
-		startBackgroundEventDrain(m.runEventCh)
 		if m.sessionClient != nil {
 			m.sessionClient.Close()
 			m.sessionClient = nil
@@ -651,18 +771,8 @@ func (m AppModel) updateRunning(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func startBackgroundEventDrain(ch <-chan any) {
-	if ch == nil {
-		return
-	}
-	go func() {
-		for range ch {
-		}
-	}()
-}
-
 // startAgent transitions from selector to running state.
-// It launches the agent via a session daemon for detach/reattach support.
+// Everything now runs through loop sessions (single-profile runs are a 1-step loop).
 func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 	p := m.profiles[m.selected]
 
@@ -693,264 +803,18 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 		return m.startLoop(p.LoopName)
 	}
 
-	// Load agent config for path lookups.
-	agentsCfg, _ := agent.LoadAgentsConfig(m.store.Root())
-
-	var customCmd string
-	if agentsCfg != nil {
-		if rec, ok := agentsCfg.Agents[p.Agent]; ok && rec.Path != "" {
-			customCmd = rec.Path
-		}
-	}
-
-	// The profile model IS the override — no ResolveModelOverride needed.
-	modelOverride := p.Model
-
-	// Look up reasoning level from the saved profile.
-	reasoningLevel := ""
-	if prof := m.globalCfg.FindProfile(p.Name); prof != nil {
-		reasoningLevel = prof.ReasoningLevel
-	}
-
-	var agentArgs []string
-	agentEnv := make(map[string]string)
-	switch p.Agent {
-	case "claude":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-		if reasoningLevel != "" {
-			agentEnv["CLAUDE_CODE_EFFORT_LEVEL"] = reasoningLevel
-		}
-		agentArgs = append(agentArgs, "--dangerously-skip-permissions")
-	case "codex":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-		if reasoningLevel != "" {
-			agentArgs = append(agentArgs, "-c", `model_reasoning_effort="`+reasoningLevel+`"`)
-		}
-		agentArgs = append(agentArgs, "--full-auto")
-	case "opencode":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-	case "gemini":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-		agentArgs = append(agentArgs, "-y")
-	}
-
-	if customCmd == "" {
-		switch p.Agent {
-		case "claude", "codex", "vibe", "opencode", "gemini", "generic":
-		default:
-			customCmd = p.Agent
-		}
-	}
-
-	workDir := ""
-	if m.project != nil {
-		workDir = m.project.RepoPath
-	}
-	if workDir == "" {
-		workDir, _ = os.Getwd()
-	}
-
-	// Look up the full profile for role-aware prompt building.
-	var prof *config.Profile
-	if found := m.globalCfg.FindProfile(p.Name); found != nil {
-		prof = found
-	}
-	promptOpts := buildPromptOpts(m.store, m.project, prof, m.globalCfg)
-	prompt, _ := promptpkg.Build(promptOpts)
-	planID := ""
-	if m.plan != nil {
-		planID = m.plan.ID
-	}
-	if planID == "" && m.project != nil {
-		planID = m.project.ActivePlanID
-	}
-
-	projectName := ""
-	if m.project != nil {
-		projectName = m.project.Name
-	}
-
-	// Create a session daemon config.
-	dcfg := session.DaemonConfig{
-		AgentName:        p.Agent,
-		AgentCommand:     customCmd,
-		AgentArgs:        agentArgs,
-		AgentEnv:         agentEnv,
-		WorkDir:          workDir,
-		Prompt:           prompt,
-		ProjectDir:       workDir,
-		ProfileName:      p.Name,
-		ProjectName:      projectName,
-		PlanID:           planID,
-		UseDefaultPrompt: true,
-	}
-
-	// Allocate a session and start the daemon.
-	sessionID, err := session.CreateSession(dcfg)
-	if err != nil {
-		// Fallback: run inline without session support.
-		return m.startAgentInline(p, projectName)
-	}
-
-	if err := session.StartDaemon(sessionID); err != nil {
-		// Fallback: run inline without session support.
-		return m.startAgentInline(p, projectName)
-	}
-
-	// Connect to the daemon.
-	client, err := session.ConnectToSession(sessionID)
-	if err != nil {
-		// Fallback: run inline without session support.
-		return m.startAgentInline(p, projectName)
-	}
-
-	// Set up the event channel.
-	eventCh := make(chan any, 256)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancelFunc := func() {
-		client.Cancel()
-		cancel()
-	}
-
-	// Stream events from the daemon.
-	go func() {
-		client.StreamEvents(eventCh, nil)
-	}()
-
-	m.state = stateRunning
-	m.runCancel = cancelFunc
-	m.runEventCh = eventCh
-	m.sessionClient = client
-	m.sessionID = sessionID
-	m.runModel = runtui.NewModel(projectName, m.plan, p.Agent, "", eventCh, cancelFunc)
-	m.runModel.SetStore(m.store)
-	m.runModel.SetSessionMode(sessionID)
-	m.runModel.SetSize(m.width, m.height)
-
-	_ = ctx // cancel is wrapped in cancelFunc
-	return m, m.runModel.Init()
-}
-
-// startAgentInline is the fallback: runs the agent in-process without session
-// daemon support (no detach/reattach). Used when session creation fails.
-func (m AppModel) startAgentInline(p profileEntry, projectName string) (tea.Model, tea.Cmd) {
-	agentInstance, ok := agent.Get(p.Agent)
-	if !ok {
+	prof := m.globalCfg.FindProfile(p.Name)
+	if prof == nil {
 		return m, nil
 	}
 
-	agentsCfg, _ := agent.LoadAgentsConfig(m.store.Root())
-	var customCmd string
-	if agentsCfg != nil {
-		if rec, ok := agentsCfg.Agents[p.Agent]; ok && rec.Path != "" {
-			customCmd = rec.Path
-		}
+	loopDef := config.LoopDef{
+		Name: "profile:" + prof.Name,
+		Steps: []config.LoopStep{
+			{Profile: prof.Name, Turns: 1},
+		},
 	}
-
-	modelOverride := p.Model
-	reasoningLevel := ""
-	if prof := m.globalCfg.FindProfile(p.Name); prof != nil {
-		reasoningLevel = prof.ReasoningLevel
-	}
-
-	var agentArgs []string
-	agentEnv := make(map[string]string)
-	switch p.Agent {
-	case "claude":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-		if reasoningLevel != "" {
-			agentEnv["CLAUDE_CODE_EFFORT_LEVEL"] = reasoningLevel
-		}
-		agentArgs = append(agentArgs, "--dangerously-skip-permissions")
-	case "codex":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-		if reasoningLevel != "" {
-			agentArgs = append(agentArgs, "-c", `model_reasoning_effort="`+reasoningLevel+`"`)
-		}
-		agentArgs = append(agentArgs, "--full-auto")
-	case "opencode":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-	case "gemini":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-		agentArgs = append(agentArgs, "-y")
-	}
-
-	if customCmd == "" {
-		switch p.Agent {
-		case "claude", "codex", "vibe", "opencode", "gemini", "generic":
-		default:
-			customCmd = p.Agent
-		}
-	}
-
-	workDir := ""
-	if m.project != nil {
-		workDir = m.project.RepoPath
-	}
-	if workDir == "" {
-		workDir, _ = os.Getwd()
-	}
-
-	var prof *config.Profile
-	if found := m.globalCfg.FindProfile(p.Name); found != nil {
-		prof = found
-	}
-	promptOpts := buildPromptOpts(m.store, m.project, prof, m.globalCfg)
-	prompt, _ := promptpkg.Build(promptOpts)
-	planID := ""
-	if m.plan != nil {
-		planID = m.plan.ID
-	}
-	if planID == "" && m.project != nil {
-		planID = m.project.ActivePlanID
-	}
-
-	agentCfg := agent.Config{
-		Name:    p.Agent,
-		Command: customCmd,
-		Args:    agentArgs,
-		Env:     agentEnv,
-		WorkDir: workDir,
-		Prompt:  prompt,
-	}
-
-	eventCh := make(chan any, 256)
-	cancel := runtui.StartAgentLoop(runtui.RunConfig{
-		Store:           m.store,
-		Agent:           agentInstance,
-		AgentCfg:        agentCfg,
-		PromptBuildOpts: &promptOpts,
-		PlanID:          planID,
-		Plan:            m.plan,
-		ProjectName:     projectName,
-		ProfileName:     p.Name,
-	}, eventCh)
-
-	m.state = stateRunning
-	m.runCancel = cancel
-	m.runEventCh = eventCh
-	m.runModel = runtui.NewModel(projectName, m.plan, p.Agent, "", eventCh, cancel)
-	m.runModel.SetStore(m.store)
-	m.runModel.SetSize(m.width, m.height)
-
-	return m, m.runModel.Init()
+	return m.startLoopSession(loopDef, []config.Profile{*prof}, prof.Name, prof.Agent, nil, 0)
 }
 
 // View implements tea.Model.
@@ -1010,6 +874,8 @@ func (m AppModel) View() string {
 		return m.viewSettingsPushoverUserKey()
 	case stateSettingsPushoverAppToken:
 		return m.viewSettingsPushoverAppToken()
+	case stateSessionPicker:
+		return m.viewSessionPicker()
 	case stateConfirmDelete:
 		return m.viewConfirmDelete()
 	default:
@@ -1043,6 +909,52 @@ func (m AppModel) viewSelector() string {
 		m.height,
 	)
 	return header + "\n" + panels + "\n" + statusBar
+}
+
+func (m AppModel) viewSessionPicker() string {
+	header := m.renderHeader()
+	statusBar := m.renderStatusBar()
+	style, cw, ch := profileWizardPanel(m)
+
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
+	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
+	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
+
+	var lines []string
+	lines = append(lines, sectionStyle.Render("Active Sessions"))
+	lines = append(lines, "")
+
+	if len(m.activeSessions) == 0 {
+		lines = append(lines, dimStyle.Render("No active sessions."))
+		lines = append(lines, "")
+		lines = append(lines, dimStyle.Render("esc/q: back"))
+	} else {
+		for i, s := range m.activeSessions {
+			prefix := "  "
+			if i == m.sessionPickSel {
+				prefix = "> "
+			}
+			title := fmt.Sprintf("#%d %s/%s", s.ID, s.ProfileName, s.AgentName)
+			status := selectorRuntimeStatusStyle(s.Status).Render("[" + s.Status + "]")
+			lines = append(lines, prefix+valueStyle.Render(truncateInputForDisplay(title, cw-18))+" "+status)
+
+			detailParts := make([]string, 0, 3)
+			if s.ProjectName != "" {
+				detailParts = append(detailParts, "project="+s.ProjectName)
+			}
+			if s.LoopName != "" {
+				detailParts = append(detailParts, "loop="+s.LoopName)
+			}
+			detailParts = append(detailParts, "started="+s.StartedAt.Local().Format("15:04:05"))
+			lines = append(lines, "  "+dimStyle.Render(strings.Join(detailParts, "  ")))
+		}
+		lines = append(lines, "")
+		lines = append(lines, dimStyle.Render("enter: attach  j/k: select  r: refresh  esc/q: back"))
+	}
+
+	content := fitLines(lines, cw, ch)
+	panel := style.Render(content)
+	return header + "\n" + panel + "\n" + statusBar
 }
 
 func (m AppModel) renderHeader() string {
@@ -1083,6 +995,17 @@ func (m AppModel) renderStatusBar() string {
 		add("d", "delete")
 		add("s", "sessions")
 		add("S", "settings")
+		if msg := strings.TrimSpace(m.selectorMsg); msg != "" {
+			maxW := m.width / 3
+			if maxW < 20 {
+				maxW = 20
+			}
+			add("!", truncateInputForDisplay(msg, maxW))
+		}
+	}
+	if m.state == stateSessionPicker {
+		add("r", "refresh")
+		add("esc", "back")
 	}
 	add("q", "quit")
 
@@ -1102,20 +1025,6 @@ func RunApp(s *store.Store) error {
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
-}
-
-func buildPromptOpts(s *store.Store, project *store.ProjectConfig, profile *config.Profile, globalCfg *config.GlobalConfig) promptpkg.BuildOpts {
-	planID := ""
-	if project != nil {
-		planID = project.ActivePlanID
-	}
-	return promptpkg.BuildOpts{
-		Store:     s,
-		Project:   project,
-		Profile:   profile,
-		GlobalCfg: globalCfg,
-		PlanID:    planID,
-	}
 }
 
 func activePlanID(project *store.ProjectConfig, plan *store.Plan) string {

@@ -369,12 +369,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loopCycle = msg.Cycle
 		m.loopStep = msg.StepIndex
 		m.loopStepProfile = msg.Profile
+		if msg.TotalSteps > 0 {
+			m.loopTotalSteps = msg.TotalSteps
+		}
 		m.addLine("")
 		m.addLine(initLabelStyle.Render(fmt.Sprintf("[loop] Cycle %d, Step %d/%d: %s (x%d)",
 			msg.Cycle+1, msg.StepIndex+1, m.loopTotalSteps, msg.Profile, msg.Turns)))
 		return m, waitForEvent(m.eventCh)
 
 	case LoopStepEndMsg:
+		if msg.TotalSteps > 0 {
+			m.loopTotalSteps = msg.TotalSteps
+		}
 		m.addLine(dimStyle.Render(fmt.Sprintf("[loop] Step %d/%d: %s completed",
 			msg.StepIndex+1, m.loopTotalSteps, msg.Profile)))
 		return m, waitForEvent(m.eventCh)

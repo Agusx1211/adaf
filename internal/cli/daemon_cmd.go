@@ -26,15 +26,5 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--id is required")
 	}
 
-	// Populate the agent registry from the session's project config.
-	cfg, err := session.LoadConfig(sessionID)
-	if err != nil {
-		return fmt.Errorf("loading session config: %w", err)
-	}
-
-	// Populate agent registry so custom agents from config can be found.
-	// Built-in agents (claude, codex, etc.) are registered automatically via init().
-	session.PopulateAgentRegistry(cfg.ProjectDir)
-
 	return session.RunDaemon(sessionID)
 }

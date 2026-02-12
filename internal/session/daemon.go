@@ -11,17 +11,16 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
-	"github.com/agusx1211/adaf/internal/loop"
-	promptpkg "github.com/agusx1211/adaf/internal/prompt"
-	"github.com/agusx1211/adaf/internal/recording"
+	"github.com/agusx1211/adaf/internal/looprun"
+	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/store"
-	"github.com/agusx1211/adaf/internal/stream"
 )
 
 // StartDaemon launches a new daemon process for the given session ID.
@@ -111,6 +110,8 @@ func RunDaemon(sessionID int) error {
 			ProfileName: cfg.ProfileName,
 			AgentName:   cfg.AgentName,
 			ProjectName: cfg.ProjectName,
+			LoopName:    cfg.Loop.Name,
+			LoopSteps:   len(cfg.Loop.Steps),
 		},
 	}
 
@@ -129,8 +130,8 @@ func RunDaemon(sessionID int) error {
 	// Accept client connections in background.
 	go b.acceptLoop(listener, cancel)
 
-	// Run the agent loop.
-	loopErr := b.runAgentLoop(ctx, sessionID, cfg)
+	// Run the loop.
+	loopErr := b.runLoop(ctx, cfg)
 
 	// Update session metadata.
 	meta, _ = LoadMeta(sessionID)
@@ -148,12 +149,15 @@ func RunDaemon(sessionID int) error {
 
 // broadcaster manages client connections and event broadcasting.
 type broadcaster struct {
-	mu         sync.Mutex
-	clients    []*clientConn
-	buffered   [][]byte // all events for replay
-	eventsFile *os.File
-	meta       WireMeta
-	done       bool
+	mu               sync.Mutex
+	clients          []*clientConn
+	buffered         []bufferedEvent // bounded replay buffer
+	eventsFile       *os.File
+	meta             WireMeta
+	done             bool
+	nextSeq          int64
+	maxReplayEvents  int
+	eventsWriteError bool
 }
 
 type clientConn struct {
@@ -161,6 +165,13 @@ type clientConn struct {
 	writer *bufio.Writer
 	mu     sync.Mutex
 }
+
+type bufferedEvent struct {
+	Seq  int64
+	Line []byte
+}
+
+const defaultMaxReplayEvents = 4096
 
 func (b *broadcaster) acceptLoop(listener net.Listener, cancelAgent context.CancelFunc) {
 	for {
@@ -182,26 +193,37 @@ func (b *broadcaster) handleClient(conn net.Conn, cancelAgent context.CancelFunc
 	metaLine, _ := EncodeMsg(MsgMeta, b.meta)
 	cc.writeLine(metaLine)
 
-	// Send buffered events (replay).
-	b.mu.Lock()
-	for _, line := range b.buffered {
-		cc.writeLine(line)
+	// Replay a stable snapshot then register for live events.
+	seq1 := b.currentSeq()
+	if err := b.replayRange(cc, 1, seq1); err != nil {
+		fmt.Fprintf(os.Stderr, "session %d: replay range 1..%d failed: %v\n", b.meta.SessionID, seq1, err)
 	}
-	isDone := b.done
+
+	seq2 := b.currentSeq()
+	if err := b.replayRange(cc, seq1+1, seq2); err != nil {
+		fmt.Fprintf(os.Stderr, "session %d: replay range %d..%d failed: %v\n", b.meta.SessionID, seq1+1, seq2, err)
+	}
+
+	b.mu.Lock()
+	seq3 := b.nextSeq
+	replay3, ok3 := b.bufferedRangeLocked(seq2+1, seq3)
 	b.clients = append(b.clients, cc)
 	b.mu.Unlock()
 
-	// Send live marker.
+	if seq3 > seq2 {
+		if ok3 {
+			for _, line := range replay3 {
+				cc.writeLine(line)
+			}
+		} else if err := b.replayFromFileRange(cc, seq2+1, seq3); err != nil {
+			fmt.Fprintf(os.Stderr, "session %d: replay range %d..%d failed: %v\n", b.meta.SessionID, seq2+1, seq3, err)
+		}
+	}
+
+	// Send live marker after replay/catchup.
 	liveLine, _ := EncodeMsg(MsgLive, nil)
 	cc.writeLine(liveLine)
 	cc.flush()
-
-	if isDone {
-		// Agent already finished; send done and close.
-		doneLine, _ := EncodeMsg(MsgDone, nil)
-		cc.writeLine(doneLine)
-		cc.flush()
-	}
 
 	// Read control messages from the client.
 	scanner := bufio.NewScanner(conn)
@@ -228,20 +250,134 @@ func (b *broadcaster) removeClient(cc *clientConn) {
 	}
 }
 
+func (b *broadcaster) currentSeq() int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.nextSeq
+}
+
+func (b *broadcaster) replayRange(cc *clientConn, fromSeq, toSeq int64) error {
+	if toSeq < fromSeq {
+		return nil
+	}
+
+	b.mu.Lock()
+	lines, ok := b.bufferedRangeLocked(fromSeq, toSeq)
+	b.mu.Unlock()
+	if ok {
+		for _, line := range lines {
+			cc.writeLine(line)
+		}
+		return nil
+	}
+
+	return b.replayFromFileRange(cc, fromSeq, toSeq)
+}
+
+func (b *broadcaster) bufferedRangeLocked(fromSeq, toSeq int64) ([][]byte, bool) {
+	if toSeq < fromSeq {
+		return nil, true
+	}
+	if len(b.buffered) == 0 {
+		return nil, false
+	}
+
+	first := b.buffered[0].Seq
+	last := b.buffered[len(b.buffered)-1].Seq
+	if fromSeq < first || toSeq > last {
+		return nil, false
+	}
+
+	lines := make([][]byte, 0, toSeq-fromSeq+1)
+	next := fromSeq
+	for _, ev := range b.buffered {
+		if ev.Seq < fromSeq {
+			continue
+		}
+		if ev.Seq > toSeq {
+			break
+		}
+		if ev.Seq != next {
+			return nil, false
+		}
+		lines = append(lines, ev.Line)
+		next++
+	}
+	if next != toSeq+1 {
+		return nil, false
+	}
+	return lines, true
+}
+
+func (b *broadcaster) replayFromFileRange(cc *clientConn, fromSeq, toSeq int64) error {
+	if toSeq < fromSeq {
+		return nil
+	}
+	if b.eventsFile == nil {
+		return fmt.Errorf("events file is not configured")
+	}
+
+	path := b.eventsFile.Name()
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	reader := bufio.NewReader(f)
+	var seq int64
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			seq++
+			if seq >= fromSeq && seq <= toSeq {
+				cc.writeLine(line)
+			}
+			if seq >= toSeq {
+				return nil
+			}
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				if seq < toSeq {
+					return fmt.Errorf("events replay truncated at seq %d (wanted %d)", seq, toSeq)
+				}
+				return nil
+			}
+			return err
+		}
+	}
+}
+
 // broadcast sends a message to all connected clients and buffers it for replay.
 func (b *broadcaster) broadcast(line []byte) {
+	if b.maxReplayEvents <= 0 {
+		b.maxReplayEvents = defaultMaxReplayEvents
+	}
+	lineCopy := append([]byte(nil), line...)
+
 	b.mu.Lock()
-	b.buffered = append(b.buffered, line)
+	b.nextSeq++
+	b.buffered = append(b.buffered, bufferedEvent{
+		Seq:  b.nextSeq,
+		Line: lineCopy,
+	})
+	if excess := len(b.buffered) - b.maxReplayEvents; excess > 0 {
+		b.buffered = append([]bufferedEvent(nil), b.buffered[excess:]...)
+	}
 
 	// Write to events file.
-	b.eventsFile.Write(line)
+	if _, err := b.eventsFile.Write(lineCopy); err != nil && !b.eventsWriteError {
+		b.eventsWriteError = true
+		fmt.Fprintf(os.Stderr, "session %d: failed to append to events file: %v\n", b.meta.SessionID, err)
+	}
 
 	clients := make([]*clientConn, len(b.clients))
 	copy(clients, b.clients)
 	b.mu.Unlock()
 
 	for _, cc := range clients {
-		cc.writeLine(line)
+		cc.writeLine(lineCopy)
 		cc.flush()
 	}
 }
@@ -249,15 +385,7 @@ func (b *broadcaster) broadcast(line []byte) {
 func (b *broadcaster) markDone() {
 	b.mu.Lock()
 	b.done = true
-	clients := make([]*clientConn, len(b.clients))
-	copy(clients, b.clients)
 	b.mu.Unlock()
-
-	doneLine, _ := EncodeMsg(MsgDone, nil)
-	for _, cc := range clients {
-		cc.writeLine(doneLine)
-		cc.flush()
-	}
 }
 
 func (b *broadcaster) waitForClients(timeout time.Duration) {
@@ -285,134 +413,174 @@ func (cc *clientConn) flush() {
 	cc.writer.Flush()
 }
 
-// runAgentLoop runs the agent and broadcasts events through the broadcaster.
-func (b *broadcaster) runAgentLoop(ctx context.Context, sessionID int, cfg *DaemonConfig) error {
-	// Open the project store.
+// runLoop runs the loop runtime and broadcasts events through the broadcaster.
+func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 	s, err := store.New(cfg.ProjectDir)
 	if err != nil {
 		return fmt.Errorf("opening store: %w", err)
 	}
-
-	// Look up the agent from the registry.
-	agentInstance, ok := agent.Get(cfg.AgentName)
-	if !ok {
-		return fmt.Errorf("unknown agent %q", cfg.AgentName)
+	if err := s.EnsureDirs(); err != nil {
+		return fmt.Errorf("ensuring store dirs: %w", err)
 	}
 
-	// Build agent config.
-	streamCh := make(chan stream.RawEvent, 64)
-	agentCfg := agent.Config{
-		Name:      cfg.AgentName,
-		Command:   cfg.AgentCommand,
-		Args:      cfg.AgentArgs,
-		Env:       cfg.AgentEnv,
-		WorkDir:   cfg.WorkDir,
-		Prompt:    cfg.Prompt,
-		MaxTurns:  cfg.MaxTurns,
-		EventSink: streamCh,
-		Stdout:    io.Discard,
-		Stderr:    io.Discard,
+	projCfg, err := s.LoadProject()
+	if err != nil {
+		return fmt.Errorf("loading project: %w", err)
 	}
 
-	// Set ADAF_AGENT=1 so spawned agents can't use session commands.
-	if agentCfg.Env == nil {
-		agentCfg.Env = make(map[string]string)
+	globalCfg := &config.GlobalConfig{
+		Profiles: append([]config.Profile(nil), cfg.Profiles...),
+		Pushover: cfg.Pushover,
 	}
-	agentCfg.Env["ADAF_AGENT"] = "1"
-
-	var promptFunc func(sessionID int, supervisorNotes []store.SupervisorNote) string
-	if cfg.UseDefaultPrompt {
-		projCfg, err := s.LoadProject()
-		if err == nil && projCfg != nil {
-			globalCfg, _ := config.Load()
-			var prof *config.Profile
-			if globalCfg != nil && cfg.ProfileName != "" {
-				prof = globalCfg.FindProfile(cfg.ProfileName)
-			}
-			basePrompt := agentCfg.Prompt
-			promptFunc = func(sessionID int, supervisorNotes []store.SupervisorNote) string {
-				built, err := promptpkg.Build(promptpkg.BuildOpts{
-					Store:           s,
-					Project:         projCfg,
-					Profile:         prof,
-					GlobalCfg:       globalCfg,
-					PlanID:          cfg.PlanID,
-					SupervisorNotes: supervisorNotes,
-				})
-				if err != nil {
-					return basePrompt
-				}
-				return built
-			}
+	if loaded, err := config.Load(); err == nil && loaded != nil {
+		if len(globalCfg.Profiles) == 0 {
+			globalCfg.Profiles = append([]config.Profile(nil), loaded.Profiles...)
+		}
+		if globalCfg.Pushover.UserKey == "" && globalCfg.Pushover.AppToken == "" {
+			globalCfg.Pushover = loaded.Pushover
 		}
 	}
 
-	// Bridge goroutine: converts stream events to wire messages.
+	agentsCfg, err := agent.LoadAgentsConfig(s.Root())
+	if err != nil {
+		return fmt.Errorf("loading agent config: %w", err)
+	}
+	applyAgentCommandOverrides(agentsCfg, cfg.AgentCommandOverrides)
+	agent.PopulateFromConfig(agentsCfg)
+
+	loopDef := cfg.Loop
+	if loopDef.Name == "" {
+		loopDef.Name = "session-loop"
+	}
+	if len(loopDef.Steps) == 0 {
+		return fmt.Errorf("loop %q has no steps", loopDef.Name)
+	}
+	workDir := cfg.WorkDir
+	if workDir == "" && projCfg != nil {
+		workDir = projCfg.RepoPath
+	}
+
+	eventCh := make(chan any, 256)
+	forwardDone := make(chan struct{})
+	loopRunID := 0
 	go func() {
-		for ev := range streamCh {
-			if ev.Err != nil {
-				continue
-			}
-			if ev.Text != "" {
-				wireRaw := WireRaw{
-					Data:      ev.Text,
-					SessionID: ev.SessionID,
+		defer close(forwardDone)
+		totalSteps := len(loopDef.Steps)
+		for msg := range eventCh {
+			switch ev := msg.(type) {
+			case runtui.AgentStartedMsg:
+				line, _ := EncodeMsg(MsgStarted, WireStarted{SessionID: ev.SessionID})
+				b.broadcast(line)
+			case runtui.AgentFinishedMsg:
+				wf := WireFinished{SessionID: ev.SessionID}
+				if ev.Result != nil {
+					wf.ExitCode = ev.Result.ExitCode
+					wf.DurationNS = ev.Result.Duration
 				}
-				line, err := EncodeMsg(MsgRaw, wireRaw)
+				if ev.Err != nil {
+					wf.Error = ev.Err.Error()
+				}
+				line, _ := EncodeMsg(MsgFinished, wf)
+				b.broadcast(line)
+			case runtui.AgentRawOutputMsg:
+				line, _ := EncodeMsg(MsgRaw, WireRaw{Data: ev.Data, SessionID: ev.SessionID})
+				b.broadcast(line)
+			case runtui.AgentEventMsg:
+				eventJSON, err := json.Marshal(ev.Event)
 				if err != nil {
 					continue
 				}
+				line, _ := EncodeMsg(MsgEvent, WireEvent{Event: eventJSON, Raw: ev.Raw})
 				b.broadcast(line)
-				continue
+			case runtui.SpawnStatusMsg:
+				spawns := make([]WireSpawnInfo, len(ev.Spawns))
+				for i, sp := range ev.Spawns {
+					spawns[i] = WireSpawnInfo{
+						ID:       sp.ID,
+						Profile:  sp.Profile,
+						Status:   sp.Status,
+						Question: sp.Question,
+					}
+				}
+				line, _ := EncodeMsg(MsgSpawn, WireSpawn{Spawns: spawns})
+				b.broadcast(line)
+			case runtui.LoopStepStartMsg:
+				if ev.RunID > 0 {
+					loopRunID = ev.RunID
+				}
+				line, _ := EncodeMsg(MsgLoopStepStart, WireLoopStepStart{
+					RunID:      ev.RunID,
+					Cycle:      ev.Cycle,
+					StepIndex:  ev.StepIndex,
+					Profile:    ev.Profile,
+					Turns:      ev.Turns,
+					TotalSteps: totalSteps,
+				})
+				b.broadcast(line)
+			case runtui.LoopStepEndMsg:
+				if ev.RunID > 0 {
+					loopRunID = ev.RunID
+				}
+				line, _ := EncodeMsg(MsgLoopStepEnd, WireLoopStepEnd{
+					RunID:      ev.RunID,
+					Cycle:      ev.Cycle,
+					StepIndex:  ev.StepIndex,
+					Profile:    ev.Profile,
+					TotalSteps: totalSteps,
+				})
+				b.broadcast(line)
 			}
-			eventJSON, err := json.Marshal(ev.Parsed)
-			if err != nil {
-				continue
-			}
-			wireEv := WireEvent{
-				Event: eventJSON,
-				Raw:   ev.Raw,
-			}
-			line, err := EncodeMsg(MsgEvent, wireEv)
-			if err != nil {
-				continue
-			}
-			b.broadcast(line)
 		}
 	}()
 
-	// Run the loop.
-	l := &loop.Loop{
-		Store:      s,
-		Agent:      agentInstance,
-		Config:     agentCfg,
-		PlanID:     cfg.PlanID,
-		PromptFunc: promptFunc,
-		OnStart: func(sid int) {
-			line, _ := EncodeMsg(MsgStarted, WireStarted{SessionID: sid})
-			b.broadcast(line)
-		},
-		OnEnd: func(sid int, result *agent.Result) {
-			wf := WireFinished{SessionID: sid}
-			if result != nil {
-				wf.ExitCode = result.ExitCode
-				wf.DurationNS = result.Duration
-			}
-			line, _ := EncodeMsg(MsgFinished, wf)
-			b.broadcast(line)
-		},
+	runErr := looprun.Run(ctx, looprun.RunConfig{
+		Store:     s,
+		GlobalCfg: globalCfg,
+		LoopDef:   &loopDef,
+		Project:   projCfg,
+		AgentsCfg: agentsCfg,
+		PlanID:    cfg.PlanID,
+		WorkDir:   workDir,
+		MaxCycles: cfg.MaxCycles,
+	}, eventCh)
+
+	close(eventCh)
+	<-forwardDone
+
+	loopDone := WireLoopDone{
+		RunID:  loopRunID,
+		Reason: classifyLoopDoneReason(runErr),
+		Error:  donePayloadError(runErr),
 	}
+	line, _ := EncodeMsg(MsgLoopDone, loopDone)
+	b.broadcast(line)
 
-	loopErr := l.Run(ctx)
-	close(streamCh)
-
-	// Send done.
-	wd := WireDone{Error: donePayloadError(loopErr)}
-	line, _ := EncodeMsg(MsgDone, wd)
+	wd := WireDone{Error: donePayloadError(runErr)}
+	line, _ = EncodeMsg(MsgDone, wd)
 	b.broadcast(line)
 	b.markDone()
 
-	return loopErr
+	return runErr
+}
+
+func applyAgentCommandOverrides(agentsCfg *agent.AgentsConfig, overrides map[string]string) {
+	if agentsCfg == nil || len(overrides) == 0 {
+		return
+	}
+	if agentsCfg.Agents == nil {
+		agentsCfg.Agents = make(map[string]agent.AgentRecord)
+	}
+	for name, path := range overrides {
+		name = strings.TrimSpace(strings.ToLower(name))
+		path = strings.TrimSpace(path)
+		if name == "" || path == "" {
+			continue
+		}
+		rec := agentsCfg.Agents[name]
+		rec.Name = name
+		rec.Path = path
+		agentsCfg.Agents[name] = rec
+	}
 }
 
 func classifySessionEnd(loopErr error) (status string, errMsg string) {
@@ -433,27 +601,20 @@ func donePayloadError(loopErr error) string {
 	return loopErr.Error()
 }
 
+func classifyLoopDoneReason(loopErr error) string {
+	switch {
+	case loopErr == nil:
+		return "stopped"
+	case errors.Is(loopErr, context.Canceled):
+		return "cancelled"
+	default:
+		return "error"
+	}
+}
+
 func normalizeDaemonExit(loopErr error) error {
 	if errors.Is(loopErr, context.Canceled) {
 		return nil
 	}
 	return loopErr
-}
-
-// PopulateAgentRegistry ensures the agent registry has entries for the given
-// agent. This is called by the daemon before running the loop.
-func PopulateAgentRegistry(projectDir string) {
-	agentsCfg, err := agent.LoadAgentsConfig(
-		fmt.Sprintf("%s/.adaf", projectDir),
-	)
-	if err != nil {
-		return
-	}
-	agent.PopulateFromConfig(agentsCfg)
-}
-
-// NewRecorder creates a recorder for the daemon's use. Exposed so the daemon
-// command can set up recording if needed.
-func NewRecorder(sessionID int, s *store.Store) *recording.Recorder {
-	return recording.New(sessionID, s)
 }

@@ -82,6 +82,7 @@ func ConnectToSession(sessionID int) (*Client, error) {
 // The isLive callback is called when replay is complete and live streaming begins.
 func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 	defer close(eventCh)
+	loopDoneSeen := false
 
 	for c.scanner.Scan() {
 		msg, err := DecodeMsg(c.scanner.Bytes())
@@ -149,7 +150,52 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 			}
 			eventCh <- runtui.SpawnStatusMsg{Spawns: spawns}
 
+		case MsgLoopStepStart:
+			data, err := DecodeData[WireLoopStepStart](msg)
+			if err != nil {
+				continue
+			}
+			eventCh <- runtui.LoopStepStartMsg{
+				RunID:      data.RunID,
+				Cycle:      data.Cycle,
+				StepIndex:  data.StepIndex,
+				Profile:    data.Profile,
+				Turns:      data.Turns,
+				TotalSteps: data.TotalSteps,
+			}
+
+		case MsgLoopStepEnd:
+			data, err := DecodeData[WireLoopStepEnd](msg)
+			if err != nil {
+				continue
+			}
+			eventCh <- runtui.LoopStepEndMsg{
+				RunID:      data.RunID,
+				Cycle:      data.Cycle,
+				StepIndex:  data.StepIndex,
+				Profile:    data.Profile,
+				TotalSteps: data.TotalSteps,
+			}
+
+		case MsgLoopDone:
+			data, err := DecodeData[WireLoopDone](msg)
+			if err != nil {
+				continue
+			}
+			done := runtui.LoopDoneMsg{
+				RunID:  data.RunID,
+				Reason: data.Reason,
+			}
+			if data.Error != "" {
+				done.Err = fmt.Errorf("%s", data.Error)
+			}
+			eventCh <- done
+			loopDoneSeen = true
+
 		case MsgDone:
+			if loopDoneSeen {
+				return nil
+			}
 			data, err := DecodeData[WireDone](msg)
 			if err != nil {
 				eventCh <- runtui.AgentLoopDoneMsg{}

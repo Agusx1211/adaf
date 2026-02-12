@@ -31,26 +31,9 @@ type RunConfig struct {
 
 	// WorkDir is the working directory for agent processes.
 	WorkDir string
-}
 
-// StartLoopRun launches the loop in a goroutine and returns a cancel function.
-// Events are sent to eventCh. The caller must drain eventCh.
-func StartLoopRun(cfg RunConfig, eventCh chan any) context.CancelFunc {
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		err := Run(ctx, cfg, eventCh)
-		reason := "stopped"
-		if err != nil {
-			if ctx.Err() != nil {
-				reason = "cancelled"
-			} else {
-				reason = "error"
-			}
-		}
-		eventCh <- runtui.LoopDoneMsg{Reason: reason, Err: err}
-		close(eventCh)
-	}()
-	return cancel
+	// MaxCycles limits loop cycles. 0 means unlimited.
+	MaxCycles int
 }
 
 // Run is the blocking loop execution implementation.
@@ -89,8 +72,12 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 		_ = stats.UpdateLoopStats(cfg.Store, loopDef.Name, run)
 	}()
 
-	// Run cycles indefinitely until stopped or cancelled.
+	// Run cycles until stopped/cancelled (or MaxCycles if configured).
 	for cycle := 0; ; cycle++ {
+		if cfg.MaxCycles > 0 && cycle >= cfg.MaxCycles {
+			return nil
+		}
+
 		run.Cycle = cycle
 		cfg.Store.UpdateLoopRun(run)
 
@@ -124,11 +111,12 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 
 			// Emit step start event.
 			eventCh <- runtui.LoopStepStartMsg{
-				RunID:     run.ID,
-				Cycle:     cycle,
-				StepIndex: stepIdx,
-				Profile:   prof.Name,
-				Turns:     turns,
+				RunID:      run.ID,
+				Cycle:      cycle,
+				StepIndex:  stepIdx,
+				Profile:    prof.Name,
+				Turns:      turns,
+				TotalSteps: len(loopDef.Steps),
 			}
 
 			// Build agent config.
@@ -274,10 +262,11 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 
 			// Emit step end event.
 			eventCh <- runtui.LoopStepEndMsg{
-				RunID:     run.ID,
-				Cycle:     cycle,
-				StepIndex: stepIdx,
-				Profile:   prof.Name,
+				RunID:      run.ID,
+				Cycle:      cycle,
+				StepIndex:  stepIdx,
+				Profile:    prof.Name,
+				TotalSteps: len(loopDef.Steps),
 			}
 
 			if loopErr != nil {

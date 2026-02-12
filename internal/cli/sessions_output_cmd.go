@@ -318,6 +318,48 @@ func (r *sessionOutputRenderer) RenderLine(line []byte) error {
 			colorDim, colorReset, data.ExitCode, time.Duration(data.DurationNS).Round(time.Second))
 		return err
 
+	case session.MsgLoopStepStart:
+		data, err := session.DecodeData[session.WireLoopStepStart](msg)
+		if err != nil || data == nil {
+			return nil
+		}
+		total := data.TotalSteps
+		if total <= 0 {
+			total = data.StepIndex + 1
+		}
+		_, err = fmt.Fprintf(r.out, "%s[loop]%s cycle=%d step=%d/%d profile=%s turns=%d\n",
+			colorDim, colorReset, data.Cycle+1, data.StepIndex+1, total, data.Profile, data.Turns)
+		return err
+
+	case session.MsgLoopStepEnd:
+		data, err := session.DecodeData[session.WireLoopStepEnd](msg)
+		if err != nil || data == nil {
+			return nil
+		}
+		total := data.TotalSteps
+		if total <= 0 {
+			total = data.StepIndex + 1
+		}
+		_, err = fmt.Fprintf(r.out, "%s[loop]%s step=%d/%d profile=%s completed\n",
+			colorDim, colorReset, data.StepIndex+1, total, data.Profile)
+		return err
+
+	case session.MsgLoopDone:
+		data, err := session.DecodeData[session.WireLoopDone](msg)
+		if err != nil || data == nil {
+			return nil
+		}
+		if data.Error != "" {
+			_, err = fmt.Fprintf(r.out, "%s[loop done] error:%s %s\n", colorRed, colorReset, data.Error)
+		} else {
+			reason := data.Reason
+			if reason == "" {
+				reason = "stopped"
+			}
+			_, err = fmt.Fprintf(r.out, "%s[loop done]%s reason=%s\n", colorDim, colorReset, reason)
+		}
+		return err
+
 	case session.MsgDone:
 		data, err := session.DecodeData[session.WireDone](msg)
 		if err != nil || data == nil {

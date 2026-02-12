@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/agusx1211/adaf/internal/config"
 )
 
 // SessionMeta describes a running or completed session daemon.
@@ -17,6 +20,8 @@ type SessionMeta struct {
 	ID          int       `json:"id"`
 	ProfileName string    `json:"profile_name"`
 	AgentName   string    `json:"agent_name"`
+	LoopName    string    `json:"loop_name,omitempty"`
+	LoopSteps   int       `json:"loop_steps,omitempty"`
 	ProjectDir  string    `json:"project_dir"`
 	ProjectName string    `json:"project_name"`
 	PID         int       `json:"pid"`
@@ -29,18 +34,23 @@ type SessionMeta struct {
 // DaemonConfig holds everything the daemon process needs to reconstruct and
 // run the agent loop. Written to disk by the parent before starting the daemon.
 type DaemonConfig struct {
-	AgentName        string            `json:"agent_name"`
-	AgentCommand     string            `json:"agent_command"`
-	AgentArgs        []string          `json:"agent_args"`
-	AgentEnv         map[string]string `json:"agent_env"`
-	WorkDir          string            `json:"work_dir"`
-	Prompt           string            `json:"prompt"`
-	UseDefaultPrompt bool              `json:"use_default_prompt,omitempty"`
-	MaxTurns         int               `json:"max_turns"`
-	ProjectDir       string            `json:"project_dir"`
-	ProfileName      string            `json:"profile_name"`
-	ProjectName      string            `json:"project_name"`
-	PlanID           string            `json:"plan_id,omitempty"`
+	ProjectDir  string `json:"project_dir"`
+	ProjectName string `json:"project_name"`
+	WorkDir     string `json:"work_dir"`
+	PlanID      string `json:"plan_id,omitempty"`
+
+	// Display fields used in session listings and attach headers.
+	ProfileName string `json:"profile_name"`
+	AgentName   string `json:"agent_name"`
+
+	// Loop execution snapshot.
+	Loop      config.LoopDef        `json:"loop"`
+	Profiles  []config.Profile      `json:"profiles"`
+	Pushover  config.PushoverConfig `json:"pushover,omitempty"`
+	MaxCycles int                   `json:"max_cycles,omitempty"` // 0 = unlimited
+
+	// Optional one-off command path overrides keyed by agent name.
+	AgentCommandOverrides map[string]string `json:"agent_command_overrides,omitempty"`
 }
 
 // Dir returns the global sessions directory (~/.adaf/sessions/), creating it if needed.
@@ -106,10 +116,27 @@ func nextID() int {
 // CreateSession allocates a new session ID, writes the DaemonConfig and initial
 // SessionMeta to disk, and returns the session ID.
 func CreateSession(dcfg DaemonConfig) (int, error) {
-	id := nextID()
-	dir := SessionDir(id)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return 0, fmt.Errorf("creating session dir: %w", err)
+	const maxAttempts = 256
+
+	var (
+		id      int
+		dir     string
+		created bool
+	)
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		id = nextID()
+		dir = SessionDir(id)
+		if err := os.Mkdir(dir, 0755); err != nil {
+			if os.IsExist(err) {
+				continue
+			}
+			return 0, fmt.Errorf("creating session dir: %w", err)
+		}
+		created = true
+		break
+	}
+	if !created {
+		return 0, fmt.Errorf("allocating session id: too much contention")
 	}
 
 	// Write daemon config.
@@ -126,6 +153,8 @@ func CreateSession(dcfg DaemonConfig) (int, error) {
 		ID:          id,
 		ProfileName: dcfg.ProfileName,
 		AgentName:   dcfg.AgentName,
+		LoopName:    dcfg.Loop.Name,
+		LoopSteps:   len(dcfg.Loop.Steps),
 		ProjectDir:  dcfg.ProjectDir,
 		ProjectName: dcfg.ProjectName,
 		Status:      "starting",
@@ -250,6 +279,47 @@ func CleanupOld(maxAge time.Duration) error {
 		}
 	}
 	return nil
+}
+
+// AbortSessionStartup best-effort cancels and terminates a just-started session.
+// It is intended for startup failures where the caller created a session daemon
+// but could not attach to it.
+func AbortSessionStartup(id int, reason string) {
+	_ = sendCancelControl(id)
+
+	meta, err := LoadMeta(id)
+	if err != nil || meta == nil {
+		return
+	}
+
+	if (meta.Status == "starting" || meta.Status == "running") && isProcessAlive(meta.PID) {
+		if meta.PID > 0 {
+			_ = syscall.Kill(-meta.PID, syscall.SIGTERM)
+			_ = syscall.Kill(meta.PID, syscall.SIGTERM)
+		}
+	}
+
+	if meta.Status == "starting" || meta.Status == "running" {
+		meta.Status = "cancelled"
+	}
+	if strings.TrimSpace(reason) != "" {
+		meta.Error = reason
+	}
+	if meta.EndedAt.IsZero() {
+		meta.EndedAt = time.Now().UTC()
+	}
+	_ = SaveMeta(id, meta)
+}
+
+func sendCancelControl(id int) error {
+	conn, err := net.DialTimeout("unix", SocketPath(id), 500*time.Millisecond)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	_ = conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
+	_, err = fmt.Fprintf(conn, "%s\n", CtrlCancel)
+	return err
 }
 
 // IsAgentContext returns true if the current process is running inside an
