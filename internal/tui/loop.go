@@ -30,7 +30,7 @@ func (m AppModel) effectiveLoopStepRole(step config.LoopStep) string {
 	return config.EffectiveStepRole(step.Role, prof)
 }
 
-func (m *AppModel) resetLoopStepSpawnOptions(selectedProfile string) {
+func (m *AppModel) resetLoopStepSpawnOptions() {
 	m.loopStepSpawnOpts = nil
 	m.loopStepSpawnSelect = make(map[int]bool)
 	m.loopStepSpawnSel = 0
@@ -38,9 +38,7 @@ func (m *AppModel) resetLoopStepSpawnOptions(selectedProfile string) {
 	m.loopStepSpawnSpeed = make(map[int]int)
 	m.loopStepSpawnHandoff = make(map[int]bool)
 	for _, p := range m.globalCfg.Profiles {
-		if !strings.EqualFold(p.Name, selectedProfile) {
-			m.loopStepSpawnOpts = append(m.loopStepSpawnOpts, p.Name)
-		}
+		m.loopStepSpawnOpts = append(m.loopStepSpawnOpts, p.Name)
 	}
 }
 
@@ -209,7 +207,7 @@ func (m AppModel) updateLoopStepList(msg tea.Msg) (tea.Model, tea.Cmd) {
 				selectedProfile = m.loopStepProfileOpts[m.loopStepProfileSel]
 			}
 			m.setLoopStepRoleSelection(config.EffectiveStepRole("", m.globalCfg.FindProfile(selectedProfile)))
-			m.resetLoopStepSpawnOptions(selectedProfile)
+			m.resetLoopStepSpawnOptions()
 			m.loopStepToolsSel = 0
 			m.state = stateLoopStepProfile
 			return m, nil
@@ -240,7 +238,7 @@ func (m AppModel) updateLoopStepList(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.loopStepCanStop = step.CanStop
 				m.loopStepCanMsg = step.CanMessage
 				m.loopStepCanPushover = step.CanPushover
-				m.resetLoopStepSpawnOptions(step.Profile)
+				m.resetLoopStepSpawnOptions()
 				m.preselectLoopStepSpawn(step)
 				m.loopStepToolsSel = 0
 				m.state = stateLoopStepProfile
@@ -347,14 +345,14 @@ func (m AppModel) updateLoopStepProfile(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.loopStepProfileOpts) > 0 {
 				m.loopStepProfileSel = (m.loopStepProfileSel + 1) % len(m.loopStepProfileOpts)
 				selected := m.loopStepProfileOpts[m.loopStepProfileSel]
-				m.resetLoopStepSpawnOptions(selected)
+				m.resetLoopStepSpawnOptions()
 				m.setLoopStepRoleSelection(config.EffectiveStepRole("", m.globalCfg.FindProfile(selected)))
 			}
 		case "k", "up":
 			if len(m.loopStepProfileOpts) > 0 {
 				m.loopStepProfileSel = (m.loopStepProfileSel - 1 + len(m.loopStepProfileOpts)) % len(m.loopStepProfileOpts)
 				selected := m.loopStepProfileOpts[m.loopStepProfileSel]
-				m.resetLoopStepSpawnOptions(selected)
+				m.resetLoopStepSpawnOptions()
 				m.setLoopStepRoleSelection(config.EffectiveStepRole("", m.globalCfg.FindProfile(selected)))
 			}
 		case "enter":
@@ -699,7 +697,7 @@ func (m AppModel) viewLoopStepSpawn() string {
 	lines = append(lines, "")
 
 	if len(m.loopStepSpawnOpts) == 0 {
-		lines = append(lines, dimStyle.Render("No other profiles available."))
+		lines = append(lines, dimStyle.Render("No profiles available. Create a profile first."))
 	}
 	for i, name := range m.loopStepSpawnOpts {
 		check := "[ ]"
