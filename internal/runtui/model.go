@@ -27,6 +27,14 @@ const (
 	focusCommand
 )
 
+type leftPanelSection int
+
+const (
+	leftSectionAgents leftPanelSection = iota
+	leftSectionIssues
+	leftSectionDocs
+)
+
 type scopedLine struct {
 	scope string
 	text  string
@@ -58,8 +66,13 @@ type Model struct {
 	height int
 
 	// Project/plan data.
-	projectName string
-	plan        *store.Plan
+	projectName  string
+	plan         *store.Plan
+	projectStore *store.Store
+	issues       []store.Issue
+	docs         []store.Doc
+	activeLoop   *store.LoopRun
+	lastDataLoad time.Time
 
 	// Agent info.
 	agentName string
@@ -120,6 +133,9 @@ type Model struct {
 	sessions      map[int]*sessionStatus
 	sessionOrder  []int
 	selectedEntry int
+	leftSection   leftPanelSection
+	selectedIssue int
+	selectedDoc   int
 
 	// Raw output accumulators per scope for line-based rendering.
 	rawRemainder map[string]string
@@ -141,6 +157,7 @@ func NewModel(projectName string, plan *store.Plan, agentName, modelName string,
 		spawnFirstSeen: make(map[int]time.Time),
 		spawnStatus:    make(map[int]string),
 		rawRemainder:   make(map[string]string),
+		leftSection:    leftSectionAgents,
 	}
 }
 
@@ -149,6 +166,38 @@ func NewModel(projectName string, plan *store.Plan, agentName, modelName string,
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+}
+
+// SetStore attaches a project store so the run TUI can surface issues/docs.
+func (m *Model) SetStore(s *store.Store) {
+	m.projectStore = s
+	m.reloadProjectData()
+}
+
+func (m *Model) reloadProjectData() {
+	if m.projectStore == nil {
+		return
+	}
+	if issues, err := m.projectStore.ListIssues(); err == nil {
+		m.issues = issues
+	}
+	if docs, err := m.projectStore.ListDocs(); err == nil {
+		m.docs = docs
+	}
+	if run, err := m.projectStore.ActiveLoopRun(); err == nil {
+		m.activeLoop = run
+	}
+	if len(m.issues) == 0 {
+		m.selectedIssue = 0
+	} else if m.selectedIssue >= len(m.issues) {
+		m.selectedIssue = len(m.issues) - 1
+	}
+	if len(m.docs) == 0 {
+		m.selectedDoc = 0
+	} else if m.selectedDoc >= len(m.docs) {
+		m.selectedDoc = len(m.docs) - 1
+	}
+	m.lastDataLoad = time.Now()
 }
 
 // SetLoopInfo configures loop display information on the model.
@@ -334,6 +383,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.elapsed = time.Since(m.startTime)
+		if m.projectStore != nil && (m.lastDataLoad.IsZero() || time.Since(m.lastDataLoad) >= 2*time.Second) {
+			m.reloadProjectData()
+		}
 		// keep scroll clamped as filtered line counts change with selection/focus.
 		ms := m.maxScroll()
 		if m.scrollPos > ms {
@@ -358,22 +410,54 @@ func (m Model) Done() bool {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	moveSelection := func(delta int) {
-		entries := m.commandEntries()
-		if len(entries) == 0 {
-			m.selectedEntry = 0
-			return
+		switch m.leftSection {
+		case leftSectionIssues:
+			if len(m.issues) == 0 {
+				m.selectedIssue = 0
+				return
+			}
+			m.selectedIssue += delta
+			if m.selectedIssue < 0 {
+				m.selectedIssue = 0
+			}
+			if m.selectedIssue >= len(m.issues) {
+				m.selectedIssue = len(m.issues) - 1
+			}
+			m.scrollPos = 0
+			m.autoScroll = false
+		case leftSectionDocs:
+			if len(m.docs) == 0 {
+				m.selectedDoc = 0
+				return
+			}
+			m.selectedDoc += delta
+			if m.selectedDoc < 0 {
+				m.selectedDoc = 0
+			}
+			if m.selectedDoc >= len(m.docs) {
+				m.selectedDoc = len(m.docs) - 1
+			}
+			m.scrollPos = 0
+			m.autoScroll = false
+		default:
+			entries := m.commandEntries()
+			if len(entries) == 0 {
+				m.selectedEntry = 0
+				return
+			}
+			m.selectedEntry += delta
+			if m.selectedEntry < 0 {
+				m.selectedEntry = 0
+			}
+			if m.selectedEntry >= len(entries) {
+				m.selectedEntry = len(entries) - 1
+			}
+			m.scrollToBottom()
+			m.autoScroll = true
 		}
-		m.selectedEntry += delta
-		if m.selectedEntry < 0 {
-			m.selectedEntry = 0
-		}
-		if m.selectedEntry >= len(entries) {
-			m.selectedEntry = len(entries) - 1
-		}
-		m.scrollToBottom()
-		m.autoScroll = true
 	}
 	cycleActiveAgent := func(delta int) {
+		m.setLeftSection(leftSectionAgents)
 		entries := m.commandEntries()
 		if len(entries) <= 1 {
 			return
@@ -426,6 +510,41 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.scrollToBottom()
 		m.autoScroll = true
 	}
+	moveToBoundary := func(start bool) {
+		switch m.leftSection {
+		case leftSectionIssues:
+			if len(m.issues) == 0 {
+				m.selectedIssue = 0
+			} else if start {
+				m.selectedIssue = 0
+			} else {
+				m.selectedIssue = len(m.issues) - 1
+			}
+			m.scrollPos = 0
+			m.autoScroll = false
+		case leftSectionDocs:
+			if len(m.docs) == 0 {
+				m.selectedDoc = 0
+			} else if start {
+				m.selectedDoc = 0
+			} else {
+				m.selectedDoc = len(m.docs) - 1
+			}
+			m.scrollPos = 0
+			m.autoScroll = false
+		default:
+			entries := m.commandEntries()
+			if len(entries) == 0 {
+				m.selectedEntry = 0
+			} else if start {
+				m.selectedEntry = 0
+			} else {
+				m.selectedEntry = len(entries) - 1
+			}
+			m.scrollToBottom()
+			m.autoScroll = true
+		}
+	}
 
 	switch msg.String() {
 	case "q":
@@ -457,6 +576,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focus = focusCommand
 	case "right", "l":
 		m.focus = focusDetail
+	case "1":
+		m.setLeftSection(leftSectionAgents)
+	case "2":
+		m.setLeftSection(leftSectionIssues)
+	case "3":
+		m.setLeftSection(leftSectionDocs)
 	case "]", "n":
 		cycleActiveAgent(1)
 	case "[", "p":
@@ -503,24 +628,32 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.scrollPos = 0
 			m.autoScroll = false
 		} else {
-			m.selectedEntry = 0
-			m.scrollToBottom()
-			m.autoScroll = true
+			moveToBoundary(true)
 		}
 	case "end", "G":
 		if m.focus == focusDetail {
 			m.scrollToBottom()
 			m.autoScroll = true
 		} else {
-			entries := m.commandEntries()
-			if len(entries) > 0 {
-				m.selectedEntry = len(entries) - 1
-				m.scrollToBottom()
-				m.autoScroll = true
-			}
+			moveToBoundary(false)
 		}
 	}
 	return m, nil
+}
+
+func (m *Model) setLeftSection(section leftPanelSection) {
+	if m.leftSection == section {
+		return
+	}
+	m.leftSection = section
+	switch section {
+	case leftSectionAgents:
+		m.scrollToBottom()
+		m.autoScroll = true
+	default:
+		m.scrollPos = 0
+		m.autoScroll = false
+	}
 }
 
 // --- Scrolling ---
@@ -561,6 +694,9 @@ func (m Model) maxScroll() int {
 }
 
 func (m Model) selectedScope() string {
+	if m.leftSection != leftSectionAgents {
+		return ""
+	}
 	entries := m.commandEntries()
 	if len(entries) == 0 {
 		return ""
@@ -1294,7 +1430,10 @@ func (m Model) renderStatusBar() string {
 		parts = append(parts, shortcut("pgup/dn", "page"))
 		parts = append(parts, shortcut("tab", "command"))
 	}
-	parts = append(parts, shortcut("[/]", "agent"))
+	parts = append(parts, shortcut("1/2/3", "views"))
+	if m.leftSection == leftSectionAgents {
+		parts = append(parts, shortcut("[/]", "agent"))
+	}
 
 	total := m.totalLines()
 	vh := m.rcHeight()
@@ -1307,8 +1446,29 @@ func (m Model) renderStatusBar() string {
 		parts = append(parts, statusValueStyle.Render(fmt.Sprintf("%d%%", pct)))
 	}
 
+	parts = append(parts, statusValueStyle.Render("view="+m.leftSectionLabel()))
 	if selected := m.selectedScope(); selected != "" {
 		parts = append(parts, statusValueStyle.Render("detail="+selected))
+	}
+	if m.leftSection == leftSectionIssues && len(m.issues) > 0 {
+		idx := m.selectedIssue
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= len(m.issues) {
+			idx = len(m.issues) - 1
+		}
+		parts = append(parts, statusValueStyle.Render(fmt.Sprintf("issue=#%d", m.issues[idx].ID)))
+	}
+	if m.leftSection == leftSectionDocs && len(m.docs) > 0 {
+		idx := m.selectedDoc
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= len(m.docs) {
+			idx = len(m.docs) - 1
+		}
+		parts = append(parts, statusValueStyle.Render("doc="+m.docs[idx].ID))
 	}
 
 	if m.done {
@@ -1328,6 +1488,17 @@ func (m Model) renderStatusBar() string {
 		Render(content)
 }
 
+func (m Model) leftSectionLabel() string {
+	switch m.leftSection {
+	case leftSectionIssues:
+		return "issues"
+	case leftSectionDocs:
+		return "docs"
+	default:
+		return "agents"
+	}
+}
+
 func shortcut(k, desc string) string {
 	return statusKeyStyle.Render(k) + statusValueStyle.Render(" "+desc)
 }
@@ -1342,6 +1513,53 @@ func statusStyle(status string) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(theme.ColorRed)
 	default:
 		return lipgloss.NewStyle().Foreground(theme.ColorOverlay0)
+	}
+}
+
+func issueStatusStyle(status string) lipgloss.Style {
+	switch status {
+	case "open":
+		return lipgloss.NewStyle().Foreground(theme.ColorGreen).Bold(true)
+	case "in_progress":
+		return lipgloss.NewStyle().Foreground(theme.ColorYellow).Bold(true)
+	case "resolved":
+		return lipgloss.NewStyle().Foreground(theme.ColorOverlay0)
+	case "wontfix":
+		return lipgloss.NewStyle().Foreground(theme.ColorRed)
+	default:
+		return lipgloss.NewStyle().Foreground(theme.ColorOverlay0)
+	}
+}
+
+func issuePriorityStyle(priority string) lipgloss.Style {
+	switch priority {
+	case "critical":
+		return lipgloss.NewStyle().Foreground(theme.ColorRed).Bold(true)
+	case "high":
+		return lipgloss.NewStyle().Foreground(theme.ColorPeach).Bold(true)
+	case "medium":
+		return lipgloss.NewStyle().Foreground(theme.ColorYellow)
+	case "low":
+		return lipgloss.NewStyle().Foreground(theme.ColorOverlay0)
+	default:
+		return lipgloss.NewStyle().Foreground(theme.ColorOverlay0)
+	}
+}
+
+func formatTimeAgoShort(t time.Time) string {
+	if t.IsZero() {
+		return "n/a"
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours())/24)
 	}
 }
 
@@ -1449,11 +1667,16 @@ func (m Model) renderLeftPanel(outerW, outerH int) string {
 	var lines []string
 	lines = append(lines, sectionTitleStyle.Render("Command Center"))
 	if m.focus == focusCommand {
-		lines = append(lines, dimStyle.Render("focus: agents"))
+		lines = append(lines, dimStyle.Render("focus: left panel"))
 	} else {
 		lines = append(lines, dimStyle.Render("focus: detail"))
 	}
-	lines = append(lines, dimStyle.Render("tab focus · [/] cycle"))
+	lines = append(lines, dimStyle.Render("tab focus · 1/2/3 sections"))
+	if m.leftSection == leftSectionAgents {
+		lines = append(lines, dimStyle.Render("[/] cycle running agents"))
+	} else {
+		lines = append(lines, dimStyle.Render("j/k select entry"))
+	}
 	lines = append(lines, "")
 
 	lines = append(lines, fieldLine("Agent", m.agentName))
@@ -1467,29 +1690,25 @@ func (m Model) renderLeftPanel(outerW, outerH int) string {
 	if m.loopStepProfile != "" {
 		lines = append(lines, fieldLine("Profile", m.loopStepProfile))
 	}
+	if m.activeLoop != nil && m.activeLoop.Status == "running" {
+		lines = append(lines, fieldLine("Loop Run", fmt.Sprintf("#%d %s", m.activeLoop.ID, m.activeLoop.Status)))
+	}
 	lines = append(lines, "")
 
-	lines = append(lines, sectionTitleStyle.Render("Agents"))
 	entries := m.commandEntries()
-	selected := m.selectedEntry
-	if selected < 0 {
-		selected = 0
-	}
-	if selected >= len(entries) {
-		selected = len(entries) - 1
-	}
-	for i, entry := range entries {
-		prefix := "  "
-		titleStyle := valueStyle
-		if i == selected {
-			prefix = "> "
-			titleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.ColorTeal)
-		}
-		status := statusStyle(entry.status).Render(entry.status)
-		line := fmt.Sprintf("%s%s [%s]", prefix, titleStyle.Render(truncate(entry.title, cw-8)), status)
-		lines = append(lines, line)
-		meta := dimStyle.Render("   " + truncate(entry.duration+" · "+entry.action, cw-3))
-		lines = append(lines, meta)
+	lines = append(lines, sectionTitleStyle.Render("Views"))
+	lines = append(lines, leftViewChip(m.leftSection == leftSectionAgents, fmt.Sprintf("1 Agents (%d)", len(entries))))
+	lines = append(lines, leftViewChip(m.leftSection == leftSectionIssues, fmt.Sprintf("2 Issues (%d)", len(m.issues))))
+	lines = append(lines, leftViewChip(m.leftSection == leftSectionDocs, fmt.Sprintf("3 Docs (%d)", len(m.docs))))
+	lines = append(lines, "")
+
+	switch m.leftSection {
+	case leftSectionIssues:
+		m.appendIssuesList(&lines, cw)
+	case leftSectionDocs:
+		m.appendDocsList(&lines, cw)
+	default:
+		m.appendAgentsList(&lines, cw, entries)
 	}
 	lines = append(lines, "")
 
@@ -1519,6 +1738,97 @@ func (m Model) renderLeftPanel(outerW, outerH int) string {
 
 	content := fitToSize(lines, cw, ch)
 	return leftPanelStyle.Render(content)
+}
+
+func leftViewChip(active bool, text string) string {
+	if active {
+		return lipgloss.NewStyle().Bold(true).Foreground(theme.ColorTeal).Render("> " + text)
+	}
+	return dimStyle.Render("  " + text)
+}
+
+func (m Model) appendAgentsList(lines *[]string, cw int, entries []commandEntry) {
+	*lines = append(*lines, sectionTitleStyle.Render("Agents"))
+	if len(entries) == 0 {
+		*lines = append(*lines, dimStyle.Render("  no active entries"))
+		return
+	}
+	selected := m.selectedEntry
+	if selected < 0 {
+		selected = 0
+	}
+	if selected >= len(entries) {
+		selected = len(entries) - 1
+	}
+	for i, entry := range entries {
+		prefix := "  "
+		titleStyle := valueStyle
+		if i == selected {
+			prefix = "> "
+			titleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.ColorTeal)
+		}
+		status := statusStyle(entry.status).Render(entry.status)
+		line := fmt.Sprintf("%s%s [%s]", prefix, titleStyle.Render(truncate(entry.title, cw-8)), status)
+		*lines = append(*lines, line)
+		meta := dimStyle.Render("   " + truncate(entry.duration+" · "+entry.action, cw-3))
+		*lines = append(*lines, meta)
+	}
+}
+
+func (m Model) appendIssuesList(lines *[]string, cw int) {
+	*lines = append(*lines, sectionTitleStyle.Render("Issues"))
+	if len(m.issues) == 0 {
+		*lines = append(*lines, dimStyle.Render("  no issues recorded"))
+		return
+	}
+	selected := m.selectedIssue
+	if selected < 0 {
+		selected = 0
+	}
+	if selected >= len(m.issues) {
+		selected = len(m.issues) - 1
+	}
+	for i, issue := range m.issues {
+		prefix := "  "
+		titleStyle := valueStyle
+		if i == selected {
+			prefix = "> "
+			titleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.ColorTeal)
+		}
+		title := fmt.Sprintf("#%d %s", issue.ID, truncate(issue.Title, cw-8))
+		*lines = append(*lines, prefix+titleStyle.Render(title))
+		meta := fmt.Sprintf("   %s · %s",
+			issuePriorityStyle(issue.Priority).Render(issue.Priority),
+			issueStatusStyle(issue.Status).Render(issue.Status))
+		*lines = append(*lines, truncate(meta, cw))
+	}
+}
+
+func (m Model) appendDocsList(lines *[]string, cw int) {
+	*lines = append(*lines, sectionTitleStyle.Render("Docs"))
+	if len(m.docs) == 0 {
+		*lines = append(*lines, dimStyle.Render("  no docs recorded"))
+		return
+	}
+	selected := m.selectedDoc
+	if selected < 0 {
+		selected = 0
+	}
+	if selected >= len(m.docs) {
+		selected = len(m.docs) - 1
+	}
+	for i, doc := range m.docs {
+		prefix := "  "
+		titleStyle := valueStyle
+		if i == selected {
+			prefix = "> "
+			titleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.ColorTeal)
+		}
+		title := fmt.Sprintf("[%s] %s", doc.ID, truncate(doc.Title, cw-8))
+		*lines = append(*lines, prefix+titleStyle.Render(title))
+		meta := fmt.Sprintf("   %s · %d chars", formatTimeAgoShort(doc.Updated), len(doc.Content))
+		*lines = append(*lines, dimStyle.Render(truncate(meta, cw)))
+	}
 }
 
 func fieldLine(label, value string) string {
@@ -1567,6 +1877,13 @@ func (m Model) getVisibleLines(height, width int) []string {
 }
 
 func (m Model) detailLines(width int) []string {
+	switch m.leftSection {
+	case leftSectionIssues:
+		return wrapRenderableLines(m.issueDetailLines(), width)
+	case leftSectionDocs:
+		return wrapRenderableLines(m.docDetailLines(), width)
+	}
+
 	lines := append([]string(nil), m.filteredLines()...)
 	if m.streamBuf.Len() > 0 && m.scopeVisible(m.currentScope) {
 		prefixAll := m.shouldPrefixAllOutput()
@@ -1574,6 +1891,88 @@ func (m Model) detailLines(width int) []string {
 		lines = append(lines, m.maybePrefixedLine(m.currentScope, partial, prefixAll))
 	}
 	return wrapRenderableLines(lines, width)
+}
+
+func (m Model) issueDetailLines() []string {
+	if len(m.issues) == 0 {
+		return []string{
+			sectionTitleStyle.Render("Issues"),
+			"",
+			dimStyle.Render("No issues available."),
+		}
+	}
+
+	idx := m.selectedIssue
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(m.issues) {
+		idx = len(m.issues) - 1
+	}
+	issue := m.issues[idx]
+
+	lines := []string{
+		sectionTitleStyle.Render(fmt.Sprintf("Issue #%d", issue.ID)),
+		fieldLine("Status", issueStatusStyle(issue.Status).Render(issue.Status)),
+		fieldLine("Priority", issuePriorityStyle(issue.Priority).Render(issue.Priority)),
+		fieldLine("Created", issue.Created.Format("2006-01-02 15:04")),
+		fieldLine("Updated", issue.Updated.Format("2006-01-02 15:04")),
+	}
+	if issue.SessionID > 0 {
+		lines = append(lines, fieldLine("Session", fmt.Sprintf("#%d", issue.SessionID)))
+	}
+	if len(issue.Labels) > 0 {
+		lines = append(lines, fieldLine("Labels", strings.Join(issue.Labels, ", ")))
+	}
+	lines = append(lines, "")
+	lines = append(lines, sectionTitleStyle.Render("Title"))
+	lines = append(lines, textStyle.Render(issue.Title))
+	lines = append(lines, "")
+	lines = append(lines, sectionTitleStyle.Render("Description"))
+	if strings.TrimSpace(issue.Description) == "" {
+		lines = append(lines, dimStyle.Render("No description."))
+		return lines
+	}
+	for _, line := range splitRenderableLines(issue.Description) {
+		lines = append(lines, textStyle.Render(line))
+	}
+	return lines
+}
+
+func (m Model) docDetailLines() []string {
+	if len(m.docs) == 0 {
+		return []string{
+			sectionTitleStyle.Render("Docs"),
+			"",
+			dimStyle.Render("No documents available."),
+		}
+	}
+
+	idx := m.selectedDoc
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(m.docs) {
+		idx = len(m.docs) - 1
+	}
+	doc := m.docs[idx]
+
+	lines := []string{
+		sectionTitleStyle.Render(fmt.Sprintf("Doc %s", doc.ID)),
+		fieldLine("Title", doc.Title),
+		fieldLine("Updated", doc.Updated.Format("2006-01-02 15:04")),
+		fieldLine("Size", fmt.Sprintf("%d chars", len(doc.Content))),
+		"",
+		sectionTitleStyle.Render("Content"),
+	}
+	if strings.TrimSpace(doc.Content) == "" {
+		lines = append(lines, dimStyle.Render("Empty content."))
+		return lines
+	}
+	for _, line := range splitRenderableLines(doc.Content) {
+		lines = append(lines, textStyle.Render(line))
+	}
+	return lines
 }
 
 // --- Utility ---

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -47,6 +48,14 @@ const (
 	stateSettingsPushoverAppToken // input pushover app token
 	stateConfirmDelete            // confirmation before deleting a profile/loop
 )
+
+type selectorRefreshMsg struct{}
+
+func selectorRefreshTick() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+		return selectorRefreshMsg{}
+	})
+}
 
 // AppModel is the top-level bubbletea model for the unified adaf TUI.
 type AppModel struct {
@@ -113,10 +122,13 @@ type AppModel struct {
 	settingsPushoverAppToken string // input buffer for pushover app token
 
 	// Cached project data for the selector.
-	project *store.ProjectConfig
-	plan    *store.Plan
-	issues  []store.Issue
-	logs    []store.SessionLog
+	project        *store.ProjectConfig
+	plan           *store.Plan
+	issues         []store.Issue
+	docs           []store.Doc
+	logs           []store.SessionLog
+	activeSessions []session.SessionMeta
+	activeLoop     *store.LoopRun
 
 	// Cached stats for selector display.
 	cachedProfileStats map[string]*store.ProfileStats
@@ -153,8 +165,17 @@ func (m *AppModel) loadProjectData() {
 	m.project, _ = m.store.LoadProject()
 	m.plan, _ = m.store.LoadPlan()
 	m.issues, _ = m.store.ListIssues()
+	m.docs, _ = m.store.ListDocs()
 	m.logs, _ = m.store.ListLogs()
 	m.loadStats()
+	m.loadRuntimeData()
+}
+
+func (m *AppModel) loadRuntimeData() {
+	if !session.IsAgentContext() {
+		m.activeSessions, _ = session.ListActiveSessions()
+	}
+	m.activeLoop, _ = m.store.ActiveLoopRun()
 }
 
 func (m *AppModel) loadStats() {
@@ -178,7 +199,10 @@ func (m *AppModel) rebuildProfiles() {
 
 // Init implements tea.Model.
 func (m AppModel) Init() tea.Cmd {
-	return tea.SetWindowTitle("adaf")
+	return tea.Batch(
+		tea.SetWindowTitle("adaf"),
+		selectorRefreshTick(),
+	)
 }
 
 // Update implements tea.Model.
@@ -193,6 +217,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m, nil
+	case selectorRefreshMsg:
+		if m.state == stateSelector {
+			m.loadProjectData()
+		}
+		return m, selectorRefreshTick()
 	}
 
 	switch m.state {
@@ -452,6 +481,7 @@ func (m AppModel) startLoop(loopName string) (tea.Model, tea.Cmd) {
 	m.runCancel = cancel
 	m.runEventCh = eventCh
 	m.runModel = runtui.NewModel(projectName, m.plan, "", "", eventCh, cancel)
+	m.runModel.SetStore(m.store)
 	// Loop runs are in-process (not session-daemon backed), but should still
 	// support detach semantics like session mode.
 	m.runModel.SetSessionMode(1)
@@ -519,6 +549,7 @@ func (m AppModel) showSessions() (tea.Model, tea.Cmd) {
 	m.sessionClient = client
 	m.sessionID = target.ID
 	m.runModel = runtui.NewModel(target.ProjectName, m.plan, target.AgentName, "", eventCh, cancelFunc)
+	m.runModel.SetStore(m.store)
 	m.runModel.SetSessionMode(target.ID)
 	m.runModel.SetSize(m.width, m.height)
 
@@ -746,6 +777,7 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 	m.sessionClient = client
 	m.sessionID = sessionID
 	m.runModel = runtui.NewModel(projectName, m.plan, p.Agent, "", eventCh, cancelFunc)
+	m.runModel.SetStore(m.store)
 	m.runModel.SetSessionMode(sessionID)
 	m.runModel.SetSize(m.width, m.height)
 
@@ -852,6 +884,7 @@ func (m AppModel) startAgentInline(p profileEntry, projectName string) (tea.Mode
 	m.runCancel = cancel
 	m.runEventCh = eventCh
 	m.runModel = runtui.NewModel(projectName, m.plan, p.Agent, "", eventCh, cancel)
+	m.runModel.SetStore(m.store)
 	m.runModel.SetSize(m.width, m.height)
 
 	return m, m.runModel.Init()
@@ -924,7 +957,21 @@ func (m AppModel) viewSelector() string {
 		panelH = 1
 	}
 
-	panels := renderSelector(m.profiles, m.selected, m.project, m.plan, m.issues, m.logs, m.cachedProfileStats, m.cachedLoopStats, m.width, m.height)
+	panels := renderSelector(
+		m.profiles,
+		m.selected,
+		m.project,
+		m.plan,
+		m.issues,
+		m.docs,
+		m.logs,
+		m.activeSessions,
+		m.activeLoop,
+		m.cachedProfileStats,
+		m.cachedLoopStats,
+		m.width,
+		m.height,
+	)
 	return header + "\n" + panels + "\n" + statusBar
 }
 

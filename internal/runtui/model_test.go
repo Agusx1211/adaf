@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/agusx1211/adaf/internal/agent"
+	"github.com/agusx1211/adaf/internal/store"
 )
 
 func TestWrapRenderableLinesWordWrap(t *testing.T) {
@@ -143,4 +144,76 @@ func TestTurnTerminologyInRunPanel(t *testing.T) {
 	if !strings.Contains(prefix, "turn #42") {
 		t.Fatalf("scope prefix = %q, want to contain %q", prefix, "turn #42")
 	}
+}
+
+func TestIssueAndDocDetailModes(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+	m.issues = []store.Issue{
+		{
+			ID:          7,
+			Title:       "Fix flaky test",
+			Description: "Repro:\n- run go test ./...",
+			Status:      "open",
+			Priority:    "high",
+			Created:     time.Now().Add(-2 * time.Hour),
+			Updated:     time.Now().Add(-time.Hour),
+		},
+	}
+	m.docs = []store.Doc{
+		{
+			ID:      "arch",
+			Title:   "Architecture",
+			Content: "System overview\nComponent map",
+			Created: time.Now().Add(-3 * time.Hour),
+			Updated: time.Now().Add(-30 * time.Minute),
+		},
+	}
+
+	m.leftSection = leftSectionIssues
+	issueLines := strings.Join(stripStyledLines(m.detailLines(80)), "\n")
+	if !strings.Contains(issueLines, "Issue #7") {
+		t.Fatalf("issue detail did not render selected issue, got: %q", issueLines)
+	}
+	if !strings.Contains(issueLines, "Fix flaky test") {
+		t.Fatalf("issue detail did not include title, got: %q", issueLines)
+	}
+
+	m.leftSection = leftSectionDocs
+	docLines := strings.Join(stripStyledLines(m.detailLines(80)), "\n")
+	if !strings.Contains(docLines, "Doc arch") {
+		t.Fatalf("doc detail did not render selected doc, got: %q", docLines)
+	}
+	if !strings.Contains(docLines, "System overview") {
+		t.Fatalf("doc detail did not include content, got: %q", docLines)
+	}
+}
+
+func TestIssueSelectionWithKeyboard(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+	m.focus = focusCommand
+	m.leftSection = leftSectionIssues
+	m.issues = []store.Issue{
+		{ID: 1, Title: "one", Status: "open", Priority: "low"},
+		{ID: 2, Title: "two", Status: "open", Priority: "low"},
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	got, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("updated model type = %T, want runtui.Model", updated)
+	}
+	if got.selectedIssue != 1 {
+		t.Fatalf("selectedIssue = %d, want 1", got.selectedIssue)
+	}
+	if got.selectedScope() != "" {
+		t.Fatalf("selectedScope = %q, want empty in issue mode", got.selectedScope())
+	}
+}
+
+func stripStyledLines(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, ansi.Strip(line))
+	}
+	return out
 }

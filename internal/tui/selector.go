@@ -11,6 +11,7 @@ import (
 
 	"github.com/agusx1211/adaf/internal/agent"
 	cfgpkg "github.com/agusx1211/adaf/internal/config"
+	"github.com/agusx1211/adaf/internal/session"
 	"github.com/agusx1211/adaf/internal/store"
 )
 
@@ -84,7 +85,20 @@ func buildProfileList(globalCfg *cfgpkg.GlobalConfig, agentsCfg *agent.AgentsCon
 }
 
 // renderSelector renders the selector view as two columns.
-func renderSelector(profiles []profileEntry, selected int, project *store.ProjectConfig, plan *store.Plan, issues []store.Issue, logs []store.SessionLog, profileStats map[string]*store.ProfileStats, loopStats map[string]*store.LoopStats, width, height int) string {
+func renderSelector(
+	profiles []profileEntry,
+	selected int,
+	project *store.ProjectConfig,
+	plan *store.Plan,
+	issues []store.Issue,
+	docs []store.Doc,
+	logs []store.SessionLog,
+	activeSessions []session.SessionMeta,
+	activeLoop *store.LoopRun,
+	profileStats map[string]*store.ProfileStats,
+	loopStats map[string]*store.LoopStats,
+	width, height int,
+) string {
 	panelH := height - 2 // header + status bar
 	if panelH < 1 {
 		panelH = 1
@@ -98,7 +112,21 @@ func renderSelector(profiles []profileEntry, selected int, project *store.Projec
 	}
 
 	left := renderProfileList(profiles, selected, leftOuter, panelH)
-	right := renderProjectPanel(profiles, selected, project, plan, issues, logs, profileStats, loopStats, rightOuter, panelH)
+	right := renderProjectPanel(
+		profiles,
+		selected,
+		project,
+		plan,
+		issues,
+		docs,
+		logs,
+		activeSessions,
+		activeLoop,
+		profileStats,
+		loopStats,
+		rightOuter,
+		panelH,
+	)
 
 	if leftOuter == 0 {
 		return right
@@ -181,7 +209,20 @@ func renderProfileList(profiles []profileEntry, selected int, outerW, outerH int
 	return style.Render(content)
 }
 
-func renderProjectPanel(profiles []profileEntry, selected int, project *store.ProjectConfig, plan *store.Plan, issues []store.Issue, logs []store.SessionLog, profileStats map[string]*store.ProfileStats, loopStats map[string]*store.LoopStats, outerW, outerH int) string {
+func renderProjectPanel(
+	profiles []profileEntry,
+	selected int,
+	project *store.ProjectConfig,
+	plan *store.Plan,
+	issues []store.Issue,
+	docs []store.Doc,
+	logs []store.SessionLog,
+	activeSessions []session.SessionMeta,
+	activeLoop *store.LoopRun,
+	profileStats map[string]*store.ProfileStats,
+	loopStats map[string]*store.LoopStats,
+	outerW, outerH int,
+) string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorSurface2).
@@ -246,6 +287,41 @@ func renderProjectPanel(profiles []profileEntry, selected int, project *store.Pr
 
 	// Sessions count
 	lines = append(lines, labelStyle.Render("Sessions")+valueStyle.Render(fmt.Sprintf("%d", len(logs))))
+	lines = append(lines, labelStyle.Render("Docs")+valueStyle.Render(fmt.Sprintf("%d", len(docs))))
+
+	lines = append(lines, "")
+	lines = append(lines, sectionStyle.Render("Runtime"))
+	if len(activeSessions) == 0 {
+		lines = append(lines, labelStyle.Render("Sessions")+dimStyle.Render("none running"))
+	} else {
+		lines = append(lines, labelStyle.Render("Sessions")+valueStyle.Render(fmt.Sprintf("%d active", len(activeSessions))))
+		limit := len(activeSessions)
+		if limit > 4 {
+			limit = 4
+		}
+		for i := 0; i < limit; i++ {
+			s := activeSessions[i]
+			label := fmt.Sprintf("#%d %s/%s", s.ID, s.ProfileName, s.AgentName)
+			statusText := selectorRuntimeStatusStyle(s.Status).Render(s.Status)
+			lines = append(lines, "  "+valueStyle.Render(truncateInputForDisplay(label, cw-16))+" "+statusText)
+		}
+		if len(activeSessions) > limit {
+			lines = append(lines, dimStyle.Render(fmt.Sprintf("  ... +%d more", len(activeSessions)-limit)))
+		}
+	}
+	if activeLoop == nil || activeLoop.Status != "running" {
+		lines = append(lines, labelStyle.Render("Loop")+dimStyle.Render("none running"))
+	} else {
+		stepDesc := "n/a"
+		if activeLoop.StepIndex >= 0 && activeLoop.StepIndex < len(activeLoop.Steps) {
+			step := activeLoop.Steps[activeLoop.StepIndex]
+			stepDesc = fmt.Sprintf("%d/%d %s", activeLoop.StepIndex+1, len(activeLoop.Steps), step.Profile)
+		}
+		lines = append(lines, labelStyle.Render("Loop")+valueStyle.Render(fmt.Sprintf("#%d %s", activeLoop.ID, activeLoop.LoopName)))
+		lines = append(lines, labelStyle.Render("Status")+selectorRuntimeStatusStyle(activeLoop.Status).Render(activeLoop.Status))
+		lines = append(lines, labelStyle.Render("Cycle")+valueStyle.Render(fmt.Sprintf("%d", activeLoop.Cycle+1)))
+		lines = append(lines, labelStyle.Render("Step")+dimStyle.Render(stepDesc))
+	}
 
 	lines = append(lines, "")
 
@@ -389,6 +465,19 @@ func roleBadge(role string) string {
 		color = ColorOverlay0
 	}
 	return lipgloss.NewStyle().Foreground(color).Render("[" + tag + "]")
+}
+
+func selectorRuntimeStatusStyle(status string) lipgloss.Style {
+	switch status {
+	case "running", "starting", "in_progress":
+		return lipgloss.NewStyle().Foreground(ColorYellow).Bold(true)
+	case "done", "stopped", "completed", "resolved":
+		return lipgloss.NewStyle().Foreground(ColorGreen)
+	case "cancelled", "failed", "dead", "error":
+		return lipgloss.NewStyle().Foreground(ColorRed).Bold(true)
+	default:
+		return lipgloss.NewStyle().Foreground(ColorOverlay0)
+	}
 }
 
 // truncateInputForDisplay returns the tail of the input string that fits within

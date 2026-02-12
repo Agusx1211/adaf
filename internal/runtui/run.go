@@ -18,13 +18,13 @@ import (
 
 // RunConfig holds everything needed to launch the run TUI.
 type RunConfig struct {
-	Store       *store.Store
-	Agent       agent.Agent
-	AgentCfg    agent.Config
+	Store           *store.Store
+	Agent           agent.Agent
+	AgentCfg        agent.Config
 	PromptBuildOpts *promptpkg.BuildOpts
-	Plan        *store.Plan
-	ProjectName string
-	ProfileName string
+	Plan            *store.Plan
+	ProjectName     string
+	ProfileName     string
 }
 
 // Run launches the two-column TUI and runs the agent loop concurrently.
@@ -37,6 +37,7 @@ func Run(cfg RunConfig) error {
 	defer cancel()
 
 	model := NewModel(cfg.ProjectName, cfg.Plan, cfg.AgentCfg.Name, "", eventCh, cancel)
+	model.SetStore(cfg.Store)
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 

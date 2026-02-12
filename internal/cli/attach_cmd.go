@@ -13,6 +13,7 @@ import (
 
 	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/session"
+	"github.com/agusx1211/adaf/internal/store"
 )
 
 var attachCmd = &cobra.Command{
@@ -99,6 +100,11 @@ func runAttach(cmd *cobra.Command, args []string) error {
 		eventCh,
 		cancelFunc,
 	)
+	if meta.ProjectDir != "" {
+		if st, err := store.New(meta.ProjectDir); err == nil {
+			runModel.SetStore(st)
+		}
+	}
 	runModel.SetSessionMode(meta.ID)
 	model := newAttachModel(runModel)
 

@@ -84,7 +84,21 @@ func TestRenderSelectorKeepsFixedPanelHeight(t *testing.T) {
 	wantPanelHeight := height - 2
 
 	for selected := range profiles {
-		out := renderSelector(profiles, selected, project, nil, nil, nil, nil, nil, width, height)
+		out := renderSelector(
+			profiles,
+			selected,
+			project,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			width,
+			height,
+		)
 		if got := len(splitRenderableLines(out)); got != wantPanelHeight {
 			t.Fatalf("selected=%d panel height = %d, want %d", selected, got, wantPanelHeight)
 		}
