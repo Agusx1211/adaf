@@ -160,6 +160,43 @@ func (m *Manager) Diff(ctx context.Context, branchName string) (string, error) {
 	return out, nil
 }
 
+// AutoCommitIfDirty stages and commits all changes in a worktree when needed.
+// It returns (commitHash, committed, error). If there are no changes, committed=false.
+func (m *Manager) AutoCommitIfDirty(ctx context.Context, worktreePath, message string) (string, bool, error) {
+	if strings.TrimSpace(worktreePath) == "" {
+		return "", false, fmt.Errorf("worktree path is empty")
+	}
+
+	status, err := m.git(ctx, "-C", worktreePath, "status", "--porcelain")
+	if err != nil {
+		return "", false, fmt.Errorf("status in worktree %s: %w", worktreePath, err)
+	}
+	if strings.TrimSpace(status) == "" {
+		return "", false, nil
+	}
+
+	if _, err := m.git(ctx, "-C", worktreePath, "add", "-A"); err != nil {
+		return "", false, fmt.Errorf("staging changes in worktree %s: %w", worktreePath, err)
+	}
+
+	// Ignore user-level git identity settings and use a stable local identity for fallback commits.
+	commitArgs := []string{
+		"-C", worktreePath,
+		"-c", "user.name=ADAF",
+		"-c", "user.email=adaf@local",
+		"commit", "-m", message,
+	}
+	if _, err := m.git(ctx, commitArgs...); err != nil {
+		return "", false, fmt.Errorf("auto-commit in worktree %s: %w", worktreePath, err)
+	}
+
+	hash, err := m.git(ctx, "-C", worktreePath, "rev-parse", "HEAD")
+	if err != nil {
+		return "", false, fmt.Errorf("rev-parse HEAD in worktree %s: %w", worktreePath, err)
+	}
+	return strings.TrimSpace(hash), true, nil
+}
+
 // ListActive returns all active worktrees under .adaf-worktrees/.
 func (m *Manager) ListActive(ctx context.Context) ([]WorktreeInfo, error) {
 	out, err := m.git(ctx, "worktree", "list", "--porcelain")

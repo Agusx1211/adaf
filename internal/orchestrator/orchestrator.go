@@ -312,8 +312,6 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 		workDir = wtPath
 	}
 
-	// Build agent args (similar to startAgent in TUI).
-	var agentArgs []string
 	agentEnv := map[string]string{
 		"ADAF_TURN_ID":     fmt.Sprintf("%d", rec.ID),
 		"ADAF_PROFILE":     childProf.Name,
@@ -322,49 +320,12 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 	if parentPlanID != "" {
 		agentEnv["ADAF_PLAN_ID"] = parentPlanID
 	}
-	modelOverride := childProf.Model
-	switch childProf.Agent {
-	case "claude":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-		if childProf.ReasoningLevel != "" {
-			agentEnv["CLAUDE_CODE_EFFORT_LEVEL"] = childProf.ReasoningLevel
-		}
-		agentArgs = append(agentArgs, "--dangerously-skip-permissions")
-	case "codex":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-		if childProf.ReasoningLevel != "" {
-			agentArgs = append(agentArgs, "-c", `model_reasoning_effort="`+childProf.ReasoningLevel+`"`)
-		}
-		agentArgs = append(agentArgs, "--dangerously-bypass-approvals-and-sandbox")
-	case "opencode":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-	case "gemini":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-		agentArgs = append(agentArgs, "-y")
-	}
 
 	// Look up custom command path.
 	agentsCfg, _ := agent.LoadAgentsConfig()
-	var customCmd string
-	if agentsCfg != nil {
-		if arec, ok := agentsCfg.Agents[childProf.Agent]; ok && arec.Path != "" {
-			customCmd = arec.Path
-		}
-	}
-	if customCmd == "" {
-		switch childProf.Agent {
-		case "claude", "codex", "vibe", "opencode", "gemini", "generic":
-		default:
-			customCmd = childProf.Agent
-		}
+	launch := agent.BuildLaunchSpec(childProf, agentsCfg, "")
+	for k, v := range launch.Env {
+		agentEnv[k] = v
 	}
 
 	// Set up event buffer for parent inspection.
@@ -373,11 +334,12 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 
 	agentCfg := agent.Config{
 		Name:      childProf.Agent,
-		Command:   customCmd,
-		Args:      agentArgs,
+		Command:   launch.Command,
+		Args:      append([]string(nil), launch.Args...),
 		Env:       agentEnv,
 		WorkDir:   workDir,
 		Prompt:    childPrompt,
+		MaxTurns:  1,
 		Stdout:    io.Discard,
 		Stderr:    io.Discard,
 		EventSink: streamCh,
@@ -499,14 +461,22 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 
 		err := l.Run(childCtx)
 		rec.CompletedAt = time.Now().UTC()
+		status := "completed"
+		exitCode := 0
+		result := ""
 		if err != nil && err != context.Canceled {
-			rec.Status = "failed"
-			rec.Result = err.Error()
-			rec.ExitCode = 1
-		} else {
-			rec.Status = "completed"
-			rec.ExitCode = 0
+			status = "failed"
+			exitCode = 1
+			result = err.Error()
 		}
+		if autoCommitNote, autoCommitErr := o.autoCommitSpawnWork(rec); autoCommitErr != nil {
+			result = appendSpawnResult(result, fmt.Sprintf("auto-commit fallback failed: %v", autoCommitErr))
+		} else if autoCommitNote != "" {
+			result = appendSpawnResult(result, autoCommitNote)
+		}
+		rec.Status = status
+		rec.ExitCode = exitCode
+		rec.Result = result
 		o.store.UpdateSpawn(rec)
 	}()
 
@@ -515,6 +485,43 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 	}
 
 	return rec.ID, nil
+}
+
+func (o *Orchestrator) autoCommitSpawnWork(rec *store.SpawnRecord) (string, error) {
+	if rec == nil || rec.WorktreePath == "" || rec.Branch == "" || rec.ReadOnly {
+		return "", nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	msg := fmt.Sprintf("adaf: auto-commit spawn #%d (%s)", rec.ID, rec.ChildProfile)
+	hash, committed, err := o.worktrees.AutoCommitIfDirty(ctx, rec.WorktreePath, msg)
+	if err != nil {
+		return "", err
+	}
+	if !committed {
+		return "", nil
+	}
+
+	return fmt.Sprintf("auto-commit: child left uncommitted changes; adaf created commit %s because the child did not commit.", shortHash(hash)), nil
+}
+
+func appendSpawnResult(base, extra string) string {
+	if extra == "" {
+		return base
+	}
+	if base == "" {
+		return extra
+	}
+	return base + " | " + extra
+}
+
+func shortHash(hash string) string {
+	if len(hash) > 12 {
+		return hash[:12]
+	}
+	return hash
 }
 
 func (o *Orchestrator) onSpawnComplete(ctx context.Context, rec *store.SpawnRecord, parentProfile string) {
@@ -641,15 +648,23 @@ func (o *Orchestrator) WaitOne(spawnID int) SpawnResult {
 		<-as.done
 	}
 
-	rec, err := o.store.GetSpawn(spawnID)
-	if err != nil {
-		return SpawnResult{SpawnID: spawnID, Status: "unknown"}
-	}
-	return SpawnResult{
-		SpawnID:  rec.ID,
-		Status:   rec.Status,
-		ExitCode: rec.ExitCode,
-		Result:   rec.Result,
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		rec, err := o.store.GetSpawn(spawnID)
+		if err != nil {
+			return SpawnResult{SpawnID: spawnID, Status: "unknown"}
+		}
+		if isTerminalSpawnStatus(rec.Status) {
+			return SpawnResult{
+				SpawnID:  rec.ID,
+				Status:   rec.Status,
+				ExitCode: rec.ExitCode,
+				Result:   rec.Result,
+			}
+		}
+		<-ticker.C
 	}
 }
 

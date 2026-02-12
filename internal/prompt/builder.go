@@ -234,6 +234,9 @@ func Build(opts BuildOpts) (string, error) {
 	b.WriteString("- Do NOT read or write files inside the `.adaf/` directory directly. " +
 		"Use `adaf` CLI commands instead (`adaf issues`, `adaf log`, `adaf plan`, etc.). " +
 		"The `.adaf/` directory structure may change and direct access will be restricted in the future.\n")
+	if opts.ParentTurnID > 0 && !opts.ReadOnly {
+		b.WriteString("- As a sub-agent, if you modify files you MUST create a git commit before finishing your turn.\n")
+	}
 	b.WriteString("\n")
 
 	// Context.

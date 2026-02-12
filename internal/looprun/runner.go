@@ -3,8 +3,11 @@ package looprun
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -361,7 +364,9 @@ func pollSpawnStatus(ctx context.Context, s *store.Store, parentTurnID int, even
 	defer ticker.Stop()
 
 	lastSnapshot := ""
-	emitIfChanged := func() {
+	spawnOffsets := make(map[int]int64)
+
+	poll := func(forceStatusEmit bool) {
 		records, err := s.SpawnsByParent(parentTurnID)
 		if err != nil {
 			return
@@ -369,6 +374,8 @@ func pollSpawnStatus(ctx context.Context, s *store.Store, parentTurnID int, even
 		sort.Slice(records, func(i, j int) bool {
 			return records[i].ID < records[j].ID
 		})
+
+		emitSpawnOutput(records, s, spawnOffsets, eventCh)
 
 		spawns := make([]runtui.SpawnInfo, 0, len(records))
 		for _, rec := range records {
@@ -385,22 +392,99 @@ func pollSpawnStatus(ctx context.Context, s *store.Store, parentTurnID int, even
 			spawns = append(spawns, info)
 		}
 
+		active := make(map[int]struct{}, len(records))
+		for _, rec := range records {
+			active[rec.ID] = struct{}{}
+		}
+		for id := range spawnOffsets {
+			if _, ok := active[id]; !ok {
+				delete(spawnOffsets, id)
+			}
+		}
+
 		snapshot := spawnSnapshotFingerprint(spawns)
-		if snapshot == lastSnapshot {
+		if !forceStatusEmit && snapshot == lastSnapshot {
 			return
 		}
 		lastSnapshot = snapshot
 		eventCh <- runtui.SpawnStatusMsg{Spawns: spawns}
 	}
 
-	emitIfChanged()
+	poll(true)
 	for {
 		select {
 		case <-ctx.Done():
-			emitIfChanged()
+			poll(true)
 			return
 		case <-ticker.C:
-			emitIfChanged()
+			poll(false)
+		}
+	}
+}
+
+// emitSpawnOutput tails child spawn recording events and forwards readable
+// output chunks into spawn-scoped raw output events for the loop TUI.
+func emitSpawnOutput(records []store.SpawnRecord, s *store.Store, offsets map[int]int64, eventCh chan any) {
+	for _, rec := range records {
+		if rec.ID <= 0 || rec.ChildTurnID <= 0 {
+			continue
+		}
+
+		eventsPath := filepath.Join(s.Root(), "records", fmt.Sprintf("%d", rec.ChildTurnID), "events.jsonl")
+		f, err := os.Open(eventsPath)
+		if err != nil {
+			continue
+		}
+
+		prevOffset := offsets[rec.ID]
+		if info, statErr := f.Stat(); statErr == nil && prevOffset > info.Size() {
+			prevOffset = 0
+		}
+		if prevOffset > 0 {
+			if _, err := f.Seek(prevOffset, io.SeekStart); err != nil {
+				_ = f.Close()
+				continue
+			}
+		}
+
+		chunk, err := io.ReadAll(f)
+		_ = f.Close()
+		if err != nil || len(chunk) == 0 {
+			offsets[rec.ID] = prevOffset
+			continue
+		}
+		offsets[rec.ID] = prevOffset + int64(len(chunk))
+
+		for _, line := range strings.Split(string(chunk), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+
+			var ev store.RecordingEvent
+			if err := json.Unmarshal([]byte(line), &ev); err != nil {
+				continue
+			}
+
+			var data string
+			switch ev.Type {
+			case "stdout":
+				data = ev.Data
+			case "stderr":
+				data = "[stderr] " + ev.Data
+			case "claude_stream":
+				data = ev.Data
+			default:
+				continue
+			}
+			if strings.TrimSpace(data) == "" {
+				continue
+			}
+
+			eventCh <- runtui.AgentRawOutputMsg{
+				Data:      data,
+				SessionID: -rec.ID, // Negative SessionID maps to spawn scope in runtui.
+			}
 		}
 	}
 }
@@ -418,7 +502,8 @@ func spawnSnapshotFingerprint(spawns []runtui.SpawnInfo) string {
 
 // buildAgentConfig creates an agent.Config for a profile step.
 func buildAgentConfig(cfg RunConfig, prof *config.Profile, runID, stepIndex int, runHexID, stepHexID string) agent.Config {
-	var agentArgs []string
+	launch := agent.BuildLaunchSpec(prof, cfg.AgentsCfg, "")
+	agentArgs := append([]string(nil), launch.Args...)
 	agentEnv := make(map[string]string)
 
 	// Set loop environment variables.
@@ -431,65 +516,13 @@ func buildAgentConfig(cfg RunConfig, prof *config.Profile, runID, stepIndex int,
 		agentEnv["ADAF_LOOP_STEP_HEX_ID"] = stepHexID
 	}
 
-	modelOverride := prof.Model
-	reasoningLevel := prof.ReasoningLevel
-
-	// Look up custom command from agents config.
-	var customCmd string
-	if cfg.AgentsCfg != nil {
-		if rec, ok := cfg.AgentsCfg.Agents[prof.Agent]; ok && rec.Path != "" {
-			customCmd = rec.Path
-		}
-	}
-
-	switch prof.Agent {
-	case "claude":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-		if reasoningLevel != "" {
-			agentEnv["CLAUDE_CODE_EFFORT_LEVEL"] = reasoningLevel
-		}
-		agentArgs = append(agentArgs, "--dangerously-skip-permissions")
-	case "codex":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-		if reasoningLevel != "" {
-			agentArgs = append(agentArgs, "-c", `model_reasoning_effort="`+reasoningLevel+`"`)
-		}
-		agentArgs = append(agentArgs, "--dangerously-bypass-approvals-and-sandbox")
-	case "opencode":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-	case "gemini":
-		if modelOverride != "" {
-			agentArgs = append(agentArgs, "--model", modelOverride)
-		}
-		agentArgs = append(agentArgs, "-y")
-	case "vibe":
-		// Vibe has no --model flag. It uses pydantic-settings with
-		// env_prefix="VIBE_", so any config field can be overridden via
-		// environment variables. VIBE_ACTIVE_MODEL sets the active model
-		// alias while preserving the full config (providers, models, etc.)
-		// from ~/.vibe/config.toml.
-		if modelOverride != "" {
-			agentEnv["VIBE_ACTIVE_MODEL"] = modelOverride
-		}
-	}
-
-	if customCmd == "" {
-		switch prof.Agent {
-		case "claude", "codex", "vibe", "opencode", "gemini", "generic":
-		default:
-			customCmd = prof.Agent
-		}
+	for k, v := range launch.Env {
+		agentEnv[k] = v
 	}
 
 	return agent.Config{
 		Name:    prof.Agent,
-		Command: customCmd,
+		Command: launch.Command,
 		Args:    agentArgs,
 		Env:     agentEnv,
 		WorkDir: cfg.WorkDir,

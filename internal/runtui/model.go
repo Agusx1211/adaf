@@ -877,8 +877,11 @@ func (m Model) rcWidth() int {
 // --- Content management ---
 
 func (m Model) sessionScope(sessionID int) string {
-	if sessionID <= 0 {
+	if sessionID == 0 {
 		return ""
+	}
+	if sessionID < 0 {
+		return m.spawnScope(-sessionID)
 	}
 	return fmt.Sprintf("session:%d", sessionID)
 }

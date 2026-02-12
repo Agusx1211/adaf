@@ -15,6 +15,8 @@ import (
 	"github.com/agusx1211/adaf/internal/stream"
 )
 
+const codexDefaultRustLog = "error,codex_core::rollout::list=off"
+
 // CodexAgent runs OpenAI's codex CLI tool.
 type CodexAgent struct{}
 
@@ -100,6 +102,7 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 	for k, v := range cfg.Env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
+	cmd.Env = withDefaultCodexRustLog(cmd.Env)
 
 	// Set up stdout pipe for streaming JSONL parsing.
 	stdoutPipe, err := cmd.StdoutPipe()
@@ -242,4 +245,23 @@ func withoutFlag(args []string, flag string) []string {
 		out = append(out, a)
 	}
 	return out
+}
+
+// withDefaultCodexRustLog installs a default log filter unless RUST_LOG is
+// already explicitly present in the environment.
+func withDefaultCodexRustLog(env []string) []string {
+	if hasEnvKey(env, "RUST_LOG") {
+		return env
+	}
+	return append(env, "RUST_LOG="+codexDefaultRustLog)
+}
+
+func hasEnvKey(env []string, key string) bool {
+	prefix := key + "="
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			return true
+		}
+	}
+	return false
 }

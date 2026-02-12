@@ -258,6 +258,42 @@ func TestStreamingDeltaAfterModelCopyDoesNotPanic(t *testing.T) {
 	}
 }
 
+func TestRawOutputRoutesToSpawnScope(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+
+	updated, _ := m.Update(SpawnStatusMsg{
+		Spawns: []SpawnInfo{
+			{ID: 9, Profile: "devstral2", Status: "running"},
+		},
+	})
+	m1, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("updated model type = %T, want runtui.Model", updated)
+	}
+
+	updated, _ = m1.Update(AgentRawOutputMsg{
+		SessionID: -9,
+		Data:      "hello from spawn\n",
+	})
+	m2, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("updated model type = %T, want runtui.Model", updated)
+	}
+
+	found := false
+	for _, line := range m2.lines {
+		if strings.Contains(ansi.Strip(line.text), "hello from spawn") {
+			found = true
+			if line.scope != "spawn:9" {
+				t.Fatalf("line scope = %q, want %q", line.scope, "spawn:9")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected spawn output line to be rendered")
+	}
+}
+
 func stripStyledLines(lines []string) []string {
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {

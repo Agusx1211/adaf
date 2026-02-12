@@ -88,3 +88,111 @@ printf 'ok\n'
 		t.Fatal("expected command metadata event")
 	}
 }
+
+func TestWithDefaultCodexRustLog(t *testing.T) {
+	t.Run("adds default when missing", func(t *testing.T) {
+		env := []string{"FOO=bar"}
+		got := withDefaultCodexRustLog(env)
+		if !hasEnvKey(got, "RUST_LOG") {
+			t.Fatalf("expected RUST_LOG to be added, got %v", got)
+		}
+		want := "RUST_LOG=" + codexDefaultRustLog
+		found := false
+		for _, kv := range got {
+			if kv == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected default RUST_LOG %q, got %v", want, got)
+		}
+	})
+
+	t.Run("respects existing value", func(t *testing.T) {
+		env := []string{"RUST_LOG=debug", "FOO=bar"}
+		got := withDefaultCodexRustLog(env)
+		count := 0
+		for _, kv := range got {
+			if strings.HasPrefix(kv, "RUST_LOG=") {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("expected one RUST_LOG entry, got %d (%v)", count, got)
+		}
+		if got[0] != "RUST_LOG=debug" {
+			t.Fatalf("expected existing RUST_LOG to be preserved, got %v", got)
+		}
+	})
+}
+
+func TestCodexRunRustLogDefaultAndOverride(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script helper not supported on windows")
+	}
+
+	tmp := t.TempDir()
+	cmdPath := filepath.Join(tmp, "fake-codex-env")
+	script := `#!/usr/bin/env sh
+echo "RUST_LOG=$RUST_LOG" >&2
+printf '{"type":"thread.started","thread_id":"test-thread"}\n'
+printf '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}\n'
+`
+	if err := os.WriteFile(cmdPath, []byte(script), 0755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	t.Run("default applied when missing", func(t *testing.T) {
+		s, err := store.New(t.TempDir())
+		if err != nil {
+			t.Fatalf("store.New() error = %v", err)
+		}
+		rec := recording.New(1, s)
+
+		result, err := NewCodexAgent().Run(context.Background(), Config{
+			Command: cmdPath,
+			WorkDir: tmp,
+			Prompt:  "PING",
+		}, rec)
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+		if result.ExitCode != 0 {
+			t.Fatalf("Run() exit code = %d, want 0; stderr = %q", result.ExitCode, result.Error)
+		}
+		want := "RUST_LOG=" + codexDefaultRustLog
+		if !strings.Contains(result.Error, want) {
+			t.Fatalf("stderr missing default RUST_LOG, want %q in %q", want, result.Error)
+		}
+	})
+
+	t.Run("user override preserved", func(t *testing.T) {
+		s, err := store.New(t.TempDir())
+		if err != nil {
+			t.Fatalf("store.New() error = %v", err)
+		}
+		rec := recording.New(1, s)
+
+		result, err := NewCodexAgent().Run(context.Background(), Config{
+			Command: cmdPath,
+			WorkDir: tmp,
+			Prompt:  "PING",
+			Env: map[string]string{
+				"RUST_LOG": "debug",
+			},
+		}, rec)
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+		if result.ExitCode != 0 {
+			t.Fatalf("Run() exit code = %d, want 0; stderr = %q", result.ExitCode, result.Error)
+		}
+		if !strings.Contains(result.Error, "RUST_LOG=debug") {
+			t.Fatalf("stderr missing overridden RUST_LOG in %q", result.Error)
+		}
+		if strings.Contains(result.Error, "RUST_LOG="+codexDefaultRustLog) {
+			t.Fatalf("stderr should not contain default RUST_LOG when overridden: %q", result.Error)
+		}
+	})
+}
