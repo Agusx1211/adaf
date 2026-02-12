@@ -19,12 +19,16 @@ type AgentRawOutputMsg struct {
 
 // AgentStartedMsg signals that a new agent session has begun.
 type AgentStartedMsg struct {
-	SessionID int
+	SessionID  int
+	TurnHexID  string
+	StepHexID  string
+	RunHexID   string
 }
 
 // AgentFinishedMsg signals that a single agent session completed.
 type AgentFinishedMsg struct {
 	SessionID int
+	TurnHexID string
 	Result    *agent.Result
 	Err       error
 }
@@ -59,6 +63,8 @@ type SpawnInfo struct {
 // LoopStepStartMsg signals that a loop step has started.
 type LoopStepStartMsg struct {
 	RunID      int
+	RunHexID   string
+	StepHexID  string
 	Cycle      int
 	StepIndex  int
 	Profile    string
@@ -69,6 +75,8 @@ type LoopStepStartMsg struct {
 // LoopStepEndMsg signals that a loop step has ended.
 type LoopStepEndMsg struct {
 	RunID      int
+	RunHexID   string
+	StepHexID  string
 	Cycle      int
 	StepIndex  int
 	Profile    string
@@ -77,9 +85,10 @@ type LoopStepEndMsg struct {
 
 // LoopDoneMsg signals that the entire loop has finished.
 type LoopDoneMsg struct {
-	RunID  int
-	Reason string // "stopped", "cancelled", "error"
-	Err    error
+	RunID    int
+	RunHexID string
+	Reason   string // "stopped", "cancelled", "error"
+	Err      error
 }
 
 // GuardrailViolationMsg signals that a guardrail violation was detected.

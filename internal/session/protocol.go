@@ -44,7 +44,10 @@ type WireMeta struct {
 
 // WireStarted signals that a new agent session has begun.
 type WireStarted struct {
-	SessionID int `json:"session_id"`
+	SessionID int    `json:"session_id"`
+	TurnHexID string `json:"turn_hex_id,omitempty"`
+	StepHexID string `json:"step_hex_id,omitempty"`
+	RunHexID  string `json:"run_hex_id,omitempty"`
 }
 
 // WireEvent carries a parsed Claude stream event.
@@ -62,6 +65,7 @@ type WireRaw struct {
 // WireFinished signals that a single agent session completed.
 type WireFinished struct {
 	SessionID  int           `json:"session_id"`
+	TurnHexID  string        `json:"turn_hex_id,omitempty"`
 	ExitCode   int           `json:"exit_code"`
 	DurationNS time.Duration `json:"duration_ns"`
 	Error      string        `json:"error,omitempty"`
@@ -83,6 +87,8 @@ type WireSpawn struct {
 // WireLoopStepStart signals a loop step start.
 type WireLoopStepStart struct {
 	RunID      int    `json:"run_id"`
+	RunHexID   string `json:"run_hex_id,omitempty"`
+	StepHexID  string `json:"step_hex_id,omitempty"`
 	Cycle      int    `json:"cycle"`
 	StepIndex  int    `json:"step_index"`
 	Profile    string `json:"profile"`
@@ -93,6 +99,8 @@ type WireLoopStepStart struct {
 // WireLoopStepEnd signals a loop step end.
 type WireLoopStepEnd struct {
 	RunID      int    `json:"run_id"`
+	RunHexID   string `json:"run_hex_id,omitempty"`
+	StepHexID  string `json:"step_hex_id,omitempty"`
 	Cycle      int    `json:"cycle"`
 	StepIndex  int    `json:"step_index"`
 	Profile    string `json:"profile"`
@@ -101,9 +109,10 @@ type WireLoopStepEnd struct {
 
 // WireLoopDone signals the loop completion state.
 type WireLoopDone struct {
-	RunID  int    `json:"run_id,omitempty"`
-	Reason string `json:"reason,omitempty"` // "stopped", "cancelled", "error"
-	Error  string `json:"error,omitempty"`
+	RunID    int    `json:"run_id,omitempty"`
+	RunHexID string `json:"run_hex_id,omitempty"`
+	Reason   string `json:"reason,omitempty"` // "stopped", "cancelled", "error"
+	Error    string `json:"error,omitempty"`
 }
 
 // WireDone signals the entire agent loop has completed.

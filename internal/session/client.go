@@ -101,7 +101,12 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 			if err != nil {
 				continue
 			}
-			eventCh <- runtui.AgentStartedMsg{SessionID: data.SessionID}
+			eventCh <- runtui.AgentStartedMsg{
+				SessionID: data.SessionID,
+				TurnHexID: data.TurnHexID,
+				StepHexID: data.StepHexID,
+				RunHexID:  data.RunHexID,
+			}
 
 		case MsgEvent:
 			data, err := DecodeData[WireEvent](msg)
@@ -128,6 +133,7 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 			}
 			eventCh <- runtui.AgentFinishedMsg{
 				SessionID: data.SessionID,
+				TurnHexID: data.TurnHexID,
 				Result: &agent.Result{
 					ExitCode: data.ExitCode,
 					Duration: time.Duration(data.DurationNS),
@@ -157,6 +163,8 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 			}
 			eventCh <- runtui.LoopStepStartMsg{
 				RunID:      data.RunID,
+				RunHexID:   data.RunHexID,
+				StepHexID:  data.StepHexID,
 				Cycle:      data.Cycle,
 				StepIndex:  data.StepIndex,
 				Profile:    data.Profile,
@@ -171,6 +179,8 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 			}
 			eventCh <- runtui.LoopStepEndMsg{
 				RunID:      data.RunID,
+				RunHexID:   data.RunHexID,
+				StepHexID:  data.StepHexID,
 				Cycle:      data.Cycle,
 				StepIndex:  data.StepIndex,
 				Profile:    data.Profile,
@@ -183,8 +193,9 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 				continue
 			}
 			done := runtui.LoopDoneMsg{
-				RunID:  data.RunID,
-				Reason: data.Reason,
+				RunID:    data.RunID,
+				RunHexID: data.RunHexID,
+				Reason:   data.Reason,
 			}
 			if data.Error != "" {
 				done.Err = fmt.Errorf("%s", data.Error)

@@ -562,16 +562,22 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 	eventCh := make(chan any, 256)
 	forwardDone := make(chan struct{})
 	loopRunID := 0
+	loopRunHexID := ""
 	go func() {
 		defer close(forwardDone)
 		totalSteps := len(loopDef.Steps)
 		for msg := range eventCh {
 			switch ev := msg.(type) {
 			case runtui.AgentStartedMsg:
-				line, _ := EncodeMsg(MsgStarted, WireStarted{SessionID: ev.SessionID})
+				line, _ := EncodeMsg(MsgStarted, WireStarted{
+					SessionID: ev.SessionID,
+					TurnHexID: ev.TurnHexID,
+					StepHexID: ev.StepHexID,
+					RunHexID:  ev.RunHexID,
+				})
 				b.broadcast(line)
 			case runtui.AgentFinishedMsg:
-				wf := WireFinished{SessionID: ev.SessionID}
+				wf := WireFinished{SessionID: ev.SessionID, TurnHexID: ev.TurnHexID}
 				if ev.Result != nil {
 					wf.ExitCode = ev.Result.ExitCode
 					wf.DurationNS = ev.Result.Duration
@@ -607,8 +613,13 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 				if ev.RunID > 0 {
 					loopRunID = ev.RunID
 				}
+				if ev.RunHexID != "" {
+					loopRunHexID = ev.RunHexID
+				}
 				line, _ := EncodeMsg(MsgLoopStepStart, WireLoopStepStart{
 					RunID:      ev.RunID,
+					RunHexID:   ev.RunHexID,
+					StepHexID:  ev.StepHexID,
 					Cycle:      ev.Cycle,
 					StepIndex:  ev.StepIndex,
 					Profile:    ev.Profile,
@@ -620,8 +631,13 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 				if ev.RunID > 0 {
 					loopRunID = ev.RunID
 				}
+				if ev.RunHexID != "" {
+					loopRunHexID = ev.RunHexID
+				}
 				line, _ := EncodeMsg(MsgLoopStepEnd, WireLoopStepEnd{
 					RunID:      ev.RunID,
+					RunHexID:   ev.RunHexID,
+					StepHexID:  ev.StepHexID,
 					Cycle:      ev.Cycle,
 					StepIndex:  ev.StepIndex,
 					Profile:    ev.Profile,
@@ -647,9 +663,10 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 	<-forwardDone
 
 	loopDone := WireLoopDone{
-		RunID:  loopRunID,
-		Reason: classifyLoopDoneReason(runErr),
-		Error:  donePayloadError(runErr),
+		RunID:    loopRunID,
+		RunHexID: loopRunHexID,
+		Reason:   classifyLoopDoneReason(runErr),
+		Error:    donePayloadError(runErr),
 	}
 	line, _ := EncodeMsg(MsgLoopDone, loopDone)
 	b.broadcast(line)

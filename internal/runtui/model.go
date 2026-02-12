@@ -117,6 +117,8 @@ type Model struct {
 	loopStep        int
 	loopTotalSteps  int
 	loopStepProfile string
+	loopRunHexID    string
+	loopStepHexID   string
 
 	// Event channel and lifecycle state.
 	eventCh    chan any
@@ -327,7 +329,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		s.StartedAt = now
 		s.LastUpdate = now
 		scope := m.sessionScope(msg.SessionID)
-		m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf(">>> Turn #%d started", msg.SessionID)))
+		turnLabel := fmt.Sprintf(">>> Turn #%d", msg.SessionID)
+		if msg.TurnHexID != "" {
+			turnLabel += fmt.Sprintf(" [%s]", msg.TurnHexID)
+		}
+		turnLabel += " started"
+		m.addScopedLine(scope, dimStyle.Render(turnLabel))
 		return m, waitForEvent(m.eventCh)
 
 	case AgentFinishedMsg:
@@ -335,6 +342,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.flushRawRemainder(scope)
 		s := m.ensureSession(msg.SessionID)
 		s.LastUpdate = time.Now()
+		hexTag := ""
+		if msg.TurnHexID != "" {
+			hexTag = fmt.Sprintf(" [%s]", msg.TurnHexID)
+		}
 		if msg.Result != nil {
 			s.EndedAt = s.LastUpdate
 			if msg.Result.ExitCode == 0 {
@@ -343,14 +354,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				s.Status = "failed"
 			}
 			s.Action = fmt.Sprintf("finished (exit=%d)", msg.Result.ExitCode)
-			m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf("<<< Turn #%d finished (exit=%d, %s)",
-				msg.SessionID, msg.Result.ExitCode, msg.Result.Duration.Round(time.Second))))
+			m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf("<<< Turn #%d%s finished (exit=%d, %s)",
+				msg.SessionID, hexTag, msg.Result.ExitCode, msg.Result.Duration.Round(time.Second))))
 		} else if msg.Err != nil {
 			s.EndedAt = s.LastUpdate
 			s.Status = "failed"
 			s.Action = "error"
 			m.addScopedLine(scope, lipgloss.NewStyle().Foreground(theme.ColorRed).Render(
-				fmt.Sprintf("<<< Turn #%d error: %v", msg.SessionID, msg.Err)))
+				fmt.Sprintf("<<< Turn #%d%s error: %v", msg.SessionID, hexTag, msg.Err)))
 		}
 		return m, waitForEvent(m.eventCh)
 
@@ -376,20 +387,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loopCycle = msg.Cycle
 		m.loopStep = msg.StepIndex
 		m.loopStepProfile = msg.Profile
+		m.loopRunHexID = msg.RunHexID
+		m.loopStepHexID = msg.StepHexID
 		if msg.TotalSteps > 0 {
 			m.loopTotalSteps = msg.TotalSteps
 		}
 		m.addLine("")
-		m.addLine(initLabelStyle.Render(fmt.Sprintf("[loop] Cycle %d, Step %d/%d: %s (x%d)",
-			msg.Cycle+1, msg.StepIndex+1, m.loopTotalSteps, msg.Profile, msg.Turns)))
+		stepLine := fmt.Sprintf("[loop] Cycle %d, Step %d/%d: %s (x%d)",
+			msg.Cycle+1, msg.StepIndex+1, m.loopTotalSteps, msg.Profile, msg.Turns)
+		if msg.RunHexID != "" || msg.StepHexID != "" {
+			stepLine += " ["
+			if msg.RunHexID != "" {
+				stepLine += "run:" + msg.RunHexID
+			}
+			if msg.StepHexID != "" {
+				if msg.RunHexID != "" {
+					stepLine += " "
+				}
+				stepLine += "step:" + msg.StepHexID
+			}
+			stepLine += "]"
+		}
+		m.addLine(initLabelStyle.Render(stepLine))
 		return m, waitForEvent(m.eventCh)
 
 	case LoopStepEndMsg:
 		if msg.TotalSteps > 0 {
 			m.loopTotalSteps = msg.TotalSteps
 		}
-		m.addLine(dimStyle.Render(fmt.Sprintf("[loop] Step %d/%d: %s completed",
-			msg.StepIndex+1, m.loopTotalSteps, msg.Profile)))
+		stepEndLine := fmt.Sprintf("[loop] Step %d/%d: %s completed",
+			msg.StepIndex+1, m.loopTotalSteps, msg.Profile)
+		if msg.StepHexID != "" {
+			stepEndLine += fmt.Sprintf(" [step:%s]", msg.StepHexID)
+		}
+		m.addLine(dimStyle.Render(stepEndLine))
 		return m, waitForEvent(m.eventCh)
 
 	case LoopDoneMsg:
@@ -1735,7 +1766,11 @@ func (m Model) renderLeftPanel(outerW, outerH int) string {
 		lines = append(lines, fieldLine("Profile", m.loopStepProfile))
 	}
 	if m.activeLoop != nil && m.activeLoop.Status == "running" {
-		lines = append(lines, fieldLine("Loop Run", fmt.Sprintf("#%d %s", m.activeLoop.ID, m.activeLoop.Status)))
+		runLabel := fmt.Sprintf("#%d %s", m.activeLoop.ID, m.activeLoop.Status)
+		if m.activeLoop.HexID != "" {
+			runLabel = fmt.Sprintf("#%d [%s] %s", m.activeLoop.ID, m.activeLoop.HexID, m.activeLoop.Status)
+		}
+		lines = append(lines, fieldLine("Loop Run", runLabel))
 	}
 	lines = append(lines, "")
 

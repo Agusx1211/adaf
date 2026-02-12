@@ -451,7 +451,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 			Agent:  agentInstance,
 			Config: agentCfg,
 			PlanID: parentPlanID,
-			OnStart: func(turnID int) {
+			OnStart: func(turnID int, turnHexID string) {
 				rec.ChildTurnID = turnID
 				o.store.UpdateSpawn(rec)
 			},

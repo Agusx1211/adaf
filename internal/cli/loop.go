@@ -320,21 +320,47 @@ func runLoopForeground(parentCtx context.Context, s *store.Store, globalCfg *con
 			if totalSteps <= 0 {
 				totalSteps = ev.StepIndex + 1
 			}
-			fmt.Printf("  %s[loop]%s cycle=%d step=%d/%d profile=%s turns=%d\n",
-				colorDim, colorReset, ev.Cycle+1, ev.StepIndex+1, totalSteps, ev.Profile, ev.Turns)
+			hexInfo := ""
+			if ev.RunHexID != "" || ev.StepHexID != "" {
+				hexInfo = " ["
+				if ev.RunHexID != "" {
+					hexInfo += "run:" + ev.RunHexID
+				}
+				if ev.StepHexID != "" {
+					if ev.RunHexID != "" {
+						hexInfo += " "
+					}
+					hexInfo += "step:" + ev.StepHexID
+				}
+				hexInfo += "]"
+			}
+			fmt.Printf("  %s[loop]%s cycle=%d step=%d/%d profile=%s turns=%d%s\n",
+				colorDim, colorReset, ev.Cycle+1, ev.StepIndex+1, totalSteps, ev.Profile, ev.Turns, hexInfo)
 		case runtui.LoopStepEndMsg:
 			totalSteps := ev.TotalSteps
 			if totalSteps <= 0 {
 				totalSteps = ev.StepIndex + 1
 			}
-			fmt.Printf("  %s[loop]%s step=%d/%d profile=%s completed\n",
-				colorDim, colorReset, ev.StepIndex+1, totalSteps, ev.Profile)
+			stepHexTag := ""
+			if ev.StepHexID != "" {
+				stepHexTag = " [step:" + ev.StepHexID + "]"
+			}
+			fmt.Printf("  %s[loop]%s step=%d/%d profile=%s completed%s\n",
+				colorDim, colorReset, ev.StepIndex+1, totalSteps, ev.Profile, stepHexTag)
 		case runtui.AgentStartedMsg:
-			fmt.Printf("  %s>>> Session #%d starting%s\n", styleBoldGreen, ev.SessionID, colorReset)
+			hexTag := ""
+			if ev.TurnHexID != "" {
+				hexTag = " [" + ev.TurnHexID + "]"
+			}
+			fmt.Printf("  %s>>> Turn #%d%s starting%s\n", styleBoldGreen, ev.SessionID, hexTag, colorReset)
 		case runtui.AgentFinishedMsg:
 			if ev.Result != nil {
-				fmt.Printf("  %s<<< Session #%d completed (exit=%d, %s)%s\n",
-					styleBoldGreen, ev.SessionID, ev.Result.ExitCode, ev.Result.Duration.Round(time.Second), colorReset)
+				hexTag := ""
+				if ev.TurnHexID != "" {
+					hexTag = " [" + ev.TurnHexID + "]"
+				}
+				fmt.Printf("  %s<<< Turn #%d%s completed (exit=%d, %s)%s\n",
+					styleBoldGreen, ev.SessionID, hexTag, ev.Result.ExitCode, ev.Result.Duration.Round(time.Second), colorReset)
 			}
 		}
 	}
@@ -463,13 +489,22 @@ func loopStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	printHeader("Active Loop Run")
-	printField("Run ID", fmt.Sprintf("#%d", run.ID))
+	runIDLabel := fmt.Sprintf("#%d", run.ID)
+	if run.HexID != "" {
+		runIDLabel = fmt.Sprintf("#%d [%s]", run.ID, run.HexID)
+	}
+	printField("Run ID", runIDLabel)
 	printField("Loop", run.LoopName)
 	printField("Status", run.Status)
 	printField("Cycle", fmt.Sprintf("%d", run.Cycle+1))
 	if run.StepIndex < len(run.Steps) {
 		step := run.Steps[run.StepIndex]
-		printField("Current Step", fmt.Sprintf("%d/%d (%s)", run.StepIndex+1, len(run.Steps), step.Profile))
+		stepLabel := fmt.Sprintf("%d/%d (%s)", run.StepIndex+1, len(run.Steps), step.Profile)
+		stepKey := fmt.Sprintf("%d:%d", run.Cycle, run.StepIndex)
+		if hexID, ok := run.StepHexIDs[stepKey]; ok {
+			stepLabel += fmt.Sprintf(" [%s]", hexID)
+		}
+		printField("Current Step", stepLabel)
 	}
 	printField("Turns", fmt.Sprintf("%d", len(run.TurnIDs)))
 	printField("Started", run.StartedAt.Format("2006-01-02 15:04:05"))

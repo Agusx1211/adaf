@@ -14,6 +14,7 @@ import (
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/guardrail"
+	"github.com/agusx1211/adaf/internal/hexid"
 	"github.com/agusx1211/adaf/internal/loop"
 	"github.com/agusx1211/adaf/internal/orchestrator"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
@@ -64,6 +65,8 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 		Steps:           steps,
 		Status:          "running",
 		StepLastSeenMsg: make(map[int]int),
+		HexID:           hexid.New(),
+		StepHexIDs:      make(map[string]string),
 	}
 
 	if err := cfg.Store.CreateLoopRun(run); err != nil {
@@ -97,6 +100,12 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			run.StepIndex = stepIdx
 			cfg.Store.UpdateLoopRun(run)
 
+			// Generate step hex ID.
+			stepHexID := hexid.New()
+			stepKey := fmt.Sprintf("%d:%d", cycle, stepIdx)
+			run.StepHexIDs[stepKey] = stepHexID
+			cfg.Store.UpdateLoopRun(run)
+
 			// Resolve profile.
 			prof := cfg.GlobalCfg.FindProfile(stepDef.Profile)
 			if prof == nil {
@@ -117,6 +126,8 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			// Emit step start event.
 			eventCh <- runtui.LoopStepStartMsg{
 				RunID:      run.ID,
+				RunHexID:   run.HexID,
+				StepHexID:  stepHexID,
 				Cycle:      cycle,
 				StepIndex:  stepIdx,
 				Profile:    prof.Name,
@@ -125,7 +136,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			}
 
 			// Build agent config.
-			agentCfg := buildAgentConfig(cfg, prof, run.ID, stepIdx)
+			agentCfg := buildAgentConfig(cfg, prof, run.ID, stepIdx, run.HexID, stepHexID)
 
 			// Gather unseen messages for this step.
 			unseenMsgs := gatherUnseenMessages(cfg.Store, run, stepIdx)
@@ -228,10 +239,12 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			handoffsReparented := false
 
 			l := &loop.Loop{
-				Store:  cfg.Store,
-				Agent:  agentInstance,
-				Config: agentCfg,
-				PlanID: cfg.PlanID,
+				Store:        cfg.Store,
+				Agent:        agentInstance,
+				Config:       agentCfg,
+				PlanID:       cfg.PlanID,
+				LoopRunHexID: run.HexID,
+				StepHexID:    stepHexID,
 				PromptFunc: func(turnID int, supervisorNotes []store.SupervisorNote) string {
 					opts := promptOpts
 					opts.SupervisorNotes = supervisorNotes
@@ -248,7 +261,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 					currentTurnCancel = cancel
 					turnCancelMu.Unlock()
 				},
-				OnStart: func(turnID int) {
+				OnStart: func(turnID int, turnHexID string) {
 					if !handoffsReparented && len(handoffs) > 0 {
 						reparentHandoffs(cfg.Store, handoffs, turnID)
 						handoffsReparented = true
@@ -256,7 +269,12 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 
 					run.TurnIDs = append(run.TurnIDs, turnID)
 					cfg.Store.UpdateLoopRun(run)
-					eventCh <- runtui.AgentStartedMsg{SessionID: turnID}
+					eventCh <- runtui.AgentStartedMsg{
+						SessionID: turnID,
+						TurnHexID: turnHexID,
+						StepHexID: stepHexID,
+						RunHexID:  run.HexID,
+					}
 
 					pollCtx, cancel := context.WithCancel(ctx)
 					pollCancel = cancel
@@ -266,7 +284,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 						pollSpawnStatus(pollCtx, cfg.Store, turnID, eventCh)
 					}()
 				},
-				OnEnd: func(turnID int, result *agent.Result) {
+				OnEnd: func(turnID int, turnHexID string, result *agent.Result) {
 					if pollCancel != nil {
 						pollCancel()
 						pollCancel = nil
@@ -277,6 +295,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 					}
 					eventCh <- runtui.AgentFinishedMsg{
 						SessionID: turnID,
+						TurnHexID: turnHexID,
 						Result:    result,
 					}
 				},
@@ -305,6 +324,8 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			// Emit step end event.
 			eventCh <- runtui.LoopStepEndMsg{
 				RunID:      run.ID,
+				RunHexID:   run.HexID,
+				StepHexID:  stepHexID,
 				Cycle:      cycle,
 				StepIndex:  stepIdx,
 				Profile:    prof.Name,
@@ -396,13 +417,19 @@ func spawnSnapshotFingerprint(spawns []runtui.SpawnInfo) string {
 }
 
 // buildAgentConfig creates an agent.Config for a profile step.
-func buildAgentConfig(cfg RunConfig, prof *config.Profile, runID, stepIndex int) agent.Config {
+func buildAgentConfig(cfg RunConfig, prof *config.Profile, runID, stepIndex int, runHexID, stepHexID string) agent.Config {
 	var agentArgs []string
 	agentEnv := make(map[string]string)
 
 	// Set loop environment variables.
 	agentEnv["ADAF_LOOP_RUN_ID"] = fmt.Sprintf("%d", runID)
 	agentEnv["ADAF_LOOP_STEP_INDEX"] = fmt.Sprintf("%d", stepIndex)
+	if runHexID != "" {
+		agentEnv["ADAF_LOOP_RUN_HEX_ID"] = runHexID
+	}
+	if stepHexID != "" {
+		agentEnv["ADAF_LOOP_STEP_HEX_ID"] = stepHexID
+	}
 
 	modelOverride := prof.Model
 	reasoningLevel := prof.ReasoningLevel

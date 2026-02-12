@@ -1202,6 +1202,32 @@ func (s *Store) ActiveLoopRun() (*LoopRun, error) {
 	return latest, nil
 }
 
+// ListLoopRuns returns all loop runs, sorted by ID.
+func (s *Store) ListLoopRuns() ([]LoopRun, error) {
+	dir := filepath.Join(s.root, "loopruns")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var runs []LoopRun
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		var run LoopRun
+		if err := s.readJSONLocked(filepath.Join(dir, e.Name()), &run); err != nil {
+			continue
+		}
+		runs = append(runs, run)
+	}
+	sort.Slice(runs, func(i, j int) bool { return runs[i].ID < runs[j].ID })
+	return runs, nil
+}
+
 func (s *Store) stopRunningLoopRunsLocked(dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

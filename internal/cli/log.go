@@ -118,19 +118,24 @@ func runTurnList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	headers := []string{"ID", "DATE", "AGENT", "PLAN", "OBJECTIVE", "BUILD"}
+	headers := []string{"ID", "HEX", "DATE", "AGENT", "PLAN", "OBJECTIVE", "BUILD"}
 	var rows [][]string
 	for _, t := range turns {
 		plan := "shared"
 		if t.PlanID != "" {
 			plan = t.PlanID
 		}
+		hexCol := ""
+		if t.HexID != "" {
+			hexCol = t.HexID
+		}
 		rows = append(rows, []string{
 			fmt.Sprintf("#%d", t.ID),
+			hexCol,
 			t.Date.Format("2006-01-02 15:04"),
 			t.Agent,
 			plan,
-			truncate(t.Objective, 45),
+			truncate(t.Objective, 40),
 			truncate(t.BuildState, 15),
 		})
 	}
@@ -146,18 +151,30 @@ func runTurnShow(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Try integer ID first, fall back to hex ID lookup.
 	id, err := strconv.Atoi(args[0])
-	if err != nil {
-		return fmt.Errorf("invalid turn ID %q: must be a number", args[0])
+	if err == nil {
+		turn, err := s.GetTurn(id)
+		if err != nil {
+			return fmt.Errorf("getting turn #%d: %w", id, err)
+		}
+		printTurn(turn)
+		return nil
 	}
 
-	turn, err := s.GetTurn(id)
+	// Hex ID lookup.
+	hexID := strings.TrimSpace(args[0])
+	turns, err := s.ListTurns()
 	if err != nil {
-		return fmt.Errorf("getting turn #%d: %w", id, err)
+		return fmt.Errorf("listing turns: %w", err)
 	}
-
-	printTurn(turn)
-	return nil
+	for i := range turns {
+		if turns[i].HexID == hexID {
+			printTurn(&turns[i])
+			return nil
+		}
+	}
+	return fmt.Errorf("turn not found for ID %q", args[0])
 }
 
 func runTurnLatest(cmd *cobra.Command, args []string) error {
@@ -247,10 +264,23 @@ func runTurnCreate(cmd *cobra.Command, args []string) error {
 }
 
 func printTurn(turn *store.Turn) {
-	printHeader(fmt.Sprintf("Turn #%d", turn.ID))
+	turnLabel := fmt.Sprintf("Turn #%d", turn.ID)
+	if turn.HexID != "" {
+		turnLabel += fmt.Sprintf(" [%s]", turn.HexID)
+	}
+	printHeader(turnLabel)
 
 	printField("Date", turn.Date.Format("2006-01-02 15:04:05 UTC"))
 	printField("Agent", turn.Agent)
+	if turn.HexID != "" {
+		printField("Hex ID", turn.HexID)
+	}
+	if turn.LoopRunHexID != "" {
+		printField("Loop Run Hex ID", turn.LoopRunHexID)
+	}
+	if turn.StepHexID != "" {
+		printField("Step Hex ID", turn.StepHexID)
+	}
 	if turn.AgentModel != "" {
 		printField("Model", turn.AgentModel)
 	}

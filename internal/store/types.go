@@ -55,22 +55,25 @@ type Doc struct {
 
 // Turn records what an agent accomplished in a single invocation (one turn of a loop).
 type Turn struct {
-	ID           int       `json:"id"`
-	PlanID       string    `json:"plan_id,omitempty"`
-	Date         time.Time `json:"date"`
-	Agent        string    `json:"agent"` // "claude", "codex", "vibe", etc.
-	AgentModel   string    `json:"agent_model,omitempty"`
-	ProfileName  string    `json:"profile_name,omitempty"`
-	CommitHash   string    `json:"commit_hash,omitempty"`
-	Objective    string    `json:"objective"`
-	WhatWasBuilt string    `json:"what_was_built"`
-	KeyDecisions string    `json:"key_decisions,omitempty"`
-	Challenges   string    `json:"challenges,omitempty"`
-	CurrentState string    `json:"current_state"`
-	KnownIssues  string    `json:"known_issues,omitempty"`
-	NextSteps    string    `json:"next_steps"`
-	BuildState   string    `json:"build_state"`
-	DurationSecs int       `json:"duration_secs,omitempty"`
+	ID             int       `json:"id"`
+	HexID          string    `json:"hex_id,omitempty"`
+	LoopRunHexID   string    `json:"loop_run_hex_id,omitempty"`
+	StepHexID      string    `json:"step_hex_id,omitempty"`
+	PlanID         string    `json:"plan_id,omitempty"`
+	Date           time.Time `json:"date"`
+	Agent          string    `json:"agent"` // "claude", "codex", "vibe", etc.
+	AgentModel     string    `json:"agent_model,omitempty"`
+	ProfileName    string    `json:"profile_name,omitempty"`
+	CommitHash     string    `json:"commit_hash,omitempty"`
+	Objective      string    `json:"objective"`
+	WhatWasBuilt   string    `json:"what_was_built"`
+	KeyDecisions   string    `json:"key_decisions,omitempty"`
+	Challenges     string    `json:"challenges,omitempty"`
+	CurrentState   string    `json:"current_state"`
+	KnownIssues    string    `json:"known_issues,omitempty"`
+	NextSteps      string    `json:"next_steps"`
+	BuildState     string    `json:"build_state"`
+	DurationSecs   int       `json:"duration_secs,omitempty"`
 }
 
 type Decision struct {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/agusx1211/adaf/internal/agent"
+	"github.com/agusx1211/adaf/internal/hexid"
 	"github.com/agusx1211/adaf/internal/recording"
 	"github.com/agusx1211/adaf/internal/stats"
 	"github.com/agusx1211/adaf/internal/store"
@@ -41,13 +42,19 @@ type Loop struct {
 	// PlanID tracks the plan context for this loop.
 	PlanID string
 
+	// LoopRunHexID is the hex ID of the parent loop run (set by looprun).
+	LoopRunHexID string
+
+	// StepHexID is the hex ID of the current loop step (set by looprun).
+	StepHexID string
+
 	// OnStart is called at the beginning of each iteration, before the agent runs.
-	// The turnID of the upcoming run is passed as an argument.
-	OnStart func(turnID int)
+	// The turnID and turnHexID of the upcoming run are passed as arguments.
+	OnStart func(turnID int, turnHexID string)
 
 	// OnEnd is called after each iteration completes (successfully or not).
-	// The turnID and the result (which may be nil on error) are passed.
-	OnEnd func(turnID int, result *agent.Result)
+	// The turnID, turnHexID, and the result (which may be nil on error) are passed.
+	OnEnd func(turnID int, turnHexID string, result *agent.Result)
 
 	// PromptFunc, if set, is called before each turn to dynamically refresh the
 	// prompt (e.g. to inject supervisor notes). If nil, Config.Prompt is used.
@@ -100,11 +107,15 @@ func (l *Loop) Run(ctx context.Context) error {
 		if objective == "" {
 			objective = "Agent run"
 		}
+		turnHexID := hexid.New()
 		turnLog := &store.Turn{
-			Agent:       l.Agent.Name(),
-			ProfileName: l.ProfileName,
-			PlanID:      l.PlanID,
-			Objective:   objective,
+			Agent:        l.Agent.Name(),
+			ProfileName:  l.ProfileName,
+			PlanID:       l.PlanID,
+			Objective:    objective,
+			HexID:        turnHexID,
+			LoopRunHexID: l.LoopRunHexID,
+			StepHexID:    l.StepHexID,
 		}
 		if err := l.Store.CreateTurn(turnLog); err != nil {
 			return fmt.Errorf("creating turn: %w", err)
@@ -122,6 +133,13 @@ func (l *Loop) Run(ctx context.Context) error {
 		}
 		cfg.Env["ADAF_AGENT"] = "1"
 		cfg.Env["ADAF_TURN_ID"] = fmt.Sprintf("%d", turnID)
+		cfg.Env["ADAF_TURN_HEX_ID"] = turnHexID
+		if l.LoopRunHexID != "" {
+			cfg.Env["ADAF_LOOP_RUN_HEX_ID"] = l.LoopRunHexID
+		}
+		if l.StepHexID != "" {
+			cfg.Env["ADAF_LOOP_STEP_HEX_ID"] = l.StepHexID
+		}
 		if strings.TrimSpace(l.ProfileName) != "" {
 			cfg.Env["ADAF_PROFILE"] = l.ProfileName
 		}
@@ -170,7 +188,7 @@ func (l *Loop) Run(ctx context.Context) error {
 
 		// Notify listener.
 		if l.OnStart != nil {
-			l.OnStart(turnID)
+			l.OnStart(turnID, turnHexID)
 		}
 
 		// Create a recorder for this turn.
@@ -178,6 +196,13 @@ func (l *Loop) Run(ctx context.Context) error {
 		rec.RecordMeta("agent", l.Agent.Name())
 		rec.RecordMeta("turn", fmt.Sprintf("%d", turn+1))
 		rec.RecordMeta("start_time", time.Now().UTC().Format(time.RFC3339))
+		rec.RecordMeta("turn_hex_id", turnHexID)
+		if l.LoopRunHexID != "" {
+			rec.RecordMeta("loop_run_hex_id", l.LoopRunHexID)
+		}
+		if l.StepHexID != "" {
+			rec.RecordMeta("step_hex_id", l.StepHexID)
+		}
 
 		// Create a turn-scoped context so guardrails can cancel just the
 		// current turn without stopping the entire loop.
@@ -234,7 +259,7 @@ func (l *Loop) Run(ctx context.Context) error {
 
 		// Notify listener.
 		if l.OnEnd != nil {
-			l.OnEnd(turnID, result)
+			l.OnEnd(turnID, turnHexID, result)
 		}
 
 		// If the agent run failed with a hard error (not just non-zero exit),

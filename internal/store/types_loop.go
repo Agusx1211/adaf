@@ -4,18 +4,20 @@ import "time"
 
 // LoopRun tracks the state of a running loop.
 type LoopRun struct {
-	ID              int           `json:"id"`
-	LoopName        string        `json:"loop_name"`
-	PlanID          string        `json:"plan_id,omitempty"`
-	Steps           []LoopRunStep `json:"steps"`      // snapshot of loop definition
-	Status          string        `json:"status"`     // "running", "stopped", "cancelled"
-	Cycle           int           `json:"cycle"`      // current cycle (0-indexed)
-	StepIndex       int           `json:"step_index"` // current step in cycle
-	StartedAt       time.Time     `json:"started_at"`
-	StoppedAt       time.Time     `json:"stopped_at,omitempty"`
-	TurnIDs         []int         `json:"session_ids"`                // all turn IDs created (JSON key kept for compat)
-	StepLastSeenMsg map[int]int   `json:"step_last_seen_msg"`         // step_index -> last seen msg index
-	PendingHandoffs []HandoffInfo `json:"pending_handoffs,omitempty"` // spawns handed off to next step
+	ID              int               `json:"id"`
+	HexID           string            `json:"hex_id,omitempty"`
+	LoopName        string            `json:"loop_name"`
+	PlanID          string            `json:"plan_id,omitempty"`
+	Steps           []LoopRunStep     `json:"steps"`      // snapshot of loop definition
+	Status          string            `json:"status"`     // "running", "stopped", "cancelled"
+	Cycle           int               `json:"cycle"`      // current cycle (0-indexed)
+	StepIndex       int               `json:"step_index"` // current step in cycle
+	StartedAt       time.Time         `json:"started_at"`
+	StoppedAt       time.Time         `json:"stopped_at,omitempty"`
+	TurnIDs         []int             `json:"session_ids"`                // all turn IDs created (JSON key kept for compat)
+	StepLastSeenMsg map[int]int       `json:"step_last_seen_msg"`         // step_index -> last seen msg index
+	PendingHandoffs []HandoffInfo     `json:"pending_handoffs,omitempty"` // spawns handed off to next step
+	StepHexIDs      map[string]string `json:"step_hex_ids,omitempty"`     // "cycle:step" -> hex ID
 }
 
 // HandoffInfo describes a spawn handed off from a previous loop step.
