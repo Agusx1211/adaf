@@ -34,6 +34,7 @@ const (
 	stateProfileIntel             // input intelligence rating (1-10)
 	stateProfileDesc              // input description text
 	stateProfileMaxInst           // input max concurrent instances
+	stateProfileSpeed             // pick speed for new profile
 	stateProfileMenu              // edit profile: field picker menu
 	stateLoopName                 // text input for loop name
 	stateLoopStepList             // list of steps, add/edit/remove/reorder
@@ -43,6 +44,7 @@ const (
 	stateLoopStepInstr            // input custom instructions for a step
 	stateLoopStepTools            // multi-select tools (stop, message, pushover)
 	stateLoopStepSpawn            // multi-select spawnable profiles for the step
+	stateLoopStepSpawnCfg         // configure speed/handoff per selected spawn profile
 	stateLoopMenu                 // edit loop: field picker menu
 	stateSettings                 // settings screen (pushover credentials, etc.)
 	stateSettingsPushoverUserKey  // input pushover user key
@@ -101,6 +103,7 @@ type AppModel struct {
 	profileDescInput         string
 	profileMenuSel           int
 	profileMaxInstInput      string
+	profileSpeedSel          int
 
 	// Loop creation/editing wizard state.
 	loopEditing         bool
@@ -118,10 +121,13 @@ type AppModel struct {
 	loopStepCanMsg      bool
 	loopStepCanPushover bool
 	loopStepToolsSel    int // cursor position in the tools multi-select
-	loopStepSpawnOpts   []string
-	loopStepSpawnSel    int
-	loopStepSpawnSelect map[int]bool
-	loopMenuSel         int
+	loopStepSpawnOpts    []string
+	loopStepSpawnSel     int
+	loopStepSpawnSelect  map[int]bool
+	loopStepSpawnCfgSel  int
+	loopStepSpawnSpeed   map[int]int
+	loopStepSpawnHandoff map[int]bool
+	loopMenuSel          int
 
 	// Confirm delete state.
 	confirmDeleteIdx int // index of profile/loop pending deletion
@@ -277,6 +283,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateProfileDesc(msg)
 	case stateProfileMaxInst:
 		return m.updateProfileMaxInst(msg)
+	case stateProfileSpeed:
+		return m.updateProfileSpeed(msg)
 	case stateProfileMenu:
 		return m.updateProfileMenu(msg)
 	case stateLoopName:
@@ -295,6 +303,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateLoopStepTools(msg)
 	case stateLoopStepSpawn:
 		return m.updateLoopStepSpawn(msg)
+	case stateLoopStepSpawnCfg:
+		return m.updateLoopStepSpawnCfg(msg)
 	case stateLoopMenu:
 		return m.updateLoopMenu(msg)
 	case stateSettings:
@@ -846,6 +856,8 @@ func (m AppModel) View() string {
 		return m.viewProfileDesc()
 	case stateProfileMaxInst:
 		return m.viewProfileMaxInst()
+	case stateProfileSpeed:
+		return m.viewProfileSpeed()
 	case stateProfileMenu:
 		return m.viewProfileMenu()
 	case stateLoopName:
@@ -864,6 +876,8 @@ func (m AppModel) View() string {
 		return m.viewLoopStepTools()
 	case stateLoopStepSpawn:
 		return m.viewLoopStepSpawn()
+	case stateLoopStepSpawnCfg:
+		return m.viewLoopStepSpawnCfg()
 	case stateLoopMenu:
 		return m.viewLoopMenu()
 	case stateSettings:

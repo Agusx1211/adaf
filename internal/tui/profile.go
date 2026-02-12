@@ -120,6 +120,14 @@ func (m AppModel) startEditProfile() (tea.Model, tea.Cmd) {
 		m.profileMaxInstInput = strconv.Itoa(prof.MaxInstances)
 	}
 
+	m.profileSpeedSel = 0
+	for i, opt := range profileSpeedOptions {
+		if opt == prof.Speed {
+			m.profileSpeedSel = i
+			break
+		}
+	}
+
 	m.profileMenuSel = 0
 	m.state = stateProfileMenu
 	return m, nil
@@ -133,8 +141,11 @@ func (m AppModel) wizardTitle() string {
 	return "New Profile"
 }
 
-// editMenuItemCount is the number of items in the edit menu (7 fields + Save).
-const editMenuItemCount = 8
+// profileSpeedOptions are the valid speed choices for profiles.
+var profileSpeedOptions = []string{"(none)", "fast", "medium", "slow"}
+
+// editMenuItemCount is the number of items in the edit menu (8 fields + Save).
+const editMenuItemCount = 9
 
 // updateProfileMenu handles the edit profile field picker menu.
 func (m AppModel) updateProfileMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -194,7 +205,9 @@ func (m AppModel) updateProfileMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = stateProfileDesc
 			case 6: // Max Instances
 				m.state = stateProfileMaxInst
-			case 7: // Save
+			case 7: // Speed
+				m.state = stateProfileSpeed
+			case 8: // Save
 				return m.finishProfileCreation()
 			}
 		}
@@ -246,6 +259,10 @@ func (m AppModel) viewProfileMenu() string {
 	if maxInst == "" {
 		maxInst = "unlimited"
 	}
+	speed := "(none)"
+	if m.profileSpeedSel > 0 && m.profileSpeedSel < len(profileSpeedOptions) {
+		speed = profileSpeedOptions[m.profileSpeedSel]
+	}
 
 	type menuItem struct {
 		label, value string
@@ -258,6 +275,7 @@ func (m AppModel) viewProfileMenu() string {
 		{"Intelligence", intel},
 		{"Description", desc},
 		{"Max Instances", maxInst},
+		{"Speed", speed},
 	}
 
 	for i, item := range items {
@@ -273,7 +291,7 @@ func (m AppModel) viewProfileMenu() string {
 	// Save item
 	lines = append(lines, "")
 	saveLabel := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render("Save")
-	if m.profileMenuSel == 7 {
+	if m.profileMenuSel == 8 {
 		cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render("> ")
 		lines = append(lines, cursor+saveLabel)
 	} else {
@@ -597,7 +615,8 @@ func (m AppModel) updateProfileMaxInst(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = stateProfileMenu
 				return m, nil
 			}
-			return m.finishProfileCreation()
+			m.profileSpeedSel = 0
+			m.state = stateProfileSpeed
 		case "esc":
 			if m.profileEditing {
 				m.state = stateProfileMenu
@@ -636,6 +655,11 @@ func (m AppModel) finishProfileCreation() (tea.Model, tea.Cmd) {
 		}
 	}
 
+	speed := ""
+	if m.profileSpeedSel > 0 && m.profileSpeedSel < len(profileSpeedOptions) {
+		speed = profileSpeedOptions[m.profileSpeedSel]
+	}
+
 	p := config.Profile{
 		Name:           m.profileNameInput,
 		Agent:          selectedAgent,
@@ -644,6 +668,7 @@ func (m AppModel) finishProfileCreation() (tea.Model, tea.Cmd) {
 		Intelligence:   intel,
 		Description:    strings.TrimSpace(m.profileDescInput),
 		MaxInstances:   maxInst,
+		Speed:          speed,
 	}
 
 	if m.profileEditing {
@@ -679,8 +704,71 @@ func (m AppModel) finishProfileCreation() (tea.Model, tea.Cmd) {
 	m.profileDescInput = ""
 	m.profileIntelInput = ""
 	m.profileMaxInstInput = ""
+	m.profileSpeedSel = 0
 	m.state = stateSelector
 	return m, nil
+}
+
+// updateProfileSpeed handles speed selection in the profile wizard.
+func (m AppModel) updateProfileSpeed(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "j", "down":
+			m.profileSpeedSel = (m.profileSpeedSel + 1) % len(profileSpeedOptions)
+		case "k", "up":
+			m.profileSpeedSel = (m.profileSpeedSel - 1 + len(profileSpeedOptions)) % len(profileSpeedOptions)
+		case "enter":
+			if m.profileEditing {
+				m.state = stateProfileMenu
+				return m, nil
+			}
+			return m.finishProfileCreation()
+		case "esc":
+			if m.profileEditing {
+				m.state = stateProfileMenu
+				return m, nil
+			}
+			m.state = stateProfileMaxInst
+		}
+	}
+	return m, nil
+}
+
+// viewProfileSpeed renders the speed selection screen.
+func (m AppModel) viewProfileSpeed() string {
+	header := m.renderHeader()
+	statusBar := m.renderStatusBar()
+	style, cw, ch := profileWizardPanel(m)
+
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
+	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
+
+	var lines []string
+	lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Speed"))
+	lines = append(lines, "")
+	lines = append(lines, dimStyle.Render("Select speed rating for this profile:"))
+	lines = append(lines, "")
+
+	for i, opt := range profileSpeedOptions {
+		if i == m.profileSpeedSel {
+			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
+			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(opt)
+			lines = append(lines, cursor+styled)
+		} else {
+			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ColorText).Render(opt))
+		}
+	}
+	lines = append(lines, "")
+	if m.profileEditing {
+		lines = append(lines, dimStyle.Render("j/k: navigate  enter: save  esc: back"))
+	} else {
+		lines = append(lines, dimStyle.Render("j/k: navigate  enter: create profile  esc: back"))
+	}
+
+	content := fitLines(lines, cw, ch)
+	panel := style.Render(content)
+	return header + "\n" + panel + "\n" + statusBar
 }
 
 // --- Views ---
@@ -932,11 +1020,7 @@ func (m AppModel) viewProfileMaxInst() string {
 	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(m.profileMaxInstInput)
 	lines = append(lines, "> "+inputText+cursor)
 	lines = append(lines, "")
-	if m.profileEditing {
-		lines = append(lines, dimStyle.Render("enter: save profile  esc: back"))
-	} else {
-		lines = append(lines, dimStyle.Render("enter: create profile  esc: back"))
-	}
+	lines = append(lines, dimStyle.Render("enter: continue  esc: back"))
 
 	content := fitLines(lines, cw, ch)
 	panel := style.Render(content)

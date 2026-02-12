@@ -34,6 +34,9 @@ func (m *AppModel) resetLoopStepSpawnOptions(selectedProfile string) {
 	m.loopStepSpawnOpts = nil
 	m.loopStepSpawnSelect = make(map[int]bool)
 	m.loopStepSpawnSel = 0
+	m.loopStepSpawnCfgSel = 0
+	m.loopStepSpawnSpeed = make(map[int]int)
+	m.loopStepSpawnHandoff = make(map[int]bool)
 	for _, p := range m.globalCfg.Profiles {
 		if !strings.EqualFold(p.Name, selectedProfile) {
 			m.loopStepSpawnOpts = append(m.loopStepSpawnOpts, p.Name)
@@ -45,6 +48,17 @@ func (m *AppModel) preselectLoopStepSpawn(step config.LoopStep) {
 	for i, name := range m.loopStepSpawnOpts {
 		if step.Delegation != nil && step.Delegation.HasProfile(name) {
 			m.loopStepSpawnSelect[i] = true
+			if dp := step.Delegation.FindProfile(name); dp != nil {
+				switch dp.Speed {
+				case "fast":
+					m.loopStepSpawnSpeed[i] = 1
+				case "medium":
+					m.loopStepSpawnSpeed[i] = 2
+				case "slow":
+					m.loopStepSpawnSpeed[i] = 3
+				}
+				m.loopStepSpawnHandoff[i] = dp.Handoff
+			}
 			continue
 		}
 		// Backward compatibility: pre-populate from legacy profile settings
@@ -645,12 +659,28 @@ func (m AppModel) updateLoopStepSpawn(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.loopStepSpawnSelect[m.loopStepSpawnSel] = !m.loopStepSpawnSelect[m.loopStepSpawnSel]
 			}
 		case "enter":
+			if len(m.selectedSpawnIndices()) > 0 {
+				m.loopStepSpawnCfgSel = 0
+				m.state = stateLoopStepSpawnCfg
+				return m, nil
+			}
 			return m.finishLoopStep()
 		case "esc":
 			m.state = stateLoopStepTools
 		}
 	}
 	return m, nil
+}
+
+// selectedSpawnIndices returns the indices of selected spawn profiles.
+func (m AppModel) selectedSpawnIndices() []int {
+	var indices []int
+	for i := range m.loopStepSpawnOpts {
+		if m.loopStepSpawnSelect[i] {
+			indices = append(indices, i)
+		}
+	}
+	return indices
 }
 
 func (m AppModel) viewLoopStepSpawn() string {
@@ -692,6 +722,77 @@ func (m AppModel) viewLoopStepSpawn() string {
 	return header + "\n" + panel + "\n" + statusBar
 }
 
+// --- Loop Step Spawn Config (Speed/Handoff) ---
+
+func (m AppModel) updateLoopStepSpawnCfg(msg tea.Msg) (tea.Model, tea.Cmd) {
+	selected := m.selectedSpawnIndices()
+	if len(selected) == 0 {
+		return m.finishLoopStep()
+	}
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "j", "down":
+			m.loopStepSpawnCfgSel = (m.loopStepSpawnCfgSel + 1) % len(selected)
+		case "k", "up":
+			m.loopStepSpawnCfgSel = (m.loopStepSpawnCfgSel - 1 + len(selected)) % len(selected)
+		case "s":
+			idx := selected[m.loopStepSpawnCfgSel]
+			cur := m.loopStepSpawnSpeed[idx]
+			m.loopStepSpawnSpeed[idx] = (cur + 1) % 4
+		case " ":
+			idx := selected[m.loopStepSpawnCfgSel]
+			m.loopStepSpawnHandoff[idx] = !m.loopStepSpawnHandoff[idx]
+		case "enter":
+			return m.finishLoopStep()
+		case "esc":
+			m.state = stateLoopStepSpawn
+		}
+	}
+	return m, nil
+}
+
+func (m AppModel) viewLoopStepSpawnCfg() string {
+	header := m.renderHeader()
+	statusBar := m.renderStatusBar()
+	style, cw, ch := profileWizardPanel(m)
+
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
+	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
+
+	var lines []string
+	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Delegation Configure"))
+	lines = append(lines, "")
+
+	speedLabels := []string{"(none)", "fast", "medium", "slow"}
+	selected := m.selectedSpawnIndices()
+	for si, idx := range selected {
+		name := m.loopStepSpawnOpts[idx]
+		spd := m.loopStepSpawnSpeed[idx]
+		speedStr := speedLabels[spd]
+		handoffStr := "[ ]"
+		if m.loopStepSpawnHandoff[idx] {
+			handoffStr = lipgloss.NewStyle().Foreground(ColorGreen).Render("[x]")
+		}
+		label := fmt.Sprintf("%-20s Speed: %-8s Handoff: %s", name, speedStr, handoffStr)
+		if si == m.loopStepSpawnCfgSel {
+			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
+			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
+			lines = append(lines, cursor+styled)
+		} else {
+			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ColorText).Render(label))
+		}
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, dimStyle.Render("s: cycle speed  space: toggle handoff  j/k: navigate"))
+	lines = append(lines, dimStyle.Render("enter: save step  esc: back"))
+
+	content := fitLines(lines, cw, ch)
+	panel := style.Render(content)
+	return header + "\n" + panel + "\n" + statusBar
+}
+
 // finishLoopStep saves the current step being edited and returns to step list.
 func (m AppModel) finishLoopStep() (tea.Model, tea.Cmd) {
 	profileName := ""
@@ -716,10 +817,18 @@ func (m AppModel) finishLoopStep() (tea.Model, tea.Cmd) {
 		role = roles[m.loopStepRoleSel]
 	}
 
+	speedNames := []string{"fast", "medium", "slow"}
 	var spawnProfiles []config.DelegationProfile
 	for i := range m.loopStepSpawnOpts {
 		if m.loopStepSpawnSelect[i] {
-			spawnProfiles = append(spawnProfiles, config.DelegationProfile{Name: m.loopStepSpawnOpts[i]})
+			dp := config.DelegationProfile{Name: m.loopStepSpawnOpts[i]}
+			if spd, ok := m.loopStepSpawnSpeed[i]; ok && spd > 0 && spd <= len(speedNames) {
+				dp.Speed = speedNames[spd-1]
+			}
+			if m.loopStepSpawnHandoff[i] {
+				dp.Handoff = true
+			}
+			spawnProfiles = append(spawnProfiles, dp)
 		}
 	}
 
