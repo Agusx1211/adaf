@@ -29,17 +29,17 @@ type SessionMeta struct {
 // DaemonConfig holds everything the daemon process needs to reconstruct and
 // run the agent loop. Written to disk by the parent before starting the daemon.
 type DaemonConfig struct {
-	AgentName    string            `json:"agent_name"`
-	AgentCommand string            `json:"agent_command"`
-	AgentArgs    []string          `json:"agent_args"`
-	AgentEnv     map[string]string `json:"agent_env"`
-	WorkDir      string            `json:"work_dir"`
-	Prompt       string            `json:"prompt"`
-	UseDefaultPrompt bool          `json:"use_default_prompt,omitempty"`
-	MaxTurns     int               `json:"max_turns"`
-	ProjectDir   string            `json:"project_dir"`
-	ProfileName  string            `json:"profile_name"`
-	ProjectName  string            `json:"project_name"`
+	AgentName        string            `json:"agent_name"`
+	AgentCommand     string            `json:"agent_command"`
+	AgentArgs        []string          `json:"agent_args"`
+	AgentEnv         map[string]string `json:"agent_env"`
+	WorkDir          string            `json:"work_dir"`
+	Prompt           string            `json:"prompt"`
+	UseDefaultPrompt bool              `json:"use_default_prompt,omitempty"`
+	MaxTurns         int               `json:"max_turns"`
+	ProjectDir       string            `json:"project_dir"`
+	ProfileName      string            `json:"profile_name"`
+	ProjectName      string            `json:"project_name"`
 }
 
 // Dir returns the global sessions directory (~/.adaf/sessions/), creating it if needed.
@@ -76,6 +76,11 @@ func ConfigPath(id int) string {
 // EventsPath returns the events JSONL path for a session.
 func EventsPath(id int) string {
 	return filepath.Join(SessionDir(id), "events.jsonl")
+}
+
+// DaemonLogPath returns the daemon stdout/stderr log path for a session.
+func DaemonLogPath(id int) string {
+	return filepath.Join(SessionDir(id), "daemon.log")
 }
 
 // nextID returns the next available session ID.

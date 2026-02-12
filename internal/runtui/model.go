@@ -343,6 +343,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+
+	case DetachMsg:
+		return m, tea.Quit
 	}
 
 	return m, nil

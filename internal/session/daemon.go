@@ -35,8 +35,13 @@ func StartDaemon(sessionID int) error {
 	cmd := exec.Command(exe, "_session-daemon", "--id", fmt.Sprintf("%d", sessionID))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdin = nil
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	logFile, err := os.OpenFile(DaemonLogPath(sessionID), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("opening daemon log: %w", err)
+	}
+	defer logFile.Close()
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting daemon: %w", err)

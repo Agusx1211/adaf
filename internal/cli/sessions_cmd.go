@@ -113,6 +113,8 @@ func runSessions(cmd *cobra.Command, args []string) error {
 	}
 	if hasActive {
 		fmt.Printf("  Use %sadaf attach <id>%s to reattach to a running session.\n", styleBoldWhite, colorReset)
+		fmt.Printf("  Use %sadaf sessions output [id]%s to inspect output without attaching.\n", styleBoldWhite, colorReset)
+		fmt.Printf("  Use %sadaf sessions logs [id]%s to inspect adaf daemon logs.\n", styleBoldWhite, colorReset)
 		fmt.Println()
 	}
 

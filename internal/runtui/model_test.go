@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -50,5 +51,36 @@ func TestDetailLinesWrapsWithoutTruncating(t *testing.T) {
 
 	if combined.String() != long {
 		t.Errorf("wrapped text mismatch: got len=%d want len=%d", len(combined.String()), len(long))
+	}
+}
+
+func TestDetachMessageQuitsInSessionMode(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+	m.SetSessionMode(7)
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	if cmd == nil {
+		t.Fatalf("ctrl+d command = nil, want detach command")
+	}
+	detachMsg := cmd()
+	detach, ok := detachMsg.(DetachMsg)
+	if !ok {
+		t.Fatalf("ctrl+d msg type = %T, want DetachMsg", detachMsg)
+	}
+	if detach.SessionID != 7 {
+		t.Fatalf("detach session id = %d, want 7", detach.SessionID)
+	}
+
+	m2, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("updated model type = %T, want runtui.Model", updated)
+	}
+	_, quitCmd := m2.Update(detach)
+	if quitCmd == nil {
+		t.Fatalf("quit command = nil, want tea.Quit")
+	}
+	quitMsg := quitCmd()
+	if _, ok := quitMsg.(tea.QuitMsg); !ok {
+		t.Fatalf("quit command result type = %T, want tea.QuitMsg", quitMsg)
 	}
 }
