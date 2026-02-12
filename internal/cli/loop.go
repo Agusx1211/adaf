@@ -355,21 +355,41 @@ func runLoopForeground(parentCtx context.Context, s *store.Store, globalCfg *con
 func loopProfilesSnapshot(globalCfg *config.GlobalConfig, loopDef *config.LoopDef) ([]config.Profile, error) {
 	seen := make(map[string]struct{}, len(loopDef.Steps))
 	profiles := make([]config.Profile, 0, len(loopDef.Steps))
-	for _, step := range loopDef.Steps {
-		name := strings.TrimSpace(step.Profile)
+
+	addProfile := func(name string) error {
+		name = strings.TrimSpace(name)
 		if name == "" {
-			return nil, fmt.Errorf("loop %q has a step with empty profile", loopDef.Name)
+			return nil
 		}
 		key := strings.ToLower(name)
 		if _, ok := seen[key]; ok {
-			continue
+			return nil
 		}
 		prof := globalCfg.FindProfile(name)
 		if prof == nil {
-			return nil, fmt.Errorf("profile %q not found for loop %q", name, loopDef.Name)
+			return fmt.Errorf("profile %q not found for loop %q", name, loopDef.Name)
 		}
 		seen[key] = struct{}{}
 		profiles = append(profiles, *prof)
+		return nil
+	}
+
+	for _, step := range loopDef.Steps {
+		if strings.TrimSpace(step.Profile) == "" {
+			return nil, fmt.Errorf("loop %q has a step with empty profile", loopDef.Name)
+		}
+		if err := addProfile(step.Profile); err != nil {
+			return nil, err
+		}
+		// Include delegation profiles so the daemon has the full set
+		// needed for prompt building and spawn resolution.
+		if step.Delegation != nil {
+			for _, dp := range step.Delegation.Profiles {
+				if err := addProfile(dp.Name); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 	return profiles, nil
 }

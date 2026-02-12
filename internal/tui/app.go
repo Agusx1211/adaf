@@ -514,20 +514,41 @@ func (m AppModel) startLoop(loopName string) (tea.Model, tea.Cmd) {
 func (m AppModel) profilesForLoop(steps []config.LoopStep) ([]config.Profile, bool) {
 	seen := make(map[string]struct{}, len(steps))
 	profiles := make([]config.Profile, 0, len(steps))
-	for _, step := range steps {
-		name := strings.TrimSpace(step.Profile)
+
+	add := func(name string) bool {
+		name = strings.TrimSpace(name)
 		if name == "" {
-			return nil, false
+			return true
 		}
-		if _, ok := seen[strings.ToLower(name)]; ok {
-			continue
+		key := strings.ToLower(name)
+		if _, ok := seen[key]; ok {
+			return true
 		}
 		prof := m.globalCfg.FindProfile(name)
 		if prof == nil {
+			return false
+		}
+		seen[key] = struct{}{}
+		profiles = append(profiles, *prof)
+		return true
+	}
+
+	for _, step := range steps {
+		if strings.TrimSpace(step.Profile) == "" {
 			return nil, false
 		}
-		seen[strings.ToLower(name)] = struct{}{}
-		profiles = append(profiles, *prof)
+		if !add(step.Profile) {
+			return nil, false
+		}
+		// Include delegation profiles so the daemon has the full set
+		// needed for prompt building and spawn resolution.
+		if step.Delegation != nil {
+			for _, dp := range step.Delegation.Profiles {
+				if !add(dp.Name) {
+					return nil, false
+				}
+			}
+		}
 	}
 	return profiles, true
 }
