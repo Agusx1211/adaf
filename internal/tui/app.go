@@ -22,30 +22,30 @@ import (
 type appState int
 
 const (
-	stateSelector         appState = iota
+	stateSelector appState = iota
 	stateRunning
-	stateProfileName      // text input for new profile name
-	stateProfileAgent     // pick agent for new profile
-	stateProfileModel     // pick model for new profile
-	stateProfileReasoning // pick reasoning level for new profile
-	stateProfileRole      // pick role for new profile
-	stateProfileIntel     // input intelligence rating (1-10)
-	stateProfileDesc      // input description text
-	stateProfileMaxInst   // input max concurrent instances
-	stateProfileSpawnable // multi-select spawnable profiles
-	stateProfileMaxPar    // input max parallel
-	stateProfileMenu      // edit profile: field picker menu
-	stateLoopName         // text input for loop name
-	stateLoopStepList     // list of steps, add/edit/remove/reorder
-	stateLoopStepProfile  // pick profile for a step
-	stateLoopStepTurns    // input turns for a step
-	stateLoopStepInstr    // input custom instructions for a step
-	stateLoopStepTools    // multi-select tools (stop, message, pushover)
-	stateLoopMenu         // edit loop: field picker menu
-	stateSettings         // settings screen (pushover credentials, etc.)
+	stateProfileName              // text input for new profile name
+	stateProfileAgent             // pick agent for new profile
+	stateProfileModel             // pick model for new profile
+	stateProfileReasoning         // pick reasoning level for new profile
+	stateProfileRole              // pick role for new profile
+	stateProfileIntel             // input intelligence rating (1-10)
+	stateProfileDesc              // input description text
+	stateProfileMaxInst           // input max concurrent instances
+	stateProfileSpawnable         // multi-select spawnable profiles
+	stateProfileMaxPar            // input max parallel
+	stateProfileMenu              // edit profile: field picker menu
+	stateLoopName                 // text input for loop name
+	stateLoopStepList             // list of steps, add/edit/remove/reorder
+	stateLoopStepProfile          // pick profile for a step
+	stateLoopStepTurns            // input turns for a step
+	stateLoopStepInstr            // input custom instructions for a step
+	stateLoopStepTools            // multi-select tools (stop, message, pushover)
+	stateLoopMenu                 // edit loop: field picker menu
+	stateSettings                 // settings screen (pushover credentials, etc.)
 	stateSettingsPushoverUserKey  // input pushover user key
 	stateSettingsPushoverAppToken // input pushover app token
-	stateConfirmDelete           // confirmation before deleting a profile/loop
+	stateConfirmDelete            // confirmation before deleting a profile/loop
 )
 
 // AppModel is the top-level bubbletea model for the unified adaf TUI.
@@ -64,28 +64,28 @@ type AppModel struct {
 	selected int
 
 	// Profile creation/editing wizard state.
-	profileEditing         bool   // true = editing existing, false = creating new
-	profileEditName        string // original name of profile being edited
-	profileNameInput       string
-	profileAgents          []string
-	profileAgentSel        int
-	profileModels          []string
-	profileModelSel        int
-	profileCustomModel     string
-	profileCustomModelMode bool
-	profileSelectedModel   string
-	profileReasoningLevels    []agentmeta.ReasoningLevel
-	profileReasoningLevelSel  int
-	profileSelectedReasoning  string
-	profileRoleSel            int
-	profileIntelInput         string
-	profileDescInput          string
-	profileMenuSel            int
-	profileMaxInstInput       string
-	profileSpawnableOptions   []string // profile names available for selection
-	profileSpawnableSelected  map[int]bool
-	profileSpawnableSel       int
-	profileMaxParInput        string
+	profileEditing           bool   // true = editing existing, false = creating new
+	profileEditName          string // original name of profile being edited
+	profileNameInput         string
+	profileAgents            []string
+	profileAgentSel          int
+	profileModels            []string
+	profileModelSel          int
+	profileCustomModel       string
+	profileCustomModelMode   bool
+	profileSelectedModel     string
+	profileReasoningLevels   []agentmeta.ReasoningLevel
+	profileReasoningLevelSel int
+	profileSelectedReasoning string
+	profileRoleSel           int
+	profileIntelInput        string
+	profileDescInput         string
+	profileMenuSel           int
+	profileMaxInstInput      string
+	profileSpawnableOptions  []string // profile names available for selection
+	profileSpawnableSelected map[int]bool
+	profileSpawnableSel      int
+	profileMaxParInput       string
 
 	// Loop creation/editing wizard state.
 	loopEditing         bool
@@ -93,7 +93,7 @@ type AppModel struct {
 	loopNameInput       string
 	loopSteps           []config.LoopStep
 	loopStepSel         int
-	loopStepEditIdx     int    // which step is being edited (-1 = adding new)
+	loopStepEditIdx     int // which step is being edited (-1 = adding new)
 	loopStepProfileOpts []string
 	loopStepProfileSel  int
 	loopStepTurnsInput  string
@@ -101,7 +101,7 @@ type AppModel struct {
 	loopStepCanStop     bool
 	loopStepCanMsg      bool
 	loopStepCanPushover bool
-	loopStepToolsSel    int    // cursor position in the tools multi-select
+	loopStepToolsSel    int // cursor position in the tools multi-select
 	loopMenuSel         int
 
 	// Confirm delete state.
@@ -452,6 +452,9 @@ func (m AppModel) startLoop(loopName string) (tea.Model, tea.Cmd) {
 	m.runCancel = cancel
 	m.runEventCh = eventCh
 	m.runModel = runtui.NewModel(projectName, m.plan, "", "", eventCh, cancel)
+	// Loop runs are in-process (not session-daemon backed), but should still
+	// support detach semantics like session mode.
+	m.runModel.SetSessionMode(1)
 	m.runModel.SetSize(m.width, m.height)
 	m.runModel.SetLoopInfo(loopDef.Name, len(loopDef.Steps))
 
@@ -524,6 +527,13 @@ func (m AppModel) showSessions() (tea.Model, tea.Cmd) {
 }
 
 func (m AppModel) updateRunning(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if stepStart, ok := msg.(runtui.LoopStepStartMsg); ok {
+		// Bind detach mode to the concrete loop run ID once we know it.
+		if m.sessionClient == nil && stepStart.RunID > 0 && m.runModel.SessionMode() != stepStart.RunID {
+			m.runModel.SetSessionMode(stepStart.RunID)
+		}
+	}
+
 	// Intercept BackToSelectorMsg to return to selector.
 	if _, ok := msg.(runtui.BackToSelectorMsg); ok {
 		// Cancel any remaining agent context.
@@ -544,6 +554,7 @@ func (m AppModel) updateRunning(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Intercept DetachMsg to detach from the session without stopping the agent.
 	if detach, ok := msg.(runtui.DetachMsg); ok {
+		startBackgroundEventDrain(m.runEventCh)
 		if m.sessionClient != nil {
 			m.sessionClient.Close()
 			m.sessionClient = nil
@@ -560,6 +571,16 @@ func (m AppModel) updateRunning(msg tea.Msg) (tea.Model, tea.Cmd) {
 	updated, cmd := m.runModel.Update(msg)
 	m.runModel = updated.(runtui.Model)
 	return m, cmd
+}
+
+func startBackgroundEventDrain(ch <-chan any) {
+	if ch == nil {
+		return
+	}
+	go func() {
+		for range ch {
+		}
+	}()
 }
 
 // startAgent transitions from selector to running state.
@@ -674,15 +695,15 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 
 	// Create a session daemon config.
 	dcfg := session.DaemonConfig{
-		AgentName:    p.Agent,
-		AgentCommand: customCmd,
-		AgentArgs:    agentArgs,
-		AgentEnv:     agentEnv,
-		WorkDir:      workDir,
-		Prompt:       prompt,
-		ProjectDir:   workDir,
-		ProfileName:  p.Name,
-		ProjectName:  projectName,
+		AgentName:        p.Agent,
+		AgentCommand:     customCmd,
+		AgentArgs:        agentArgs,
+		AgentEnv:         agentEnv,
+		WorkDir:          workDir,
+		Prompt:           prompt,
+		ProjectDir:       workDir,
+		ProfileName:      p.Name,
+		ProjectName:      projectName,
 		UseDefaultPrompt: true,
 	}
 
@@ -818,13 +839,13 @@ func (m AppModel) startAgentInline(p profileEntry, projectName string) (tea.Mode
 
 	eventCh := make(chan any, 256)
 	cancel := runtui.StartAgentLoop(runtui.RunConfig{
-		Store:       m.store,
-		Agent:       agentInstance,
-		AgentCfg:    agentCfg,
+		Store:           m.store,
+		Agent:           agentInstance,
+		AgentCfg:        agentCfg,
 		PromptBuildOpts: &promptOpts,
-		Plan:        m.plan,
-		ProjectName: projectName,
-		ProfileName: p.Name,
+		Plan:            m.plan,
+		ProjectName:     projectName,
+		ProfileName:     p.Name,
 	}, eventCh)
 
 	m.state = stateRunning
