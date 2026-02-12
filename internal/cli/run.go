@@ -40,7 +40,7 @@ Examples:
   adaf run --agent claude --prompt "Fix the failing tests in auth/"
 
   # Run codex with a specific model
-  adaf run --agent codex --model o3
+  adaf run --agent codex --model gpt-5.1-codex-max
 
   # Run as a detachable session (like tmux)
   adaf run --agent claude -s

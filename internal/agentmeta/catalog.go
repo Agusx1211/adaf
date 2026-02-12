@@ -43,14 +43,24 @@ var builtin = map[string]Info{
 	"codex": {
 		Name:         "codex",
 		Binary:       "codex",
-		DefaultModel: "o4-mini",
-		SupportedModels: []string{"o4-mini", "o3", "gpt-4.1"},
+		DefaultModel: "gpt-5.2-codex",
+		SupportedModels: []string{
+			"gpt-5.2-codex",
+			"gpt-5.1-codex-max",
+			"gpt-5.1-codex-mini",
+			"gpt-5.2",
+			"gpt-5.1-codex",
+			"gpt-5.1",
+			"gpt-5-codex",
+			"gpt-5",
+		},
 		ReasoningLevels: []ReasoningLevel{
 			{Name: "low"},
 			{Name: "medium"},
 			{Name: "high"},
+			{Name: "xhigh"},
 		},
-		Capabilities: []string{"prompt-arg", "model-select", "auto-approve", "tty-required"},
+		Capabilities: []string{"prompt-arg", "model-select", "auto-approve", "json-output"},
 	},
 	"vibe": {
 		Name:            "vibe",

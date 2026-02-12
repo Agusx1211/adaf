@@ -79,12 +79,12 @@ func TestResolveDefaultModel(t *testing.T) {
 		Agents: map[string]AgentRecord{
 			"codex": {
 				Name:          "codex",
-				ModelOverride: "o3",
+				ModelOverride: "gpt-5.1-codex-max",
 			},
 		},
 	}
 
-	if got := ResolveDefaultModel(cfg, nil, "codex"); got != "o3" {
+	if got := ResolveDefaultModel(cfg, nil, "codex"); got != "gpt-5.1-codex-max" {
 		t.Fatalf("ResolveDefaultModel(codex) = %q", got)
 	}
 	if got := ResolveDefaultModel(nil, nil, "claude"); got != "sonnet" {
@@ -97,8 +97,8 @@ func TestResolveModelOverride(t *testing.T) {
 		Agents: map[string]AgentRecord{
 			"codex": {
 				Name:          "codex",
-				ModelOverride: "gpt-4.1",
-				DefaultModel:  "o4-mini",
+				ModelOverride: "gpt-5.1-codex-max",
+				DefaultModel:  "gpt-5.2-codex",
 			},
 			"claude": {
 				Name:         "claude",
@@ -107,7 +107,7 @@ func TestResolveModelOverride(t *testing.T) {
 		},
 	}
 
-	if got := ResolveModelOverride(cfg, nil, "codex"); got != "gpt-4.1" {
+	if got := ResolveModelOverride(cfg, nil, "codex"); got != "gpt-5.1-codex-max" {
 		t.Fatalf("ResolveModelOverride(codex) = %q", got)
 	}
 	if got := ResolveModelOverride(cfg, nil, "claude"); got != "" {

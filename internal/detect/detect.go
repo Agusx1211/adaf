@@ -138,8 +138,13 @@ func probeModelDiscovery(name, path string) (models []string, levels []agentmeta
 
 // --- Codex model discovery ---
 
-// codexModelsCachePath returns ~/.codex/models_cache.json.
+// codexModelsCachePath returns the path to the Codex models cache file.
+// It respects the CODEX_HOME environment variable; if not set, defaults
+// to ~/.codex/models_cache.json.
 func codexModelsCachePath() string {
+	if codexHome := os.Getenv("CODEX_HOME"); codexHome != "" {
+		return filepath.Join(codexHome, "models_cache.json")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
@@ -148,6 +153,8 @@ func codexModelsCachePath() string {
 }
 
 // codexCacheFile represents the top-level structure of models_cache.json.
+// The file also contains fetched_at, etag, and client_version fields that
+// we intentionally ignore here.
 type codexCacheFile struct {
 	Models []codexCacheModel `json:"models"`
 }

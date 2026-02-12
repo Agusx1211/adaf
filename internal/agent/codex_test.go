@@ -52,7 +52,7 @@ printf 'ok\n'
 	if result.ExitCode != 0 {
 		t.Fatalf("Run() exit code = %d, want 0", result.ExitCode)
 	}
-	if !strings.Contains(result.Output, "args:exec --full-auto PING") {
+	if !strings.Contains(result.Output, "args:exec --skip-git-repo-check --full-auto PING") {
 		t.Fatalf("Run() output missing expected arg sequence, got %q", result.Output)
 	}
 }
