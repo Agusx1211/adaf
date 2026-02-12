@@ -1081,7 +1081,13 @@ func (s *Store) CreateLoopRun(run *LoopRun) error {
 	defer s.mu.Unlock()
 
 	dir := filepath.Join(s.root, "loopruns")
-	os.MkdirAll(dir, 0755)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	if err := s.stopRunningLoopRunsLocked(dir); err != nil {
+		return err
+	}
+
 	run.ID = s.nextID(dir)
 	run.StartedAt = time.Now().UTC()
 	if run.Status == "" {
@@ -1118,6 +1124,7 @@ func (s *Store) ActiveLoopRun() (*LoopRun, error) {
 		return nil, err
 	}
 
+	var latest *LoopRun
 	for _, e := range entries {
 		if !strings.HasSuffix(e.Name(), ".json") {
 			continue
@@ -1127,10 +1134,47 @@ func (s *Store) ActiveLoopRun() (*LoopRun, error) {
 			continue
 		}
 		if run.Status == "running" {
-			return &run, nil
+			if latest == nil || run.ID > latest.ID {
+				cp := run
+				latest = &cp
+			}
 		}
 	}
-	return nil, nil
+	return latest, nil
+}
+
+func (s *Store) stopRunningLoopRunsLocked(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	stoppedAt := time.Now().UTC()
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+
+		path := filepath.Join(dir, e.Name())
+		var run LoopRun
+		if err := s.readJSONLocked(path, &run); err != nil {
+			continue
+		}
+		if run.Status != "running" {
+			continue
+		}
+
+		run.Status = "stopped"
+		run.StoppedAt = stoppedAt
+		if err := s.writeJSONLocked(path, &run); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // --- Loop Messages ---

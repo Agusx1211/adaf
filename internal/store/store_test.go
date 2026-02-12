@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestStoreInit(t *testing.T) {
@@ -453,5 +454,116 @@ func TestGetDecision(t *testing.T) {
 				t.Fatalf("GetDecision(%d) title = %q, want %q", tt.id, got.Title, tt.wantTitle)
 			}
 		})
+	}
+}
+
+func TestActiveLoopRunReturnsLatestRunningRun(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := New(dir)
+	if err := s.Init(ProjectConfig{Name: "test", RepoPath: "/tmp"}); err != nil {
+		t.Fatal(err)
+	}
+
+	run1 := &LoopRun{LoopName: "loop-a"}
+	if err := s.CreateLoopRun(run1); err != nil {
+		t.Fatalf("CreateLoopRun(run1): %v", err)
+	}
+
+	run2 := &LoopRun{LoopName: "loop-b"}
+	if err := s.CreateLoopRun(run2); err != nil {
+		t.Fatalf("CreateLoopRun(run2): %v", err)
+	}
+
+	// Simulate a stale orphaned run that was left as "running".
+	stale, err := s.GetLoopRun(run1.ID)
+	if err != nil {
+		t.Fatalf("GetLoopRun(run1): %v", err)
+	}
+	stale.Status = "running"
+	stale.StoppedAt = time.Time{}
+	if err := s.UpdateLoopRun(stale); err != nil {
+		t.Fatalf("UpdateLoopRun(stale): %v", err)
+	}
+
+	active, err := s.ActiveLoopRun()
+	if err != nil {
+		t.Fatalf("ActiveLoopRun(): %v", err)
+	}
+	if active == nil {
+		t.Fatal("ActiveLoopRun() = nil, want latest running run")
+	}
+	if active.ID != run2.ID {
+		t.Fatalf("ActiveLoopRun() ID = %d, want %d", active.ID, run2.ID)
+	}
+}
+
+func TestCreateLoopRunStopsExistingRunningRuns(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := New(dir)
+	if err := s.Init(ProjectConfig{Name: "test", RepoPath: "/tmp"}); err != nil {
+		t.Fatal(err)
+	}
+
+	run1 := &LoopRun{LoopName: "loop-a"}
+	if err := s.CreateLoopRun(run1); err != nil {
+		t.Fatalf("CreateLoopRun(run1): %v", err)
+	}
+
+	run2 := &LoopRun{LoopName: "loop-b"}
+	if err := s.CreateLoopRun(run2); err != nil {
+		t.Fatalf("CreateLoopRun(run2): %v", err)
+	}
+
+	// Simulate zombie state: multiple old runs marked as running.
+	revive := func(id int) {
+		t.Helper()
+		r, err := s.GetLoopRun(id)
+		if err != nil {
+			t.Fatalf("GetLoopRun(%d): %v", id, err)
+		}
+		r.Status = "running"
+		r.StoppedAt = time.Time{}
+		if err := s.UpdateLoopRun(r); err != nil {
+			t.Fatalf("UpdateLoopRun(%d): %v", id, err)
+		}
+	}
+	revive(run1.ID)
+	revive(run2.ID)
+
+	run3 := &LoopRun{LoopName: "loop-c"}
+	if err := s.CreateLoopRun(run3); err != nil {
+		t.Fatalf("CreateLoopRun(run3): %v", err)
+	}
+
+	assertStopped := func(id int) {
+		t.Helper()
+		r, err := s.GetLoopRun(id)
+		if err != nil {
+			t.Fatalf("GetLoopRun(%d): %v", id, err)
+		}
+		if r.Status != "stopped" {
+			t.Fatalf("run %d status = %q, want %q", id, r.Status, "stopped")
+		}
+		if r.StoppedAt.IsZero() {
+			t.Fatalf("run %d stopped_at is zero, want non-zero", id)
+		}
+	}
+	assertStopped(run1.ID)
+	assertStopped(run2.ID)
+
+	created, err := s.GetLoopRun(run3.ID)
+	if err != nil {
+		t.Fatalf("GetLoopRun(run3): %v", err)
+	}
+	if created.Status != "running" {
+		t.Fatalf("run %d status = %q, want %q", run3.ID, created.Status, "running")
+	}
+
+	active, err := s.ActiveLoopRun()
+	if err != nil {
+		t.Fatalf("ActiveLoopRun(): %v", err)
+	}
+	if active == nil || active.ID != run3.ID {
+		t.Fatalf("ActiveLoopRun() = %#v, want run ID %d", active, run3.ID)
 	}
 }
