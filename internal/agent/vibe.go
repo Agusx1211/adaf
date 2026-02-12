@@ -53,8 +53,13 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 
 	// Build arguments: start with configured defaults, then append
 	// programmatic-mode flags.
-	args := make([]string, 0, len(cfg.Args)+4)
+	args := make([]string, 0, len(cfg.Args)+6)
 	args = append(args, cfg.Args...)
+
+	// Resume a previous session if a session ID is provided.
+	if cfg.ResumeSessionID != "" {
+		args = append(args, "--resume", cfg.ResumeSessionID)
+	}
 
 	var stdinReader io.Reader
 	if cfg.Prompt != "" {

@@ -36,6 +36,9 @@ type SpawnResult struct {
 	Status   string
 	ExitCode int
 	Result   string
+	Summary  string // child's final output
+	ReadOnly bool   // whether this was a read-only scout
+	Branch   string // worktree branch (empty for read-only)
 }
 
 type activeSpawn struct {
@@ -465,6 +468,9 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 						Status:   r.Status,
 						ExitCode: r.ExitCode,
 						Result:   r.Result,
+						Summary:  r.Summary,
+						ReadOnly: r.ReadOnly,
+						Branch:   r.Branch,
 					})
 				}
 				return wr
@@ -474,6 +480,17 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 
 		err := l.Run(childCtx)
 		rec.CompletedAt = time.Now().UTC()
+
+		// Capture child's output for parent consumption.
+		const maxSummarySize = 8000
+		if l.LastResult != nil && l.LastResult.Output != "" {
+			summary := l.LastResult.Output
+			if len(summary) > maxSummarySize {
+				summary = "...(truncated)\n" + summary[len(summary)-maxSummarySize:]
+			}
+			rec.Summary = summary
+		}
+
 		status := "completed"
 		exitCode := 0
 		result := ""
@@ -652,6 +669,9 @@ func (o *Orchestrator) Wait(parentTurnID int) []SpawnResult {
 			Status:   r.Status,
 			ExitCode: r.ExitCode,
 			Result:   r.Result,
+			Summary:  r.Summary,
+			ReadOnly: r.ReadOnly,
+			Branch:   r.Branch,
 		})
 	}
 	return results
@@ -681,6 +701,9 @@ func (o *Orchestrator) WaitOne(spawnID int) SpawnResult {
 				Status:   rec.Status,
 				ExitCode: rec.ExitCode,
 				Result:   rec.Result,
+				Summary:  rec.Summary,
+				ReadOnly: rec.ReadOnly,
+				Branch:   rec.Branch,
 			}
 		}
 		<-ticker.C

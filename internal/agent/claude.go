@@ -53,6 +53,11 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 	// --verbose is required by the CLI when using stream-json output format.
 	args = append(args, "--print", "--output-format", "stream-json", "--verbose")
 
+	// Resume a previous session if a session ID is provided.
+	if cfg.ResumeSessionID != "" {
+		args = append(args, "--resume", cfg.ResumeSessionID)
+	}
+
 	// In --print mode, Claude accepts prompt via stdin or positional arg.
 	// We pass prompt through stdin to avoid argv size limits on long prompts.
 	var stdinReader io.Reader
@@ -115,6 +120,7 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 	events := stream.Parse(ctx, stdoutPipe)
 
 	var textBuf strings.Builder
+	var agentSessionID string
 
 	// accumulateText extracts text content from a stream event.
 	// In stream-json mode, the CLI emits complete "assistant" events (not
@@ -157,6 +163,11 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 				continue
 			}
 
+			// Capture session ID from init event.
+			if ev.Parsed.Type == "system" && ev.Parsed.Subtype == "init" && ev.Parsed.TurnID != "" {
+				agentSessionID = ev.Parsed.TurnID
+			}
+
 			// Forward to TUI.
 			cfg.EventSink <- ev
 
@@ -191,6 +202,11 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 					continue
 				}
 
+				// Capture session ID from init event.
+				if ev.Parsed.Type == "system" && ev.Parsed.Subtype == "init" && ev.Parsed.TurnID != "" {
+					agentSessionID = ev.Parsed.TurnID
+				}
+
 				display.Handle(ev.Parsed)
 				accumulateText(ev.Parsed)
 
@@ -217,9 +233,10 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 	}
 
 	return &Result{
-		ExitCode: exitCode,
-		Duration: duration,
-		Output:   textBuf.String(),
-		Error:    stderrBuf.String(),
+		ExitCode:       exitCode,
+		Duration:       duration,
+		Output:         textBuf.String(),
+		Error:          stderrBuf.String(),
+		AgentSessionID: agentSessionID,
 	}, nil
 }

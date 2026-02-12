@@ -92,6 +92,9 @@ type WaitResultInfo struct {
 	Status   string
 	ExitCode int
 	Result   string
+	Summary  string // child's final output
+	ReadOnly bool   // whether this was a read-only scout
+	Branch   string // worktree branch (empty for read-only)
 }
 
 // Build constructs a prompt from project context and role configuration.
@@ -348,13 +351,8 @@ func Build(opts BuildOpts) (string, error) {
 		b.WriteString("## Spawn Wait Results\n\n")
 		b.WriteString("The spawns you waited for have completed:\n\n")
 		for _, wr := range opts.WaitResults {
-			fmt.Fprintf(&b, "- Spawn #%d (profile=%s): status=%s, exit_code=%d", wr.SpawnID, wr.Profile, wr.Status, wr.ExitCode)
-			if wr.Result != "" {
-				fmt.Fprintf(&b, " — %s", wr.Result)
-			}
-			b.WriteString("\n")
+			b.WriteString(formatWaitResultInfo(wr))
 		}
-		b.WriteString("\nReview their diffs with `adaf spawn-diff --spawn-id N` and merge or reject as needed.\n\n")
 	}
 
 	// Handoff section.
@@ -397,6 +395,37 @@ func Build(opts BuildOpts) (string, error) {
 	}
 
 	return b.String(), nil
+}
+
+// formatWaitResultInfo formats a single WaitResultInfo for the prompt.
+func formatWaitResultInfo(wr WaitResultInfo) string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "### Spawn #%d (profile=%s", wr.SpawnID, wr.Profile)
+	if wr.ReadOnly {
+		b.WriteString(", read-only")
+	} else if wr.Branch != "" {
+		fmt.Fprintf(&b, ", branch=%s", wr.Branch)
+	}
+	b.WriteString(") — ")
+	b.WriteString(wr.Status)
+	if wr.ExitCode != 0 {
+		fmt.Fprintf(&b, " (exit_code=%d)", wr.ExitCode)
+	}
+	b.WriteString("\n\n")
+
+	body := wr.Summary
+	if body == "" {
+		body = wr.Result
+	}
+	if body != "" {
+		b.WriteString(body)
+		b.WriteString("\n\n")
+	} else {
+		b.WriteString("(no output captured)\n\n")
+	}
+
+	return b.String()
 }
 
 func summarizeForContext(s string, max int) string {

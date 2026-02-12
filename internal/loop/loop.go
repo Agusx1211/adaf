@@ -26,6 +26,9 @@ type WaitResult struct {
 	Status   string
 	ExitCode int
 	Result   string
+	Summary  string // child's final output
+	ReadOnly bool   // whether this was a read-only scout
+	Branch   string // worktree branch (empty for read-only)
 }
 
 // Loop is the main agent loop controller. It runs an agent one or more times,
@@ -73,6 +76,14 @@ type Loop struct {
 	// cancel function. This allows external code (e.g. guardrail monitors) to
 	// cancel only the current turn without stopping the entire loop.
 	OnTurnContext func(cancel context.CancelFunc)
+
+	// LastResult is populated after each Agent.Run() call so callers
+	// (e.g. orchestrator) can inspect the child's output.
+	LastResult *agent.Result
+
+	// lastAgentSessionID holds the session/thread ID from the last agent
+	// run, used to resume the session on the next turn (e.g. after wait-for-spawns).
+	lastAgentSessionID string
 
 	// lastWaitResults holds results from a wait cycle, injected into the next prompt.
 	lastWaitResults []WaitResult
@@ -175,14 +186,8 @@ func (l *Loop) Run(ctx context.Context) error {
 		if len(l.lastWaitResults) > 0 {
 			cfg.Prompt += "\n## Spawn Wait Results\n\nThe spawns you waited for have completed:\n\n"
 			for _, wr := range l.lastWaitResults {
-				cfg.Prompt += fmt.Sprintf("- Spawn #%d (profile=%s): status=%s, exit_code=%d",
-					wr.SpawnID, wr.Profile, wr.Status, wr.ExitCode)
-				if wr.Result != "" {
-					cfg.Prompt += fmt.Sprintf(" — %s", wr.Result)
-				}
-				cfg.Prompt += "\n"
+				cfg.Prompt += formatWaitResult(wr)
 			}
-			cfg.Prompt += "\nReview their diffs with `adaf spawn-diff --spawn-id N` and merge or reject as needed.\n\n"
 			l.lastWaitResults = nil // Clear after injecting.
 		}
 
@@ -211,9 +216,22 @@ func (l *Loop) Run(ctx context.Context) error {
 			l.OnTurnContext(turnCancel)
 		}
 
+		// Resume the previous agent session if we have a session ID
+		// (e.g. continuing after a wait-for-spawns cycle).
+		if l.lastAgentSessionID != "" {
+			cfg.ResumeSessionID = l.lastAgentSessionID
+			l.lastAgentSessionID = "" // consume after use
+		}
+
 		// Run the agent.
 		result, runErr := l.Agent.Run(turnCtx, cfg, rec)
 		turnCancel() // ensure turn context is always cleaned up
+
+		// Capture the result and session ID for potential resume.
+		l.LastResult = result
+		if result != nil && result.AgentSessionID != "" {
+			l.lastAgentSessionID = result.AgentSessionID
+		}
 
 		// Record completion metadata.
 		rec.RecordMeta("end_time", time.Now().UTC().Format(time.RFC3339))
@@ -269,21 +287,38 @@ func (l *Loop) Run(ctx context.Context) error {
 				if msg := l.drainInterrupt(); msg != "" {
 					// Interrupted (e.g. guardrail violation or parent signal) —
 					// continue to next turn with the interrupt message injected.
+					// Don't increment turn count — interrupt turns don't count
+					// toward MaxTurns (same as wait-for-spawns).
 					l.lastInterruptMsg = msg
-					turn++
 					continue
 				}
 				// If the parent context is still alive and we have turn-scoped
 				// cancel support (OnTurnContext), this was a turn-only cancel
 				// (e.g. guardrail) that raced with drainInterrupt.
 				if l.OnTurnContext != nil && ctx.Err() == nil {
-					turn++
 					continue
 				}
 				// Preserve cancellation semantics so callers can classify graceful stop.
 				return context.Canceled
 			}
 			return fmt.Errorf("agent run failed (turn %d): %w", turnID, runErr)
+		}
+
+		// Check for interrupt even when runErr is nil.
+		// When agents are killed by SIGKILL (e.g. interrupt from parent or
+		// guardrail), cmd.Wait() returns *exec.ExitError which Agent.Run()
+		// handles as a normal exit — returning (*Result, nil) rather than
+		// (nil, context.Canceled). We must still drain the interrupt channel
+		// so the message is injected into the next turn.
+		if msg := l.drainInterrupt(); msg != "" {
+			l.lastInterruptMsg = msg
+			continue
+		}
+		// If the parent context was canceled but no interrupt message was
+		// pending, exit the loop. This handles child contexts canceled by
+		// the orchestrator.
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 
 		// Check for wait-for-spawns signal.
@@ -318,6 +353,39 @@ func (l *Loop) drainInterrupt() string {
 	default:
 		return ""
 	}
+}
+
+// formatWaitResult formats a single WaitResult for injection into the prompt.
+func formatWaitResult(wr WaitResult) string {
+	var b strings.Builder
+
+	// Header: ### Spawn #7 (profile=devstral2, read-only) — completed
+	fmt.Fprintf(&b, "### Spawn #%d (profile=%s", wr.SpawnID, wr.Profile)
+	if wr.ReadOnly {
+		b.WriteString(", read-only")
+	} else if wr.Branch != "" {
+		fmt.Fprintf(&b, ", branch=%s", wr.Branch)
+	}
+	b.WriteString(") — ")
+	b.WriteString(wr.Status)
+	if wr.ExitCode != 0 {
+		fmt.Fprintf(&b, " (exit_code=%d)", wr.ExitCode)
+	}
+	b.WriteString("\n\n")
+
+	// Body: prefer Summary, fall back to Result.
+	body := wr.Summary
+	if body == "" {
+		body = wr.Result
+	}
+	if body != "" {
+		b.WriteString(body)
+		b.WriteString("\n\n")
+	} else {
+		b.WriteString("(no output captured)\n\n")
+	}
+
+	return b.String()
 }
 
 // summarizeObjectiveForLog extracts a compact objective summary from a full

@@ -20,6 +20,11 @@ type Config struct {
 	MaxTurns int               // max loop iterations (0 = infinite)
 	TurnID   int               // current turn ID for recording
 
+	// ResumeSessionID is the session/thread ID from a previous agent run.
+	// When set, the agent should resume the previous session instead of
+	// starting a new one (e.g. --resume for Claude/Gemini, exec resume for Codex).
+	ResumeSessionID string
+
 	// EventSink, when set, receives parsed Claude stream events instead of
 	// displaying them to stdout. Used by the TUI to render events in its
 	// own viewport.
@@ -33,10 +38,11 @@ type Config struct {
 
 // Result holds the outcome of a single agent run.
 type Result struct {
-	ExitCode int
-	Duration time.Duration
-	Output   string // captured stdout
-	Error    string // captured stderr
+	ExitCode       int
+	Duration       time.Duration
+	Output         string // captured stdout
+	Error          string // captured stderr
+	AgentSessionID string // session/thread ID captured from stream init event
 }
 
 // Agent is the interface that all agent runners must implement.

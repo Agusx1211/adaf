@@ -638,6 +638,9 @@ func waitForSessionSpawns(s *store.Store, parentTurnID int) []loop.WaitResult {
 			Status:   rec.Status,
 			ExitCode: rec.ExitCode,
 			Result:   rec.Result,
+			Summary:  rec.Summary,
+			ReadOnly: rec.ReadOnly,
+			Branch:   rec.Branch,
 		})
 	}
 	return results

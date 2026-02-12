@@ -48,6 +48,11 @@ func (g *GeminiAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 	args = append(args, cfg.Args...)
 	args = append(args, "--output-format", "stream-json")
 
+	// Resume a previous session if a session ID is provided.
+	if cfg.ResumeSessionID != "" {
+		args = append(args, "--resume", cfg.ResumeSessionID)
+	}
+
 	// Keep -p with an empty value to force non-interactive mode while
 	// avoiding long prompt text in argv.
 	var stdinReader io.Reader
@@ -110,6 +115,7 @@ func (g *GeminiAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 	events := stream.ParseGemini(ctx, stdoutPipe)
 
 	var textBuf strings.Builder
+	var agentSessionID string
 
 	if cfg.EventSink != nil {
 		// TUI mode: forward events to the sink channel for the TUI to render.
@@ -121,6 +127,11 @@ func (g *GeminiAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 
 			if ev.Err != nil {
 				continue
+			}
+
+			// Capture session ID from init event.
+			if ev.Parsed.Type == "system" && ev.Parsed.Subtype == "init" && ev.Parsed.TurnID != "" {
+				agentSessionID = ev.Parsed.TurnID
 			}
 
 			// Forward to TUI.
@@ -169,6 +180,11 @@ func (g *GeminiAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 					continue
 				}
 
+				// Capture session ID from init event.
+				if ev.Parsed.Type == "system" && ev.Parsed.Subtype == "init" && ev.Parsed.TurnID != "" {
+					agentSessionID = ev.Parsed.TurnID
+				}
+
 				display.Handle(ev.Parsed)
 
 				// Accumulate text for Result.Output.
@@ -208,9 +224,10 @@ func (g *GeminiAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 	}
 
 	return &Result{
-		ExitCode: exitCode,
-		Duration: duration,
-		Output:   textBuf.String(),
-		Error:    stderrBuf.String(),
+		ExitCode:       exitCode,
+		Duration:       duration,
+		Output:         textBuf.String(),
+		Error:          stderrBuf.String(),
+		AgentSessionID: agentSessionID,
 	}, nil
 }

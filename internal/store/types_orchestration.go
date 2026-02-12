@@ -16,6 +16,7 @@ type SpawnRecord struct {
 	Status          string    `json:"status"` // "queued","running","awaiting_input","completed","failed","merged","rejected"
 	Result          string    `json:"result,omitempty"`
 	ExitCode        int       `json:"exit_code,omitempty"`
+	Summary         string    `json:"summary,omitempty"` // child's final output for parent consumption
 	StartedAt       time.Time `json:"started_at"`
 	CompletedAt     time.Time `json:"completed_at,omitzero"`
 	MergeCommit     string    `json:"merge_commit,omitempty"`

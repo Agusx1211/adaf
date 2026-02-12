@@ -51,7 +51,12 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 
 	// Build arguments: force non-interactive exec mode, then configured flags.
 	args := make([]string, 0, len(cfg.Args)+8)
-	args = append(args, "exec")
+	if cfg.ResumeSessionID != "" {
+		// Resume a previous thread using "exec resume --last".
+		args = append(args, "exec", "resume", "--last")
+	} else {
+		args = append(args, "exec")
+	}
 
 	// Allow running outside a git repository since ADAF manages its own
 	// worktrees and launch contexts.
@@ -136,6 +141,7 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 
 	events := stream.ParseCodex(ctx, stdoutPipe)
 	var textBuf strings.Builder
+	var agentSessionID string
 
 	accumulateText := func(ev stream.ClaudeEvent) {
 		switch ev.Type {
@@ -163,6 +169,9 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 			if ev.Err != nil || ev.Parsed.Type == "" {
 				continue
 			}
+			if ev.Parsed.Type == "system" && ev.Parsed.Subtype == "init" && ev.Parsed.TurnID != "" {
+				agentSessionID = ev.Parsed.TurnID
+			}
 			ev.TurnID = cfg.TurnID
 			cfg.EventSink <- ev
 			accumulateText(ev.Parsed)
@@ -188,6 +197,9 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 				}
 				if ev.Err != nil || ev.Parsed.Type == "" {
 					continue
+				}
+				if ev.Parsed.Type == "system" && ev.Parsed.Subtype == "init" && ev.Parsed.TurnID != "" {
+					agentSessionID = ev.Parsed.TurnID
 				}
 				display.Handle(ev.Parsed)
 				accumulateText(ev.Parsed)
@@ -215,10 +227,11 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 	}
 
 	return &Result{
-		ExitCode: exitCode,
-		Duration: duration,
-		Output:   textBuf.String(),
-		Error:    stderrBuf.String(),
+		ExitCode:       exitCode,
+		Duration:       duration,
+		Output:         textBuf.String(),
+		Error:          stderrBuf.String(),
+		AgentSessionID: agentSessionID,
 	}, nil
 }
 
