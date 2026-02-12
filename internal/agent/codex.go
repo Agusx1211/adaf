@@ -82,9 +82,33 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
 
+	stdoutW := cfg.Stdout
+	if stdoutW == nil {
+		stdoutW = os.Stdout
+	}
+	stderrW := cfg.Stderr
+	if stderrW == nil {
+		stderrW = os.Stderr
+	}
+
 	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = io.MultiWriter(&stdoutBuf, recorder.WrapWriter(os.Stdout, "stdout"))
-	cmd.Stderr = io.MultiWriter(&stderrBuf, recorder.WrapWriter(os.Stderr, "stderr"))
+	stdoutWriters := []io.Writer{
+		&stdoutBuf,
+		recorder.WrapWriter(stdoutW, "stdout"),
+	}
+	if w := newEventSinkWriter(cfg.EventSink, cfg.SessionID, ""); w != nil {
+		stdoutWriters = append(stdoutWriters, w)
+	}
+	cmd.Stdout = io.MultiWriter(stdoutWriters...)
+
+	stderrWriters := []io.Writer{
+		&stderrBuf,
+		recorder.WrapWriter(stderrW, "stderr"),
+	}
+	if w := newEventSinkWriter(cfg.EventSink, cfg.SessionID, "[stderr] "); w != nil {
+		stderrWriters = append(stderrWriters, w)
+	}
+	cmd.Stderr = io.MultiWriter(stderrWriters...)
 
 	recorder.RecordMeta("agent", "codex")
 	recorder.RecordMeta("command", cmdName+" "+strings.Join(args, " "))

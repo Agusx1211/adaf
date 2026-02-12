@@ -58,12 +58,33 @@ func (g *GenericAgent) Run(ctx context.Context, cfg Config, recorder *recording.
 	// Capture stdout and stderr, streaming to both the recorder and
 	// in-memory buffers so we can return the full output in Result.
 	var stdoutBuf, stderrBuf bytes.Buffer
+	stdoutW := cfg.Stdout
+	if stdoutW == nil {
+		stdoutW = os.Stdout
+	}
+	stderrW := cfg.Stderr
+	if stderrW == nil {
+		stderrW = os.Stderr
+	}
 
-	stdoutWriter := io.MultiWriter(&stdoutBuf, recorder.WrapWriter(os.Stdout, "stdout"))
-	stderrWriter := io.MultiWriter(&stderrBuf, recorder.WrapWriter(os.Stderr, "stderr"))
+	stdoutWriters := []io.Writer{
+		&stdoutBuf,
+		recorder.WrapWriter(stdoutW, "stdout"),
+	}
+	if w := newEventSinkWriter(cfg.EventSink, cfg.SessionID, ""); w != nil {
+		stdoutWriters = append(stdoutWriters, w)
+	}
 
-	cmd.Stdout = stdoutWriter
-	cmd.Stderr = stderrWriter
+	stderrWriters := []io.Writer{
+		&stderrBuf,
+		recorder.WrapWriter(stderrW, "stderr"),
+	}
+	if w := newEventSinkWriter(cfg.EventSink, cfg.SessionID, "[stderr] "); w != nil {
+		stderrWriters = append(stderrWriters, w)
+	}
+
+	cmd.Stdout = io.MultiWriter(stdoutWriters...)
+	cmd.Stderr = io.MultiWriter(stderrWriters...)
 
 	recorder.RecordMeta("command", cmdName+" "+strings.Join(args, " "))
 	recorder.RecordMeta("workdir", cfg.WorkDir)

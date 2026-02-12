@@ -118,7 +118,7 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 			if err != nil {
 				continue
 			}
-			eventCh <- runtui.AgentRawOutputMsg{Data: data.Data}
+			eventCh <- runtui.AgentRawOutputMsg{Data: data.Data, SessionID: data.SessionID}
 
 		case MsgFinished:
 			data, err := DecodeData[WireFinished](msg)

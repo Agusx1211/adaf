@@ -99,8 +99,23 @@ func (o *OpencodeAgent) Run(ctx context.Context, cfg Config, recorder *recording
 	}
 
 	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = io.MultiWriter(&stdoutBuf, recorder.WrapWriter(stdoutW, "stdout"))
-	cmd.Stderr = io.MultiWriter(&stderrBuf, recorder.WrapWriter(stderrW, "stderr"))
+	stdoutWriters := []io.Writer{
+		&stdoutBuf,
+		recorder.WrapWriter(stdoutW, "stdout"),
+	}
+	if w := newEventSinkWriter(cfg.EventSink, cfg.SessionID, ""); w != nil {
+		stdoutWriters = append(stdoutWriters, w)
+	}
+	cmd.Stdout = io.MultiWriter(stdoutWriters...)
+
+	stderrWriters := []io.Writer{
+		&stderrBuf,
+		recorder.WrapWriter(stderrW, "stderr"),
+	}
+	if w := newEventSinkWriter(cfg.EventSink, cfg.SessionID, "[stderr] "); w != nil {
+		stderrWriters = append(stderrWriters, w)
+	}
+	cmd.Stderr = io.MultiWriter(stderrWriters...)
 
 	recorder.RecordMeta("agent", "opencode")
 	recorder.RecordMeta("command", cmdName+" "+strings.Join(args, " "))

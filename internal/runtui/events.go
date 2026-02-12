@@ -13,7 +13,8 @@ type AgentEventMsg struct {
 
 // AgentRawOutputMsg carries raw text for non-Claude agents.
 type AgentRawOutputMsg struct {
-	Data string
+	Data      string
+	SessionID int
 }
 
 // AgentStartedMsg signals that a new agent session has begun.

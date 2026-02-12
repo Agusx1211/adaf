@@ -323,6 +323,18 @@ func (b *broadcaster) runAgentLoop(ctx context.Context, sessionID int, cfg *Daem
 			if ev.Err != nil {
 				continue
 			}
+			if ev.Text != "" {
+				wireRaw := WireRaw{
+					Data:      ev.Text,
+					SessionID: ev.SessionID,
+				}
+				line, err := EncodeMsg(MsgRaw, wireRaw)
+				if err != nil {
+					continue
+				}
+				b.broadcast(line)
+				continue
+			}
 			eventJSON, err := json.Marshal(ev.Parsed)
 			if err != nil {
 				continue
@@ -358,13 +370,6 @@ func (b *broadcaster) runAgentLoop(ctx context.Context, sessionID int, cfg *Daem
 			b.broadcast(line)
 		},
 	}
-
-	// Also set up a recorder-like event sink for raw output from non-Claude agents.
-	// The agent.Run already writes to the EventSink channel for Claude.
-	// For other agents, raw output goes through Stdout which we've set to Discard,
-	// so we need to handle that differently. The existing loop handles this via
-	// the recording system, so we rely on the EventSink for Claude and the loop
-	// callbacks for lifecycle events.
 
 	loopErr := l.Run(ctx)
 	close(streamCh)

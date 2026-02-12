@@ -33,10 +33,9 @@ func (v *VibeAgent) Name() string {
 // after completing the response (equivalent to using the "auto-approve"
 // agent profile).
 //
-// We explicitly pass --output text to ensure deterministic plain-text
-// output. Vibe also supports --output json (all messages at end) and
-// --output streaming (NDJSON per message), but we use text mode to keep
-// the buffer-agent pattern simple.
+// We select output mode based on runtime:
+//   - TUI/EventSink mode: --output streaming for realtime NDJSON updates.
+//   - Non-TUI mode: --output text for deterministic plain-text output.
 //
 // Model selection is done via the VIBE_ACTIVE_MODEL environment variable
 // (set in cfg.Env) rather than a --model flag, because vibe uses
@@ -57,10 +56,13 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 
 	if cfg.Prompt != "" {
 		args = append(args, "-p", cfg.Prompt)
-		// Request explicit text output so we get clean human-readable
-		// output rather than depending on vibe's default, which could
-		// change across versions.
-		args = append(args, "--output", "text")
+		outputMode := "text"
+		if cfg.EventSink != nil {
+			outputMode = "streaming"
+		}
+		// Request explicit output mode rather than depending on defaults
+		// that may change across vibe releases.
+		args = append(args, "--output", outputMode)
 		recorder.RecordStdin(cfg.Prompt)
 	}
 
@@ -85,8 +87,23 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 
 	// Capture output.
 	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = io.MultiWriter(&stdoutBuf, recorder.WrapWriter(stdoutW, "stdout"))
-	cmd.Stderr = io.MultiWriter(&stderrBuf, recorder.WrapWriter(stderrW, "stderr"))
+	stdoutWriters := []io.Writer{
+		&stdoutBuf,
+		recorder.WrapWriter(stdoutW, "stdout"),
+	}
+	if w := newEventSinkWriter(cfg.EventSink, cfg.SessionID, ""); w != nil {
+		stdoutWriters = append(stdoutWriters, w)
+	}
+	cmd.Stdout = io.MultiWriter(stdoutWriters...)
+
+	stderrWriters := []io.Writer{
+		&stderrBuf,
+		recorder.WrapWriter(stderrW, "stderr"),
+	}
+	if w := newEventSinkWriter(cfg.EventSink, cfg.SessionID, "[stderr] "); w != nil {
+		stderrWriters = append(stderrWriters, w)
+	}
+	cmd.Stderr = io.MultiWriter(stderrWriters...)
 
 	recorder.RecordMeta("agent", "vibe")
 	recorder.RecordMeta("command", cmdName+" "+strings.Join(args, " "))

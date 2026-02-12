@@ -6,7 +6,11 @@ import "encoding/json"
 type RawEvent struct {
 	Raw    []byte
 	Parsed ClaudeEvent
-	Err    error
+	// Text carries raw stdout/stderr chunks for non-NDJSON agents.
+	Text string
+	// SessionID identifies which loop session produced Text.
+	SessionID int
+	Err       error
 }
 
 // ClaudeEvent is the top-level structure for a Claude stream-json event.
@@ -50,15 +54,15 @@ type ClaudeEvent struct {
 	Delta        *Delta        `json:"delta,omitempty"`
 
 	// For result events.
-	TotalCostUSD float64        `json:"total_cost_usd,omitempty"`
-	DurationMS   float64        `json:"duration_ms,omitempty"`
-	DurationAPMS float64        `json:"duration_api_ms,omitempty"`
-	IsError      bool           `json:"is_error,omitempty"`
-	NumTurns     int            `json:"num_turns,omitempty"`
-	ResultText   string         `json:"result,omitempty"`
-	StopReason   *string        `json:"stop_reason,omitempty"`
-	Usage        *Usage         `json:"usage,omitempty"`
-	Errors       []string       `json:"errors,omitempty"`
+	TotalCostUSD float64  `json:"total_cost_usd,omitempty"`
+	DurationMS   float64  `json:"duration_ms,omitempty"`
+	DurationAPMS float64  `json:"duration_api_ms,omitempty"`
+	IsError      bool     `json:"is_error,omitempty"`
+	NumTurns     int      `json:"num_turns,omitempty"`
+	ResultText   string   `json:"result,omitempty"`
+	StopReason   *string  `json:"stop_reason,omitempty"`
+	Usage        *Usage   `json:"usage,omitempty"`
+	Errors       []string `json:"errors,omitempty"`
 }
 
 // AssistantMessage is the message payload inside an "assistant" event.

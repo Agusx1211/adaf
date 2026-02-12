@@ -50,7 +50,8 @@ type WireEvent struct {
 
 // WireRaw carries raw text output for non-Claude agents.
 type WireRaw struct {
-	Data string `json:"data"`
+	Data      string `json:"data"`
+	SessionID int    `json:"session_id,omitempty"`
 }
 
 // WireFinished signals that a single agent session completed.

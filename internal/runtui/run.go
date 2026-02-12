@@ -51,6 +51,10 @@ func Run(cfg RunConfig) error {
 			if ev.Err != nil {
 				continue
 			}
+			if ev.Text != "" {
+				eventCh <- AgentRawOutputMsg{Data: ev.Text, SessionID: ev.SessionID}
+				continue
+			}
 			eventCh <- AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw}
 		}
 	}()
@@ -76,6 +80,10 @@ func StartAgentLoop(cfg RunConfig, eventCh chan any) context.CancelFunc {
 	go func() {
 		for ev := range streamCh {
 			if ev.Err != nil {
+				continue
+			}
+			if ev.Text != "" {
+				eventCh <- AgentRawOutputMsg{Data: ev.Text, SessionID: ev.SessionID}
 				continue
 			}
 			eventCh <- AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw}

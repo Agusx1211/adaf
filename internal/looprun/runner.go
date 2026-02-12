@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/agusx1211/adaf/internal/agent"
@@ -169,6 +171,10 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 					if ev.Err != nil {
 						continue
 					}
+					if ev.Text != "" {
+						eventCh <- runtui.AgentRawOutputMsg{Data: ev.Text, SessionID: ev.SessionID}
+						continue
+					}
 					eventCh <- runtui.AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw}
 				}
 				close(bridgeDone)
@@ -177,6 +183,9 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			agentCfg.EventSink = streamCh
 			agentCfg.Stdout = io.Discard
 			agentCfg.Stderr = io.Discard
+
+			var pollCancel context.CancelFunc
+			var pollDone chan struct{}
 
 			l := &loop.Loop{
 				Store:       cfg.Store,
@@ -187,8 +196,24 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 					run.SessionIDs = append(run.SessionIDs, sessionID)
 					cfg.Store.UpdateLoopRun(run)
 					eventCh <- runtui.AgentStartedMsg{SessionID: sessionID}
+
+					pollCtx, cancel := context.WithCancel(ctx)
+					pollCancel = cancel
+					pollDone = make(chan struct{})
+					go func() {
+						defer close(pollDone)
+						pollSpawnStatus(pollCtx, cfg.Store, sessionID, eventCh)
+					}()
 				},
 				OnEnd: func(sessionID int, result *agent.Result) {
+					if pollCancel != nil {
+						pollCancel()
+						pollCancel = nil
+					}
+					if pollDone != nil {
+						<-pollDone
+						pollDone = nil
+					}
 					eventCh <- runtui.AgentFinishedMsg{
 						SessionID: sessionID,
 						Result:    result,
@@ -197,6 +222,12 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			}
 
 			loopErr := l.Run(ctx)
+			if pollCancel != nil {
+				pollCancel()
+			}
+			if pollDone != nil {
+				<-pollDone
+			}
 			close(streamCh)
 			<-bridgeDone
 
@@ -229,6 +260,66 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			}
 		}
 	}
+}
+
+func pollSpawnStatus(ctx context.Context, s *store.Store, parentSessionID int, eventCh chan any) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	lastSnapshot := ""
+	emitIfChanged := func() {
+		records, err := s.SpawnsByParent(parentSessionID)
+		if err != nil {
+			return
+		}
+		sort.Slice(records, func(i, j int) bool {
+			return records[i].ID < records[j].ID
+		})
+
+		spawns := make([]runtui.SpawnInfo, 0, len(records))
+		for _, rec := range records {
+			info := runtui.SpawnInfo{
+				ID:      rec.ID,
+				Profile: rec.ChildProfile,
+				Status:  rec.Status,
+			}
+			if rec.Status == "awaiting_input" {
+				if ask, err := s.PendingAsk(rec.ID); err == nil && ask != nil {
+					info.Question = ask.Content
+				}
+			}
+			spawns = append(spawns, info)
+		}
+
+		snapshot := spawnSnapshotFingerprint(spawns)
+		if snapshot == lastSnapshot {
+			return
+		}
+		lastSnapshot = snapshot
+		eventCh <- runtui.SpawnStatusMsg{Spawns: spawns}
+	}
+
+	emitIfChanged()
+	for {
+		select {
+		case <-ctx.Done():
+			emitIfChanged()
+			return
+		case <-ticker.C:
+			emitIfChanged()
+		}
+	}
+}
+
+func spawnSnapshotFingerprint(spawns []runtui.SpawnInfo) string {
+	if len(spawns) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, sp := range spawns {
+		b.WriteString(fmt.Sprintf("%d|%s|%s|%s;", sp.ID, sp.Profile, sp.Status, sp.Question))
+	}
+	return b.String()
 }
 
 // buildAgentConfig creates an agent.Config for a profile step.
