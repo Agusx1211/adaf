@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/recording"
 )
 
@@ -63,6 +64,13 @@ func (o *OpencodeAgent) Run(ctx context.Context, cfg Config, recorder *recording
 		stdinReader = strings.NewReader(cfg.Prompt)
 		recorder.RecordStdin(cfg.Prompt)
 	}
+
+	debug.LogKV("agent.opencode", "building command",
+		"binary", cmdName,
+		"args", strings.Join(args, " "),
+		"workdir", cfg.WorkDir,
+		"prompt_len", len(cfg.Prompt),
+	)
 
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
@@ -124,6 +132,7 @@ func (o *OpencodeAgent) Run(ctx context.Context, cfg Config, recorder *recording
 	recorder.RecordMeta("workdir", cfg.WorkDir)
 
 	start := time.Now()
+	debug.LogKV("agent.opencode", "process starting", "binary", cmdName)
 	err := cmd.Run()
 	duration := time.Since(start)
 
@@ -133,9 +142,15 @@ func (o *OpencodeAgent) Run(ctx context.Context, cfg Config, recorder *recording
 		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
+			debug.LogKV("agent.opencode", "cmd.Run() error (not ExitError)", "error", err)
 			return nil, fmt.Errorf("opencode agent: failed to run command: %w", err)
 		}
 	}
+	debug.LogKV("agent.opencode", "process finished",
+		"exit_code", exitCode,
+		"duration", duration,
+		"output_len", stdoutBuf.Len(),
+	)
 
 	return &Result{
 		ExitCode: exitCode,

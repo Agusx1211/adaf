@@ -16,6 +16,7 @@ import (
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
+	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/guardrail"
 	"github.com/agusx1211/adaf/internal/hexid"
 	"github.com/agusx1211/adaf/internal/loop"
@@ -47,6 +48,14 @@ type RunConfig struct {
 
 // Run is the blocking loop execution implementation.
 func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
+	debug.LogKV("looprun", "Run() starting",
+		"loop_name", cfg.LoopDef.Name,
+		"steps", len(cfg.LoopDef.Steps),
+		"plan_id", cfg.PlanID,
+		"session_id", cfg.SessionID,
+		"max_cycles", cfg.MaxCycles,
+		"workdir", cfg.WorkDir,
+	)
 	loopDef := cfg.LoopDef
 
 	// Create the loop run record.
@@ -77,6 +86,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 	if err := cfg.Store.CreateLoopRun(run); err != nil {
 		return fmt.Errorf("creating loop run: %w", err)
 	}
+	debug.LogKV("looprun", "loop run created", "run_id", run.ID, "hex_id", run.HexID)
 
 	defer func() {
 		run.Status = "stopped"
@@ -98,9 +108,18 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			select {
 			case <-ctx.Done():
 				run.Status = "cancelled"
+				debug.LogKV("looprun", "cancelled during step iteration", "cycle", cycle, "step", stepIdx)
 				return ctx.Err()
 			default:
 			}
+
+			debug.LogKV("looprun", "step starting",
+				"cycle", cycle,
+				"step", stepIdx,
+				"profile", stepDef.Profile,
+				"turns", stepDef.Turns,
+				"role", stepDef.Role,
+			)
 
 			run.StepIndex = stepIdx
 			cfg.Store.UpdateLoopRun(run)
@@ -322,6 +341,12 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			}
 
 			loopErr := l.Run(ctx)
+			debug.LogKV("looprun", "step loop finished",
+				"cycle", cycle,
+				"step", stepIdx,
+				"profile", prof.Name,
+				"error", loopErr,
+			)
 			stopPoll()
 			close(streamCh)
 			<-bridgeDone

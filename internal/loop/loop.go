@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/agusx1211/adaf/internal/agent"
+	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/hexid"
 	"github.com/agusx1211/adaf/internal/recording"
 	"github.com/agusx1211/adaf/internal/stats"
@@ -100,6 +101,15 @@ func (l *Loop) Run(ctx context.Context) error {
 	maxTurns := l.Config.MaxTurns
 	turn := 0
 
+	debug.LogKV("loop", "loop starting",
+		"agent", l.Agent.Name(),
+		"profile", l.ProfileName,
+		"plan_id", l.PlanID,
+		"max_turns", maxTurns,
+		"loop_run_hex", l.LoopRunHexID,
+		"step_hex", l.StepHexID,
+	)
+
 	for {
 		// Check if we've hit the turn limit.
 		if maxTurns > 0 && turn >= maxTurns {
@@ -133,6 +143,14 @@ func (l *Loop) Run(ctx context.Context) error {
 		}
 		turnID := turnLog.ID
 
+		debug.LogKV("loop", "turn allocated",
+			"turn_id", turnID,
+			"turn_hex", turnHexID,
+			"turn_num", turn+1,
+			"agent", l.Agent.Name(),
+			"profile", l.ProfileName,
+		)
+
 		// Update config with the current turn ID.
 		cfg := l.Config
 		cfg.TurnID = turnID
@@ -165,6 +183,8 @@ func (l *Loop) Run(ctx context.Context) error {
 		}
 		// Determine if we're resuming a previous agent session.
 		isResume := l.lastAgentSessionID != ""
+
+		debug.LogKV("loop", "turn mode", "turn_id", turnID, "is_resume", isResume)
 
 		if isResume {
 			// When resuming, the agent already has the full system prompt
@@ -230,8 +250,35 @@ func (l *Loop) Run(ctx context.Context) error {
 		}
 
 		// Run the agent.
+		debug.LogKV("loop", "agent.Run() starting",
+			"turn_id", turnID,
+			"agent", l.Agent.Name(),
+			"workdir", cfg.WorkDir,
+			"prompt_len", len(cfg.Prompt),
+			"resume_session", cfg.ResumeSessionID,
+		)
+		agentStart := time.Now()
 		result, runErr := l.Agent.Run(turnCtx, cfg, rec)
 		turnCancel() // ensure turn context is always cleaned up
+		debug.LogKV("loop", "agent.Run() finished",
+			"turn_id", turnID,
+			"duration", time.Since(agentStart),
+			"has_result", result != nil,
+			"has_error", runErr != nil,
+		)
+		if result != nil {
+			debug.LogKV("loop", "agent result",
+				"turn_id", turnID,
+				"exit_code", result.ExitCode,
+				"duration", result.Duration,
+				"output_len", len(result.Output),
+				"stderr_len", len(result.Error),
+				"session_id", result.AgentSessionID,
+			)
+		}
+		if runErr != nil {
+			debug.LogKV("loop", "agent error", "turn_id", turnID, "error", runErr)
+		}
 
 		// Capture the result and session ID for potential resume.
 		l.LastResult = result
@@ -248,8 +295,10 @@ func (l *Loop) Run(ctx context.Context) error {
 
 		// Flush the recording to the store.
 		if flushErr := rec.Flush(); flushErr != nil {
-			// Log flush error but don't fail the loop.
+			debug.LogKV("loop", "recording flush failed", "turn_id", turnID, "error", flushErr)
 			fmt.Printf("warning: failed to flush recording for turn %d: %v\n", turnID, flushErr)
+		} else {
+			debug.LogKV("loop", "recording flushed", "turn_id", turnID)
 		}
 
 		// Update profile stats from the completed turn.
@@ -291,6 +340,7 @@ func (l *Loop) Run(ctx context.Context) error {
 		if runErr != nil {
 			if errors.Is(runErr, context.Canceled) {
 				if msg := l.drainInterrupt(); msg != "" {
+					debug.LogKV("loop", "interrupt drained after cancel", "turn_id", turnID, "msg_len", len(msg))
 					// Interrupted (e.g. guardrail violation or parent signal) —
 					// continue to next turn with the interrupt message injected.
 					// Don't increment turn count — interrupt turns don't count
@@ -329,11 +379,19 @@ func (l *Loop) Run(ctx context.Context) error {
 
 		// Check for wait-for-spawns signal.
 		if l.Store != nil && l.Store.IsWaiting(turnID) {
+			debug.LogKV("loop", "wait-for-spawns signal detected", "turn_id", turnID)
 			if err := l.Store.ClearWait(turnID); err != nil {
 				fmt.Printf("warning: failed to clear wait signal for turn %d: %v\n", turnID, err)
 			}
 			if l.OnWait != nil {
+				debug.LogKV("loop", "blocking on OnWait callback", "turn_id", turnID)
+				waitStart := time.Now()
 				l.lastWaitResults = l.OnWait(turnID)
+				debug.LogKV("loop", "OnWait callback returned",
+					"turn_id", turnID,
+					"wait_duration", time.Since(waitStart),
+					"results_count", len(l.lastWaitResults),
+				)
 			}
 			// Don't increment turn count — the wait turn doesn't count toward the limit.
 			// Loop continues to next iteration with wait results in the prompt.

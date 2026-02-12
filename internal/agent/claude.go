@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/recording"
 	"github.com/agusx1211/adaf/internal/stream"
 )
@@ -66,6 +67,15 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 		recorder.RecordStdin(cfg.Prompt)
 	}
 
+	debug.LogKV("agent.claude", "building command",
+		"binary", cmdName,
+		"args", strings.Join(args, " "),
+		"workdir", cfg.WorkDir,
+		"prompt_len", len(cfg.Prompt),
+		"resume_session", cfg.ResumeSessionID,
+		"has_event_sink", cfg.EventSink != nil,
+	)
+
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
 	if stdinReader != nil {
@@ -113,8 +123,10 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 
 	start := time.Now()
 	if err := cmd.Start(); err != nil {
+		debug.LogKV("agent.claude", "process start failed", "error", err)
 		return nil, fmt.Errorf("claude agent: failed to start command: %w", err)
 	}
+	debug.LogKV("agent.claude", "process started", "pid", cmd.Process.Pid)
 
 	// Parse the NDJSON stream.
 	events := stream.Parse(ctx, stdoutPipe)
@@ -228,9 +240,18 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
+			debug.LogKV("agent.claude", "cmd.Wait() error (not ExitError)", "error", waitErr)
 			return nil, fmt.Errorf("claude agent: failed to run command: %w", waitErr)
 		}
 	}
+
+	debug.LogKV("agent.claude", "process finished",
+		"exit_code", exitCode,
+		"duration", duration,
+		"output_len", textBuf.Len(),
+		"stderr_len", stderrBuf.Len(),
+		"agent_session_id", agentSessionID,
+	)
 
 	return &Result{
 		ExitCode:       exitCode,

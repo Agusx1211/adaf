@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/agusx1211/adaf/internal/debug"
 )
 
 const worktreeDir = ".adaf-worktrees"
@@ -66,6 +68,7 @@ func (m *Manager) CreateDetached(ctx context.Context, name string) (string, erro
 // Create creates a new worktree for the given branch.
 // It returns the worktree path on disk.
 func (m *Manager) Create(ctx context.Context, branchName string) (string, error) {
+	debug.LogKV("worktree", "Create()", "branch", branchName, "repo_root", m.repoRoot)
 	base := filepath.Join(m.repoRoot, worktreeDir)
 	if err := os.MkdirAll(base, 0755); err != nil {
 		return "", fmt.Errorf("creating worktree dir: %w", err)
@@ -95,6 +98,7 @@ func (m *Manager) Create(ctx context.Context, branchName string) (string, error)
 	// Symlink .adaf/ so sub-agents share the store.
 	m.symlinkAdaf(wtPath)
 
+	debug.LogKV("worktree", "created", "branch", branchName, "path", wtPath, "head", strings.TrimSpace(head))
 	return wtPath, nil
 }
 
@@ -132,6 +136,7 @@ func (m *Manager) RemoveWithBranch(ctx context.Context, wtPath, branchName strin
 
 // Merge merges the given branch into the current branch with a merge commit.
 func (m *Manager) Merge(ctx context.Context, branchName, message string) (string, error) {
+	debug.LogKV("worktree", "Merge()", "branch", branchName)
 	if message == "" {
 		message = "Merge " + branchName
 	}
@@ -175,6 +180,7 @@ func (m *Manager) Diff(ctx context.Context, branchName string) (string, error) {
 // AutoCommitIfDirty stages and commits all changes in a worktree when needed.
 // It returns (commitHash, committed, error). If there are no changes, committed=false.
 func (m *Manager) AutoCommitIfDirty(ctx context.Context, worktreePath, message string) (string, bool, error) {
+	debug.LogKV("worktree", "AutoCommitIfDirty()", "path", worktreePath)
 	if strings.TrimSpace(worktreePath) == "" {
 		return "", false, fmt.Errorf("worktree path is empty")
 	}
@@ -298,11 +304,14 @@ func (m *Manager) symlinkAdaf(wtPath string) {
 
 // git runs a git command in the repo root and returns combined output.
 func (m *Manager) git(ctx context.Context, args ...string) (string, error) {
+	debug.LogKV("worktree", "git exec", "cmd", "git "+strings.Join(args, " "), "dir", m.repoRoot)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = m.repoRoot
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		debug.LogKV("worktree", "git exec failed", "cmd", "git "+strings.Join(args, " "), "error", err, "output_len", len(out))
 		return string(out), fmt.Errorf("git %s: %s: %w", strings.Join(args, " "), string(out), err)
 	}
+	debug.LogKV("worktree", "git exec ok", "cmd", "git "+strings.Join(args, " "), "output_len", len(out))
 	return string(out), nil
 }

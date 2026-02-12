@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/recording"
 )
 
@@ -39,6 +40,14 @@ func (g *GenericAgent) Run(ctx context.Context, cfg Config, recorder *recording.
 
 	args := make([]string, len(cfg.Args))
 	copy(args, cfg.Args)
+
+	debug.LogKV("agent.generic", "building command",
+		"name", g.name,
+		"binary", cmdName,
+		"args", strings.Join(args, " "),
+		"workdir", cfg.WorkDir,
+		"prompt_len", len(cfg.Prompt),
+	)
 
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
@@ -90,6 +99,7 @@ func (g *GenericAgent) Run(ctx context.Context, cfg Config, recorder *recording.
 	recorder.RecordMeta("workdir", cfg.WorkDir)
 
 	start := time.Now()
+	debug.LogKV("agent.generic", "process starting", "name", g.name, "binary", cmdName)
 	err := cmd.Run()
 	duration := time.Since(start)
 
@@ -98,10 +108,16 @@ func (g *GenericAgent) Run(ctx context.Context, cfg Config, recorder *recording.
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
-			// If we can't determine exit code (e.g. command not found), return the error.
+			debug.LogKV("agent.generic", "cmd.Run() error (not ExitError)", "name", g.name, "error", err)
 			return nil, fmt.Errorf("agent %q: failed to run command: %w", g.name, err)
 		}
 	}
+	debug.LogKV("agent.generic", "process finished",
+		"name", g.name,
+		"exit_code", exitCode,
+		"duration", duration,
+		"output_len", stdoutBuf.Len(),
+	)
 
 	return &Result{
 		ExitCode: exitCode,

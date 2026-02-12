@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/recording"
 	"github.com/agusx1211/adaf/internal/stream"
 )
@@ -62,6 +63,14 @@ func (g *GeminiAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 		recorder.RecordStdin(cfg.Prompt)
 	}
 
+	debug.LogKV("agent.gemini", "building command",
+		"binary", cmdName,
+		"args", strings.Join(args, " "),
+		"workdir", cfg.WorkDir,
+		"prompt_len", len(cfg.Prompt),
+		"resume_session", cfg.ResumeSessionID,
+	)
+
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
 	if stdinReader != nil {
@@ -108,8 +117,10 @@ func (g *GeminiAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 
 	start := time.Now()
 	if err := cmd.Start(); err != nil {
+		debug.LogKV("agent.gemini", "process start failed", "error", err)
 		return nil, fmt.Errorf("gemini agent: failed to start command: %w", err)
 	}
+	debug.LogKV("agent.gemini", "process started", "pid", cmd.Process.Pid)
 
 	// Parse the NDJSON stream using the Gemini parser.
 	events := stream.ParseGemini(ctx, stdoutPipe)
@@ -219,9 +230,16 @@ func (g *GeminiAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
+			debug.LogKV("agent.gemini", "cmd.Wait() error (not ExitError)", "error", waitErr)
 			return nil, fmt.Errorf("gemini agent: failed to run command: %w", waitErr)
 		}
 	}
+	debug.LogKV("agent.gemini", "process finished",
+		"exit_code", exitCode,
+		"duration", duration,
+		"output_len", textBuf.Len(),
+		"agent_session_id", agentSessionID,
+	)
 
 	return &Result{
 		ExitCode:       exitCode,

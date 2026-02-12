@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/recording"
 )
 
@@ -82,6 +83,13 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 		recorder.RecordStdin(cfg.Prompt)
 	}
 
+	debug.LogKV("agent.vibe", "building command",
+		"binary", cmdName,
+		"args", strings.Join(args, " "),
+		"workdir", cfg.WorkDir,
+		"prompt_len", len(cfg.Prompt),
+	)
+
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
 	if stdinReader != nil {
@@ -129,6 +137,7 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 	recorder.RecordMeta("workdir", cfg.WorkDir)
 
 	start := time.Now()
+	debug.LogKV("agent.vibe", "process starting", "binary", cmdName)
 	err := cmd.Run()
 	duration := time.Since(start)
 
@@ -137,9 +146,15 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
+			debug.LogKV("agent.vibe", "cmd.Run() error (not ExitError)", "error", err)
 			return nil, fmt.Errorf("vibe agent: failed to run command: %w", err)
 		}
 	}
+	debug.LogKV("agent.vibe", "process finished",
+		"exit_code", exitCode,
+		"duration", duration,
+		"output_len", stdoutBuf.Len(),
+	)
 
 	return &Result{
 		ExitCode: exitCode,

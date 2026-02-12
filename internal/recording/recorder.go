@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/store"
 )
 
@@ -85,11 +86,16 @@ func (r *Recorder) Flush() error {
 	copy(events, r.events)
 	r.mu.Unlock()
 
+	debug.LogKV("recorder", "flushing", "turn_id", r.TurnID, "events", len(events))
 	rec := &store.TurnRecording{
 		TurnID: r.TurnID,
 		Events: events,
 	}
-	return r.Store.SaveRecording(rec)
+	err := r.Store.SaveRecording(rec)
+	if err != nil {
+		debug.LogKV("recorder", "flush failed", "turn_id", r.TurnID, "error", err)
+	}
+	return err
 }
 
 // WrapWriter returns an io.Writer that writes to the underlying writer w

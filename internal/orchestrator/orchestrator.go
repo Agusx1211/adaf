@@ -11,6 +11,7 @@ import (
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
+	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/loop"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
 	"github.com/agusx1211/adaf/internal/store"
@@ -130,6 +131,15 @@ func New(s *store.Store, globalCfg *config.GlobalConfig, repoRoot string) *Orche
 
 // Spawn starts (or queues) a sub-agent.
 func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error) {
+	debug.LogKV("orch", "Spawn() called",
+		"parent_turn", req.ParentTurnID,
+		"parent_profile", req.ParentProfile,
+		"child_profile", req.ChildProfile,
+		"read_only", req.ReadOnly,
+		"wait", req.Wait,
+		"task_len", len(req.Task),
+	)
+
 	// Validate parent profile exists.
 	parentProf := o.globalCfg.FindProfile(req.ParentProfile)
 	if parentProf == nil {
@@ -208,6 +218,12 @@ func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error)
 	o.instances[req.ChildProfile]++
 	o.mu.Unlock()
 
+	debug.LogKV("orch", "spawn starting immediately",
+		"parent_profile", req.ParentProfile,
+		"child_profile", req.ChildProfile,
+		"running", o.running[req.ParentProfile],
+		"instances", o.instances[req.ChildProfile],
+	)
 	return o.startSpawn(ctx, req, parentProf, childProf)
 }
 
@@ -236,6 +252,12 @@ func legacyCanSpawn(deleg *config.DelegationConfig, childName string, parentProf
 }
 
 func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentProf, childProf *config.Profile) (int, error) {
+	debug.LogKV("orch", "startSpawn()",
+		"parent_profile", req.ParentProfile,
+		"child_profile", req.ChildProfile,
+		"child_agent", childProf.Agent,
+		"read_only", req.ReadOnly,
+	)
 	// Populate handoff and speed from delegation profile if available.
 	var handoff bool
 	var speed string
@@ -289,8 +311,16 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 			o.worktrees.RemoveWithBranch(ctx, wtPath, rec.Branch)
 		}
 		o.decrementRunning(req.ParentProfile)
+		debug.LogKV("orch", "spawn record creation failed", "error", err)
 		return 0, fmt.Errorf("creating spawn record: %w", err)
 	}
+	debug.LogKV("orch", "spawn record created",
+		"spawn_id", rec.ID,
+		"branch", rec.Branch,
+		"worktree", rec.WorktreePath,
+		"handoff", handoff,
+		"speed", speed,
+	)
 
 	// Resolve agent.
 	agentInstance, ok := agent.Get(childProf.Agent)
@@ -412,6 +442,11 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 
 	// Run the child agent in a goroutine.
 	go func() {
+		debug.LogKV("orch", "spawn goroutine started",
+			"spawn_id", rec.ID,
+			"child_profile", req.ChildProfile,
+			"workdir", workDir,
+		)
 		defer close(done)
 		defer func() {
 			close(streamCh)
@@ -479,6 +514,11 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 		}
 
 		err := l.Run(childCtx)
+		debug.LogKV("orch", "spawn loop finished",
+			"spawn_id", rec.ID,
+			"child_profile", req.ChildProfile,
+			"error", err,
+		)
 		rec.CompletedAt = time.Now().UTC()
 
 		// Capture child's output for parent consumption.
@@ -561,6 +601,12 @@ func shortHash(hash string) string {
 }
 
 func (o *Orchestrator) onSpawnComplete(ctx context.Context, rec *store.SpawnRecord, parentProfile string) {
+	debug.LogKV("orch", "onSpawnComplete",
+		"spawn_id", rec.ID,
+		"child_profile", rec.ChildProfile,
+		"status", rec.Status,
+		"exit_code", rec.ExitCode,
+	)
 	_ = o.store.ClearInterrupt(rec.ID)
 
 	o.mu.Lock()
@@ -638,6 +684,7 @@ func (o *Orchestrator) decrementInstancesLocked(profile string) {
 
 // Wait blocks until all spawns for the given parent turn are done.
 func (o *Orchestrator) Wait(parentTurnID int) []SpawnResult {
+	debug.LogKV("orch", "Wait() called", "parent_turn", parentTurnID)
 	// Snapshot non-terminal spawns for this parent and wait until they complete.
 	records, _ := o.store.SpawnsByParent(parentTurnID)
 	pending := make(map[int]struct{})
@@ -760,6 +807,7 @@ func (o *Orchestrator) InspectSpawn(spawnID int) ([]stream.RawEvent, error) {
 
 // Merge merges a completed spawn's branch into the current branch.
 func (o *Orchestrator) Merge(ctx context.Context, spawnID int, squash bool) (string, error) {
+	debug.LogKV("orch", "Merge() called", "spawn_id", spawnID, "squash", squash)
 	rec, err := o.store.GetSpawn(spawnID)
 	if err != nil {
 		return "", fmt.Errorf("spawn %d not found: %w", spawnID, err)
@@ -796,6 +844,7 @@ func (o *Orchestrator) Merge(ctx context.Context, spawnID int, squash bool) (str
 
 // Reject rejects a spawn's work and cleans up.
 func (o *Orchestrator) Reject(ctx context.Context, spawnID int) error {
+	debug.LogKV("orch", "Reject() called", "spawn_id", spawnID)
 	rec, err := o.store.GetSpawn(spawnID)
 	if err != nil {
 		return fmt.Errorf("spawn %d not found: %w", spawnID, err)
@@ -925,6 +974,7 @@ var (
 // Init initializes the global orchestrator singleton and cleans up stale
 // worktrees left behind by previous sessions (crashed, killed, etc.).
 func Init(s *store.Store, globalCfg *config.GlobalConfig, repoRoot string) *Orchestrator {
+	debug.LogKV("orch", "Init() called", "repo_root", repoRoot)
 	globalOrchMu.Lock()
 	defer globalOrchMu.Unlock()
 	globalOrch = New(s, globalCfg, repoRoot)

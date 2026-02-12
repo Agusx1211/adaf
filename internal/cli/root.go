@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/agusx1211/adaf/internal/buildinfo"
+	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/tui"
 )
 
@@ -89,12 +90,38 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.CompletionOptions.HiddenDefaultCmd = true
+	rootCmd.PersistentFlags().Bool("debug", false, "Enable verbose debug logging to ~/.adaf/debug/")
+
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		debugFlag, _ := cmd.Flags().GetBool("debug")
+		if !debugFlag {
+			return nil
+		}
+		logPath, err := debug.Init()
+		if err != nil {
+			return fmt.Errorf("initializing debug logger: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "%s[debug]%s logging to %s\n", colorDim, colorReset, logPath)
+		bi := buildinfo.Current()
+		debug.LogKV("cli", "adaf starting",
+			"version", bi.Version,
+			"commit", bi.CommitHash,
+			"build_date", bi.BuildDate,
+			"pid", os.Getpid(),
+			"command", cmd.Name(),
+			"args", args,
+		)
+		return nil
+	}
 }
 
 // Execute runs the root command.
 func Execute() {
+	defer debug.Close()
 	if err := rootCmd.Execute(); err != nil {
+		debug.Logf("cli", "exit with error: %v", err)
 		fmt.Fprintf(os.Stderr, "%sError: %s%s\n", colorRed, err, colorReset)
 		os.Exit(1)
 	}
+	debug.Log("cli", "exit success")
 }

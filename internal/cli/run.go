@@ -13,6 +13,7 @@ import (
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
+	"github.com/agusx1211/adaf/internal/debug"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
 	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/session"
@@ -50,6 +51,7 @@ func init() {
 }
 
 func runAgent(cmd *cobra.Command, args []string) error {
+	debug.Log("cli.run", "runAgent() called")
 	if session.IsAgentContext() {
 		return fmt.Errorf("run is not available inside an agent context")
 	}
@@ -158,9 +160,18 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}
+	debug.LogKV("cli.run", "session created",
+		"session_id", sessionID,
+		"agent", agentName,
+		"plan_id", effectivePlanID,
+		"max_turns", maxTurns,
+		"session_mode", sessionMode,
+	)
 	if err := session.StartDaemon(sessionID); err != nil {
+		debug.LogKV("cli.run", "daemon start failed", "session_id", sessionID, "error", err)
 		return fmt.Errorf("starting session daemon: %w", err)
 	}
+	debug.LogKV("cli.run", "daemon started", "session_id", sessionID)
 
 	if sessionMode {
 		fmt.Printf("\n  %sSession #%d started%s (agent=%s, project=%s)\n",

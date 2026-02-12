@@ -19,6 +19,7 @@ import (
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
+	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/looprun"
 	"github.com/agusx1211/adaf/internal/orchestrator"
 	"github.com/agusx1211/adaf/internal/runtui"
@@ -157,6 +158,7 @@ func stripANSI(s string) string {
 // It reads the session config, runs the agent loop, and serves events
 // over a Unix domain socket.
 func RunDaemon(sessionID int) error {
+	debug.LogKV("session", "RunDaemon() starting", "session_id", sessionID, "pid", os.Getpid())
 	cfg, err := LoadConfig(sessionID)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
@@ -551,6 +553,14 @@ func (cc *clientConn) flush() {
 
 // runLoop runs the loop runtime and broadcasts events through the broadcaster.
 func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
+	debug.LogKV("session", "runLoop() starting",
+		"session_id", b.meta.SessionID,
+		"project_dir", cfg.ProjectDir,
+		"workdir", cfg.WorkDir,
+		"loop_name", cfg.Loop.Name,
+		"loop_steps", len(cfg.Loop.Steps),
+		"max_cycles", cfg.MaxCycles,
+	)
 	s, err := store.New(cfg.ProjectDir)
 	if err != nil {
 		return fmt.Errorf("opening store: %w", err)
