@@ -76,8 +76,11 @@ func runDoctorProfile(cmd *cobra.Command, args []string) error {
 	if prof.ReasoningLevel != "" {
 		fmt.Printf("- Reasoning Level: %s\n", prof.ReasoningLevel)
 	}
+	if prof.Speed != "" {
+		fmt.Printf("- Speed: %s\n", prof.Speed)
+	}
 	if len(prof.SpawnableProfiles) > 0 {
-		fmt.Printf("- Spawnable: %s\n", strings.Join(prof.SpawnableProfiles, ", "))
+		fmt.Printf("- Spawnable (legacy): %s\n", strings.Join(prof.SpawnableProfiles, ", "))
 	}
 	fmt.Println()
 

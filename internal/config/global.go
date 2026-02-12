@@ -10,28 +10,33 @@ import (
 
 // Profile is a named agent+model combo stored in the global config.
 type Profile struct {
-	Name          string `json:"name"`                      // Display name, e.g. "codex 5.2"
-	Agent         string `json:"agent"`                     // Agent key: "claude", "codex", etc.
-	Model         string `json:"model,omitempty"`           // Model override (empty = agent default)
+	Name           string `json:"name"`                      // Display name, e.g. "codex 5.2"
+	Agent          string `json:"agent"`                     // Agent key: "claude", "codex", etc.
+	Model          string `json:"model,omitempty"`           // Model override (empty = agent default)
 	ReasoningLevel string `json:"reasoning_level,omitempty"` // Reasoning level (e.g. "low", "medium", "high", "xhigh")
 
 	// Orchestration fields (all optional — existing profiles work unchanged).
-	Role              string   `json:"role,omitempty"`               // "manager", "senior", "junior", "supervisor" (empty = "junior")
-	MaxParallel       int      `json:"max_parallel,omitempty"`       // max concurrent sub-agents (manager/senior)
-	SpawnableProfiles []string `json:"spawnable_profiles,omitempty"` // profile names this can spawn
-	Description       string   `json:"description,omitempty"`        // strengths/weaknesses text
-	Intelligence      int      `json:"intelligence,omitempty"`       // 1-10 capability rating
-	MaxInstances      int      `json:"max_instances,omitempty"`      // max concurrent instances of this profile (0 = unlimited)
+	Role         string `json:"role,omitempty"`          // "manager", "senior", "junior", "supervisor" (empty = "junior")
+	Description  string `json:"description,omitempty"`   // strengths/weaknesses text
+	Intelligence int    `json:"intelligence,omitempty"`  // 1-10 capability rating
+	MaxInstances int    `json:"max_instances,omitempty"` // max concurrent instances of this profile (0 = unlimited)
+	Speed        string `json:"speed,omitempty"`         // "fast", "medium", "slow" — informational speed rating
+
+	// Deprecated: spawning is now controlled by DelegationConfig on loop steps / session starts.
+	// Kept for backward compatibility with existing config files.
+	MaxParallel       int      `json:"max_parallel,omitempty"`       // deprecated: use DelegationConfig.MaxParallel
+	SpawnableProfiles []string `json:"spawnable_profiles,omitempty"` // deprecated: use DelegationConfig.Profiles
 }
 
 // LoopStep defines one step in a loop cycle.
 type LoopStep struct {
-	Profile      string `json:"profile"`                  // profile name reference
-	Turns        int    `json:"turns,omitempty"`           // turns per step (0 = 1 turn)
-	Instructions string `json:"instructions,omitempty"`    // custom instructions appended to prompt
-	CanStop      bool   `json:"can_stop,omitempty"`        // can this step signal loop stop?
-	CanMessage   bool   `json:"can_message,omitempty"`     // can this step send messages to subsequent steps?
-	CanPushover  bool   `json:"can_pushover,omitempty"`    // can this step send Pushover notifications?
+	Profile      string            `json:"profile"`                // profile name reference
+	Turns        int               `json:"turns,omitempty"`        // turns per step (0 = 1 turn)
+	Instructions string            `json:"instructions,omitempty"` // custom instructions appended to prompt
+	CanStop      bool              `json:"can_stop,omitempty"`     // can this step signal loop stop?
+	CanMessage   bool              `json:"can_message,omitempty"`  // can this step send messages to subsequent steps?
+	CanPushover  bool              `json:"can_pushover,omitempty"` // can this step send Pushover notifications?
+	Delegation   *DelegationConfig `json:"delegation,omitempty"`   // spawn capabilities for this step
 }
 
 // LoopDef defines a loop as a cyclic template of profile steps.

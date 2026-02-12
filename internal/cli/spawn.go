@@ -22,7 +22,7 @@ import (
 var spawnCmd = &cobra.Command{
 	Use:     "spawn",
 	Aliases: []string{"fork", "sub-agent", "sub_agent", "subagent"},
-	Short: "Spawn a sub-agent to work on a task",
+	Short:   "Spawn a sub-agent to work on a task",
 	Long: `Spawn a child agent to work on a subtask in an isolated git worktree.
 
 The child agent runs in its own branch and can be monitored, messaged,
@@ -38,7 +38,7 @@ Examples:
   adaf spawn-status                       # Check all spawns
   adaf spawn-diff --spawn-id 3            # View changes
   adaf spawn-merge --spawn-id 3           # Merge changes`,
-	RunE:    runSpawn,
+	RunE: runSpawn,
 }
 
 func init() {
@@ -82,6 +82,11 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	delegation, err := resolveCurrentDelegation(parentProfile)
+	if err != nil {
+		return err
+	}
+
 	o, err := ensureOrchestrator()
 	if err != nil {
 		return err
@@ -94,6 +99,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		Task:            task,
 		ReadOnly:        readOnly,
 		Wait:            wait,
+		Delegation:      delegation,
 	})
 	if err != nil {
 		return fmt.Errorf("spawn failed: %w", err)
@@ -407,6 +413,126 @@ func runSpawnWatch(cmd *cobra.Command, args []string) error {
 	}
 }
 
+// --- adaf spawn-inspect ---
+
+var spawnInspectCmd = &cobra.Command{
+	Use:     "spawn-inspect",
+	Aliases: []string{"spawn_inspect", "spawninspect"},
+	Short:   "Inspect a running spawn's recent activity",
+	Long: `Show the child agent's recent stream events, formatted for consumption
+by a parent agent. Shows the last few tool calls, reasoning blocks, and output.`,
+	RunE: runSpawnInspect,
+}
+
+func init() {
+	spawnInspectCmd.Flags().Int("spawn-id", 0, "Spawn ID to inspect (required)")
+	spawnInspectCmd.Flags().Int("last", 20, "Number of recent events to show")
+	rootCmd.AddCommand(spawnInspectCmd)
+}
+
+func runSpawnInspect(cmd *cobra.Command, args []string) error {
+	spawnID, _ := cmd.Flags().GetInt("spawn-id")
+	last, _ := cmd.Flags().GetInt("last")
+	if spawnID == 0 {
+		return fmt.Errorf("--spawn-id is required")
+	}
+
+	// Fast path: if this process owns the running orchestrator, inspect in-memory events.
+	if o := orchestrator.Get(); o != nil {
+		events, err := o.InspectSpawn(spawnID)
+		if err == nil {
+			if len(events) == 0 {
+				fmt.Println("No events recorded yet.")
+				return nil
+			}
+
+			// Show only the last N events.
+			if last > 0 && len(events) > last {
+				events = events[len(events)-last:]
+			}
+
+			fmt.Printf("Recent activity for spawn #%d (%d events):\n\n", spawnID, len(events))
+			for _, ev := range events {
+				if ev.Text != "" {
+					fmt.Printf("[output] %s\n", truncate(ev.Text, 200))
+				} else if ev.Parsed.Type != "" {
+					summary := ev.Parsed.Type
+					if ev.Parsed.Subtype != "" {
+						summary += "/" + ev.Parsed.Subtype
+					}
+					// Extract a brief content preview from the assistant message.
+					content := ""
+					if ev.Parsed.AssistantMessage != nil {
+						for _, cb := range ev.Parsed.AssistantMessage.Content {
+							if cb.Text != "" {
+								content = truncate(cb.Text, 150)
+								break
+							}
+						}
+					}
+					if content != "" {
+						fmt.Printf("[%s] %s\n", summary, content)
+					} else {
+						raw := string(ev.Raw)
+						if len(raw) > 200 {
+							raw = raw[:200] + "..."
+						}
+						fmt.Printf("[%s] %s\n", summary, raw)
+					}
+				}
+			}
+			return nil
+		}
+	}
+
+	// Cross-process fallback: inspect persisted recording events.
+	s, err := openStoreRequired()
+	if err != nil {
+		return err
+	}
+	rec, err := s.GetSpawn(spawnID)
+	if err != nil {
+		return fmt.Errorf("spawn %d not found: %w", spawnID, err)
+	}
+	if rec.ChildSessionID == 0 {
+		fmt.Println("Spawn has not started a child session yet.")
+		return nil
+	}
+
+	eventsPath := filepath.Join(s.Root(), "records", fmt.Sprintf("%d", rec.ChildSessionID), "events.jsonl")
+	data, err := os.ReadFile(eventsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("No recorded events yet.")
+			return nil
+		}
+		return fmt.Errorf("reading events: %w", err)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	nonEmpty := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		nonEmpty = append(nonEmpty, line)
+	}
+	if len(nonEmpty) == 0 {
+		fmt.Println("No recorded events yet.")
+		return nil
+	}
+	if last > 0 && len(nonEmpty) > last {
+		nonEmpty = nonEmpty[len(nonEmpty)-last:]
+	}
+
+	fmt.Printf("Recent activity for spawn #%d (%d events):\n\n", spawnID, len(nonEmpty))
+	for _, line := range nonEmpty {
+		formatEventLine(line)
+	}
+	return nil
+}
+
 // formatEventLine formats a single NDJSON recording event for display.
 func formatEventLine(line string) {
 	var ev store.RecordingEvent
@@ -424,6 +550,62 @@ func formatEventLine(line string) {
 }
 
 // --- Helpers ---
+
+func resolveCurrentDelegation(parentProfile string) (*config.DelegationConfig, error) {
+	runIDStr := strings.TrimSpace(os.Getenv("ADAF_LOOP_RUN_ID"))
+	stepIdxStr := strings.TrimSpace(os.Getenv("ADAF_LOOP_STEP_INDEX"))
+	if runIDStr == "" && stepIdxStr == "" {
+		// Non-loop session: keep legacy role/profile behavior.
+		return nil, nil
+	}
+	if runIDStr == "" || stepIdxStr == "" {
+		return nil, fmt.Errorf("ADAF_LOOP_RUN_ID and ADAF_LOOP_STEP_INDEX must both be set when spawning from a loop step")
+	}
+
+	runID, err := strconv.Atoi(runIDStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid ADAF_LOOP_RUN_ID: %s", runIDStr)
+	}
+	stepIdx, err := strconv.Atoi(stepIdxStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid ADAF_LOOP_STEP_INDEX: %s", stepIdxStr)
+	}
+
+	s, err := openStoreRequired()
+	if err != nil {
+		return nil, err
+	}
+	run, err := s.GetLoopRun(runID)
+	if err != nil {
+		return nil, fmt.Errorf("loading loop run %d: %w", runID, err)
+	}
+
+	globalCfg, err := config.Load()
+	if err != nil {
+		return nil, fmt.Errorf("loading global config: %w", err)
+	}
+	loopDef := globalCfg.FindLoop(run.LoopName)
+	if loopDef == nil {
+		return nil, fmt.Errorf("loop %q not found in global config", run.LoopName)
+	}
+	if stepIdx < 0 || stepIdx >= len(loopDef.Steps) {
+		return nil, fmt.Errorf("loop %q has %d steps; step index %d is out of range", run.LoopName, len(loopDef.Steps), stepIdx)
+	}
+
+	step := loopDef.Steps[stepIdx]
+	if step.Profile != "" && !strings.EqualFold(step.Profile, parentProfile) {
+		return nil, fmt.Errorf("loop step %d profile mismatch: env profile=%q, loop profile=%q", stepIdx, parentProfile, step.Profile)
+	}
+	if step.Delegation == nil {
+		// Explicitly disallow spawn in this step.
+		return &config.DelegationConfig{}, nil
+	}
+
+	// Return a shallow copy so request-scoped code cannot mutate global config.
+	deleg := *step.Delegation
+	deleg.Profiles = append([]config.DelegationProfile(nil), step.Delegation.Profiles...)
+	return &deleg, nil
+}
 
 func getSessionContext() (int, string, error) {
 	sessionStr := os.Getenv("ADAF_SESSION_ID")

@@ -29,7 +29,9 @@ func EffectiveRole(role string) string {
 	return role
 }
 
-// CanSpawn reports whether the given role is allowed to spawn sub-agents.
+// CanSpawn reports whether the given role is traditionally allowed to spawn sub-agents.
+// Deprecated: spawning is now controlled by DelegationConfig on loop steps / session starts.
+// This is kept for backward compatibility with profile creation UIs.
 func CanSpawn(role string) bool {
 	r := EffectiveRole(role)
 	return r == RoleManager || r == RoleSenior

@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,19 @@ import (
 	"github.com/agusx1211/adaf/internal/stats"
 	"github.com/agusx1211/adaf/internal/store"
 )
+
+// WaitCallback is called when the loop detects a wait signal.
+// It should block until spawns complete and return results for the next prompt.
+type WaitCallback func(sessionID int) []WaitResult
+
+// WaitResult describes the outcome of a spawn that was waited on.
+type WaitResult struct {
+	SpawnID  int
+	Profile  string
+	Status   string
+	ExitCode int
+	Result   string
+}
 
 // Loop is the main agent loop controller. It runs an agent one or more times,
 // creating a new session recording for each iteration, and persists results
@@ -35,6 +49,18 @@ type Loop struct {
 	// PromptFunc, if set, is called before each turn to dynamically refresh the
 	// prompt (e.g. to inject supervisor notes). If nil, Config.Prompt is used.
 	PromptFunc func(sessionID int, supervisorNotes []store.SupervisorNote) string
+
+	// OnWait is called when the agent signals a wait-for-spawns.
+	// It should block until spawns complete and return results.
+	// If nil, wait signals are ignored.
+	OnWait WaitCallback
+
+	// InterruptCh, if set, receives signals when the agent's turn should be
+	// interrupted (e.g. parent sends an interrupt message).
+	InterruptCh <-chan string
+
+	// lastWaitResults holds results from a wait cycle, injected into the next prompt.
+	lastWaitResults []WaitResult
 }
 
 // Run executes the agent loop. It will run the agent up to Config.MaxTurns times
@@ -105,6 +131,21 @@ func (l *Loop) Run(ctx context.Context) error {
 			cfg.Prompt = l.PromptFunc(sessionID, supervisorNotes)
 		}
 
+		// Inject wait results from a previous wait-for-spawns cycle.
+		if len(l.lastWaitResults) > 0 {
+			cfg.Prompt += "\n## Spawn Wait Results\n\nThe spawns you waited for have completed:\n\n"
+			for _, wr := range l.lastWaitResults {
+				cfg.Prompt += fmt.Sprintf("- Spawn #%d (profile=%s): status=%s, exit_code=%d",
+					wr.SpawnID, wr.Profile, wr.Status, wr.ExitCode)
+				if wr.Result != "" {
+					cfg.Prompt += fmt.Sprintf(" — %s", wr.Result)
+				}
+				cfg.Prompt += "\n"
+			}
+			cfg.Prompt += "\nReview their diffs with `adaf spawn-diff --spawn-id N` and merge or reject as needed.\n\n"
+			l.lastWaitResults = nil // Clear after injecting.
+		}
+
 		// Notify listener.
 		if l.OnStart != nil {
 			l.OnStart(sessionID)
@@ -163,12 +204,43 @@ func (l *Loop) Run(ctx context.Context) error {
 		}
 
 		// If the agent run failed with a hard error (not just non-zero exit),
-		// stop the loop.
+		// stop the loop — unless it was an interrupt.
 		if runErr != nil {
+			if errors.Is(runErr, context.Canceled) && l.checkInterrupt() {
+				// Interrupted by parent — continue to next turn with interrupt message.
+				turn++
+				continue
+			}
 			return fmt.Errorf("agent run failed (session %d): %w", sessionID, runErr)
 		}
 
+		// Check for wait-for-spawns signal.
+		if l.Store != nil && l.Store.IsWaiting(sessionID) {
+			if err := l.Store.ClearWait(sessionID); err != nil {
+				fmt.Printf("warning: failed to clear wait signal for session %d: %v\n", sessionID, err)
+			}
+			if l.OnWait != nil {
+				l.lastWaitResults = l.OnWait(sessionID)
+			}
+			// Don't increment turn count — the wait turn doesn't count toward the limit.
+			// Loop continues to next iteration with wait results in the prompt.
+			continue
+		}
+
 		turn++
+	}
+}
+
+// checkInterrupt checks if there's a pending interrupt and drains the channel.
+func (l *Loop) checkInterrupt() bool {
+	if l.InterruptCh == nil {
+		return false
+	}
+	select {
+	case <-l.InterruptCh:
+		return true
+	default:
+		return false
 	}
 }
 

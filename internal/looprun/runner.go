@@ -12,6 +12,7 @@ import (
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/loop"
+	"github.com/agusx1211/adaf/internal/orchestrator"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
 	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/stats"
@@ -148,12 +149,19 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				RunID:        run.ID,
 			}
 
+			// Pass any pending handoffs from previous step and clear them.
+			handoffs := run.PendingHandoffs
+			run.PendingHandoffs = nil
+			cfg.Store.UpdateLoopRun(run)
+
 			promptOpts := promptpkg.BuildOpts{
 				Store:       cfg.Store,
 				Project:     cfg.Project,
 				Profile:     prof,
 				GlobalCfg:   cfg.GlobalCfg,
 				LoopContext: loopCtx,
+				Delegation:  stepDef.Delegation,
+				Handoffs:    handoffs,
 			}
 
 			prompt, err := promptpkg.Build(promptOpts)
@@ -189,11 +197,13 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			var pollCancel context.CancelFunc
 			var pollDone chan struct{}
 			basePrompt := agentCfg.Prompt
+			stepSessionStart := len(run.SessionIDs)
+			handoffsReparented := false
 
 			l := &loop.Loop{
-				Store:       cfg.Store,
-				Agent:       agentInstance,
-				Config:      agentCfg,
+				Store:  cfg.Store,
+				Agent:  agentInstance,
+				Config: agentCfg,
 				PromptFunc: func(sessionID int, supervisorNotes []store.SupervisorNote) string {
 					opts := promptOpts
 					opts.SupervisorNotes = supervisorNotes
@@ -205,6 +215,11 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				},
 				ProfileName: prof.Name,
 				OnStart: func(sessionID int) {
+					if !handoffsReparented && len(handoffs) > 0 {
+						reparentHandoffs(cfg.Store, handoffs, sessionID)
+						handoffsReparented = true
+					}
+
 					run.SessionIDs = append(run.SessionIDs, sessionID)
 					cfg.Store.UpdateLoopRun(run)
 					eventCh <- runtui.AgentStartedMsg{SessionID: sessionID}
@@ -230,6 +245,9 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 						SessionID: sessionID,
 						Result:    result,
 					}
+				},
+				OnWait: func(sessionID int) []loop.WaitResult {
+					return waitForSessionSpawns(cfg.Store, sessionID)
 				},
 			}
 
@@ -265,6 +283,14 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				}
 				return fmt.Errorf("step %d (%s) failed: %w", stepIdx, prof.Name, loopErr)
 			}
+
+			// Collect handoffs: running spawns marked as handoff from this step's sessions.
+			var stepSessionIDs []int
+			if stepSessionStart < len(run.SessionIDs) {
+				stepSessionIDs = append(stepSessionIDs, run.SessionIDs[stepSessionStart:]...)
+			}
+			run.PendingHandoffs = collectHandoffs(cfg.Store, stepSessionIDs)
+			cfg.Store.UpdateLoopRun(run)
 
 			// Check stop signal after steps with can_stop.
 			if stepDef.CanStop && cfg.Store.IsLoopStopped(run.ID) {
@@ -405,6 +431,121 @@ func buildAgentConfig(cfg RunConfig, prof *config.Profile, runID, stepIndex int)
 		Args:    agentArgs,
 		Env:     agentEnv,
 		WorkDir: cfg.WorkDir,
+	}
+}
+
+// collectHandoffs finds running spawns marked as handoff from any of the given session IDs.
+func collectHandoffs(s *store.Store, sessionIDs []int) []store.HandoffInfo {
+	var handoffs []store.HandoffInfo
+	seen := make(map[int]struct{})
+	for _, sid := range sessionIDs {
+		records, err := s.SpawnsByParent(sid)
+		if err != nil {
+			continue
+		}
+		for _, rec := range records {
+			if _, ok := seen[rec.ID]; ok {
+				continue
+			}
+			if rec.Handoff && (rec.Status == "running" || rec.Status == "queued") {
+				seen[rec.ID] = struct{}{}
+				handoffs = append(handoffs, store.HandoffInfo{
+					SpawnID: rec.ID,
+					Profile: rec.ChildProfile,
+					Task:    rec.Task,
+					Status:  rec.Status,
+					Speed:   rec.Speed,
+					Branch:  rec.Branch,
+				})
+			}
+		}
+	}
+	return handoffs
+}
+
+func reparentHandoffs(s *store.Store, handoffs []store.HandoffInfo, newParentSessionID int) {
+	if len(handoffs) == 0 {
+		return
+	}
+
+	// Prefer orchestrator API when available so in-memory active spawn records
+	// stay in sync with persisted store data.
+	if o := orchestrator.Get(); o != nil {
+		for _, h := range handoffs {
+			_ = o.ReparentSpawn(h.SpawnID, newParentSessionID)
+		}
+		return
+	}
+
+	for _, h := range handoffs {
+		rec, err := s.GetSpawn(h.SpawnID)
+		if err != nil {
+			continue
+		}
+		rec.ParentSessionID = newParentSessionID
+		rec.HandedOffTo = newParentSessionID
+		_ = s.UpdateSpawn(rec)
+	}
+}
+
+func waitForSessionSpawns(s *store.Store, parentSessionID int) []loop.WaitResult {
+	records, err := s.SpawnsByParent(parentSessionID)
+	if err != nil || len(records) == 0 {
+		return nil
+	}
+
+	pending := make(map[int]struct{})
+	for _, rec := range records {
+		if !isTerminalSpawnStatus(rec.Status) {
+			pending[rec.ID] = struct{}{}
+		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+
+	waitedIDs := make([]int, 0, len(pending))
+	for id := range pending {
+		waitedIDs = append(waitedIDs, id)
+	}
+
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	for len(pending) > 0 {
+		<-ticker.C
+		for id := range pending {
+			rec, err := s.GetSpawn(id)
+			if err != nil || isTerminalSpawnStatus(rec.Status) {
+				delete(pending, id)
+			}
+		}
+	}
+
+	sort.Ints(waitedIDs)
+	results := make([]loop.WaitResult, 0, len(waitedIDs))
+	for _, id := range waitedIDs {
+		rec, err := s.GetSpawn(id)
+		if err != nil {
+			continue
+		}
+		results = append(results, loop.WaitResult{
+			SpawnID:  rec.ID,
+			Profile:  rec.ChildProfile,
+			Status:   rec.Status,
+			ExitCode: rec.ExitCode,
+			Result:   rec.Result,
+		})
+	}
+	return results
+}
+
+func isTerminalSpawnStatus(status string) bool {
+	switch status {
+	case "completed", "failed", "merged", "rejected":
+		return true
+	default:
+		return false
 	}
 }
 

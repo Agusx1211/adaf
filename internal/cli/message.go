@@ -163,12 +163,14 @@ var spawnMessageCmd = &cobra.Command{
 
 func init() {
 	spawnMessageCmd.Flags().Int("spawn-id", 0, "Spawn ID (required)")
+	spawnMessageCmd.Flags().Bool("interrupt", false, "Interrupt child's current turn")
 	rootCmd.AddCommand(spawnMessageCmd)
 }
 
 func runSpawnMessage(cmd *cobra.Command, args []string) error {
 	content := args[0]
 	spawnID, _ := cmd.Flags().GetInt("spawn-id")
+	interrupt, _ := cmd.Flags().GetBool("interrupt")
 	if spawnID == 0 {
 		return fmt.Errorf("--spawn-id is required")
 	}
@@ -183,12 +185,21 @@ func runSpawnMessage(cmd *cobra.Command, args []string) error {
 		Direction: "parent_to_child",
 		Type:      "message",
 		Content:   content,
+		Interrupt: interrupt,
 	}
 	if err := s.CreateMessage(msg); err != nil {
 		return fmt.Errorf("sending message: %w", err)
 	}
 
-	fmt.Printf("Message sent to spawn #%d\n", spawnID)
+	if interrupt {
+		// Signal the interrupt so the orchestrator/loop can detect it.
+		if err := s.SignalInterrupt(spawnID, content); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to signal interrupt: %v\n", err)
+		}
+		fmt.Printf("Interrupt message sent to spawn #%d\n", spawnID)
+	} else {
+		fmt.Printf("Message sent to spawn #%d\n", spawnID)
+	}
 	return nil
 }
 
@@ -232,5 +243,86 @@ func runSpawnReadMessages(cmd *cobra.Command, args []string) error {
 		s.MarkMessageRead(m.SpawnID, m.ID)
 	}
 	fmt.Print(sb.String())
+	return nil
+}
+
+// --- adaf wait-for-spawns ---
+
+var waitForSpawnsCmd = &cobra.Command{
+	Use:     "wait-for-spawns",
+	Aliases: []string{"wait_for_spawns", "waitforspawns"},
+	Short:   "Signal that you want to wait for all spawns to complete",
+	Long: `Signal the loop controller that this agent wants to pause and resume
+when all spawned sub-agents complete. The agent should exit/finish its
+current turn after calling this command. When spawns complete, the loop
+will start a new turn with spawn results in the prompt.
+
+This saves API costs by not keeping the agent running while waiting.`,
+	RunE: runWaitForSpawns,
+}
+
+func init() {
+	rootCmd.AddCommand(waitForSpawnsCmd)
+}
+
+func runWaitForSpawns(cmd *cobra.Command, args []string) error {
+	sessionID, _, err := getSessionContext()
+	if err != nil {
+		return err
+	}
+
+	s, err := openStoreRequired()
+	if err != nil {
+		return err
+	}
+
+	if err := s.SignalWait(sessionID); err != nil {
+		return fmt.Errorf("signaling wait: %w", err)
+	}
+
+	fmt.Println("Wait signal created. Finish your current turn — the loop will resume when all spawns complete.")
+	return nil
+}
+
+// --- adaf parent-notify ---
+
+var parentNotifyCmd = &cobra.Command{
+	Use:     "parent-notify [message]",
+	Aliases: []string{"parent_notify", "parentnotify", "notify-parent", "notify_parent"},
+	Short:   "Send a non-blocking notification to parent agent",
+	Long: `Send a notification message to the parent agent without blocking.
+Unlike parent-ask, this does not wait for a reply.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runParentNotify,
+}
+
+func init() {
+	rootCmd.AddCommand(parentNotifyCmd)
+}
+
+func runParentNotify(cmd *cobra.Command, args []string) error {
+	content := args[0]
+
+	spawnID, _, err := getSessionContext()
+	if err != nil {
+		return err
+	}
+
+	s, err := openStoreRequired()
+	if err != nil {
+		return err
+	}
+
+	msg := &store.SpawnMessage{
+		SpawnID:   spawnID,
+		Direction: "child_to_parent",
+		Type:      "notify",
+		Content:   content,
+	}
+	if err := s.CreateMessage(msg); err != nil {
+		return fmt.Errorf("sending notification: %w", err)
+	}
+
+	fmt.Println("Notification sent to parent.")
 	return nil
 }

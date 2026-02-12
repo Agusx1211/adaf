@@ -13,6 +13,7 @@ import (
 	"github.com/agusx1211/adaf/internal/loop"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
 	"github.com/agusx1211/adaf/internal/store"
+	"github.com/agusx1211/adaf/internal/stream"
 	"github.com/agusx1211/adaf/internal/worktree"
 )
 
@@ -23,7 +24,8 @@ type SpawnRequest struct {
 	ChildProfile    string
 	Task            string
 	ReadOnly        bool
-	Wait            bool // if true, Spawn blocks until child completes
+	Wait            bool                     // if true, Spawn blocks until child completes
+	Delegation      *config.DelegationConfig // explicit delegation config (required for spawning)
 }
 
 // SpawnResult is the outcome of a completed spawn.
@@ -35,9 +37,53 @@ type SpawnResult struct {
 }
 
 type activeSpawn struct {
-	record *store.SpawnRecord
-	cancel context.CancelFunc
-	done   chan struct{}
+	record      *store.SpawnRecord
+	cancel      context.CancelFunc
+	done        chan struct{}
+	eventBuffer *eventRingBuffer // circular buffer of recent events
+	interruptCh chan string      // signals the child loop about an interrupt
+}
+
+// eventRingBuffer is a thread-safe circular buffer of recent stream events.
+type eventRingBuffer struct {
+	mu     sync.RWMutex
+	events []stream.RawEvent
+	size   int
+	pos    int
+	full   bool
+}
+
+func newEventRingBuffer(size int) *eventRingBuffer {
+	return &eventRingBuffer{
+		events: make([]stream.RawEvent, size),
+		size:   size,
+	}
+}
+
+func (rb *eventRingBuffer) Add(ev stream.RawEvent) {
+	rb.mu.Lock()
+	rb.events[rb.pos] = ev
+	rb.pos = (rb.pos + 1) % rb.size
+	if rb.pos == 0 {
+		rb.full = true
+	}
+	rb.mu.Unlock()
+}
+
+func (rb *eventRingBuffer) Snapshot() []stream.RawEvent {
+	rb.mu.RLock()
+	defer rb.mu.RUnlock()
+
+	if !rb.full {
+		result := make([]stream.RawEvent, rb.pos)
+		copy(result, rb.events[:rb.pos])
+		return result
+	}
+	// Buffer is full — return in order starting from pos.
+	result := make([]stream.RawEvent, rb.size)
+	copy(result, rb.events[rb.pos:])
+	copy(result[rb.size-rb.pos:], rb.events[:rb.pos])
+	return result
 }
 
 type pendingSpawn struct {
@@ -58,8 +104,8 @@ type Orchestrator struct {
 	repoRoot  string
 
 	mu        sync.Mutex
-	running   map[string]int        // parent profile -> count of running spawns
-	instances map[string]int        // child profile -> count of running instances
+	running   map[string]int // parent profile -> count of running spawns
+	instances map[string]int // child profile -> count of running instances
 	queue     []*pendingSpawn
 	spawns    map[int]*activeSpawn
 }
@@ -79,30 +125,48 @@ func New(s *store.Store, globalCfg *config.GlobalConfig, repoRoot string) *Orche
 
 // Spawn starts (or queues) a sub-agent.
 func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error) {
-	// Validate parent profile can spawn.
+	// Validate parent profile exists.
 	parentProf := o.globalCfg.FindProfile(req.ParentProfile)
 	if parentProf == nil {
 		return 0, fmt.Errorf("parent profile %q not found", req.ParentProfile)
 	}
-	if !config.CanSpawn(parentProf.Role) {
-		return 0, fmt.Errorf("profile %q (role=%s) cannot spawn sub-agents", req.ParentProfile, config.EffectiveRole(parentProf.Role))
+
+	// Delegation config is required for spawning.
+	deleg := req.Delegation
+	strictDelegation := deleg != nil
+	if deleg == nil {
+		// Backward compatibility: if no delegation config, try legacy role-based check
+		// and build a delegation config from SpawnableProfiles.
+		if !config.CanSpawn(parentProf.Role) {
+			return 0, fmt.Errorf("profile %q cannot spawn sub-agents (no delegation config and role=%s)", req.ParentProfile, config.EffectiveRole(parentProf.Role))
+		}
+		deleg = legacyDelegation(parentProf)
+		req.Delegation = deleg
 	}
 
-	// Validate child profile exists and is in spawnable list.
+	// Validate child profile exists and is in delegation profiles list.
 	childProf := o.globalCfg.FindProfile(req.ChildProfile)
 	if childProf == nil {
 		return 0, fmt.Errorf("child profile %q not found", req.ChildProfile)
 	}
-	if !isSpawnable(parentProf, req.ChildProfile) {
-		return 0, fmt.Errorf("profile %q is not in spawnable_profiles of %q", req.ChildProfile, req.ParentProfile)
+	if strictDelegation && !deleg.HasProfile(req.ChildProfile) {
+		return 0, fmt.Errorf("profile %q is not in delegation profiles of %q", req.ChildProfile, req.ParentProfile)
+	}
+	if !strictDelegation && !legacyCanSpawn(deleg, req.ChildProfile, parentProf) {
+		return 0, fmt.Errorf("profile %q is not in delegation profiles of %q", req.ChildProfile, req.ParentProfile)
 	}
 
 	o.mu.Lock()
 
 	// Check child profile instance limit.
-	if childProf.MaxInstances > 0 {
+	// Use delegation profile's MaxInstances if set, otherwise fall back to child profile's.
+	maxInst := childProf.MaxInstances
+	if dp := deleg.FindProfile(req.ChildProfile); dp != nil && dp.MaxInstances > 0 {
+		maxInst = dp.MaxInstances
+	}
+	if maxInst > 0 {
 		currentInstances := o.instances[req.ChildProfile]
-		if currentInstances >= childProf.MaxInstances {
+		if currentInstances >= maxInst {
 			// Queue the spawn (will be released when an instance of this profile completes).
 			ch := make(chan spawnOutcome, 1)
 			o.queue = append(o.queue, &pendingSpawn{req: req, ch: ch})
@@ -117,11 +181,8 @@ func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error)
 		}
 	}
 
-	// Check parent concurrency limit.
-	maxPar := parentProf.MaxParallel
-	if maxPar <= 0 {
-		maxPar = 4 // sensible default
-	}
+	// Check parent concurrency limit from delegation config.
+	maxPar := deleg.EffectiveMaxParallel()
 	currentRunning := o.running[req.ParentProfile]
 	if currentRunning >= maxPar {
 		// Queue the spawn.
@@ -145,7 +206,44 @@ func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error)
 	return o.startSpawn(ctx, req, parentProf, childProf)
 }
 
+// legacyDelegation builds a DelegationConfig from legacy Profile fields for backward compatibility.
+func legacyDelegation(prof *config.Profile) *config.DelegationConfig {
+	deleg := &config.DelegationConfig{
+		MaxParallel: prof.MaxParallel,
+	}
+	for _, name := range prof.SpawnableProfiles {
+		deleg.Profiles = append(deleg.Profiles, config.DelegationProfile{Name: name})
+	}
+	return deleg
+}
+
+// legacyCanSpawn checks whether a child profile is allowed under legacy or delegation rules.
+// In legacy mode (empty SpawnableProfiles), any profile can be spawned.
+func legacyCanSpawn(deleg *config.DelegationConfig, childName string, parentProf *config.Profile) bool {
+	if deleg.HasProfile(childName) {
+		return true
+	}
+	// Legacy: empty SpawnableProfiles means "can spawn anything"
+	if len(parentProf.SpawnableProfiles) == 0 && len(deleg.Profiles) == 0 {
+		return true
+	}
+	return false
+}
+
 func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentProf, childProf *config.Profile) (int, error) {
+	// Populate handoff and speed from delegation profile if available.
+	var handoff bool
+	var speed string
+	if req.Delegation != nil {
+		if dp := req.Delegation.FindProfile(req.ChildProfile); dp != nil {
+			handoff = dp.Handoff
+			speed = dp.Speed
+		}
+	}
+	if speed == "" {
+		speed = childProf.Speed
+	}
+
 	// Create spawn record.
 	rec := &store.SpawnRecord{
 		ParentSessionID: req.ParentSessionID,
@@ -154,6 +252,8 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 		Task:            req.Task,
 		ReadOnly:        req.ReadOnly,
 		Status:          "running",
+		Handoff:         handoff,
+		Speed:           speed,
 	}
 
 	var wtPath string
@@ -256,33 +356,83 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 		}
 	}
 
+	// Set up event buffer for parent inspection.
+	eventBuf := newEventRingBuffer(1000)
+	streamCh := make(chan stream.RawEvent, 256)
+
 	agentCfg := agent.Config{
-		Name:    childProf.Agent,
-		Command: customCmd,
-		Args:    agentArgs,
-		Env:     agentEnv,
-		WorkDir: workDir,
-		Prompt:  childPrompt,
-		Stdout:  io.Discard,
-		Stderr:  io.Discard,
+		Name:      childProf.Agent,
+		Command:   customCmd,
+		Args:      agentArgs,
+		Env:       agentEnv,
+		WorkDir:   workDir,
+		Prompt:    childPrompt,
+		Stdout:    io.Discard,
+		Stderr:    io.Discard,
+		EventSink: streamCh,
 	}
 
 	childCtx, childCancel := context.WithCancel(ctx)
 	done := make(chan struct{})
+	interruptCh := make(chan string, 1)
 
 	as := &activeSpawn{
-		record: rec,
-		cancel: childCancel,
-		done:   done,
+		record:      rec,
+		cancel:      childCancel,
+		done:        done,
+		eventBuffer: eventBuf,
+		interruptCh: interruptCh,
 	}
 
 	o.mu.Lock()
 	o.spawns[rec.ID] = as
 	o.mu.Unlock()
 
+	// Drain stream events into the ring buffer in the background.
+	eventDone := make(chan struct{})
+	go func() {
+		defer close(eventDone)
+		for ev := range streamCh {
+			eventBuf.Add(ev)
+		}
+	}()
+
+	// Watch for interrupt signals written by `adaf spawn-message --interrupt`.
+	interruptDone := make(chan struct{})
+	go func() {
+		defer close(interruptDone)
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-childCtx.Done():
+				return
+			case <-ticker.C:
+				msg := o.store.CheckInterrupt(rec.ID)
+				if msg == "" {
+					continue
+				}
+				_ = o.store.ClearInterrupt(rec.ID)
+				select {
+				case interruptCh <- msg:
+				default:
+				}
+				childCancel()
+			}
+		}
+	}()
+
 	// Run the child agent in a goroutine.
 	go func() {
 		defer close(done)
+		defer func() {
+			close(streamCh)
+			<-eventDone
+		}()
+		defer func() {
+			childCancel()
+			<-interruptDone
+		}()
 		defer o.onSpawnComplete(ctx, rec, req.ParentProfile)
 
 		l := &loop.Loop{
@@ -311,6 +461,27 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 				})
 				return newPrompt
 			},
+			OnWait: func(sessionID int) []loop.WaitResult {
+				// Wait for this child's own spawns to complete.
+				results := o.Wait(rec.ChildSessionID)
+				var wr []loop.WaitResult
+				for _, r := range results {
+					childRec, _ := o.store.GetSpawn(r.SpawnID)
+					profile := ""
+					if childRec != nil {
+						profile = childRec.ChildProfile
+					}
+					wr = append(wr, loop.WaitResult{
+						SpawnID:  r.SpawnID,
+						Profile:  profile,
+						Status:   r.Status,
+						ExitCode: r.ExitCode,
+						Result:   r.Result,
+					})
+				}
+				return wr
+			},
+			InterruptCh: interruptCh,
 		}
 
 		err := l.Run(childCtx)
@@ -334,13 +505,15 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 }
 
 func (o *Orchestrator) onSpawnComplete(ctx context.Context, rec *store.SpawnRecord, parentProfile string) {
+	_ = o.store.ClearInterrupt(rec.ID)
+
 	o.mu.Lock()
 	delete(o.spawns, rec.ID)
 	o.decrementRunningLocked(parentProfile)
 	o.decrementInstancesLocked(rec.ChildProfile)
 
 	// Check queue for next pending spawn that can now run.
-	// A queued spawn becomes eligible when both the parent's MaxParallel
+	// A queued spawn becomes eligible when both the delegation MaxParallel
 	// and the child's MaxInstances limits have room.
 	for i, pending := range o.queue {
 		parentProf := o.globalCfg.FindProfile(pending.req.ParentProfile)
@@ -353,15 +526,24 @@ func (o *Orchestrator) onSpawnComplete(ctx context.Context, rec *store.SpawnReco
 			return
 		}
 
-		// Check both limits.
-		maxPar := parentProf.MaxParallel
-		if maxPar <= 0 {
-			maxPar = 4
+		// Check parent concurrency limit from delegation config.
+		deleg := pending.req.Delegation
+		maxPar := 4
+		if deleg != nil {
+			maxPar = deleg.EffectiveMaxParallel()
 		}
 		if o.running[pending.req.ParentProfile] >= maxPar {
 			continue
 		}
-		if childProf.MaxInstances > 0 && o.instances[pending.req.ChildProfile] >= childProf.MaxInstances {
+
+		// Check child instance limit (delegation profile overrides child profile).
+		maxInst := childProf.MaxInstances
+		if deleg != nil {
+			if dp := deleg.FindProfile(pending.req.ChildProfile); dp != nil && dp.MaxInstances > 0 {
+				maxInst = dp.MaxInstances
+			}
+		}
+		if maxInst > 0 && o.instances[pending.req.ChildProfile] >= maxInst {
 			continue
 		}
 
@@ -400,22 +582,30 @@ func (o *Orchestrator) decrementInstancesLocked(profile string) {
 
 // Wait blocks until all spawns for the given parent session are done.
 func (o *Orchestrator) Wait(parentSessionID int) []SpawnResult {
-	// Collect active spawns for this parent.
-	o.mu.Lock()
-	var toWait []*activeSpawn
-	for _, as := range o.spawns {
-		if as.record.ParentSessionID == parentSessionID {
-			toWait = append(toWait, as)
+	// Snapshot non-terminal spawns for this parent and wait until they complete.
+	records, _ := o.store.SpawnsByParent(parentSessionID)
+	pending := make(map[int]struct{})
+	for _, r := range records {
+		if !isTerminalSpawnStatus(r.Status) {
+			pending[r.ID] = struct{}{}
 		}
 	}
-	o.mu.Unlock()
-
-	for _, as := range toWait {
-		<-as.done
+	if len(pending) > 0 {
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		for len(pending) > 0 {
+			<-ticker.C
+			for id := range pending {
+				rec, err := o.store.GetSpawn(id)
+				if err != nil || isTerminalSpawnStatus(rec.Status) {
+					delete(pending, id)
+				}
+			}
+		}
 	}
 
 	// Return results from store.
-	records, _ := o.store.SpawnsByParent(parentSessionID)
+	records, _ = o.store.SpawnsByParent(parentSessionID)
 	var results []SpawnResult
 	for _, r := range records {
 		results = append(results, SpawnResult{
@@ -461,6 +651,41 @@ func (o *Orchestrator) Cancel(spawnID int) error {
 	}
 	as.cancel()
 	return nil
+}
+
+// InterruptSpawn sends an interrupt message to a running spawn's loop.
+func (o *Orchestrator) InterruptSpawn(spawnID int, message string) error {
+	o.mu.Lock()
+	as, ok := o.spawns[spawnID]
+	o.mu.Unlock()
+
+	if !ok {
+		return fmt.Errorf("spawn %d not found or already completed", spawnID)
+	}
+
+	// Send interrupt to the child's loop via its interrupt channel.
+	select {
+	case as.interruptCh <- message:
+	default:
+		// Channel already has a pending interrupt.
+	}
+
+	// Cancel the child's current turn.
+	as.cancel()
+	return nil
+}
+
+// InspectSpawn returns recent stream events from a running spawn's event buffer.
+func (o *Orchestrator) InspectSpawn(spawnID int) ([]stream.RawEvent, error) {
+	o.mu.Lock()
+	as, ok := o.spawns[spawnID]
+	o.mu.Unlock()
+
+	if !ok {
+		return nil, fmt.Errorf("spawn %d not found or already completed", spawnID)
+	}
+
+	return as.eventBuffer.Snapshot(), nil
 }
 
 // Merge merges a completed spawn's branch into the current branch.
@@ -545,16 +770,47 @@ func (o *Orchestrator) CleanupAll(ctx context.Context) error {
 	return o.worktrees.CleanupAll(ctx)
 }
 
-func isSpawnable(parent *config.Profile, childName string) bool {
-	if len(parent.SpawnableProfiles) == 0 {
-		return true // no restriction = can spawn anything
+// ReparentSpawn updates a spawn's parent session ID, used for handoff across loop steps.
+func (o *Orchestrator) ReparentSpawn(spawnID, newParentSessionID int) error {
+	rec, err := o.store.GetSpawn(spawnID)
+	if err != nil {
+		return fmt.Errorf("spawn %d not found: %w", spawnID, err)
 	}
-	for _, name := range parent.SpawnableProfiles {
-		if name == childName {
-			return true
+	rec.ParentSessionID = newParentSessionID
+	rec.HandedOffTo = newParentSessionID
+	if err := o.store.UpdateSpawn(rec); err != nil {
+		return err
+	}
+
+	o.mu.Lock()
+	if as, ok := o.spawns[spawnID]; ok && as.record != nil {
+		as.record.ParentSessionID = newParentSessionID
+		as.record.HandedOffTo = newParentSessionID
+	}
+	o.mu.Unlock()
+	return nil
+}
+
+// ActiveSpawnsForParent returns IDs of currently running spawns for a parent session.
+func (o *Orchestrator) ActiveSpawnsForParent(parentSessionID int) []int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	var ids []int
+	for _, as := range o.spawns {
+		if as.record.ParentSessionID == parentSessionID {
+			ids = append(ids, as.record.ID)
 		}
 	}
-	return false
+	return ids
+}
+
+func isTerminalSpawnStatus(status string) bool {
+	switch status {
+	case "completed", "failed", "merged", "rejected":
+		return true
+	default:
+		return false
+	}
 }
 
 // --- Singleton ---

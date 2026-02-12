@@ -825,3 +825,49 @@ func (s *Store) IsLoopStopped(runID int) bool {
 	_, err := os.Stat(filepath.Join(s.loopRunDir(runID), "stop"))
 	return err == nil
 }
+
+// --- Wait Signal ---
+
+// SignalWait creates a wait signal file for a session.
+// This indicates the agent wants to pause and resume when spawns complete.
+func (s *Store) SignalWait(sessionID int) error {
+	dir := filepath.Join(s.root, "waits")
+	os.MkdirAll(dir, 0755)
+	return os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d", sessionID)), []byte("waiting"), 0644)
+}
+
+// IsWaiting checks if a wait signal exists for a session.
+func (s *Store) IsWaiting(sessionID int) bool {
+	_, err := os.Stat(filepath.Join(s.root, "waits", fmt.Sprintf("%d", sessionID)))
+	return err == nil
+}
+
+// ClearWait removes the wait signal for a session.
+func (s *Store) ClearWait(sessionID int) error {
+	return os.Remove(filepath.Join(s.root, "waits", fmt.Sprintf("%d", sessionID)))
+}
+
+// --- Interrupt Signal ---
+
+// SignalInterrupt creates an interrupt signal file for a spawn.
+func (s *Store) SignalInterrupt(spawnID int, message string) error {
+	dir := filepath.Join(s.root, "interrupts")
+	os.MkdirAll(dir, 0755)
+	return os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d", spawnID)), []byte(message), 0644)
+}
+
+// CheckInterrupt checks for and returns an interrupt message for a spawn.
+// Returns empty string if no interrupt is pending.
+func (s *Store) CheckInterrupt(spawnID int) string {
+	path := filepath.Join(s.root, "interrupts", fmt.Sprintf("%d", spawnID))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// ClearInterrupt removes the interrupt signal for a spawn.
+func (s *Store) ClearInterrupt(spawnID int) error {
+	return os.Remove(filepath.Join(s.root, "interrupts", fmt.Sprintf("%d", spawnID)))
+}

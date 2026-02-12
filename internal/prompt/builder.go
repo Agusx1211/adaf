@@ -62,6 +62,25 @@ type BuildOpts struct {
 
 	// LoopContext provides loop-specific context (nil if not in a loop).
 	LoopContext *LoopPromptContext
+
+	// Delegation describes spawn capabilities for this agent's context.
+	// If nil, the agent cannot spawn sub-agents.
+	Delegation *config.DelegationConfig
+
+	// WaitResults from a previous wait-for-spawns cycle, injected into the prompt.
+	WaitResults []WaitResultInfo
+
+	// Handoffs from previous loop step, injected into the prompt.
+	Handoffs []store.HandoffInfo
+}
+
+// WaitResultInfo describes the result of a spawn that was waited on.
+type WaitResultInfo struct {
+	SpawnID  int
+	Profile  string
+	Status   string
+	ExitCode int
+	Result   string
 }
 
 // Build constructs a prompt from project context and role configuration.
@@ -246,6 +265,43 @@ func Build(opts BuildOpts) (string, error) {
 			}
 			b.WriteString("\n")
 		}
+	}
+
+	// Delegation section.
+	b.WriteString(delegationSection(opts.Delegation, opts.GlobalCfg))
+
+	// Wait results from a previous wait-for-spawns cycle.
+	if len(opts.WaitResults) > 0 {
+		b.WriteString("## Spawn Wait Results\n\n")
+		b.WriteString("The spawns you waited for have completed:\n\n")
+		for _, wr := range opts.WaitResults {
+			fmt.Fprintf(&b, "- Spawn #%d (profile=%s): status=%s, exit_code=%d", wr.SpawnID, wr.Profile, wr.Status, wr.ExitCode)
+			if wr.Result != "" {
+				fmt.Fprintf(&b, " — %s", wr.Result)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("\nReview their diffs with `adaf spawn-diff --spawn-id N` and merge or reject as needed.\n\n")
+	}
+
+	// Handoff section.
+	if len(opts.Handoffs) > 0 {
+		b.WriteString("## Inherited Running Agents (Handoff)\n\n")
+		b.WriteString("The previous step handed off these running sub-agents to you:\n\n")
+		for _, h := range opts.Handoffs {
+			fmt.Fprintf(&b, "- Spawn #%d (profile: %s", h.SpawnID, h.Profile)
+			if h.Speed != "" {
+				fmt.Fprintf(&b, ", speed: %s", h.Speed)
+			}
+			fmt.Fprintf(&b, ") — Task: %q\n", h.Task)
+			fmt.Fprintf(&b, "  Status: %s", h.Status)
+			if h.Branch != "" {
+				fmt.Fprintf(&b, ", Branch: %s", h.Branch)
+			}
+			b.WriteString("\n")
+			fmt.Fprintf(&b, "  Use `adaf spawn-status --spawn-id %d` to check progress.\n\n", h.SpawnID)
+		}
+		b.WriteString("You can manage these exactly like your own spawns (wait, diff, merge, reject).\n\n")
 	}
 
 	// AGENTS.md.

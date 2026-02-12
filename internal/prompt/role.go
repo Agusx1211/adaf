@@ -9,6 +9,7 @@ import (
 
 // RolePrompt returns the role-specific system prompt section for a profile.
 // An agent NEVER sees its own intelligence rating.
+// Spawning capabilities are no longer emitted here — they come from delegationSection().
 func RolePrompt(profile *config.Profile, globalCfg *config.GlobalConfig) string {
 	role := config.EffectiveRole(profile.Role)
 
@@ -19,22 +20,18 @@ func RolePrompt(profile *config.Profile, globalCfg *config.GlobalConfig) string 
 		b.WriteString("# Your Role: MANAGER\n\n")
 		b.WriteString("You are a MANAGER agent. You do NOT write code directly. Your job is to:\n")
 		b.WriteString("- Break down tasks into smaller, well-defined sub-tasks\n")
-		b.WriteString("- Spawn developer agents to handle implementation\n")
+		b.WriteString("- Delegate implementation to sub-agents\n")
 		b.WriteString("- Review every diff before merging (use `adaf spawn-diff`)\n")
 		b.WriteString("- Merge or reject work based on quality\n\n")
-		b.WriteString(delegationCommands())
-		b.WriteString(spawnableInfo(profile, globalCfg))
 
 	case config.RoleSenior:
 		b.WriteString("# Your Role: SENIOR DEVELOPER\n\n")
-		b.WriteString("You are a SENIOR DEVELOPER agent. You can both write code AND delegate tasks. You are strongly encouraged to delegate smaller tasks to junior agents when appropriate.\n\n")
-		b.WriteString(delegationCommands())
+		b.WriteString("You are a SENIOR DEVELOPER agent. You can write code and may also delegate tasks to sub-agents when configured.\n\n")
 		b.WriteString(communicationCommands())
-		b.WriteString(spawnableInfo(profile, globalCfg))
 
 	case config.RoleJunior:
 		b.WriteString("# Your Role: JUNIOR DEVELOPER\n\n")
-		b.WriteString("You are a JUNIOR DEVELOPER agent. Focus exclusively on your assigned task. You cannot spawn sub-agents.\n\n")
+		b.WriteString("You are a JUNIOR DEVELOPER agent. Focus exclusively on your assigned task.\n\n")
 		b.WriteString(communicationCommands())
 
 	case config.RoleSupervisor:
@@ -58,6 +55,69 @@ func ReadOnlyPrompt() string {
 	return "# READ-ONLY MODE\n\nYou are in READ-ONLY mode. Do NOT create, modify, or delete any files. Only read and analyze.\n"
 }
 
+// delegationSection builds the delegation/spawning prompt section from a DelegationConfig.
+func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalConfig) string {
+	if deleg == nil {
+		return "You cannot spawn sub-agents.\n\n"
+	}
+
+	var b strings.Builder
+
+	b.WriteString("# Delegation\n\n")
+
+	// Style guidance.
+	if style := deleg.DelegationStyleText(); style != "" {
+		b.WriteString("**Delegation style:** " + style + "\n\n")
+	}
+
+	// Delegation commands.
+	b.WriteString(delegationCommands())
+
+	// Wait-for-spawns command.
+	b.WriteString("- `adaf wait-for-spawns` — Signal that you want to wait for all spawns to complete, then get results in your next turn\n\n")
+
+	// Available profiles.
+	if len(deleg.Profiles) > 0 && globalCfg != nil {
+		b.WriteString("## Available Profiles to Spawn\n\n")
+		for _, dp := range deleg.Profiles {
+			p := globalCfg.FindProfile(dp.Name)
+			if p == nil {
+				b.WriteString(fmt.Sprintf("- **%s** (not found in config)\n", dp.Name))
+				continue
+			}
+			line := fmt.Sprintf("- **%s** — agent=%s", p.Name, p.Agent)
+			if p.Model != "" {
+				line += fmt.Sprintf(", model=%s", p.Model)
+			}
+			role := config.EffectiveRole(p.Role)
+			line += fmt.Sprintf(", role=%s", role)
+			if p.Intelligence > 0 {
+				line += fmt.Sprintf(", intelligence=%d/10", p.Intelligence)
+			}
+			speed := dp.Speed
+			if speed == "" {
+				speed = p.Speed
+			}
+			if speed != "" {
+				line += fmt.Sprintf(", speed=%s", speed)
+			}
+			if dp.Handoff {
+				line += " [handoff]"
+			}
+			if p.Description != "" {
+				line += fmt.Sprintf(" — %s", p.Description)
+			}
+			b.WriteString(line + "\n")
+		}
+		b.WriteString("\n")
+	}
+
+	maxPar := deleg.EffectiveMaxParallel()
+	fmt.Fprintf(&b, "Maximum concurrent sub-agents: %d\n\n", maxPar)
+
+	return b.String()
+}
+
 func delegationCommands() string {
 	var b strings.Builder
 	b.WriteString("## Delegation Commands\n\n")
@@ -70,7 +130,8 @@ func delegationCommands() string {
 	b.WriteString("- `adaf spawn-reject --spawn-id N` — Reject spawn's changes\n")
 	b.WriteString("- `adaf spawn-watch --spawn-id N` — Watch spawn output in real-time\n")
 	b.WriteString("- `adaf spawn-reply --spawn-id N \"answer\"` — Reply to child's question\n")
-	b.WriteString("- `adaf spawn-message --spawn-id N \"guidance\"` — Send async message to child\n\n")
+	b.WriteString("- `adaf spawn-message --spawn-id N \"guidance\"` — Send async message to child\n")
+	b.WriteString("- `adaf spawn-message --spawn-id N --interrupt \"new priority\"` — Interrupt child's current turn\n\n")
 	return b.String()
 }
 
@@ -78,42 +139,7 @@ func communicationCommands() string {
 	var b strings.Builder
 	b.WriteString("## Communication with Parent\n\n")
 	b.WriteString("- `adaf parent-ask \"question\"` — Ask your parent a question (blocks until answered)\n")
+	b.WriteString("- `adaf parent-notify \"status update\"` — Send a non-blocking notification to parent\n")
 	b.WriteString("- `adaf spawn-read-messages` — Read messages from parent\n\n")
-	return b.String()
-}
-
-func spawnableInfo(profile *config.Profile, globalCfg *config.GlobalConfig) string {
-	if len(profile.SpawnableProfiles) == 0 || globalCfg == nil {
-		return ""
-	}
-
-	var b strings.Builder
-	b.WriteString("## Available Profiles to Spawn\n\n")
-	for _, name := range profile.SpawnableProfiles {
-		p := globalCfg.FindProfile(name)
-		if p == nil {
-			b.WriteString(fmt.Sprintf("- **%s** (not found in config)\n", name))
-			continue
-		}
-		line := fmt.Sprintf("- **%s** — agent=%s", p.Name, p.Agent)
-		if p.Model != "" {
-			line += fmt.Sprintf(", model=%s", p.Model)
-		}
-		role := config.EffectiveRole(p.Role)
-		line += fmt.Sprintf(", role=%s", role)
-		if p.Intelligence > 0 {
-			line += fmt.Sprintf(", intelligence=%d/10", p.Intelligence)
-		}
-		if p.Description != "" {
-			line += fmt.Sprintf(" — %s", p.Description)
-		}
-		b.WriteString(line + "\n")
-	}
-	b.WriteString("\n")
-
-	if profile.MaxParallel > 0 {
-		fmt.Fprintf(&b, "Maximum concurrent sub-agents: %d\n\n", profile.MaxParallel)
-	}
-
 	return b.String()
 }

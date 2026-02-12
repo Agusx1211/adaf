@@ -4,16 +4,27 @@ import "time"
 
 // LoopRun tracks the state of a running loop.
 type LoopRun struct {
-	ID              int            `json:"id"`
-	LoopName        string         `json:"loop_name"`
-	Steps           []LoopRunStep  `json:"steps"`                      // snapshot of loop definition
-	Status          string         `json:"status"`                     // "running", "stopped", "cancelled"
-	Cycle           int            `json:"cycle"`                      // current cycle (0-indexed)
-	StepIndex       int            `json:"step_index"`                 // current step in cycle
-	StartedAt       time.Time      `json:"started_at"`
-	StoppedAt       time.Time      `json:"stopped_at,omitempty"`
-	SessionIDs      []int          `json:"session_ids"`                // all session IDs created
-	StepLastSeenMsg map[int]int    `json:"step_last_seen_msg"`         // step_index -> last seen msg index
+	ID              int           `json:"id"`
+	LoopName        string        `json:"loop_name"`
+	Steps           []LoopRunStep `json:"steps"`      // snapshot of loop definition
+	Status          string        `json:"status"`     // "running", "stopped", "cancelled"
+	Cycle           int           `json:"cycle"`      // current cycle (0-indexed)
+	StepIndex       int           `json:"step_index"` // current step in cycle
+	StartedAt       time.Time     `json:"started_at"`
+	StoppedAt       time.Time     `json:"stopped_at,omitempty"`
+	SessionIDs      []int         `json:"session_ids"`                // all session IDs created
+	StepLastSeenMsg map[int]int   `json:"step_last_seen_msg"`         // step_index -> last seen msg index
+	PendingHandoffs []HandoffInfo `json:"pending_handoffs,omitempty"` // spawns handed off to next step
+}
+
+// HandoffInfo describes a spawn handed off from a previous loop step.
+type HandoffInfo struct {
+	SpawnID int    `json:"spawn_id"`
+	Profile string `json:"child_profile"`
+	Task    string `json:"task"`
+	Status  string `json:"status"`
+	Speed   string `json:"speed,omitempty"`
+	Branch  string `json:"branch,omitempty"`
 }
 
 // LoopRunStep is a snapshot of a loop step definition stored with the run.
