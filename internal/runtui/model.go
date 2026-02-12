@@ -341,10 +341,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForEvent(m.eventCh)
 
 	case AgentStartedMsg:
-		m.finalizeWaitingSessions()
+		m.finalizeWaitingSessions(msg.SessionID)
 		m.sessionID = msg.SessionID
 		now := time.Now()
 		s := m.ensureSession(msg.SessionID)
+		resuming := isWaitingSessionStatus(s.Status)
 		if s.Agent == "" {
 			s.Agent = m.agentName
 		}
@@ -352,15 +353,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s.Profile = m.loopStepProfile
 		}
 		s.Status = "running"
-		s.Action = "starting"
-		s.StartedAt = now
+		if resuming {
+			s.Action = "resumed"
+		} else {
+			s.Action = "starting"
+		}
+		if !resuming || s.StartedAt.IsZero() {
+			s.StartedAt = now
+		}
+		s.EndedAt = time.Time{}
 		s.LastUpdate = now
 		scope := m.sessionScope(msg.SessionID)
 		turnLabel := fmt.Sprintf(">>> Turn #%d", msg.SessionID)
 		if msg.TurnHexID != "" {
 			turnLabel += fmt.Sprintf(" [%s]", msg.TurnHexID)
 		}
-		turnLabel += " started"
+		if resuming {
+			turnLabel += " resumed"
+		} else {
+			turnLabel += " started"
+		}
 		m.addScopedLine(scope, dimStyle.Render(turnLabel))
 		return m, waitForEvent(m.eventCh)
 
@@ -1058,9 +1070,12 @@ func isTerminalSpawnStatus(status string) bool {
 	}
 }
 
-func (m *Model) finalizeWaitingSessions() {
+func (m *Model) finalizeWaitingSessions(exceptSessionID int) {
 	now := time.Now()
 	for _, sid := range m.sessionOrder {
+		if sid == exceptSessionID {
+			continue
+		}
 		s := m.sessions[sid]
 		if s == nil || !isWaitingSessionStatus(s.Status) {
 			continue

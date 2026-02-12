@@ -16,8 +16,10 @@ import (
 )
 
 // WaitCallback is called when the loop detects a wait signal.
-// It should block until spawns complete and return results for the next prompt.
-type WaitCallback func(turnID int) []WaitResult
+// It should block until at least one spawn completes (wait-for-any)
+// and return results for the completed spawns. The bool return indicates
+// whether more spawns are still pending.
+type WaitCallback func(turnID int) (results []WaitResult, morePending bool)
 
 // WaitResult describes the outcome of a spawn that was waited on.
 type WaitResult struct {
@@ -32,8 +34,8 @@ type WaitResult struct {
 }
 
 // Loop is the main agent loop controller. It runs an agent one or more times,
-// creating a new turn recording for each iteration, and persists results
-// to the store.
+// creating turn recordings in the store. Normal iterations create new turns;
+// wait-for-spawns resumes continue on the same turn.
 type Loop struct {
 	Store  *store.Store
 	Agent  agent.Agent
@@ -88,6 +90,16 @@ type Loop struct {
 	// lastWaitResults holds results from a wait cycle, injected into the next prompt.
 	lastWaitResults []WaitResult
 
+	// moreSpawnsPending is true when the last wait returned partial results
+	// and more spawns are still running.
+	moreSpawnsPending bool
+
+	// waitResumeTurnID/HexID identify the turn that should be resumed after
+	// wait-for-spawns. This keeps the logical turn stable instead of creating
+	// a new turn record for each wait cycle.
+	waitResumeTurnID    int
+	waitResumeTurnHexID string
+
 	// lastInterruptMsg holds the message from the last interrupt, injected
 	// into the next turn's prompt.
 	lastInterruptMsg string
@@ -113,25 +125,63 @@ func (l *Loop) Run(ctx context.Context) error {
 		default:
 		}
 
-		// Allocate a new turn ID by creating a turn entry.
-		objective := summarizeObjectiveForLog(l.Config.Prompt)
-		if objective == "" {
-			objective = "Agent run"
+		// Allocate a turn ID. For wait-for-spawns resumes, reuse the same turn.
+		var (
+			turnID       int
+			turnHexID    string
+			turnLog      *store.Turn
+			resumingTurn bool
+		)
+		if l.waitResumeTurnID > 0 {
+			resumingTurn = true
+			turnID = l.waitResumeTurnID
+			if l.Store != nil {
+				existing, err := l.Store.GetTurn(turnID)
+				if err != nil {
+					return fmt.Errorf("loading wait-resume turn %d: %w", turnID, err)
+				}
+				turnLog = existing
+				if strings.TrimSpace(turnLog.HexID) != "" {
+					turnHexID = strings.TrimSpace(turnLog.HexID)
+				}
+			}
+			if turnHexID == "" {
+				turnHexID = strings.TrimSpace(l.waitResumeTurnHexID)
+			}
+			if turnHexID == "" {
+				turnHexID = hexid.New()
+			}
+			// Consume the pending wait-resume marker now; if this iteration
+			// is interrupted/error'd, the next iteration should allocate a new
+			// turn unless another wait signal is raised.
+			l.waitResumeTurnID = 0
+			l.waitResumeTurnHexID = ""
+		} else {
+			objective := summarizeObjectiveForLog(l.Config.Prompt)
+			if objective == "" {
+				objective = "Agent run"
+			}
+			turnHexID = hexid.New()
+			turnLog = &store.Turn{
+				Agent:        l.Agent.Name(),
+				ProfileName:  l.ProfileName,
+				PlanID:       l.PlanID,
+				Objective:    objective,
+				HexID:        turnHexID,
+				LoopRunHexID: l.LoopRunHexID,
+				StepHexID:    l.StepHexID,
+			}
+			if err := l.Store.CreateTurn(turnLog); err != nil {
+				return fmt.Errorf("creating turn: %w", err)
+			}
+			turnID = turnLog.ID
 		}
-		turnHexID := hexid.New()
-		turnLog := &store.Turn{
-			Agent:        l.Agent.Name(),
-			ProfileName:  l.ProfileName,
-			PlanID:       l.PlanID,
-			Objective:    objective,
-			HexID:        turnHexID,
-			LoopRunHexID: l.LoopRunHexID,
-			StepHexID:    l.StepHexID,
+		if turnLog == nil {
+			turnLog = &store.Turn{ID: turnID}
 		}
-		if err := l.Store.CreateTurn(turnLog); err != nil {
-			return fmt.Errorf("creating turn: %w", err)
+		if strings.TrimSpace(turnLog.HexID) == "" {
+			turnLog.HexID = turnHexID
 		}
-		turnID := turnLog.ID
 
 		// Update config with the current turn ID.
 		cfg := l.Config
@@ -173,8 +223,9 @@ func (l *Loop) Run(ctx context.Context) error {
 			// notes) as a continuation message — NOT the full system prompt.
 			cfg.ResumeSessionID = l.lastAgentSessionID
 			l.lastAgentSessionID = "" // consume after use
-			cfg.Prompt = buildResumePrompt(l.lastWaitResults, l.lastInterruptMsg, l.loadSupervisorNotes(turnID))
+			cfg.Prompt = buildResumePrompt(l.lastWaitResults, l.moreSpawnsPending, l.lastInterruptMsg, l.loadSupervisorNotes(turnID))
 			l.lastWaitResults = nil
+			l.moreSpawnsPending = false
 			l.lastInterruptMsg = ""
 		} else {
 			var supervisorNotes []store.SupervisorNote
@@ -193,11 +244,15 @@ func (l *Loop) Run(ctx context.Context) error {
 
 			// Inject wait results from a previous wait-for-spawns cycle.
 			if len(l.lastWaitResults) > 0 {
-				cfg.Prompt += "\n## Spawn Wait Results\n\nThe spawns you waited for have completed:\n\n"
+				cfg.Prompt += "\n## Spawn Wait Results\n\nThe following spawns have completed:\n\n"
 				for _, wr := range l.lastWaitResults {
 					cfg.Prompt += formatWaitResult(wr)
 				}
-				l.lastWaitResults = nil // Clear after injecting.
+				if l.moreSpawnsPending {
+					cfg.Prompt += "**Other spawns are still running.** Call `adaf wait-for-spawns` again when you need more results.\n\n"
+				}
+				l.lastWaitResults = nil
+				l.moreSpawnsPending = false
 			}
 		}
 
@@ -252,20 +307,26 @@ func (l *Loop) Run(ctx context.Context) error {
 			fmt.Printf("warning: failed to flush recording for turn %d: %v\n", turnID, flushErr)
 		}
 
-		// Update profile stats from the completed turn.
-		if l.ProfileName != "" {
-			_ = stats.UpdateProfileStats(l.Store, l.ProfileName, turnID)
-		}
+		waitingForSpawns := l.Store != nil && l.Store.IsWaiting(turnID)
 
 		// Update the turn with results.
 		if result != nil {
-			turnLog.DurationSecs = int(result.Duration.Seconds())
-			if result.ExitCode == 0 {
+			durationSecs := int(result.Duration.Seconds())
+			if resumingTurn && turnLog.DurationSecs > 0 {
+				turnLog.DurationSecs += durationSecs
+			} else {
+				turnLog.DurationSecs = durationSecs
+			}
+			if waitingForSpawns {
+				turnLog.BuildState = "waiting_for_spawns"
+				turnLog.CurrentState = fmt.Sprintf("Turn %d waiting for spawns", turn+1)
+			} else if result.ExitCode == 0 {
 				turnLog.BuildState = "success"
+				turnLog.CurrentState = fmt.Sprintf("Turn %d completed", turn+1)
 			} else {
 				turnLog.BuildState = fmt.Sprintf("exit_code_%d", result.ExitCode)
+				turnLog.CurrentState = fmt.Sprintf("Turn %d completed", turn+1)
 			}
-			turnLog.CurrentState = fmt.Sprintf("Turn %d completed", turn+1)
 		} else {
 			if errors.Is(runErr, context.Canceled) {
 				turnLog.BuildState = "cancelled"
@@ -328,16 +389,23 @@ func (l *Loop) Run(ctx context.Context) error {
 		}
 
 		// Check for wait-for-spawns signal.
-		if l.Store != nil && l.Store.IsWaiting(turnID) {
+		if waitingForSpawns {
 			if err := l.Store.ClearWait(turnID); err != nil {
 				fmt.Printf("warning: failed to clear wait signal for turn %d: %v\n", turnID, err)
 			}
 			if l.OnWait != nil {
-				l.lastWaitResults = l.OnWait(turnID)
+				l.lastWaitResults, l.moreSpawnsPending = l.OnWait(turnID)
 			}
+			l.waitResumeTurnID = turnID
+			l.waitResumeTurnHexID = turnHexID
 			// Don't increment turn count — the wait turn doesn't count toward the limit.
 			// Loop continues to next iteration with wait results in the prompt.
 			continue
+		}
+
+		// Update profile stats from a fully completed turn.
+		if l.ProfileName != "" {
+			_ = stats.UpdateProfileStats(l.Store, l.ProfileName, turnID)
 		}
 
 		turn++
@@ -377,7 +445,7 @@ func (l *Loop) loadSupervisorNotes(turnID int) []store.SupervisorNote {
 // buildResumePrompt constructs a minimal continuation prompt for a resumed
 // agent session. Unlike a fresh turn, the agent already has the full system
 // prompt and conversation history — we only send new information.
-func buildResumePrompt(waitResults []WaitResult, interruptMsg string, supervisorNotes []store.SupervisorNote) string {
+func buildResumePrompt(waitResults []WaitResult, moreSpawnsPending bool, interruptMsg string, supervisorNotes []store.SupervisorNote) string {
 	var b strings.Builder
 
 	b.WriteString("Continue from where you left off.\n\n")
@@ -389,9 +457,12 @@ func buildResumePrompt(waitResults []WaitResult, interruptMsg string, supervisor
 	}
 
 	if len(waitResults) > 0 {
-		b.WriteString("## Spawn Wait Results\n\nThe spawns you waited for have completed:\n\n")
+		b.WriteString("## Spawn Wait Results\n\nThe following spawns have completed:\n\n")
 		for _, wr := range waitResults {
 			b.WriteString(formatWaitResult(wr))
+		}
+		if moreSpawnsPending {
+			b.WriteString("**Other spawns are still running.** Call `adaf wait-for-spawns` again when you need more results.\n\n")
 		}
 	}
 

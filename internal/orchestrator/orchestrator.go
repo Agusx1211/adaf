@@ -452,9 +452,9 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 				})
 				return newPrompt
 			},
-			OnWait: func(turnID int) []loop.WaitResult {
-				// Wait for this child's own spawns to complete.
-				results := o.Wait(rec.ChildTurnID)
+			OnWait: func(turnID int) ([]loop.WaitResult, bool) {
+				// Wait for at least one of this child's own spawns to complete.
+				results, morePending := o.WaitAny(turnID)
 				var wr []loop.WaitResult
 				for _, r := range results {
 					childRec, _ := o.store.GetSpawn(r.SpawnID)
@@ -473,7 +473,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 						Branch:   r.Branch,
 					})
 				}
-				return wr
+				return wr, morePending
 			},
 			InterruptCh: interruptCh,
 		}
@@ -675,6 +675,60 @@ func (o *Orchestrator) Wait(parentTurnID int) []SpawnResult {
 		})
 	}
 	return results
+}
+
+// WaitAny blocks until at least one non-terminal spawn for the given parent
+// turn reaches a terminal state, then returns results for all completed spawns.
+// The bool return indicates whether more spawns are still running.
+func (o *Orchestrator) WaitAny(parentTurnID int) ([]SpawnResult, bool) {
+	records, _ := o.store.SpawnsByParent(parentTurnID)
+	pending := make(map[int]struct{})
+	var completed []int
+	for _, r := range records {
+		if isTerminalSpawnStatus(r.Status) {
+			completed = append(completed, r.ID)
+		} else {
+			pending[r.ID] = struct{}{}
+		}
+	}
+	if len(pending) == 0 && len(completed) == 0 {
+		return nil, false
+	}
+
+	// Poll until at least one pending spawn reaches a terminal state.
+	if len(completed) == 0 && len(pending) > 0 {
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+
+		for len(completed) == 0 {
+			<-ticker.C
+			for id := range pending {
+				rec, err := o.store.GetSpawn(id)
+				if err != nil || isTerminalSpawnStatus(rec.Status) {
+					completed = append(completed, id)
+					delete(pending, id)
+				}
+			}
+		}
+	}
+
+	results := make([]SpawnResult, 0, len(completed))
+	for _, id := range completed {
+		rec, err := o.store.GetSpawn(id)
+		if err != nil {
+			continue
+		}
+		results = append(results, SpawnResult{
+			SpawnID:  rec.ID,
+			Status:   rec.Status,
+			ExitCode: rec.ExitCode,
+			Result:   rec.Result,
+			Summary:  rec.Summary,
+			ReadOnly: rec.ReadOnly,
+			Branch:   rec.Branch,
+		})
+	}
+	return results, len(pending) > 0
 }
 
 // WaitOne blocks until a specific spawn completes.

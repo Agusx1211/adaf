@@ -293,7 +293,10 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 						handoffsReparented = true
 					}
 
-					run.TurnIDs = append(run.TurnIDs, turnID)
+					// wait-for-spawns resumes reuse the same turn ID.
+					if len(run.TurnIDs) == 0 || run.TurnIDs[len(run.TurnIDs)-1] != turnID {
+						run.TurnIDs = append(run.TurnIDs, turnID)
+					}
 					cfg.Store.UpdateLoopRun(run)
 					eventCh <- runtui.AgentStartedMsg{
 						SessionID: turnID,
@@ -316,8 +319,8 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 						Result:        result,
 					}
 				},
-				OnWait: func(turnID int) []loop.WaitResult {
-					return waitForSessionSpawns(cfg.Store, turnID)
+				OnWait: func(turnID int) ([]loop.WaitResult, bool) {
+					return waitForAnySessionSpawns(cfg.Store, turnID)
 				},
 			}
 
@@ -596,43 +599,48 @@ func reparentHandoffs(s *store.Store, handoffs []store.HandoffInfo, newParentTur
 	}
 }
 
-func waitForSessionSpawns(s *store.Store, parentTurnID int) []loop.WaitResult {
+// waitForAnySessionSpawns blocks until at least one non-terminal spawn under
+// parentTurnID reaches a terminal state, then returns results for all spawns
+// that have completed so far. The bool return indicates whether more spawns
+// are still running (wait-for-any semantics).
+func waitForAnySessionSpawns(s *store.Store, parentTurnID int) ([]loop.WaitResult, bool) {
 	records, err := s.SpawnsByParent(parentTurnID)
 	if err != nil || len(records) == 0 {
-		return nil
+		return nil, false
 	}
 
 	pending := make(map[int]struct{})
+	var completed []int
 	for _, rec := range records {
-		if !isTerminalSpawnStatus(rec.Status) {
+		if isTerminalSpawnStatus(rec.Status) {
+			completed = append(completed, rec.ID)
+		} else {
 			pending[rec.ID] = struct{}{}
 		}
 	}
-	if len(pending) == 0 {
-		return nil
+	if len(pending) == 0 && len(completed) == 0 {
+		return nil, false
 	}
 
-	waitedIDs := make([]int, 0, len(pending))
-	for id := range pending {
-		waitedIDs = append(waitedIDs, id)
-	}
-
-	ticker := time.NewTicker(250 * time.Millisecond)
-	defer ticker.Stop()
-
-	for len(pending) > 0 {
-		<-ticker.C
-		for id := range pending {
-			rec, err := s.GetSpawn(id)
-			if err != nil || isTerminalSpawnStatus(rec.Status) {
-				delete(pending, id)
+	// Poll until at least one pending spawn reaches a terminal state.
+	if len(completed) == 0 && len(pending) > 0 {
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		for len(completed) == 0 {
+			<-ticker.C
+			for id := range pending {
+				rec, err := s.GetSpawn(id)
+				if err != nil || isTerminalSpawnStatus(rec.Status) {
+					completed = append(completed, id)
+					delete(pending, id)
+				}
 			}
 		}
 	}
 
-	sort.Ints(waitedIDs)
-	results := make([]loop.WaitResult, 0, len(waitedIDs))
-	for _, id := range waitedIDs {
+	sort.Ints(completed)
+	results := make([]loop.WaitResult, 0, len(completed))
+	for _, id := range completed {
 		rec, err := s.GetSpawn(id)
 		if err != nil {
 			continue
@@ -648,7 +656,7 @@ func waitForSessionSpawns(s *store.Store, parentTurnID int) []loop.WaitResult {
 			Branch:   rec.Branch,
 		})
 	}
-	return results
+	return results, len(pending) > 0
 }
 
 func isTerminalSpawnStatus(status string) bool {
