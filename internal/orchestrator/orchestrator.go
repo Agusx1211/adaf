@@ -289,23 +289,27 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 
 	var wtPath string
 	if !req.ReadOnly {
-		branchName := worktree.BranchName(req.ParentTurnID, req.ChildProfile)
-		var err error
-		wtPath, err = o.worktrees.Create(ctx, branchName)
+		branchName, createdPath, err := o.createWritableWorktree(ctx, req.ParentTurnID, req.ChildProfile)
 		if err != nil {
-			o.decrementRunning(req.ParentProfile)
+			o.releaseSpawnSlot(req.ParentProfile, req.ChildProfile)
 			return 0, fmt.Errorf("creating worktree: %w", err)
 		}
+		wtPath = createdPath
 		rec.Branch = branchName
 		rec.WorktreePath = wtPath
 	} else {
 		// Read-only spawns get an isolated worktree (detached HEAD) so
 		// concurrent agents don't contend for lock files in the same directory.
 		// Note: these worktrees are at HEAD and won't see uncommitted changes.
-		name := "ro-" + worktree.BranchName(req.ParentTurnID, req.ChildProfile)
-		if p, err := o.worktrees.CreateDetached(ctx, name); err == nil {
+		if p, err := o.createReadOnlyWorktree(ctx, req.ParentTurnID, req.ChildProfile); err == nil {
 			wtPath = p
 			rec.WorktreePath = wtPath
+		} else {
+			debug.LogKV("orch", "read-only worktree create failed; falling back to repo root",
+				"parent_turn", req.ParentTurnID,
+				"child_profile", req.ChildProfile,
+				"error", err,
+			)
 		}
 		// If creation fails, fall back to repoRoot (legacy behavior).
 	}
@@ -314,7 +318,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 		if wtPath != "" {
 			o.worktrees.RemoveWithBranch(ctx, wtPath, rec.Branch)
 		}
-		o.decrementRunning(req.ParentProfile)
+		o.releaseSpawnSlot(req.ParentProfile, req.ChildProfile)
 		debug.LogKV("orch", "spawn record creation failed", "error", err)
 		return 0, fmt.Errorf("creating spawn record: %w", err)
 	}
@@ -332,7 +336,10 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 		rec.Status = "failed"
 		rec.Result = "agent not found: " + childProf.Agent
 		o.store.UpdateSpawn(rec)
-		o.decrementRunning(req.ParentProfile)
+		if wtPath != "" {
+			o.worktrees.RemoveWithBranch(ctx, wtPath, rec.Branch)
+		}
+		o.releaseSpawnSlot(req.ParentProfile, req.ChildProfile)
 		return rec.ID, fmt.Errorf("agent %q not found", childProf.Agent)
 	}
 
@@ -578,6 +585,56 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 	return rec.ID, nil
 }
 
+const worktreeCreateRetries = 4
+
+func (o *Orchestrator) createWritableWorktree(ctx context.Context, parentTurnID int, childProfile string) (branchName, wtPath string, _ error) {
+	var lastErr error
+	for attempt := 1; attempt <= worktreeCreateRetries; attempt++ {
+		branchName = worktree.BranchName(parentTurnID, childProfile)
+		wtPath, lastErr = o.worktrees.Create(ctx, branchName)
+		if lastErr == nil {
+			return branchName, wtPath, nil
+		}
+		if !isAlreadyExistsErr(lastErr) {
+			return "", "", lastErr
+		}
+		debug.LogKV("orch", "writable worktree name collision; retrying",
+			"attempt", attempt,
+			"branch", branchName,
+			"error", lastErr,
+		)
+	}
+	return "", "", lastErr
+}
+
+func (o *Orchestrator) createReadOnlyWorktree(ctx context.Context, parentTurnID int, childProfile string) (string, error) {
+	var lastErr error
+	for attempt := 1; attempt <= worktreeCreateRetries; attempt++ {
+		name := "ro-" + worktree.BranchName(parentTurnID, childProfile)
+		wtPath, err := o.worktrees.CreateDetached(ctx, name)
+		if err == nil {
+			return wtPath, nil
+		}
+		lastErr = err
+		if !isAlreadyExistsErr(err) {
+			return "", err
+		}
+		debug.LogKV("orch", "read-only worktree name collision; retrying",
+			"attempt", attempt,
+			"name", name,
+			"error", err,
+		)
+	}
+	return "", lastErr
+}
+
+func isAlreadyExistsErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "already exists")
+}
+
 func (o *Orchestrator) autoCommitSpawnWork(rec *store.SpawnRecord) (string, error) {
 	if rec == nil || rec.WorktreePath == "" || rec.Branch == "" || rec.ReadOnly {
 		return "", nil
@@ -820,9 +877,10 @@ func (o *Orchestrator) onSpawnComplete(ctx context.Context, rec *store.SpawnReco
 	o.mu.Unlock()
 }
 
-func (o *Orchestrator) decrementRunning(profile string) {
+func (o *Orchestrator) releaseSpawnSlot(parentProfile, childProfile string) {
 	o.mu.Lock()
-	o.decrementRunningLocked(profile)
+	o.decrementRunningLocked(parentProfile)
+	o.decrementInstancesLocked(childProfile)
 	o.mu.Unlock()
 }
 

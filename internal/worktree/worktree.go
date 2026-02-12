@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/agusx1211/adaf/internal/debug"
@@ -39,10 +40,14 @@ func sanitize(s string) string {
 	return unsafeChars.ReplaceAllString(s, "_")
 }
 
+var branchNonce atomic.Uint64
+
 // BranchName builds a conventional branch name for a spawn.
 func BranchName(parentSession int, childProfile string) string {
-	ts := time.Now().UTC().Format("20060102T150405")
-	return fmt.Sprintf("adaf/%d/%s/%s", parentSession, sanitize(childProfile), ts)
+	now := time.Now().UTC()
+	ts := fmt.Sprintf("%s%09d", now.Format("20060102T150405"), now.Nanosecond())
+	nonce := branchNonce.Add(1)
+	return fmt.Sprintf("adaf/%d/%s/%s-%d", parentSession, sanitize(childProfile), ts, nonce)
 }
 
 // CreateDetached creates a worktree with a detached HEAD at the current commit.

@@ -1,0 +1,75 @@
+package orchestrator
+
+import (
+	"context"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/agusx1211/adaf/internal/config"
+)
+
+func TestSpawn_AgentLookupFailureReleasesSlotsAndCleansWorktree(t *testing.T) {
+	repo := initGitRepo(t)
+	s := newTestStore(t, repo)
+	cfg := &config.GlobalConfig{
+		Profiles: []config.Profile{
+			{Name: "parent", Agent: "codex"},
+			{Name: "broken", Agent: "missing-agent"},
+		},
+	}
+	o := New(s, cfg, repo)
+
+	req := SpawnRequest{
+		ParentTurnID:  62,
+		ParentProfile: "parent",
+		ChildProfile:  "broken",
+		Task:          "test",
+		ReadOnly:      false,
+		Delegation: &config.DelegationConfig{
+			Profiles: []config.DelegationProfile{{Name: "broken"}},
+		},
+	}
+
+	spawnID, err := o.Spawn(context.Background(), req)
+	if err == nil {
+		t.Fatalf("Spawn error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "agent") {
+		t.Fatalf("Spawn error = %q, want agent lookup failure", err)
+	}
+	if spawnID == 0 {
+		t.Fatalf("spawnID = 0, want non-zero")
+	}
+
+	if got := o.running["parent"]; got != 0 {
+		t.Fatalf("running[parent] = %d, want 0", got)
+	}
+	if got := o.instances["broken"]; got != 0 {
+		t.Fatalf("instances[broken] = %d, want 0", got)
+	}
+
+	rec, getErr := s.GetSpawn(spawnID)
+	if getErr != nil {
+		t.Fatalf("GetSpawn(%d): %v", spawnID, getErr)
+	}
+	if rec == nil {
+		t.Fatalf("GetSpawn(%d) = nil", spawnID)
+	}
+	if rec.Status != "failed" {
+		t.Fatalf("spawn status = %q, want failed", rec.Status)
+	}
+	if rec.Branch == "" {
+		t.Fatalf("spawn branch is empty, want branch name")
+	}
+	if rec.WorktreePath == "" {
+		t.Fatalf("spawn worktree path is empty, want populated path")
+	}
+
+	if _, statErr := os.Stat(rec.WorktreePath); !os.IsNotExist(statErr) {
+		t.Fatalf("worktree path %q should be removed, stat err=%v", rec.WorktreePath, statErr)
+	}
+	if branchExists(repo, rec.Branch) {
+		t.Fatalf("branch %q should be removed", rec.Branch)
+	}
+}

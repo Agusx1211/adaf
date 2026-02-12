@@ -9,6 +9,17 @@ import (
 	"testing"
 )
 
+func TestBranchName_Unique(t *testing.T) {
+	seen := make(map[string]struct{}, 256)
+	for i := 0; i < 256; i++ {
+		name := BranchName(62, "devstral2")
+		if _, exists := seen[name]; exists {
+			t.Fatalf("duplicate branch name generated: %s", name)
+		}
+		seen[name] = struct{}{}
+	}
+}
+
 func TestAutoCommitIfDirty_CommitsChanges(t *testing.T) {
 	repo := initGitRepo(t)
 	mgr := NewManager(repo)
