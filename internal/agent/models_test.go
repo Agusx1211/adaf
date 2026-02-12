@@ -12,8 +12,8 @@ func TestModelRegistry(t *testing.T) {
 		t.Fatal("expected codex model list to be non-empty")
 	}
 
-	if !IsModelSupported("codex", "o4-mini") {
-		t.Fatal("expected o4-mini to be supported for codex")
+	if !IsModelSupported("codex", "gpt-5.2-codex") {
+		t.Fatal("expected gpt-5.2-codex to be supported for codex")
 	}
 	if IsModelSupported("codex", "not-a-model") {
 		t.Fatal("unexpected unsupported codex model accepted")

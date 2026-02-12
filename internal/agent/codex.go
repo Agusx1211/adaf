@@ -31,8 +31,9 @@ func (c *CodexAgent) Name() string {
 // Run executes the codex CLI with the given configuration.
 //
 // ADAF runs codex in non-interactive mode via "codex exec" so the underlying
-// TUI does not take over the terminal. Additional flags (e.g. --model,
-// --full-auto) can be supplied via cfg.Args.
+// TUI does not take over the terminal. The exec subcommand defaults to
+// never asking for approvals. Additional flags (e.g. --model, --full-auto,
+// --dangerously-bypass-approvals-and-sandbox) can be supplied via cfg.Args.
 func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Recorder) (*Result, error) {
 	cmdName := cfg.Command
 	if cmdName == "" {
@@ -40,10 +41,20 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 	}
 
 	// Build arguments: force non-interactive exec mode, then configured flags.
-	args := make([]string, 0, len(cfg.Args)+2)
+	args := make([]string, 0, len(cfg.Args)+4)
 	args = append(args, "exec")
+
+	// Allow running outside a git repository since ADAF manages its own
+	// worktrees and launch contexts.
+	if !hasFlag(cfg.Args, "--skip-git-repo-check") {
+		args = append(args, "--skip-git-repo-check")
+	}
+
 	args = append(args, cfg.Args...)
 
+	// The prompt must be the final positional argument. If no prompt is
+	// provided and stdin is not a terminal, codex exec will attempt to
+	// read from stdin which would hang in a piped context.
 	if cfg.Prompt != "" {
 		args = append(args, cfg.Prompt)
 		recorder.RecordStdin(cfg.Prompt)
@@ -99,4 +110,14 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 		Output:   stdoutBuf.String(),
 		Error:    stderrBuf.String(),
 	}, nil
+}
+
+// hasFlag returns true if flag appears in args.
+func hasFlag(args []string, flag string) bool {
+	for _, a := range args {
+		if a == flag {
+			return true
+		}
+	}
+	return false
 }
