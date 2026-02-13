@@ -47,7 +47,7 @@ type BuildOpts struct {
 	Profile *config.Profile
 
 	// Role overrides the role prompt for this run context.
-	// When empty, prompt generation falls back to profile.Role.
+	// When empty, prompt generation defaults to "junior".
 	Role string
 
 	// GlobalCfg provides access to all profiles (for spawnable info).
@@ -115,7 +115,7 @@ func Build(opts BuildOpts) (string, error) {
 
 	var plan *store.Plan
 	if effectivePlanID == "" && opts.Task == "" {
-		// Backward compatibility path: LoadPlan triggers legacy single-plan migration.
+		// Fallback path: use currently active plan if available.
 		loaded, _ := s.LoadPlan()
 		if loaded != nil && loaded.ID != "" {
 			if loaded.Status == "" {
@@ -162,7 +162,7 @@ func Build(opts BuildOpts) (string, error) {
 	// Guardrails notice.
 	effectiveRole := ""
 	if opts.Profile != nil {
-		effectiveRole = config.EffectiveStepRole(opts.Role, opts.Profile)
+		effectiveRole = config.EffectiveStepRole(opts.Role)
 	}
 	if opts.Guardrails && !config.CanWriteCode(effectiveRole) {
 		b.WriteString("# Guardrails Active\n\n")

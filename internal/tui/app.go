@@ -43,8 +43,8 @@ const (
 	stateLoopStepTurns            // input turns for a step
 	stateLoopStepInstr            // input custom instructions for a step
 	stateLoopStepTools            // multi-select tools (stop, message, pushover)
-	stateLoopStepSpawn            // multi-select spawnable profiles for the step
-	stateLoopStepSpawnCfg         // configure speed/handoff per selected spawn profile
+	stateLoopStepSpawn            // hierarchical delegation tree editor
+	stateLoopStepSpawnCfg         // add-profile picker for current delegation level
 	stateLoopMenu                 // edit loop: field picker menu
 	stateSettings                 // settings screen (pushover credentials, etc.)
 	stateSettingsPushoverUserKey  // input pushover user key
@@ -106,28 +106,27 @@ type AppModel struct {
 	profileSpeedSel          int
 
 	// Loop creation/editing wizard state.
-	loopEditing          bool
-	loopEditName         string
-	loopNameInput        string
-	loopSteps            []config.LoopStep
-	loopStepSel          int
-	loopStepEditIdx      int // which step is being edited (-1 = adding new)
-	loopStepProfileOpts  []string
-	loopStepProfileSel   int
-	loopStepRoleSel      int
-	loopStepTurnsInput   string
-	loopStepInstrInput   string
-	loopStepCanStop      bool
-	loopStepCanMsg       bool
-	loopStepCanPushover  bool
-	loopStepToolsSel     int // cursor position in the tools multi-select
-	loopStepSpawnOpts    []string
-	loopStepSpawnSel     int
-	loopStepSpawnSelect  map[int]bool
-	loopStepSpawnCfgSel  int
-	loopStepSpawnSpeed   map[int]int
-	loopStepSpawnHandoff map[int]bool
-	loopMenuSel          int
+	loopEditing         bool
+	loopEditName        string
+	loopNameInput       string
+	loopSteps           []config.LoopStep
+	loopStepSel         int
+	loopStepEditIdx     int // which step is being edited (-1 = adding new)
+	loopStepProfileOpts []string
+	loopStepProfileSel  int
+	loopStepRoleSel     int
+	loopStepTurnsInput  string
+	loopStepInstrInput  string
+	loopStepCanStop     bool
+	loopStepCanMsg      bool
+	loopStepCanPushover bool
+	loopStepToolsSel    int // cursor position in the tools multi-select
+	loopStepSpawnOpts   []string
+	loopStepSpawnSel    int // selection in current delegation level
+	loopStepSpawnCfgSel int // selection in add-profile picker
+	loopStepDelegRoots  []*loopDelegationNode
+	loopStepDelegPath   []int // path of indices to current delegation level
+	loopMenuSel         int
 
 	// Confirm delete state.
 	confirmDeleteIdx int // index of profile/loop pending deletion
@@ -540,13 +539,11 @@ func (m AppModel) profilesForLoop(steps []config.LoopStep) ([]config.Profile, bo
 		if !add(step.Profile) {
 			return nil, false
 		}
-		// Include delegation profiles so the daemon has the full set
-		// needed for prompt building and spawn resolution.
-		if step.Delegation != nil {
-			for _, dp := range step.Delegation.Profiles {
-				if !add(dp.Name) {
-					return nil, false
-				}
+		// Include all profiles from the full delegation tree so the daemon has
+		// everything needed for nested spawn resolution and prompt rendering.
+		for _, name := range config.CollectDelegationProfileNames(step.Delegation) {
+			if !add(name) {
+				return nil, false
 			}
 		}
 	}
@@ -853,7 +850,7 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 		Steps: []config.LoopStep{
 			{
 				Profile: prof.Name,
-				Role:    config.EffectiveStepRole("", prof),
+				Role:    config.EffectiveStepRole(""),
 				Turns:   1,
 			},
 		},

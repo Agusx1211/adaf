@@ -27,11 +27,18 @@ type SpawnRequest struct {
 	ParentTurnID  int
 	ParentProfile string
 	ChildProfile  string
+	ChildRole     string
 	PlanID        string
 	Task          string
 	ReadOnly      bool
 	Wait          bool                     // if true, Spawn blocks until child completes
-	Delegation    *config.DelegationConfig // explicit delegation config (required for spawning)
+	Delegation    *config.DelegationConfig // parent delegation config (required for strict spawning)
+
+	// Resolved child execution settings populated during Spawn validation.
+	ChildDelegation   *config.DelegationConfig
+	ChildMaxInstances int
+	ChildSpeed        string
+	ChildHandoff      bool
 }
 
 // SpawnResult is the outcome of a completed spawn.
@@ -135,53 +142,60 @@ func New(s *store.Store, globalCfg *config.GlobalConfig, repoRoot string) *Orche
 
 // Spawn starts (or queues) a sub-agent.
 func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error) {
+	req.ChildRole = strings.ToLower(strings.TrimSpace(req.ChildRole))
 	debug.LogKV("orch", "Spawn() called",
 		"parent_turn", req.ParentTurnID,
 		"parent_profile", req.ParentProfile,
 		"child_profile", req.ChildProfile,
+		"child_role", req.ChildRole,
 		"read_only", req.ReadOnly,
 		"wait", req.Wait,
 		"task_len", len(req.Task),
 	)
 
 	// Validate parent profile exists.
-	parentProf := o.globalCfg.FindProfile(req.ParentProfile)
-	if parentProf == nil {
+	if o.globalCfg.FindProfile(req.ParentProfile) == nil {
 		return 0, fmt.Errorf("parent profile %q not found", req.ParentProfile)
 	}
 
-	// Delegation config is required for spawning.
 	deleg := req.Delegation
-	strictDelegation := deleg != nil
 	if deleg == nil {
-		// Backward compatibility: if no delegation config, try legacy role-based check
-		// and build a delegation config from SpawnableProfiles.
-		if !config.CanSpawn(parentProf.Role) {
-			return 0, fmt.Errorf("profile %q cannot spawn sub-agents (no delegation config and role=%s)", req.ParentProfile, config.EffectiveRole(parentProf.Role))
-		}
-		deleg = legacyDelegation(parentProf)
-		req.Delegation = deleg
+		return 0, fmt.Errorf("spawning requires explicit delegation rules in the current loop/agent context")
 	}
 
-	// Validate child profile exists and is in delegation profiles list.
+	// Validate child profile exists and resolve delegation option.
 	childProf := o.globalCfg.FindProfile(req.ChildProfile)
 	if childProf == nil {
 		return 0, fmt.Errorf("child profile %q not found", req.ChildProfile)
 	}
-	if strictDelegation && !deleg.HasProfile(req.ChildProfile) {
-		return 0, fmt.Errorf("profile %q is not in delegation profiles of %q", req.ChildProfile, req.ParentProfile)
+
+	if req.ChildRole != "" && !config.ValidRole(req.ChildRole) {
+		return 0, fmt.Errorf("invalid child role %q", req.ChildRole)
 	}
-	if !strictDelegation && !legacyCanSpawn(deleg, req.ChildProfile, parentProf) {
-		return 0, fmt.Errorf("profile %q is not in delegation profiles of %q", req.ChildProfile, req.ParentProfile)
+
+	resolved, resolvedRole, err := deleg.ResolveProfile(req.ChildProfile, req.ChildRole)
+	if err != nil {
+		return 0, err
+	}
+	req.ChildRole = resolvedRole
+	req.ChildHandoff = resolved.Handoff
+	req.ChildSpeed = resolved.Speed
+	if resolved.MaxInstances > 0 {
+		req.ChildMaxInstances = resolved.MaxInstances
+	}
+	if resolved.Delegation != nil {
+		req.ChildDelegation = resolved.Delegation.Clone()
+	} else {
+		// Nil child rules means explicit no-spawn for this child.
+		req.ChildDelegation = &config.DelegationConfig{}
 	}
 
 	o.mu.Lock()
 
 	// Check child profile instance limit.
-	// Use delegation profile's MaxInstances if set, otherwise fall back to child profile's.
 	maxInst := childProf.MaxInstances
-	if dp := deleg.FindProfile(req.ChildProfile); dp != nil && dp.MaxInstances > 0 {
-		maxInst = dp.MaxInstances
+	if req.ChildMaxInstances > 0 {
+		maxInst = req.ChildMaxInstances
 	}
 	if maxInst > 0 {
 		currentInstances := o.instances[req.ChildProfile]
@@ -228,49 +242,19 @@ func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error)
 		"running", o.running[req.ParentProfile],
 		"instances", o.instances[req.ChildProfile],
 	)
-	return o.startSpawn(ctx, req, parentProf, childProf)
+	return o.startSpawn(ctx, req, childProf)
 }
 
-// legacyDelegation builds a DelegationConfig from legacy Profile fields for backward compatibility.
-func legacyDelegation(prof *config.Profile) *config.DelegationConfig {
-	deleg := &config.DelegationConfig{
-		MaxParallel: prof.MaxParallel,
-	}
-	for _, name := range prof.SpawnableProfiles {
-		deleg.Profiles = append(deleg.Profiles, config.DelegationProfile{Name: name})
-	}
-	return deleg
-}
-
-// legacyCanSpawn checks whether a child profile is allowed under legacy or delegation rules.
-// In legacy mode (empty SpawnableProfiles), any profile can be spawned.
-func legacyCanSpawn(deleg *config.DelegationConfig, childName string, parentProf *config.Profile) bool {
-	if deleg.HasProfile(childName) {
-		return true
-	}
-	// Legacy: empty SpawnableProfiles means "can spawn anything"
-	if len(parentProf.SpawnableProfiles) == 0 && len(deleg.Profiles) == 0 {
-		return true
-	}
-	return false
-}
-
-func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentProf, childProf *config.Profile) (int, error) {
+func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childProf *config.Profile) (int, error) {
 	debug.LogKV("orch", "startSpawn()",
 		"parent_profile", req.ParentProfile,
 		"child_profile", req.ChildProfile,
+		"child_role", req.ChildRole,
 		"child_agent", childProf.Agent,
 		"read_only", req.ReadOnly,
 	)
-	// Populate handoff and speed from delegation profile if available.
-	var handoff bool
-	var speed string
-	if req.Delegation != nil {
-		if dp := req.Delegation.FindProfile(req.ChildProfile); dp != nil {
-			handoff = dp.Handoff
-			speed = dp.Speed
-		}
-	}
+	handoff := req.ChildHandoff
+	speed := req.ChildSpeed
 	if speed == "" {
 		speed = childProf.Speed
 	}
@@ -280,6 +264,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 		ParentTurnID:  req.ParentTurnID,
 		ParentProfile: req.ParentProfile,
 		ChildProfile:  req.ChildProfile,
+		ChildRole:     req.ChildRole,
 		Task:          req.Task,
 		ReadOnly:      req.ReadOnly,
 		Status:        "running",
@@ -311,7 +296,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 				"error", err,
 			)
 		}
-		// If creation fails, fall back to repoRoot (legacy behavior).
+		// If creation fails, fall back to repoRoot.
 	}
 
 	if err := o.store.CreateSpawn(rec); err != nil {
@@ -355,12 +340,13 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 		Store:        o.store,
 		Project:      projCfg,
 		Profile:      childProf,
+		Role:         req.ChildRole,
 		GlobalCfg:    o.globalCfg,
 		PlanID:       parentPlanID,
 		Task:         req.Task,
 		ReadOnly:     req.ReadOnly,
 		ParentTurnID: req.ParentTurnID,
-		Delegation:   req.Delegation,
+		Delegation:   req.ChildDelegation,
 	})
 
 	workDir := o.repoRoot
@@ -373,8 +359,22 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 		"ADAF_PROFILE":     childProf.Name,
 		"ADAF_PARENT_TURN": fmt.Sprintf("%d", req.ParentTurnID),
 	}
+	if req.ChildRole != "" {
+		agentEnv["ADAF_ROLE"] = req.ChildRole
+	}
 	if parentPlanID != "" {
 		agentEnv["ADAF_PLAN_ID"] = parentPlanID
+	}
+	if req.ChildDelegation != nil {
+		if delegationJSON, err := json.Marshal(req.ChildDelegation); err == nil {
+			agentEnv["ADAF_DELEGATION_JSON"] = string(delegationJSON)
+		} else {
+			debug.LogKV("orch", "failed to encode child delegation for env",
+				"spawn_parent_profile", req.ParentProfile,
+				"spawn_child_profile", req.ChildProfile,
+				"error", err,
+			)
+		}
 	}
 
 	// Look up custom command path.
@@ -489,12 +489,13 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, parentP
 					Store:           o.store,
 					Project:         projCfg,
 					Profile:         childProf,
+					Role:            req.ChildRole,
 					GlobalCfg:       o.globalCfg,
 					PlanID:          parentPlanID,
 					Task:            req.Task,
 					ReadOnly:        req.ReadOnly,
 					ParentTurnID:    req.ParentTurnID,
-					Delegation:      req.Delegation,
+					Delegation:      req.ChildDelegation,
 					SupervisorNotes: supervisorNotes,
 					Messages:        msgs,
 				})
@@ -855,10 +856,8 @@ func (o *Orchestrator) onSpawnComplete(ctx context.Context, rec *store.SpawnReco
 
 		// Check child instance limit (delegation profile overrides child profile).
 		maxInst := childProf.MaxInstances
-		if deleg != nil {
-			if dp := deleg.FindProfile(pending.req.ChildProfile); dp != nil && dp.MaxInstances > 0 {
-				maxInst = dp.MaxInstances
-			}
+		if pending.req.ChildMaxInstances > 0 {
+			maxInst = pending.req.ChildMaxInstances
 		}
 		if maxInst > 0 && o.instances[pending.req.ChildProfile] >= maxInst {
 			continue
@@ -870,7 +869,7 @@ func (o *Orchestrator) onSpawnComplete(ctx context.Context, rec *store.SpawnReco
 		o.instances[pending.req.ChildProfile]++
 		o.mu.Unlock()
 
-		spawnID, err := o.startSpawn(ctx, pending.req, parentProf, childProf)
+		spawnID, err := o.startSpawn(ctx, pending.req, childProf)
 		pending.ch <- spawnOutcome{spawnID: spawnID, err: err}
 		return
 	}

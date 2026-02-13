@@ -11,7 +11,7 @@ import (
 // An agent NEVER sees its own intelligence rating.
 // Spawning capabilities are no longer emitted here — they come from delegationSection().
 func RolePrompt(profile *config.Profile, stepRole string, globalCfg *config.GlobalConfig) string {
-	role := config.EffectiveStepRole(stepRole, profile)
+	role := config.EffectiveStepRole(stepRole)
 
 	var b strings.Builder
 
@@ -65,7 +65,7 @@ func ReadOnlyPrompt() string {
 
 // delegationSection builds the delegation/spawning prompt section from a DelegationConfig.
 func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalConfig) string {
-	if deleg == nil {
+	if deleg == nil || len(deleg.Profiles) == 0 {
 		return "You cannot spawn sub-agents.\n\n"
 	}
 
@@ -83,6 +83,7 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 
 	// Task quality guidance.
 	b.WriteString("When spawning, write a thorough task description — sub-agents only see what you give them. Include relevant context, goals, constraints, and what \"done\" looks like. Use `--task-file` for anything non-trivial.\n\n")
+	b.WriteString("If the same profile is allowed with multiple roles, you MUST pass `--role <role>` in the spawn command.\n\n")
 
 	// Quick-start example.
 	b.WriteString("### Quick-Start Example\n\n")
@@ -106,6 +107,14 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 				continue
 			}
 			line := fmt.Sprintf("- **%s** — agent=%s", p.Name, p.Agent)
+			roles, rolesErr := dp.EffectiveRoles()
+			if rolesErr != nil {
+				line += fmt.Sprintf(", roles=INVALID(%v)", rolesErr)
+			} else if len(roles) == 1 {
+				line += fmt.Sprintf(", role=%s", roles[0])
+			} else if len(roles) > 1 {
+				line += fmt.Sprintf(", roles=%s", strings.Join(roles, "/"))
+			}
 			if p.Model != "" {
 				line += fmt.Sprintf(", model=%s", p.Model)
 			}
@@ -121,6 +130,9 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 			}
 			if dp.Handoff {
 				line += " [handoff]"
+			}
+			if dp.Delegation != nil {
+				line += fmt.Sprintf(" [child-spawn:%d]", len(dp.Delegation.Profiles))
 			}
 			if p.Description != "" {
 				line += fmt.Sprintf(" — %s", p.Description)
@@ -162,8 +174,8 @@ func delegationCommands() string {
 	// Command reference.
 	b.WriteString("### Command Reference\n\n")
 	b.WriteString("**Spawning:**\n")
-	b.WriteString("- `adaf spawn --profile <name> --task \"...\" [--read-only]` — Spawn a sub-agent (non-blocking)\n")
-	b.WriteString("- `adaf spawn --profile <name> --task-file <path> [--read-only]` — Spawn with detailed task from file\n")
+	b.WriteString("- `adaf spawn --profile <name> [--role <role>] --task \"...\" [--read-only]` — Spawn a sub-agent (non-blocking)\n")
+	b.WriteString("- `adaf spawn --profile <name> [--role <role>] --task-file <path> [--read-only]` — Spawn with detailed task from file\n")
 	b.WriteString("- `adaf wait-for-spawns` — Suspend until all spawns complete (TOKEN-FREE wait)\n\n")
 	b.WriteString("**Monitoring (use sparingly — prefer wait-for-spawns):**\n")
 	b.WriteString("- `adaf spawn-status [--spawn-id N]` — Check spawn status\n")

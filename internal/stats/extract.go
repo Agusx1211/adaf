@@ -62,8 +62,7 @@ func ExtractFromRecording(st *store.Store, turnID int) (*SessionMetrics, error) 
 	return m, scanner.Err()
 }
 
-// findEventsFile locates the events.jsonl for a given turn ID,
-// checking both the current and legacy recording directories.
+// findEventsFile locates the events.jsonl for a given turn ID.
 func findEventsFile(st *store.Store, turnID int) (string, error) {
 	for _, dir := range st.RecordsDirs() {
 		path := filepath.Join(dir, fmt.Sprintf("%d", turnID), "events.jsonl")

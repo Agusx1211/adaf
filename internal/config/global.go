@@ -16,18 +16,10 @@ type Profile struct {
 	ReasoningLevel string `json:"reasoning_level,omitempty"` // Reasoning level (e.g. "low", "medium", "high", "xhigh")
 
 	// Profile metadata fields.
-	// Deprecated: role is now configured per-loop step. Kept for backward
-	// compatibility with existing config files.
-	Role         string `json:"role,omitempty"`          // "manager", "senior", "junior", "supervisor"
 	Description  string `json:"description,omitempty"`   // strengths/weaknesses text
 	Intelligence int    `json:"intelligence,omitempty"`  // 1-10 capability rating
 	MaxInstances int    `json:"max_instances,omitempty"` // max concurrent instances of this profile (0 = unlimited)
 	Speed        string `json:"speed,omitempty"`         // "fast", "medium", "slow" — informational speed rating
-
-	// Deprecated: spawning is now controlled by DelegationConfig on loop steps / session starts.
-	// Kept for backward compatibility with existing config files.
-	MaxParallel       int      `json:"max_parallel,omitempty"`       // deprecated: use DelegationConfig.MaxParallel
-	SpawnableProfiles []string `json:"spawnable_profiles,omitempty"` // deprecated: use DelegationConfig.Profiles
 }
 
 // LoopStep defines one step in a loop cycle.

@@ -148,6 +148,7 @@ type WireControlSpawn struct {
 	ParentTurnID  int                      `json:"parent_turn_id"`
 	ParentProfile string                   `json:"parent_profile"`
 	ChildProfile  string                   `json:"child_profile"`
+	ChildRole     string                   `json:"child_role,omitempty"`
 	PlanID        string                   `json:"plan_id,omitempty"`
 	Task          string                   `json:"task"`
 	ReadOnly      bool                     `json:"read_only,omitempty"`

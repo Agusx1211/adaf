@@ -109,8 +109,12 @@ func printTreeNode(s *store.Store, r store.SpawnRecord, children map[int][]store
 	statusStr := coloredStatus(r.Status)
 	elapsed := elapsedStr(r)
 	task := truncate(r.Task, 60)
+	label := r.ChildProfile
+	if r.ChildRole != "" {
+		label = fmt.Sprintf("%s/%s", label, r.ChildRole)
+	}
 
-	fmt.Printf("%s[%d] %s (%s) - \"%s\" [%s]\n", indent, r.ID, r.ChildProfile, statusStr, task, elapsed)
+	fmt.Printf("%s[%d] %s (%s) - \"%s\" [%s]\n", indent, r.ID, label, statusStr, task, elapsed)
 
 	// Show pending question for awaiting_input.
 	if r.Status == "awaiting_input" {

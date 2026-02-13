@@ -1,11 +1,20 @@
 package config
 
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
+
 // DelegationProfile describes one profile available for spawning.
 type DelegationProfile struct {
-	Name         string `json:"name"`                    // profile name
-	MaxInstances int    `json:"max_instances,omitempty"` // max concurrent (0 = unlimited)
-	Speed        string `json:"speed,omitempty"`         // "fast", "medium", "slow" — informational
-	Handoff      bool   `json:"handoff,omitempty"`       // can be transferred to next loop step
+	Name         string            `json:"name"`                    // profile name
+	Role         string            `json:"role,omitempty"`          // explicit role for this spawn option
+	Roles        []string          `json:"roles,omitempty"`         // allowed roles for this spawn option
+	MaxInstances int               `json:"max_instances,omitempty"` // max concurrent (0 = unlimited)
+	Speed        string            `json:"speed,omitempty"`         // "fast", "medium", "slow" — informational
+	Handoff      bool              `json:"handoff,omitempty"`       // can be transferred to next loop step
+	Delegation   *DelegationConfig `json:"delegation,omitempty"`    // child spawn rules for this option
 }
 
 // DelegationConfig describes spawn capabilities for a loop step or session.
@@ -59,13 +68,37 @@ func (d *DelegationConfig) DelegationStyleText() string {
 	return d.Style
 }
 
+// Clone deep-copies a DelegationConfig tree.
+func (d *DelegationConfig) Clone() *DelegationConfig {
+	if d == nil {
+		return nil
+	}
+	out := &DelegationConfig{
+		MaxParallel: d.MaxParallel,
+		Style:       d.Style,
+		StylePreset: d.StylePreset,
+	}
+	if len(d.Profiles) > 0 {
+		out.Profiles = make([]DelegationProfile, len(d.Profiles))
+		for i := range d.Profiles {
+			p := d.Profiles[i]
+			if len(p.Roles) > 0 {
+				p.Roles = append([]string(nil), p.Roles...)
+			}
+			p.Delegation = p.Delegation.Clone()
+			out.Profiles[i] = p
+		}
+	}
+	return out
+}
+
 // HasProfile checks whether a profile name is in the delegation's profile list.
 func (d *DelegationConfig) HasProfile(name string) bool {
 	if d == nil {
 		return false
 	}
 	for _, p := range d.Profiles {
-		if p.Name == name {
+		if strings.EqualFold(p.Name, name) {
 			return true
 		}
 	}
@@ -78,7 +111,7 @@ func (d *DelegationConfig) FindProfile(name string) *DelegationProfile {
 		return nil
 	}
 	for i := range d.Profiles {
-		if d.Profiles[i].Name == name {
+		if strings.EqualFold(d.Profiles[i].Name, name) {
 			return &d.Profiles[i]
 		}
 	}
@@ -91,4 +124,210 @@ func (d *DelegationConfig) EffectiveMaxParallel() int {
 		return 4
 	}
 	return d.MaxParallel
+}
+
+func normalizeRole(role string) string {
+	return strings.ToLower(strings.TrimSpace(role))
+}
+
+// EffectiveRoles resolves allowed roles for this spawn option.
+//
+// Priority:
+//  1. Role (single explicit role)
+//  2. Roles (multiple explicit roles)
+//  3. "junior"
+func (p *DelegationProfile) EffectiveRoles() ([]string, error) {
+	if p == nil {
+		return nil, nil
+	}
+	if role := normalizeRole(p.Role); role != "" {
+		if !ValidRole(role) {
+			return nil, fmt.Errorf("invalid delegation role %q for profile %q", p.Role, p.Name)
+		}
+		return []string{role}, nil
+	}
+	if len(p.Roles) > 0 {
+		roles := make([]string, 0, len(p.Roles))
+		seen := make(map[string]struct{}, len(p.Roles))
+		for _, raw := range p.Roles {
+			role := normalizeRole(raw)
+			if role == "" {
+				continue
+			}
+			if !ValidRole(role) {
+				return nil, fmt.Errorf("invalid delegation role %q for profile %q", raw, p.Name)
+			}
+			if _, ok := seen[role]; ok {
+				continue
+			}
+			seen[role] = struct{}{}
+			roles = append(roles, role)
+		}
+		if len(roles) > 0 {
+			return roles, nil
+		}
+	}
+	return []string{RoleJunior}, nil
+}
+
+type resolvedDelegationProfile struct {
+	index int
+	roles []string
+}
+
+func roleInList(role string, roles []string) bool {
+	for _, r := range roles {
+		if r == role {
+			return true
+		}
+	}
+	return false
+}
+
+func sortedRoleKeys(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for role := range m {
+		out = append(out, role)
+	}
+	order := map[string]int{
+		RoleManager:    0,
+		RoleSenior:     1,
+		RoleJunior:     2,
+		RoleSupervisor: 3,
+	}
+	sort.Slice(out, func(i, j int) bool {
+		li, lok := order[out[i]]
+		rj, rok := order[out[j]]
+		switch {
+		case lok && rok:
+			return li < rj
+		case lok:
+			return true
+		case rok:
+			return false
+		default:
+			return out[i] < out[j]
+		}
+	})
+	return out
+}
+
+func pickCandidate(candidates []resolvedDelegationProfile, role string) (resolvedDelegationProfile, bool) {
+	// Prefer explicit single-role matches first.
+	for _, c := range candidates {
+		if len(c.roles) == 1 && c.roles[0] == role {
+			return c, true
+		}
+	}
+	for _, c := range candidates {
+		if roleInList(role, c.roles) {
+			return c, true
+		}
+	}
+	return resolvedDelegationProfile{}, false
+}
+
+// ResolveProfile selects a single spawn option by child profile and role.
+//
+// requestedRole may be empty. When empty and multiple roles are available for
+// the same profile, an explicit role is required.
+func (d *DelegationConfig) ResolveProfile(name, requestedRole string) (*DelegationProfile, string, error) {
+	if d == nil {
+		return nil, "", fmt.Errorf("delegation config is nil")
+	}
+	requestedRole = normalizeRole(requestedRole)
+	if requestedRole != "" && !ValidRole(requestedRole) {
+		return nil, "", fmt.Errorf("invalid role %q", requestedRole)
+	}
+
+	candidates := make([]resolvedDelegationProfile, 0, len(d.Profiles))
+	allRoles := make(map[string]struct{})
+	for i := range d.Profiles {
+		p := d.Profiles[i]
+		if !strings.EqualFold(p.Name, name) {
+			continue
+		}
+		roles, err := p.EffectiveRoles()
+		if err != nil {
+			return nil, "", err
+		}
+		if len(roles) == 0 {
+			continue
+		}
+		if requestedRole != "" && !roleInList(requestedRole, roles) {
+			continue
+		}
+		candidates = append(candidates, resolvedDelegationProfile{
+			index: i,
+			roles: roles,
+		})
+		for _, role := range roles {
+			allRoles[role] = struct{}{}
+		}
+	}
+
+	if len(candidates) == 0 {
+		if requestedRole != "" {
+			return nil, "", fmt.Errorf("profile %q cannot be spawned as role %q", name, requestedRole)
+		}
+		return nil, "", fmt.Errorf("profile %q is not in delegation profiles", name)
+	}
+
+	role := requestedRole
+	if role == "" {
+		roleKeys := sortedRoleKeys(allRoles)
+		if len(roleKeys) == 1 {
+			role = roleKeys[0]
+		} else {
+			return nil, "", fmt.Errorf("profile %q can be spawned with multiple roles (%s); specify --role",
+				name, strings.Join(roleKeys, ", "))
+		}
+	}
+
+	match, ok := pickCandidate(candidates, role)
+	if !ok {
+		return nil, "", fmt.Errorf("profile %q cannot be spawned as role %q", name, role)
+	}
+
+	resolved := d.Profiles[match.index]
+	resolved.Role = role
+	resolved.Roles = nil
+	resolved.Delegation = resolved.Delegation.Clone()
+	return &resolved, role, nil
+}
+
+// CollectDelegationProfileNames returns all unique profile names present in a
+// delegation tree (depth-first traversal order).
+func CollectDelegationProfileNames(deleg *DelegationConfig) []string {
+	if deleg == nil {
+		return nil
+	}
+	seenCfg := make(map[*DelegationConfig]struct{})
+	seenNames := make(map[string]struct{})
+	var names []string
+
+	var walk func(cur *DelegationConfig)
+	walk = func(cur *DelegationConfig) {
+		if cur == nil {
+			return
+		}
+		if _, ok := seenCfg[cur]; ok {
+			return
+		}
+		seenCfg[cur] = struct{}{}
+		for _, dp := range cur.Profiles {
+			name := strings.TrimSpace(dp.Name)
+			if name != "" {
+				key := strings.ToLower(name)
+				if _, ok := seenNames[key]; !ok {
+					seenNames[key] = struct{}{}
+					names = append(names, name)
+				}
+			}
+			walk(dp.Delegation)
+		}
+	}
+
+	walk(deleg)
+	return names
 }

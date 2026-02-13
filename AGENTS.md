@@ -88,6 +88,13 @@ The `references/` directory is git-ignored. Never commit files from it.
 - The `agent` package owns the `Agent` interface, `Config`, `Result`, and the global registry.
 - The `stream` package handles parsing and display independently of which agent produced the output.
 
+### TUI First-Class
+
+- The TUI (`internal/tui/`) is a first-class user surface, not an optional wrapper.
+- Any user-facing feature added to CLI/config must be represented in the TUI flow unless explicitly scoped out by the user.
+- Do not ship CLI-only feature changes that leave TUI unable to configure or operate the same capability.
+- When changing loop/delegation/sub-agent behavior, update both runtime behavior and TUI editing/visibility paths together.
+
 ## Agent Integration Patterns
 
 When adding or modifying an agent integration, follow these patterns from the existing implementations:

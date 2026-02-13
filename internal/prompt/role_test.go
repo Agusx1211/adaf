@@ -8,7 +8,11 @@ import (
 )
 
 func TestDelegationSection_IncludesQuickstartWhenDelegationEnabled(t *testing.T) {
-	got := delegationSection(&config.DelegationConfig{}, nil)
+	got := delegationSection(&config.DelegationConfig{
+		Profiles: []config.DelegationProfile{
+			{Name: "worker"},
+		},
+	}, nil)
 
 	hasSpawnFlow := strings.Contains(got, "ALWAYS use this pattern")
 	if !hasSpawnFlow {
@@ -35,6 +39,38 @@ func TestDelegationSection_NoDelegation(t *testing.T) {
 	got := delegationSection(nil, nil)
 	if got != "You cannot spawn sub-agents.\n\n" {
 		t.Fatalf("delegationSection(nil) = %q, want %q", got, "You cannot spawn sub-agents.\n\n")
+	}
+
+	got = delegationSection(&config.DelegationConfig{}, nil)
+	if got != "You cannot spawn sub-agents.\n\n" {
+		t.Fatalf("delegationSection(empty) = %q, want %q", got, "You cannot spawn sub-agents.\n\n")
+	}
+}
+
+func TestDelegationSection_IncludesRoleDetails(t *testing.T) {
+	deleg := &config.DelegationConfig{
+		Profiles: []config.DelegationProfile{
+			{
+				Name: "worker",
+				Role: config.RoleSenior,
+				Delegation: &config.DelegationConfig{
+					Profiles: []config.DelegationProfile{{Name: "scout", Role: config.RoleJunior}},
+				},
+			},
+		},
+	}
+	globalCfg := &config.GlobalConfig{
+		Profiles: []config.Profile{
+			{Name: "worker", Agent: "codex"},
+		},
+	}
+
+	got := delegationSection(deleg, globalCfg)
+	if !strings.Contains(got, "role=senior") {
+		t.Fatalf("expected role annotation in delegation section\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "[child-spawn:1]") {
+		t.Fatalf("expected child-spawn annotation in delegation section\nprompt:\n%s", got)
 	}
 }
 

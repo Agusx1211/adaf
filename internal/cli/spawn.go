@@ -44,6 +44,7 @@ Examples:
 
 func init() {
 	spawnCmd.Flags().String("profile", "", "Profile name of the sub-agent to spawn (required)")
+	spawnCmd.Flags().String("role", "", "Role for the sub-agent (manager, senior, junior, supervisor)")
 	spawnCmd.Flags().String("task", "", "Task description for the sub-agent")
 	spawnCmd.Flags().String("task-file", "", "Path to file containing task description (mutually exclusive with --task)")
 	spawnCmd.Flags().Bool("read-only", false, "Run sub-agent in read-only mode (no worktree)")
@@ -53,10 +54,12 @@ func init() {
 
 func runSpawn(cmd *cobra.Command, args []string) error {
 	profileName, _ := cmd.Flags().GetString("profile")
+	childRole, _ := cmd.Flags().GetString("role")
 	task, _ := cmd.Flags().GetString("task")
 	taskFile, _ := cmd.Flags().GetString("task-file")
 	readOnly, _ := cmd.Flags().GetBool("read-only")
 	wait, _ := cmd.Flags().GetBool("wait")
+	childRole = strings.ToLower(strings.TrimSpace(childRole))
 
 	if profileName == "" {
 		return fmt.Errorf("--profile is required")
@@ -77,6 +80,9 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		}
 		task = string(data)
 	}
+	if childRole != "" && !config.ValidRole(childRole) {
+		return fmt.Errorf("invalid --role %q (valid: %s)", childRole, strings.Join(config.AllRoles(), ", "))
+	}
 
 	parentTurnID, parentProfile, err := getTurnContext()
 	if err != nil {
@@ -94,6 +100,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 			ParentTurnID:  parentTurnID,
 			ParentProfile: parentProfile,
 			ChildProfile:  profileName,
+			ChildRole:     childRole,
 			PlanID:        planID,
 			Task:          task,
 			ReadOnly:      readOnly,
@@ -110,7 +117,11 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("spawn failed: daemon returned an empty response")
 		}
 
-		fmt.Printf("Spawned sub-agent #%d (profile=%s)\n", resp.SpawnID, profileName)
+		roleSuffix := ""
+		if childRole != "" {
+			roleSuffix = ", role=" + childRole
+		}
+		fmt.Printf("Spawned sub-agent #%d (profile=%s%s)\n", resp.SpawnID, profileName, roleSuffix)
 		if wait {
 			fmt.Printf("Spawn #%d completed: status=%s exit_code=%d\n", resp.SpawnID, resp.Status, resp.ExitCode)
 			if strings.TrimSpace(resp.Result) != "" {
@@ -129,6 +140,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		ParentTurnID:  parentTurnID,
 		ParentProfile: parentProfile,
 		ChildProfile:  profileName,
+		ChildRole:     childRole,
 		PlanID:        planID,
 		Task:          task,
 		ReadOnly:      readOnly,
@@ -139,7 +151,11 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("spawn failed: %w", err)
 	}
 
-	fmt.Printf("Spawned sub-agent #%d (profile=%s)\n", spawnID, profileName)
+	roleSuffix := ""
+	if childRole != "" {
+		roleSuffix = ", role=" + childRole
+	}
+	fmt.Printf("Spawned sub-agent #%d (profile=%s%s)\n", spawnID, profileName, roleSuffix)
 	if wait {
 		result := o.WaitOne(spawnID)
 		fmt.Printf("Spawn #%d completed: status=%s exit_code=%d\n", spawnID, result.Status, result.ExitCode)
@@ -586,11 +602,18 @@ func formatEventLine(line string) {
 // --- Helpers ---
 
 func resolveCurrentDelegation(parentProfile string) (*config.DelegationConfig, error) {
+	if raw := strings.TrimSpace(os.Getenv("ADAF_DELEGATION_JSON")); raw != "" {
+		var deleg config.DelegationConfig
+		if err := json.Unmarshal([]byte(raw), &deleg); err != nil {
+			return nil, fmt.Errorf("invalid ADAF_DELEGATION_JSON: %w", err)
+		}
+		return deleg.Clone(), nil
+	}
+
 	runIDStr := strings.TrimSpace(os.Getenv("ADAF_LOOP_RUN_ID"))
 	stepIdxStr := strings.TrimSpace(os.Getenv("ADAF_LOOP_STEP_INDEX"))
 	if runIDStr == "" && stepIdxStr == "" {
-		// Non-loop session: keep legacy role/profile behavior.
-		return nil, nil
+		return nil, fmt.Errorf("spawning is not allowed in this context: no delegation rules found")
 	}
 	if runIDStr == "" || stepIdxStr == "" {
 		return nil, fmt.Errorf("ADAF_LOOP_RUN_ID and ADAF_LOOP_STEP_INDEX must both be set when spawning from a loop step")
@@ -635,10 +658,8 @@ func resolveCurrentDelegation(parentProfile string) (*config.DelegationConfig, e
 		return &config.DelegationConfig{}, nil
 	}
 
-	// Return a shallow copy so request-scoped code cannot mutate global config.
-	deleg := *step.Delegation
-	deleg.Profiles = append([]config.DelegationProfile(nil), step.Delegation.Profiles...)
-	return &deleg, nil
+	// Return a deep copy so request-scoped code cannot mutate global config.
+	return step.Delegation.Clone(), nil
 }
 
 func getTurnContext() (int, string, error) {
@@ -706,6 +727,9 @@ func ensureOrchestrator() (*orchestrator.Orchestrator, error) {
 func printSpawnRecord(r *store.SpawnRecord) {
 	fmt.Printf("Spawn #%d:\n", r.ID)
 	printField("Profile", r.ChildProfile)
+	if strings.TrimSpace(r.ChildRole) != "" {
+		printField("Role", r.ChildRole)
+	}
 	printField("Status", r.Status)
 	printField("Task", truncate(r.Task, 80))
 	if r.Branch != "" {

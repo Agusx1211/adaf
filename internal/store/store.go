@@ -423,16 +423,7 @@ func (s *Store) UpdateIssue(issue *Issue) error {
 // Turns
 
 func (s *Store) turnsDir() string {
-	dir := filepath.Join(s.root, "turns")
-	if _, err := os.Stat(dir); err == nil {
-		return dir
-	}
-	// Fall back to legacy "logs/" for backward compat.
-	legacyDir := filepath.Join(s.root, "logs")
-	if _, err := os.Stat(legacyDir); err == nil {
-		return legacyDir
-	}
-	return dir
+	return filepath.Join(s.root, "turns")
 }
 
 func (s *Store) ListTurns() ([]Turn, error) {
@@ -629,7 +620,7 @@ func (s *Store) GetDecision(id int) (*Decision, error) {
 	return &dec, nil
 }
 
-// Records (formerly "recordings")
+// Records
 
 func (s *Store) SaveRecording(rec *TurnRecording) error {
 	dir := filepath.Join(s.root, "records", fmt.Sprintf("%d", rec.TurnID))
@@ -660,28 +651,17 @@ func (s *Store) AppendRecordingEvent(turnID int, event RecordingEvent) error {
 }
 
 func (s *Store) LoadRecording(turnID int) (*TurnRecording, error) {
-	// Try records/ first, fall back to recordings/ for backward compat.
 	var rec TurnRecording
 	path := filepath.Join(s.root, "records", fmt.Sprintf("%d", turnID), "recording.json")
 	if err := s.readJSON(path, &rec); err != nil {
-		// Try legacy path.
-		legacyPath := filepath.Join(s.root, "recordings", fmt.Sprintf("%d", turnID), "recording.json")
-		if err2 := s.readJSON(legacyPath, &rec); err2 != nil {
-			return nil, err // return original error
-		}
+		return nil, err
 	}
 	return &rec, nil
 }
 
-// RecordsDirs returns paths to scan for turn recording directories,
-// including the legacy "recordings/" path for backward compatibility.
+// RecordsDirs returns paths to scan for turn recording directories.
 func (s *Store) RecordsDirs() []string {
-	dirs := []string{filepath.Join(s.root, "records")}
-	legacyDir := filepath.Join(s.root, "recordings")
-	if info, err := os.Stat(legacyDir); err == nil && info.IsDir() {
-		dirs = append(dirs, legacyDir)
-	}
-	return dirs
+	return []string{filepath.Join(s.root, "records")}
 }
 
 // Helpers
@@ -729,55 +709,6 @@ func (s *Store) ensurePlanStorage() error {
 	if err := os.MkdirAll(s.plansDir(), 0755); err != nil {
 		return err
 	}
-	return s.migrateLegacyPlan()
-}
-
-func (s *Store) migrateLegacyPlan() error {
-	legacyPath := filepath.Join(s.root, "plan.json")
-	if _, err := os.Stat(legacyPath); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-
-	var legacy Plan
-	if err := s.readJSON(legacyPath, &legacy); err != nil {
-		return fmt.Errorf("reading legacy plan: %w", err)
-	}
-
-	now := time.Now().UTC()
-	if legacy.ID == "" {
-		legacy.ID = "default"
-	}
-	if legacy.Status == "" {
-		legacy.Status = "active"
-	}
-	if legacy.Created.IsZero() {
-		legacy.Created = now
-	}
-	if legacy.Updated.IsZero() {
-		legacy.Updated = now
-	}
-
-	if _, err := os.Stat(s.planPath(legacy.ID)); os.IsNotExist(err) {
-		if err := s.writeJSON(s.planPath(legacy.ID), &legacy); err != nil {
-			return fmt.Errorf("writing migrated plan: %w", err)
-		}
-	}
-
-	project, err := s.LoadProject()
-	if err == nil && project != nil && project.ActivePlanID == "" {
-		project.ActivePlanID = legacy.ID
-		if err := s.SaveProject(project); err != nil {
-			return err
-		}
-	}
-
-	if err := os.Remove(legacyPath); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-
 	return nil
 }
 
@@ -1076,25 +1007,11 @@ func (s *Store) EnsureDirs() error {
 	return err
 }
 
-// Repair recreates missing project store directories and runs legacy migrations.
+// Repair recreates missing project store directories.
 // It returns a list of created relative directory paths (for reporting).
 func (s *Store) Repair() ([]string, error) {
-	// Migrate legacy "logs/" directory to "turns/" if needed.
-	logsDir := filepath.Join(s.root, "logs")
-	turnsDir := filepath.Join(s.root, "turns")
-	if info, err := os.Stat(logsDir); err == nil && info.IsDir() {
-		if _, err := os.Stat(turnsDir); os.IsNotExist(err) {
-			if err := os.Rename(logsDir, turnsDir); err != nil {
-				return nil, fmt.Errorf("migrating logs/ to turns/: %w", err)
-			}
-		}
-	}
-
 	created, err := s.ensureProjectDirs()
 	if err != nil {
-		return nil, err
-	}
-	if err := s.migrateLegacyPlan(); err != nil {
 		return nil, err
 	}
 	return created, nil

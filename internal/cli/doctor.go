@@ -64,9 +64,6 @@ func runDoctorProfile(cmd *cobra.Command, args []string) error {
 	if prof.Model != "" {
 		fmt.Printf("- Model: %s\n", prof.Model)
 	}
-	if prof.Role != "" {
-		fmt.Printf("- Role: %s\n", prof.Role)
-	}
 	if prof.Intelligence > 0 {
 		fmt.Printf("- Intelligence: %d/10\n", prof.Intelligence)
 	}
@@ -78,9 +75,6 @@ func runDoctorProfile(cmd *cobra.Command, args []string) error {
 	}
 	if prof.Speed != "" {
 		fmt.Printf("- Speed: %s\n", prof.Speed)
-	}
-	if len(prof.SpawnableProfiles) > 0 {
-		fmt.Printf("- Spawnable (legacy): %s\n", strings.Join(prof.SpawnableProfiles, ", "))
 	}
 	fmt.Println()
 

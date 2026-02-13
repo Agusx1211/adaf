@@ -9,6 +9,7 @@ type SpawnRecord struct {
 	ChildTurnID     int       `json:"child_session_id,omitempty"` // JSON key kept for compat
 	ParentProfile   string    `json:"parent_profile"`
 	ChildProfile    string    `json:"child_profile"`
+	ChildRole       string    `json:"child_role,omitempty"`
 	Task            string    `json:"task"`
 	Branch          string    `json:"branch,omitempty"`
 	WorktreePath    string    `json:"worktree_path,omitempty"`

@@ -635,6 +635,7 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 				ParentTurnID:  req.Spawn.ParentTurnID,
 				ParentProfile: req.Spawn.ParentProfile,
 				ChildProfile:  req.Spawn.ChildProfile,
+				ChildRole:     req.Spawn.ChildRole,
 				PlanID:        req.Spawn.PlanID,
 				Task:          req.Spawn.Task,
 				ReadOnly:      req.Spawn.ReadOnly,

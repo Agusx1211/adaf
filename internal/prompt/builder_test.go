@@ -14,7 +14,6 @@ func TestBuild_SubAgentIncludesCommitRule(t *testing.T) {
 	profile := &config.Profile{
 		Name:  "dev",
 		Agent: "codex",
-		Role:  config.RoleJunior,
 	}
 
 	got, err := Build(BuildOpts{
@@ -39,7 +38,6 @@ func TestBuild_MainAgentDoesNotIncludeSubAgentCommitRule(t *testing.T) {
 	profile := &config.Profile{
 		Name:  "dev",
 		Agent: "codex",
-		Role:  config.RoleJunior,
 	}
 
 	got, err := Build(BuildOpts{

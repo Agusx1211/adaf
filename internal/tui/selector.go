@@ -69,7 +69,7 @@ func buildProfileList(globalCfg *cfgpkg.GlobalConfig, agentsCfg *agent.AgentsCon
 			steps := make([]cfgpkg.LoopStep, len(l.Steps))
 			for i, step := range l.Steps {
 				steps[i] = step
-				steps[i].Role = cfgpkg.EffectiveStepRole(step.Role, globalCfg.FindProfile(step.Profile))
+				steps[i].Role = cfgpkg.EffectiveStepRole(step.Role)
 			}
 			entries = append(entries, profileEntry{
 				IsLoop:          true,
