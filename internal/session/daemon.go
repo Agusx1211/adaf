@@ -666,6 +666,7 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 	defer b.setControlHandler(nil)
 
 	eventCh := make(chan any, 256)
+	orch.SetEventCh(eventCh)
 	forwardDone := make(chan struct{})
 	loopRunID := 0
 	loopRunHexID := ""

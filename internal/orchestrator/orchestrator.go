@@ -15,8 +15,10 @@ import (
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/debug"
+	"github.com/agusx1211/adaf/internal/guardrail"
 	"github.com/agusx1211/adaf/internal/loop"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
+	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/store"
 	"github.com/agusx1211/adaf/internal/stream"
 	"github.com/agusx1211/adaf/internal/worktree"
@@ -125,6 +127,7 @@ type Orchestrator struct {
 	queue     []*pendingSpawn
 	spawns    map[int]*activeSpawn
 	spawnWG   sync.WaitGroup // tracks running spawn goroutines
+	eventCh   chan any        // optional TUI event channel for real-time sub-agent events
 }
 
 // New creates an Orchestrator.
@@ -138,6 +141,32 @@ func New(s *store.Store, globalCfg *config.GlobalConfig, repoRoot string) *Orche
 		instances: make(map[string]int),
 		spawns:    make(map[int]*activeSpawn),
 	}
+}
+
+// SetEventCh sets the TUI event channel so sub-agent lifecycle events
+// (prompts, finishes, raw output, guardrail violations) are forwarded to the TUI.
+func (o *Orchestrator) SetEventCh(ch chan any) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.eventCh = ch
+}
+
+const promptEventLimitBytes = 256 * 1024
+
+func truncatePrompt(prompt string) (string, bool, int) {
+	origLen := len(prompt)
+	if origLen <= promptEventLimitBytes {
+		return prompt, false, origLen
+	}
+	if promptEventLimitBytes <= 0 {
+		return "", true, origLen
+	}
+	cut := promptEventLimitBytes
+	if cut > len(prompt) {
+		cut = len(prompt)
+	}
+	suffix := fmt.Sprintf("\n\n[Prompt truncated to %d bytes; original=%d bytes]\n", cut, origLen)
+	return prompt[:cut] + suffix, true, origLen
 }
 
 // Spawn starts (or queues) a sub-agent.
@@ -416,12 +445,50 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 	o.spawns[rec.ID] = as
 	o.mu.Unlock()
 
-	// Drain stream events into the ring buffer in the background.
+	// Set up guardrail monitor for this sub-agent.
+	effectiveRole := config.EffectiveStepRole(req.ChildRole, o.globalCfg)
+	monitor := guardrail.NewMonitor(effectiveRole, true, o.globalCfg)
+	var turnCancelMu sync.Mutex
+	var currentTurnCancel context.CancelFunc
+
+	// Bridge stream events into the ring buffer AND forward to eventCh for the TUI.
 	eventDone := make(chan struct{})
 	go func() {
 		defer close(eventDone)
 		for ev := range streamCh {
 			eventBuf.Add(ev)
+
+			if o.eventCh == nil {
+				continue
+			}
+			if ev.Err != nil {
+				continue
+			}
+			if ev.Text != "" {
+				o.eventCh <- runtui.AgentRawOutputMsg{Data: ev.Text, SessionID: -rec.ID}
+				continue
+			}
+			o.eventCh <- runtui.AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw}
+
+			// Guardrail check on parsed events.
+			if monitor != nil {
+				if toolName := monitor.CheckEvent(ev.Parsed); toolName != "" {
+					o.eventCh <- runtui.GuardrailViolationMsg{
+						Tool: toolName,
+						Role: effectiveRole,
+					}
+					msg := guardrail.WarningMessage(effectiveRole, toolName, monitor.Violations())
+					select {
+					case interruptCh <- msg:
+					default:
+					}
+					turnCancelMu.Lock()
+					if currentTurnCancel != nil {
+						currentTurnCancel()
+					}
+					turnCancelMu.Unlock()
+				}
+			}
 		}
 	}()
 
@@ -471,13 +538,41 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 		defer o.onSpawnComplete(ctx, rec, req.ParentProfile)
 
 		l := &loop.Loop{
-			Store:  o.store,
-			Agent:  agentInstance,
-			Config: agentCfg,
-			PlanID: parentPlanID,
+			Store:       o.store,
+			Agent:       agentInstance,
+			Config:      agentCfg,
+			PlanID:      parentPlanID,
+			ProfileName: req.ChildProfile,
 			OnStart: func(turnID int, turnHexID string) {
 				rec.ChildTurnID = turnID
 				o.store.UpdateSpawn(rec)
+			},
+			OnPrompt: func(turnID int, turnHexID, prompt string, isResume bool) {
+				if o.eventCh != nil {
+					trimmed, truncated, origLen := truncatePrompt(prompt)
+					o.eventCh <- runtui.AgentPromptMsg{
+						SessionID:      -rec.ID,
+						TurnHexID:      turnHexID,
+						Prompt:         trimmed,
+						IsResume:       isResume,
+						Truncated:      truncated,
+						OriginalLength: origLen,
+					}
+				}
+			},
+			OnEnd: func(turnID int, turnHexID string, result *agent.Result) {
+				if o.eventCh != nil {
+					o.eventCh <- runtui.AgentFinishedMsg{
+						SessionID: -rec.ID,
+						TurnHexID: turnHexID,
+						Result:    result,
+					}
+				}
+			},
+			OnTurnContext: func(cancel context.CancelFunc) {
+				turnCancelMu.Lock()
+				currentTurnCancel = cancel
+				turnCancelMu.Unlock()
 			},
 			PromptFunc: func(turnID int, supervisorNotes []store.SupervisorNote) string {
 				msgs, _ := o.store.UnreadMessages(rec.ID, "parent_to_child")
