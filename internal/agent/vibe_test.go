@@ -97,3 +97,74 @@ printf 'ok\n'
 		}
 	}
 }
+
+func TestExtractVibeSessionID(t *testing.T) {
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T, dir string)
+		want    string
+	}{
+		{
+			name:  "empty directory",
+			setup: func(t *testing.T, dir string) {},
+			want:  "",
+		},
+		{
+			name: "valid session with meta.json",
+			setup: func(t *testing.T, dir string) {
+				sessDir := filepath.Join(dir, "session_20250101_abcd1234")
+				if err := os.MkdirAll(sessDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				meta := `{"session_id": "abcd1234-5678-9abc-def0-123456789abc"}`
+				if err := os.WriteFile(filepath.Join(sessDir, "meta.json"), []byte(meta), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "abcd1234-5678-9abc-def0-123456789abc",
+		},
+		{
+			name: "no session_prefix directory",
+			setup: func(t *testing.T, dir string) {
+				otherDir := filepath.Join(dir, "other_dir")
+				if err := os.MkdirAll(otherDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "",
+		},
+		{
+			name: "session directory without meta.json",
+			setup: func(t *testing.T, dir string) {
+				sessDir := filepath.Join(dir, "session_20250101_abcd1234")
+				if err := os.MkdirAll(sessDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "",
+		},
+		{
+			name: "invalid JSON in meta.json",
+			setup: func(t *testing.T, dir string) {
+				sessDir := filepath.Join(dir, "session_20250101_abcd1234")
+				if err := os.MkdirAll(sessDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(sessDir, "meta.json"), []byte("not json"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tt.setup(t, dir)
+			got := extractVibeSessionID(dir)
+			if got != tt.want {
+				t.Errorf("extractVibeSessionID() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

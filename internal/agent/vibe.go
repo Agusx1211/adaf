@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -82,11 +84,35 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 		recorder.RecordStdin(cfg.Prompt)
 	}
 
+	// Create an isolated VIBE_HOME so session logs are written to a known
+	// location with zero collision risk from concurrent or external vibe runs.
+	vibeHome, err := os.MkdirTemp("", "adaf-vibe-home-*")
+	if err != nil {
+		return nil, fmt.Errorf("vibe agent: failed to create temp VIBE_HOME: %w", err)
+	}
+	defer os.RemoveAll(vibeHome)
+
+	sessionLogDir := filepath.Join(vibeHome, "logs", "session")
+	if err := os.MkdirAll(sessionLogDir, 0o755); err != nil {
+		return nil, fmt.Errorf("vibe agent: failed to create session log dir: %w", err)
+	}
+
+	// Copy user config files into the isolated home so model/provider settings
+	// and API keys are available.
+	copyVibeConfigFiles(vibeHome)
+
+	// Merge VIBE_HOME into the env overlay.
+	if cfg.Env == nil {
+		cfg.Env = make(map[string]string)
+	}
+	cfg.Env["VIBE_HOME"] = vibeHome
+
 	debug.LogKV("agent.vibe", "building command",
 		"binary", cmdName,
 		"args", strings.Join(args, " "),
 		"workdir", cfg.WorkDir,
 		"prompt_len", len(cfg.Prompt),
+		"vibe_home", vibeHome,
 	)
 
 	cmd := exec.CommandContext(ctx, cmdName, args...)
@@ -101,26 +127,30 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 
 	start := time.Now()
 	debug.LogKV("agent.vibe", "process starting", "binary", cmdName)
-	err := cmd.Run()
+	runErr := cmd.Run()
 	duration := time.Since(start)
 
-	exitCode, err := extractExitCode(err)
-	if err != nil {
-		debug.LogKV("agent.vibe", "cmd.Run() error (not ExitError)", "error", err)
-		return nil, fmt.Errorf("vibe agent: failed to run command: %w", err)
+	exitCode, runErr := extractExitCode(runErr)
+	if runErr != nil {
+		debug.LogKV("agent.vibe", "cmd.Run() error (not ExitError)", "error", runErr)
+		return nil, fmt.Errorf("vibe agent: failed to run command: %w", runErr)
 	}
+
+	agentSessionID := extractVibeSessionID(sessionLogDir)
 
 	debug.LogKV("agent.vibe", "process finished",
 		"exit_code", exitCode,
 		"duration", duration,
 		"output_len", bo.StdoutBuf.Len(),
+		"session_id", agentSessionID,
 	)
 
 	return &Result{
-		ExitCode: exitCode,
-		Duration: duration,
-		Output:   bo.StdoutBuf.String(),
-		Error:    bo.StderrBuf.String(),
+		ExitCode:       exitCode,
+		Duration:       duration,
+		Output:         bo.StdoutBuf.String(),
+		Error:          bo.StderrBuf.String(),
+		AgentSessionID: agentSessionID,
 	}, nil
 }
 
@@ -131,4 +161,50 @@ func canUseVibeStdinPrompt() bool {
 	}
 	_ = tty.Close()
 	return true
+}
+
+// copyVibeConfigFiles copies config.toml and .env from the user's default
+// ~/.vibe directory into the isolated VIBE_HOME so model/provider settings
+// and API keys remain available. Errors are silently ignored (best-effort).
+func copyVibeConfigFiles(vibeHome string) {
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	defaultVibeDir := filepath.Join(userHome, ".vibe")
+	for _, name := range []string{"config.toml", ".env"} {
+		src := filepath.Join(defaultVibeDir, name)
+		data, err := os.ReadFile(src)
+		if err != nil {
+			continue // file doesn't exist or isn't readable
+		}
+		_ = os.WriteFile(filepath.Join(vibeHome, name), data, 0o600)
+	}
+}
+
+// extractVibeSessionID reads the session ID from the meta.json file inside
+// the first session_* subdirectory found in sessionDir. Returns empty string
+// on any error (best-effort, non-fatal).
+func extractVibeSessionID(sessionDir string) string {
+	entries, err := os.ReadDir(sessionDir)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "session_") {
+			continue
+		}
+		metaPath := filepath.Join(sessionDir, entry.Name(), "meta.json")
+		data, err := os.ReadFile(metaPath)
+		if err != nil {
+			continue
+		}
+		var meta struct {
+			SessionID string `json:"session_id"`
+		}
+		if json.Unmarshal(data, &meta) == nil && meta.SessionID != "" {
+			return meta.SessionID
+		}
+	}
+	return ""
 }

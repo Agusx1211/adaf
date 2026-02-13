@@ -15,7 +15,7 @@ func TestVibeRealIntegration(t *testing.T) {
 		Name:           "vibe",
 		Binary:         findBinary("vibe"),
 		NewAgent:       func() Agent { return NewVibeAgent() },
-		BaseArgs:       []string{"--max-turns", "3"},
+		BaseArgs:       []string{"--max-turns", "10"},
 		SupportsResume: true,
 		Timeout:        180 * time.Second,
 	}
