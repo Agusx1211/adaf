@@ -1,6 +1,7 @@
 package looprun
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -15,7 +16,7 @@ func TestWaitForAnySessionSpawnsReturnsOnlyUnseenCompletions(t *testing.T) {
 	doneTwo := createLooprunSpawn(t, s, parentTurnID, "completed")
 	running := createLooprunSpawn(t, s, parentTurnID, "running")
 
-	first, morePending := waitForAnySessionSpawns(s, parentTurnID, nil)
+	first, morePending := waitForAnySessionSpawns(context.Background(), s, parentTurnID, nil)
 	if !morePending {
 		t.Fatalf("first morePending = false, want true")
 	}
@@ -41,7 +42,7 @@ func TestWaitForAnySessionSpawnsReturnsOnlyUnseenCompletions(t *testing.T) {
 		_ = s.UpdateSpawn(rec)
 	}()
 
-	second, morePending := waitForAnySessionSpawns(s, parentTurnID, alreadySeen)
+	second, morePending := waitForAnySessionSpawns(context.Background(), s, parentTurnID, alreadySeen)
 	if morePending {
 		t.Fatalf("second morePending = true, want false")
 	}
@@ -53,7 +54,7 @@ func TestWaitForAnySessionSpawnsReturnsOnlyUnseenCompletions(t *testing.T) {
 	}
 
 	alreadySeen[running.ID] = struct{}{}
-	third, morePending := waitForAnySessionSpawns(s, parentTurnID, alreadySeen)
+	third, morePending := waitForAnySessionSpawns(context.Background(), s, parentTurnID, alreadySeen)
 	if morePending {
 		t.Fatalf("third morePending = true, want false")
 	}

@@ -21,7 +21,9 @@ import (
 // and return results for newly completed spawns. alreadySeen contains
 // spawn IDs returned in previous wait cycles for the same turn. The bool
 // return indicates whether more spawns are still pending.
-type WaitCallback func(turnID int, alreadySeen map[int]struct{}) (results []WaitResult, morePending bool)
+// The context must be respected: implementations should return promptly
+// when ctx is cancelled.
+type WaitCallback func(ctx context.Context, turnID int, alreadySeen map[int]struct{}) (results []WaitResult, morePending bool)
 
 // WaitResult describes the outcome of a spawn that was waited on.
 type WaitResult struct {
@@ -475,7 +477,7 @@ func (l *Loop) Run(ctx context.Context) error {
 					"already_seen", len(seenSpawnIDs),
 				)
 				waitStart := time.Now()
-				l.lastWaitResults, l.moreSpawnsPending = l.OnWait(turnID, seenSpawnIDs)
+				l.lastWaitResults, l.moreSpawnsPending = l.OnWait(ctx, turnID, seenSpawnIDs)
 				for _, wr := range l.lastWaitResults {
 					seenSpawnIDs[wr.SpawnID] = struct{}{}
 				}
