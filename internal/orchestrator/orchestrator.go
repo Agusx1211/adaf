@@ -427,7 +427,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 
 	childCtx, childCancel := context.WithCancel(ctx)
 	done := make(chan struct{})
-	interruptCh := make(chan string, 1)
+	interruptCh := make(chan string, 8)
 
 	as := &activeSpawn{
 		record:      rec,
@@ -474,6 +474,11 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 					select {
 					case interruptCh <- msg:
 					default:
+						debug.LogKV("orch", "guardrail interrupt dropped: channel full",
+							"spawn_id", rec.ID,
+							"tool", toolName,
+							"role", effectiveRole,
+						)
 					}
 					turnCancelMu.Lock()
 					if currentTurnCancel != nil {
@@ -504,6 +509,9 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 				select {
 				case interruptCh <- msg:
 				default:
+					debug.LogKV("orch", "file interrupt dropped: channel full",
+						"spawn_id", rec.ID,
+					)
 				}
 				childCancel()
 			}
@@ -1233,7 +1241,9 @@ func (o *Orchestrator) InterruptSpawn(spawnID int, message string) error {
 	select {
 	case as.interruptCh <- message:
 	default:
-		// Channel already has a pending interrupt.
+		debug.LogKV("orch", "InterruptSpawn dropped: channel full",
+			"spawn_id", spawnID,
+		)
 	}
 
 	// Cancel the child's current turn.
