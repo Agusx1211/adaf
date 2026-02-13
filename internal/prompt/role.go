@@ -55,9 +55,13 @@ func RolePrompt(profile *config.Profile, stepRole string, globalCfg *config.Glob
 		b.WriteString(roleDesc + "\n\n")
 	}
 	for _, ruleID := range ruleIDs {
-		// Upstream communication is now runtime-contextual: it is injected
-		// automatically for spawned sub-agents only.
+		// Communication rules are now runtime-contextual: upstream is injected
+		// for spawned sub-agents only, downstream is injected only when the
+		// agent actually has delegation capability (see delegationSection).
 		if strings.EqualFold(strings.TrimSpace(ruleID), config.RuleCommunicationUpstream) {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(ruleID), config.RuleCommunicationDownstream) {
 			continue
 		}
 		body := ruleBodies[strings.ToLower(strings.TrimSpace(ruleID))]
@@ -98,6 +102,13 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 	var b strings.Builder
 
 	b.WriteString("# Delegation\n\n")
+
+	// Downstream communication style — only shown when delegation is available.
+	if globalCfg != nil {
+		if rule := globalCfg.FindPromptRule(config.RuleCommunicationDownstream); rule != nil && rule.Body != "" {
+			b.WriteString(rule.Body + "\n\n")
+		}
+	}
 
 	// Style guidance.
 	if style := deleg.DelegationStyleText(); style != "" {

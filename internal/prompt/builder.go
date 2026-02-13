@@ -3,17 +3,11 @@ package prompt
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/store"
 )
-
-// maxAgentsMDSize is the upper bound (in bytes) for embedding AGENTS.md into
-// the prompt. Files larger than this are referenced instead of inlined.
-const maxAgentsMDSize = 16 * 1024
 
 const (
 	maxLastSessionObjective = 500
@@ -378,25 +372,6 @@ func Build(opts BuildOpts) (string, error) {
 			fmt.Fprintf(&b, "  Use `adaf spawn-status --spawn-id %d` to check progress.\n\n", h.SpawnID)
 		}
 		b.WriteString("You can manage these exactly like your own spawns (wait, diff, merge, reject).\n\n")
-	}
-
-	// AGENTS.md.
-	workDir := project.RepoPath
-	if workDir != "" {
-		agentsMD := filepath.Join(workDir, "AGENTS.md")
-		if info, err := os.Stat(agentsMD); err == nil {
-			if info.Size() <= maxAgentsMDSize {
-				if data, err := os.ReadFile(agentsMD); err == nil {
-					b.WriteString("# AGENTS.md\n\n")
-					b.WriteString("The repository includes an AGENTS.md with instructions for AI agents. Follow these:\n\n")
-					b.WriteString(string(data))
-					b.WriteString("\n\n")
-				}
-			} else {
-				b.WriteString("# AGENTS.md\n\n")
-				fmt.Fprintf(&b, "The repository includes an AGENTS.md file at `%s`. Read it before starting work — it contains important instructions for AI agents.\n\n", agentsMD)
-			}
-		}
 	}
 
 	return b.String(), nil
