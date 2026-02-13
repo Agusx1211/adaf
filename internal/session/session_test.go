@@ -36,8 +36,8 @@ func TestAbortSessionStartupMarksMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadMeta: %v", err)
 	}
-	if meta.Status != "cancelled" {
-		t.Fatalf("status = %q, want %q", meta.Status, "cancelled")
+	if meta.Status != StatusCancelled {
+		t.Fatalf("status = %q, want %q", meta.Status, StatusCancelled)
 	}
 	if !strings.Contains(meta.Error, "connect failed") {
 		t.Fatalf("error = %q, want to contain %q", meta.Error, "connect failed")
@@ -138,4 +138,28 @@ func TestIsAgentContext(t *testing.T) {
 			t.Fatal("IsAgentContext() = false, want true")
 		}
 	})
+}
+
+func TestIsActiveStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		status string
+		want   bool
+	}{
+		{name: "starting", status: StatusStarting, want: true},
+		{name: "running", status: StatusRunning, want: true},
+		{name: "done", status: StatusDone, want: false},
+		{name: "cancelled", status: StatusCancelled, want: false},
+		{name: "error", status: StatusError, want: false},
+		{name: "dead", status: StatusDead, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsActiveStatus(tt.status)
+			if got != tt.want {
+				t.Fatalf("IsActiveStatus(%q) = %v, want %v", tt.status, got, tt.want)
+			}
+		})
+	}
 }

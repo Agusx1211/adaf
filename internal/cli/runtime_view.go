@@ -123,11 +123,11 @@ func configureRuntimeCommandView(root *cobra.Command) {
 }
 
 func applyRuntimeView(root *cobra.Command, view cliRuntimeView) {
-	applyRuntimeViewRecursive(root, "", view)
+	applyRuntimeViewRecursive(root, view)
 }
 
-func applyRuntimeViewRecursive(cmd *cobra.Command, parentPath string, view cliRuntimeView) {
-	path := commandPath(cmd, parentPath)
+func applyRuntimeViewRecursive(cmd *cobra.Command, view cliRuntimeView) {
+	path := commandPathFromLeaf(cmd)
 
 	rememberBaseState(cmd)
 	applyVisibilityForView(cmd, path, view)
@@ -135,19 +135,8 @@ func applyRuntimeViewRecursive(cmd *cobra.Command, parentPath string, view cliRu
 	applyLongForView(cmd, path, view)
 
 	for _, child := range cmd.Commands() {
-		applyRuntimeViewRecursive(child, path, view)
+		applyRuntimeViewRecursive(child, view)
 	}
-}
-
-func commandPath(cmd *cobra.Command, parentPath string) string {
-	if cmd.Parent() == nil {
-		return ""
-	}
-	name := strings.TrimSpace(cmd.Name())
-	if parentPath == "" {
-		return name
-	}
-	return parentPath + " " + name
 }
 
 func commandPathFromLeaf(cmd *cobra.Command) string {

@@ -15,6 +15,16 @@ import (
 	"github.com/agusx1211/adaf/internal/config"
 )
 
+const (
+	// Session lifecycle statuses stored in SessionMeta.Status.
+	StatusStarting  = "starting"
+	StatusRunning   = "running"
+	StatusDone      = "done"
+	StatusCancelled = "cancelled"
+	StatusError     = "error"
+	StatusDead      = "dead"
+)
+
 // SessionMeta describes a running or completed session daemon.
 type SessionMeta struct {
 	ID          int       `json:"id"`
@@ -25,10 +35,15 @@ type SessionMeta struct {
 	ProjectDir  string    `json:"project_dir"`
 	ProjectName string    `json:"project_name"`
 	PID         int       `json:"pid"`
-	Status      string    `json:"status"` // "starting", "running", "done", "cancelled", "error", "dead"
+	Status      string    `json:"status"` // one of StatusStarting/StatusRunning/StatusDone/StatusCancelled/StatusError/StatusDead
 	StartedAt   time.Time `json:"started_at"`
 	EndedAt     time.Time `json:"ended_at,omitempty"`
 	Error       string    `json:"error,omitempty"`
+}
+
+// IsActiveStatus returns whether a session status represents a live/running daemon.
+func IsActiveStatus(status string) bool {
+	return status == StatusStarting || status == StatusRunning
 }
 
 // DaemonConfig holds everything the daemon process needs to reconstruct and
@@ -120,13 +135,11 @@ func CreateSession(dcfg DaemonConfig) (int, error) {
 
 	var (
 		id      int
-		dir     string
 		created bool
 	)
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		id = nextID()
-		dir = SessionDir(id)
-		if err := os.Mkdir(dir, 0755); err != nil {
+		if err := os.Mkdir(SessionDir(id), 0755); err != nil {
 			if os.IsExist(err) {
 				continue
 			}
@@ -157,7 +170,7 @@ func CreateSession(dcfg DaemonConfig) (int, error) {
 		LoopSteps:   len(dcfg.Loop.Steps),
 		ProjectDir:  dcfg.ProjectDir,
 		ProjectName: dcfg.ProjectName,
-		Status:      "starting",
+		Status:      StatusStarting,
 		StartedAt:   time.Now().UTC(),
 	}
 	return id, SaveMeta(id, &meta)
@@ -199,7 +212,7 @@ func LoadConfig(id int) (*DaemonConfig, error) {
 }
 
 // ListSessions returns all sessions, sorted by ID descending (newest first).
-// Stale sessions (where the PID is dead) are automatically cleaned up.
+// Stale sessions (where the PID is dead) are marked as StatusDead.
 func ListSessions() ([]SessionMeta, error) {
 	dir := Dir()
 	entries, err := os.ReadDir(dir)
@@ -215,7 +228,8 @@ func ListSessions() ([]SessionMeta, error) {
 		if !e.IsDir() {
 			continue
 		}
-		if _, err := strconv.Atoi(e.Name()); err != nil {
+		sessionID, err := strconv.Atoi(e.Name())
+		if err != nil {
 			continue
 		}
 
@@ -229,14 +243,17 @@ func ListSessions() ([]SessionMeta, error) {
 		if err := json.Unmarshal(data, &meta); err != nil {
 			continue
 		}
+		if meta.ID == 0 {
+			meta.ID = sessionID
+		}
 
 		// Check if the daemon is still alive for running sessions.
-		if meta.Status == "running" || meta.Status == "starting" {
+		if IsActiveStatus(meta.Status) {
 			if !isProcessAlive(meta.PID) {
-				meta.Status = "dead"
+				meta.Status = StatusDead
 				meta.EndedAt = time.Now().UTC()
 				meta.Error = "daemon process died unexpectedly"
-				SaveMeta(meta.ID, &meta)
+				_ = SaveMeta(meta.ID, &meta)
 			}
 		}
 
@@ -255,7 +272,7 @@ func ListActiveSessions() ([]SessionMeta, error) {
 	}
 	var active []SessionMeta
 	for _, s := range all {
-		if s.Status == "running" || s.Status == "starting" {
+		if IsActiveStatus(s.Status) {
 			active = append(active, s)
 		}
 	}
@@ -271,7 +288,7 @@ func CleanupOld(maxAge time.Duration) error {
 	}
 	cutoff := time.Now().Add(-maxAge)
 	for _, s := range sessions {
-		if s.Status == "running" || s.Status == "starting" {
+		if IsActiveStatus(s.Status) {
 			continue
 		}
 		if s.EndedAt.Before(cutoff) || (s.EndedAt.IsZero() && s.StartedAt.Before(cutoff)) {
@@ -292,15 +309,15 @@ func AbortSessionStartup(id int, reason string) {
 		return
 	}
 
-	if (meta.Status == "starting" || meta.Status == "running") && isProcessAlive(meta.PID) {
+	if IsActiveStatus(meta.Status) && isProcessAlive(meta.PID) {
 		if meta.PID > 0 {
 			_ = syscall.Kill(-meta.PID, syscall.SIGTERM)
 			_ = syscall.Kill(meta.PID, syscall.SIGTERM)
 		}
 	}
 
-	if meta.Status == "starting" || meta.Status == "running" {
-		meta.Status = "cancelled"
+	if IsActiveStatus(meta.Status) {
+		meta.Status = StatusCancelled
 	}
 	if strings.TrimSpace(reason) != "" {
 		meta.Error = reason
@@ -413,27 +430,30 @@ func FindRunningByLoopName(name string) (*SessionMeta, error) {
 		return nil, err
 	}
 
-	name = strings.ToLower(strings.TrimSpace(name))
+	requested := strings.TrimSpace(name)
+	lookup := strings.ToLower(requested)
 	var matches []SessionMeta
 	for _, s := range active {
-		if strings.ToLower(s.LoopName) == name {
+		if strings.ToLower(s.LoopName) == lookup {
 			matches = append(matches, s)
 		}
 	}
 
 	if len(matches) == 0 {
-		return nil, fmt.Errorf("no running session for loop %q", name)
+		return nil, fmt.Errorf("no running session for loop %q", requested)
 	}
 	if len(matches) > 1 {
-		return nil, fmt.Errorf("multiple running sessions for loop %q, specify the session ID", name)
+		return nil, fmt.Errorf("multiple running sessions for loop %q, specify the session ID", requested)
 	}
 	return &matches[0], nil
 }
 
 // FindSessionByPartial finds a session by numeric ID or partial profile name match.
 func FindSessionByPartial(query string) (*SessionMeta, error) {
+	requested := strings.TrimSpace(query)
+
 	// Try numeric ID first.
-	if id, err := strconv.Atoi(query); err == nil {
+	if id, err := strconv.Atoi(requested); err == nil {
 		meta, err := LoadMeta(id)
 		if err == nil {
 			return meta, nil
@@ -446,25 +466,25 @@ func FindSessionByPartial(query string) (*SessionMeta, error) {
 		return nil, err
 	}
 
-	query = strings.ToLower(query)
+	lookup := strings.ToLower(requested)
 	var matches []SessionMeta
 	for _, s := range sessions {
-		if strings.Contains(strings.ToLower(s.ProfileName), query) {
+		if strings.Contains(strings.ToLower(s.ProfileName), lookup) {
 			matches = append(matches, s)
 		}
 	}
 
 	if len(matches) == 0 {
-		return nil, fmt.Errorf("no session matching %q", query)
+		return nil, fmt.Errorf("no session matching %q", requested)
 	}
 	if len(matches) > 1 {
 		// Prefer running sessions.
 		for _, m := range matches {
-			if m.Status == "running" {
+			if m.Status == StatusRunning {
 				return &m, nil
 			}
 		}
-		return nil, fmt.Errorf("multiple sessions match %q, specify the numeric ID", query)
+		return nil, fmt.Errorf("multiple sessions match %q, specify the numeric ID", requested)
 	}
 	return &matches[0], nil
 }

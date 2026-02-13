@@ -171,7 +171,7 @@ func RunDaemon(sessionID int) error {
 		return fmt.Errorf("loading meta: %w", err)
 	}
 	meta.PID = os.Getpid()
-	meta.Status = "running"
+	meta.Status = StatusRunning
 	if err := SaveMeta(sessionID, meta); err != nil {
 		return fmt.Errorf("saving meta: %w", err)
 	}
@@ -810,11 +810,11 @@ func applyAgentCommandOverrides(agentsCfg *agent.AgentsConfig, overrides map[str
 func classifySessionEnd(loopErr error) (status string, errMsg string) {
 	switch {
 	case loopErr == nil:
-		return "done", ""
+		return StatusDone, ""
 	case errors.Is(loopErr, context.Canceled):
-		return "cancelled", ""
+		return StatusCancelled, ""
 	default:
-		return "error", loopErr.Error()
+		return StatusError, loopErr.Error()
 	}
 }
 

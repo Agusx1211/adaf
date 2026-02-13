@@ -63,8 +63,7 @@ func pushoverSetup(cmd *cobra.Command, args []string) error {
 		current := globalCfg.Pushover.UserKey
 		prompt := "  Pushover User Key"
 		if current != "" {
-			masked := current[:4] + strings.Repeat("*", len(current)-4)
-			prompt += fmt.Sprintf(" [%s]", masked)
+			prompt += fmt.Sprintf(" [%s]", maskSecret(current))
 		}
 		prompt += ": "
 		fmt.Print(prompt)
@@ -81,8 +80,7 @@ func pushoverSetup(cmd *cobra.Command, args []string) error {
 		current := globalCfg.Pushover.AppToken
 		prompt := "  Pushover App Token"
 		if current != "" {
-			masked := current[:4] + strings.Repeat("*", len(current)-4)
-			prompt += fmt.Sprintf(" [%s]", masked)
+			prompt += fmt.Sprintf(" [%s]", maskSecret(current))
 		}
 		prompt += ": "
 		fmt.Print(prompt)
@@ -144,10 +142,8 @@ func pushoverStatusFn(cmd *cobra.Command, args []string) error {
 
 	printHeader("Pushover")
 	if pushover.Configured(&globalCfg.Pushover) {
-		masked := globalCfg.Pushover.UserKey[:4] + strings.Repeat("*", len(globalCfg.Pushover.UserKey)-4)
-		printField("User Key", masked)
-		masked = globalCfg.Pushover.AppToken[:4] + strings.Repeat("*", len(globalCfg.Pushover.AppToken)-4)
-		printField("App Token", masked)
+		printField("User Key", maskSecret(globalCfg.Pushover.UserKey))
+		printField("App Token", maskSecret(globalCfg.Pushover.AppToken))
 		printFieldColored("Status", "configured", colorGreen)
 	} else {
 		printFieldColored("Status", "not configured", colorYellow)
@@ -155,4 +151,14 @@ func pushoverStatusFn(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Run %sadaf config pushover setup%s to configure.\n", styleBoldWhite, colorReset)
 	}
 	return nil
+}
+
+func maskSecret(secret string) string {
+	if secret == "" {
+		return ""
+	}
+	if len(secret) <= 4 {
+		return strings.Repeat("*", len(secret))
+	}
+	return secret[:4] + strings.Repeat("*", len(secret)-4)
 }

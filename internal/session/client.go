@@ -70,7 +70,7 @@ func ConnectToSession(sessionID int) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("session %d not found: %w", sessionID, err)
 	}
-	if meta.Status != "running" && meta.Status != "starting" {
+	if !IsActiveStatus(meta.Status) {
 		return nil, fmt.Errorf("session %d is not running (status: %s)", sessionID, meta.Status)
 	}
 

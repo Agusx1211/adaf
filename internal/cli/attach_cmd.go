@@ -70,7 +70,7 @@ func runAttach(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if meta.Status != "running" && meta.Status != "starting" {
+	if !session.IsActiveStatus(meta.Status) {
 		return fmt.Errorf("session %d is not running (status: %s)", meta.ID, meta.Status)
 	}
 

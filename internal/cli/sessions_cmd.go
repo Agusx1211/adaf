@@ -46,7 +46,7 @@ func runSessions(cmd *cobra.Command, args []string) error {
 		cutoff := time.Now().Add(-1 * time.Hour)
 		var filtered []session.SessionMeta
 		for _, s := range sessions {
-			if s.Status == "running" || s.Status == "starting" {
+			if session.IsActiveStatus(s.Status) {
 				filtered = append(filtered, s)
 			} else if !s.EndedAt.IsZero() && s.EndedAt.After(cutoff) {
 				filtered = append(filtered, s)
@@ -73,7 +73,7 @@ func runSessions(cmd *cobra.Command, args []string) error {
 	for _, s := range sessions {
 		status := formatSessionStatus(s.Status)
 		elapsed := ""
-		if s.Status == "running" || s.Status == "starting" {
+		if session.IsActiveStatus(s.Status) {
 			elapsed = session.FormatElapsed(time.Since(s.StartedAt))
 		} else if !s.EndedAt.IsZero() {
 			elapsed = session.FormatTimeAgo(s.EndedAt)
@@ -112,7 +112,7 @@ func runSessions(cmd *cobra.Command, args []string) error {
 	// Show hint for active sessions.
 	hasActive := false
 	for _, s := range sessions {
-		if s.Status == "running" {
+		if s.Status == session.StatusRunning {
 			hasActive = true
 			break
 		}
@@ -129,18 +129,18 @@ func runSessions(cmd *cobra.Command, args []string) error {
 
 func formatSessionStatus(status string) string {
 	switch status {
-	case "running":
-		return styleBoldGreen + "running" + colorReset
-	case "starting":
-		return styleBoldYellow + "starting" + colorReset
-	case "done":
-		return colorGreen + "done" + colorReset
-	case "cancelled":
-		return styleBoldYellow + "cancelled" + colorReset
-	case "error":
-		return styleBoldRed + "error" + colorReset
-	case "dead":
-		return colorDim + "dead" + colorReset
+	case session.StatusRunning:
+		return styleBoldGreen + session.StatusRunning + colorReset
+	case session.StatusStarting:
+		return styleBoldYellow + session.StatusStarting + colorReset
+	case session.StatusDone:
+		return colorGreen + session.StatusDone + colorReset
+	case session.StatusCancelled:
+		return styleBoldYellow + session.StatusCancelled + colorReset
+	case session.StatusError:
+		return styleBoldRed + session.StatusError + colorReset
+	case session.StatusDead:
+		return colorDim + session.StatusDead + colorReset
 	default:
 		return status
 	}

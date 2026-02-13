@@ -236,7 +236,7 @@ func selectSessionTargets(query, agentFilter string, includeAll bool) ([]session
 
 	var out []session.SessionMeta
 	for _, s := range sessions {
-		if !includeAll && s.Status != "running" && s.Status != "starting" {
+		if !includeAll && !session.IsActiveStatus(s.Status) {
 			continue
 		}
 		if !matchesAgentFilter(s.AgentName, agentFilter) {
