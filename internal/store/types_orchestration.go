@@ -11,6 +11,7 @@ type SpawnRecord struct {
 	ChildProfile    string    `json:"child_profile"`
 	ChildRole       string    `json:"child_role,omitempty"`
 	Task            string    `json:"task"`
+	IssueIDs        []int     `json:"issue_ids,omitempty"`
 	Branch          string    `json:"branch,omitempty"`
 	WorktreePath    string    `json:"worktree_path,omitempty"`
 	ReadOnly        bool      `json:"read_only,omitempty"`

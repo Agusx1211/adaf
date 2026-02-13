@@ -47,6 +47,7 @@ func init() {
 	spawnCmd.Flags().String("role", "", "Role for the sub-agent")
 	spawnCmd.Flags().String("task", "", "Task description for the sub-agent")
 	spawnCmd.Flags().String("task-file", "", "Path to file containing task description (mutually exclusive with --task)")
+	spawnCmd.Flags().IntSlice("issue", nil, "Issue ID(s) to assign to the sub-agent (can be repeated)")
 	spawnCmd.Flags().Bool("read-only", false, "Run sub-agent in read-only mode (no worktree)")
 	spawnCmd.Flags().Bool("wait", false, "Block until the sub-agent completes")
 	rootCmd.AddCommand(spawnCmd)
@@ -57,6 +58,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	childRole, _ := cmd.Flags().GetString("role")
 	task, _ := cmd.Flags().GetString("task")
 	taskFile, _ := cmd.Flags().GetString("task-file")
+	issueIDs, _ := cmd.Flags().GetIntSlice("issue")
 	readOnly, _ := cmd.Flags().GetBool("read-only")
 	wait, _ := cmd.Flags().GetBool("wait")
 	childRole = strings.ToLower(strings.TrimSpace(childRole))
@@ -106,6 +108,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 			ChildRole:     childRole,
 			PlanID:        planID,
 			Task:          task,
+			IssueIDs:      issueIDs,
 			ReadOnly:      readOnly,
 			Wait:          wait,
 			Delegation:    delegation,
@@ -146,6 +149,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		ChildRole:     childRole,
 		PlanID:        planID,
 		Task:          task,
+		IssueIDs:      issueIDs,
 		ReadOnly:      readOnly,
 		Wait:          wait,
 		Delegation:    delegation,

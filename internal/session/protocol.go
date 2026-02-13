@@ -154,6 +154,7 @@ type WireControlSpawn struct {
 	ChildRole     string                   `json:"child_role,omitempty"`
 	PlanID        string                   `json:"plan_id,omitempty"`
 	Task          string                   `json:"task"`
+	IssueIDs      []int                    `json:"issue_ids,omitempty"`
 	ReadOnly      bool                     `json:"read_only,omitempty"`
 	Wait          bool                     `json:"wait,omitempty"`
 	Delegation    *config.DelegationConfig `json:"delegation,omitempty"`

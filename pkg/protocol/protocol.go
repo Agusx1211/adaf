@@ -83,8 +83,9 @@ adaf log create --agent <your-name> \
 
 Use ` + "`--read-only`" + ` scouts for any information gathering (repo structure, file contents, git history, test status). Note: read-only scouts run in an isolated worktree snapshot at HEAD — they do NOT see uncommitted or staged changes.
 
-- ` + "`adaf spawn --profile <name> [--role <role>] --task \"...\" [--read-only]`" + ` — Spawn a sub-agent (non-blocking)
-- ` + "`adaf spawn --profile <name> [--role <role>] --task-file <path> [--read-only]`" + ` — Spawn with detailed task from file
+- ` + "`adaf spawn --profile <name> [--role <role>] --task \"...\" [--read-only] [--issue N]`" + ` — Spawn a sub-agent (non-blocking)
+- ` + "`adaf spawn --profile <name> [--role <role>] --task-file <path> [--read-only] [--issue N]`" + ` — Spawn with detailed task from file
+  - Use ` + "`--issue`" + ` to assign specific issues to the sub-agent (can be repeated: ` + "`--issue 3 --issue 7`" + `)
 - ` + "`adaf wait-for-spawns`" + ` — Suspend until all spawns complete (zero-cost wait)
 - ` + "`adaf spawn-status [--spawn-id N]`" + ` — Check spawn status
 - ` + "`adaf spawn-diff --spawn-id N`" + ` — View diff of spawn's changes

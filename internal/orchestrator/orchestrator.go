@@ -32,6 +32,7 @@ type SpawnRequest struct {
 	ChildRole     string
 	PlanID        string
 	Task          string
+	IssueIDs      []int
 	ReadOnly      bool
 	Wait          bool                     // if true, Spawn blocks until child completes
 	Delegation    *config.DelegationConfig // parent delegation config (required for strict spawning)
@@ -272,6 +273,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 		ChildProfile:  req.ChildProfile,
 		ChildRole:     req.ChildRole,
 		Task:          req.Task,
+		IssueIDs:      req.IssueIDs,
 		ReadOnly:      req.ReadOnly,
 		Status:        "running",
 		Handoff:       handoff,
@@ -353,6 +355,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 		ReadOnly:     req.ReadOnly,
 		ParentTurnID: req.ParentTurnID,
 		Delegation:   req.ChildDelegation,
+		IssueIDs:     req.IssueIDs,
 	})
 
 	workDir := o.repoRoot
@@ -570,6 +573,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 					Delegation:      req.ChildDelegation,
 					SupervisorNotes: supervisorNotes,
 					Messages:        msgs,
+					IssueIDs:        req.IssueIDs,
 				})
 				return newPrompt
 			},
