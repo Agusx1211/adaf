@@ -326,7 +326,9 @@ func sendCancelControl(id int) error {
 // adaf agent session (spawned by the orchestrator or launched as an agent).
 // Session management commands should refuse to run in this context.
 func IsAgentContext() bool {
-	return os.Getenv("ADAF_SESSION_ID") != "" || os.Getenv("ADAF_AGENT") == "1"
+	return strings.TrimSpace(os.Getenv("ADAF_TURN_ID")) != "" ||
+		strings.TrimSpace(os.Getenv("ADAF_SESSION_ID")) != "" ||
+		os.Getenv("ADAF_AGENT") == "1"
 }
 
 // isProcessAlive checks if a process with the given PID is still running.

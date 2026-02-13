@@ -45,7 +45,7 @@ func init() {
 	pushoverSetupCmd.Flags().String("user-key", "", "Pushover user key")
 	pushoverSetupCmd.Flags().String("app-token", "", "Pushover application token")
 	pushoverCmd.AddCommand(pushoverSetupCmd, pushoverTestCmd, pushoverStatusCmd)
-	rootCmd.AddCommand(pushoverCmd)
+	configCmd.AddCommand(pushoverCmd)
 }
 
 func pushoverSetup(cmd *cobra.Command, args []string) error {
@@ -117,7 +117,7 @@ func pushoverTest(cmd *cobra.Command, args []string) error {
 	}
 
 	if !pushover.Configured(&globalCfg.Pushover) {
-		return fmt.Errorf("pushover not configured: run 'adaf pushover setup' first")
+		return fmt.Errorf("pushover not configured: run 'adaf config pushover setup' first")
 	}
 
 	msg := pushover.Message{
@@ -152,7 +152,7 @@ func pushoverStatusFn(cmd *cobra.Command, args []string) error {
 	} else {
 		printFieldColored("Status", "not configured", colorYellow)
 		fmt.Println()
-		fmt.Printf("  Run %sadaf pushover setup%s to configure.\n", styleBoldWhite, colorReset)
+		fmt.Printf("  Run %sadaf config pushover setup%s to configure.\n", styleBoldWhite, colorReset)
 	}
 	return nil
 }

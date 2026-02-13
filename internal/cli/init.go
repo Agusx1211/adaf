@@ -149,7 +149,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 				detected++
 			}
 		}
-		printField("Agents found", fmt.Sprintf("%d (run 'adaf agents' to list)", detected))
+		printField("Agents found", fmt.Sprintf("%d (run 'adaf config agents' to list)", detected))
 	}
 	fmt.Println()
 	fmt.Printf("  Next: run %sadaf plan create --id default --title \"Initial Plan\"%s.\n", styleBoldWhite, colorReset)

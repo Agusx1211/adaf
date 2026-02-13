@@ -50,7 +50,7 @@ When you run AI coding agents (Claude, Codex, Gemini, etc.) on a project, each s
 | **opencode** | `opencode` | `opencode` |
 | **generic** | any | Custom command with prompt piped to stdin |
 
-adaf auto-detects installed agents via `adaf agents detect` and supports per-agent model overrides, reasoning levels, and health checks.
+adaf auto-detects installed agents via `adaf config agents detect` and supports per-agent model overrides, reasoning levels, and health checks.
 
 ## Installation
 
@@ -126,14 +126,17 @@ adaf
 | `adaf decision create` | `new`, `record` | Record a new decision (ADR) |
 | `adaf decision show <id>` | `get` | Show decision details |
 
-### Agent Management
+### Configuration
 
 | Command | Aliases | Description |
 |---------|---------|-------------|
-| `adaf agents [list]` | `agent` | List detected agent tools |
-| `adaf agents detect` | `scan`, `refresh` | Scan PATH for agent tools |
-| `adaf agents set-model <agent> <model>` | | Set default model for an agent |
-| `adaf agents test <agent>` | `health-check` | Run a health-check prompt |
+| `adaf config agents [list]` | `agent` | List detected agent tools |
+| `adaf config agents detect` | `scan`, `refresh` | Scan PATH for agent tools |
+| `adaf config agents set-model <agent> <model>` | | Set default model for an agent |
+| `adaf config agents test <agent>` | `health-check` | Run a health-check prompt |
+| `adaf config pushover setup` | | Configure Pushover notification credentials |
+| `adaf config pushover test` | | Send a test Pushover notification |
+| `adaf config pushover status` | | Show Pushover configuration status |
 
 ### Orchestration
 
@@ -175,18 +178,12 @@ adaf
 | `adaf stats migrate` | Retroactively compute stats from recordings |
 | `adaf doctor profile <name>` | Export profile history as markdown for LLM analysis |
 | `adaf doctor loop <name>` | Export loop history as markdown for LLM analysis |
-| `adaf session list` | List session recordings |
-| `adaf session show <id>` | Show recording event timeline |
-
 ### Utilities
 
 | Command | Aliases | Description |
 |---------|---------|-------------|
 | `adaf worktree list` | `wt ls` | List active adaf-managed worktrees |
 | `adaf worktree cleanup` | `wt clean` | Remove all adaf worktrees (crash recovery) |
-| `adaf pushover setup` | | Configure Pushover notification credentials |
-| `adaf pushover test` | | Send a test Pushover notification |
-| `adaf pushover status` | | Show Pushover configuration status |
 
 ## How It Works
 
@@ -227,7 +224,7 @@ Every agent interaction is recorded to `.adaf/records/<session-id>/`:
 - `events.jsonl` -- NDJSON stream of timestamped events (stdin, stdout, stderr, parsed stream events)
 - Metadata (agent, model, start/end time, exit code)
 
-Use `adaf session show <id>` to replay the event timeline, or `adaf stats migrate` to extract cost/token/tool usage metrics from recordings.
+Use `adaf stats migrate` to extract cost/token/tool usage metrics from recordings.
 
 ## Multi-Agent Workflows
 
@@ -392,7 +389,7 @@ adaf integrates with [Pushover](https://pushover.net) for mobile/desktop push no
 
 ```bash
 # Set up credentials
-adaf pushover setup
+adaf config pushover setup
 
 # Send from a loop step
 adaf loop notify "Build Complete" "All tests passing" --priority 1

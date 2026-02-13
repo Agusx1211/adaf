@@ -101,3 +101,41 @@ func TestCreateSessionConcurrentUniqueIDs(t *testing.T) {
 		t.Fatalf("created sessions = %d, want %d", len(seen), n)
 	}
 }
+
+func TestIsAgentContext(t *testing.T) {
+	t.Run("false when no marker env vars are set", func(t *testing.T) {
+		t.Setenv("ADAF_TURN_ID", "")
+		t.Setenv("ADAF_SESSION_ID", "")
+		t.Setenv("ADAF_AGENT", "")
+		if IsAgentContext() {
+			t.Fatal("IsAgentContext() = true, want false")
+		}
+	})
+
+	t.Run("true when ADAF_TURN_ID is set", func(t *testing.T) {
+		t.Setenv("ADAF_TURN_ID", "123")
+		t.Setenv("ADAF_SESSION_ID", "")
+		t.Setenv("ADAF_AGENT", "")
+		if !IsAgentContext() {
+			t.Fatal("IsAgentContext() = false, want true")
+		}
+	})
+
+	t.Run("true when ADAF_SESSION_ID is set", func(t *testing.T) {
+		t.Setenv("ADAF_TURN_ID", "")
+		t.Setenv("ADAF_SESSION_ID", "55")
+		t.Setenv("ADAF_AGENT", "")
+		if !IsAgentContext() {
+			t.Fatal("IsAgentContext() = false, want true")
+		}
+	})
+
+	t.Run("true when ADAF_AGENT is 1", func(t *testing.T) {
+		t.Setenv("ADAF_TURN_ID", "")
+		t.Setenv("ADAF_SESSION_ID", "")
+		t.Setenv("ADAF_AGENT", "1")
+		if !IsAgentContext() {
+			t.Fatal("IsAgentContext() = false, want true")
+		}
+	})
+}

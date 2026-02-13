@@ -26,11 +26,11 @@ needs to know where they are installed. Use 'agents detect' to scan your
 PATH and cache the results. Use 'agents set-model' to set default models.
 
 Examples:
-  adaf agents                             # List detected agents
-  adaf agents detect                      # Scan PATH for agents
-  adaf agents set-model claude sonnet     # Set default model
-  adaf agents set-model claude opus --global
-  adaf agents test claude                 # Run health check`,
+  adaf config agents                             # List detected agents
+  adaf config agents detect                      # Scan PATH for agents
+  adaf config agents set-model claude sonnet     # Set default model
+  adaf config agents set-model claude opus --global
+  adaf config agents test claude                 # Run health check`,
 	RunE: runAgentsList,
 }
 
@@ -72,7 +72,7 @@ func init() {
 	agentsCmd.AddCommand(agentsDetectCmd)
 	agentsCmd.AddCommand(agentsSetModelCmd)
 	agentsCmd.AddCommand(agentsTestCmd)
-	rootCmd.AddCommand(agentsCmd)
+	configCmd.AddCommand(agentsCmd)
 }
 
 func runAgentsList(cmd *cobra.Command, args []string) error {
@@ -131,7 +131,7 @@ func runAgentsList(cmd *cobra.Command, args []string) error {
 
 	printHeader("Agents")
 	if len(rows) == 0 {
-		fmt.Printf("  %sNo agents detected. Run %sadaf agents detect%s to scan.%s\n",
+		fmt.Printf("  %sNo agents detected. Run %sadaf config agents detect%s to scan.%s\n",
 			colorDim, styleBoldWhite, colorDim, colorReset)
 	} else {
 		printTable([]string{"NAME", "VERSION", "PATH", "DEFAULT MODEL", "AVAILABLE MODELS"}, rows)

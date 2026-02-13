@@ -46,7 +46,7 @@ type Response struct {
 // Send sends a Pushover notification using the credentials from the global config.
 func Send(cfg *config.PushoverConfig, msg Message) error {
 	if cfg.UserKey == "" || cfg.AppToken == "" {
-		return fmt.Errorf("pushover not configured: run 'adaf pushover setup' to set credentials")
+		return fmt.Errorf("pushover not configured: run 'adaf config pushover setup' to set credentials")
 	}
 
 	title := msg.Title

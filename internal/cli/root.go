@@ -66,6 +66,10 @@ var rootCmd = &cobra.Command{
   https://github.com/agusx1211/adaf`,
 
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if isAgentRuntimeContext() {
+			return cmd.Help()
+		}
+
 		// When run with no subcommand, show a brief status or help
 		s, err := openStore()
 		if err != nil {
@@ -93,6 +97,10 @@ func init() {
 	rootCmd.PersistentFlags().Bool("debug", false, "Enable verbose debug logging to ~/.adaf/debug/")
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if err := enforceRuntimeCommandAccess(cmd); err != nil {
+			return err
+		}
+
 		debugFlag, _ := cmd.Flags().GetBool("debug")
 		if !debugFlag && !debug.ShouldEnableFromEnv() {
 			return nil
@@ -118,6 +126,7 @@ func init() {
 // Execute runs the root command.
 func Execute() {
 	defer debug.Close()
+	configureRuntimeCommandView(rootCmd)
 	if err := rootCmd.Execute(); err != nil {
 		debug.Logf("cli", "exit with error: %v", err)
 		fmt.Fprintf(os.Stderr, "%sError: %s%s\n", colorRed, err, colorReset)

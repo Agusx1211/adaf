@@ -537,7 +537,7 @@ func loopNotify(cmd *cobra.Command, args []string) error {
 	}
 
 	if !pushover.Configured(&globalCfg.Pushover) {
-		return fmt.Errorf("pushover not configured: run 'adaf pushover setup' to set credentials")
+		return fmt.Errorf("pushover not configured: run 'adaf config pushover setup' to set credentials")
 	}
 
 	priority, _ := cmd.Flags().GetInt("priority")
