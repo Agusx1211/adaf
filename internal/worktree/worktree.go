@@ -117,7 +117,10 @@ func (m *Manager) Remove(ctx context.Context, wtPath string, deleteBranch bool) 
 
 	if _, err := m.git(ctx, "worktree", "remove", "--force", wtPath); err != nil {
 		// Fallback: manual cleanup.
-		os.RemoveAll(wtPath)
+		if removeErr := os.RemoveAll(wtPath); removeErr != nil {
+			m.git(ctx, "worktree", "prune")
+			return fmt.Errorf("worktree remove failed (%w) and manual cleanup also failed: %v", err, removeErr)
+		}
 		m.git(ctx, "worktree", "prune")
 	}
 
