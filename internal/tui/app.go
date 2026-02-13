@@ -45,6 +45,7 @@ const (
 	stateLoopStepTools            // multi-select tools (stop, message, pushover)
 	stateLoopStepSpawn            // hierarchical delegation tree editor
 	stateLoopStepSpawnCfg         // add-profile picker for current delegation level
+	stateLoopStepSpawnRoles       // role picker for selected delegation rule
 	stateLoopMenu                 // edit loop: field picker menu
 	stateSettings                 // settings screen (pushover credentials, etc.)
 	stateSettingsPushoverUserKey  // input pushover user key
@@ -118,27 +119,28 @@ type AppModel struct {
 	profileSpeedSel          int
 
 	// Loop creation/editing wizard state.
-	loopEditing         bool
-	loopEditName        string
-	loopNameInput       string
-	loopSteps           []config.LoopStep
-	loopStepSel         int
-	loopStepEditIdx     int // which step is being edited (-1 = adding new)
-	loopStepProfileOpts []string
-	loopStepProfileSel  int
-	loopStepRoleSel     int
-	loopStepTurnsInput  string
-	loopStepInstrInput  string
-	loopStepCanStop     bool
-	loopStepCanMsg      bool
-	loopStepCanPushover bool
-	loopStepToolsSel    int // cursor position in the tools multi-select
-	loopStepSpawnOpts   []string
-	loopStepSpawnSel    int // selection in current delegation level
-	loopStepSpawnCfgSel int // selection in add-profile picker
-	loopStepDelegRoots  []*loopDelegationNode
-	loopStepDelegPath   []int // path of indices to current delegation level
-	loopMenuSel         int
+	loopEditing          bool
+	loopEditName         string
+	loopNameInput        string
+	loopSteps            []config.LoopStep
+	loopStepSel          int
+	loopStepEditIdx      int // which step is being edited (-1 = adding new)
+	loopStepProfileOpts  []string
+	loopStepProfileSel   int
+	loopStepRoleSel      int
+	loopStepTurnsInput   string
+	loopStepInstrInput   string
+	loopStepCanStop      bool
+	loopStepCanMsg       bool
+	loopStepCanPushover  bool
+	loopStepToolsSel     int // cursor position in the tools multi-select
+	loopStepSpawnOpts    []string
+	loopStepSpawnSel     int // selection in current delegation level
+	loopStepSpawnCfgSel  int // selection in add-profile picker
+	loopStepSpawnRoleSel int // selection in role picker for current rule
+	loopStepDelegRoots   []*loopDelegationNode
+	loopStepDelegPath    []int // path of indices to current delegation level
+	loopMenuSel          int
 
 	// Confirm delete state.
 	confirmDeleteIdx int // index of profile/loop pending deletion
@@ -350,6 +352,8 @@ func (m AppModel) updateByState(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateLoopStepSpawn(msg)
 	case stateLoopStepSpawnCfg:
 		return m.updateLoopStepSpawnCfg(msg)
+	case stateLoopStepSpawnRoles:
+		return m.updateLoopStepSpawnRoles(msg)
 	case stateLoopMenu:
 		return m.updateLoopMenu(msg)
 	case stateSettings:
@@ -998,6 +1002,8 @@ func (m AppModel) View() string {
 		return m.viewLoopStepSpawn()
 	case stateLoopStepSpawnCfg:
 		return m.viewLoopStepSpawnCfg()
+	case stateLoopStepSpawnRoles:
+		return m.viewLoopStepSpawnRoles()
 	case stateLoopMenu:
 		return m.viewLoopMenu()
 	case stateSettings:
@@ -1219,11 +1225,16 @@ func (m AppModel) renderStatusBar() string {
 		add("j/k", "navigate")
 		add("a", "add rule")
 		add("d", "delete")
-		add("r", "role")
+		add("r", "roles")
 		add("s", "speed")
 		add("space", "handoff")
 		add("S", "save step")
 		add("esc", "up/back")
+	case stateLoopStepSpawnRoles:
+		add("j/k", "navigate roles")
+		add("space", "toggle role")
+		add("enter", "done")
+		add("esc", "back")
 	case stateSettingsRolesList:
 		if m.isRightPaneFocused() && m.stateHasSplitPaneLayout() {
 			add("j/k", "scroll preview")
