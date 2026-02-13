@@ -19,6 +19,8 @@ func TestOpencodePromptUsesStdinNotArgv(t *testing.T) {
 
 	tmp := t.TempDir()
 	cmdPath := filepath.Join(tmp, "fake-opencode")
+	// The fake script validates that the prompt arrives via stdin (not argv)
+	// and emits NDJSON matching the SST fork's --format json output.
 	script := `#!/usr/bin/env sh
 expected="PROMPT_SENTINEL_321"
 stdin_data="$(cat)"
@@ -36,7 +38,9 @@ if [ "$stdin_data" != "$expected" ]; then
 	echo "stdin mismatch" >&2
 	exit 98
 fi
-printf 'ok\n'
+printf '{"type":"step_start","timestamp":1,"sessionID":"test-oc","part":{"id":"p1","type":"step-start"}}\n'
+printf '{"type":"text","timestamp":2,"sessionID":"test-oc","part":{"id":"p2","type":"text","text":"ok","time":{"start":1,"end":2}}}\n'
+printf '{"type":"step_finish","timestamp":3,"sessionID":"test-oc","part":{"id":"p3","type":"step-finish","reason":"end_turn","cost":0,"tokens":{"input":1,"output":1}}}\n'
 `
 	if err := os.WriteFile(cmdPath, []byte(script), 0755); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
