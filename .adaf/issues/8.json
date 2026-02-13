@@ -1,0 +1,14 @@
+{
+  "id": 8,
+  "title": "Wait-for-spawns agent kills look like crashes in debug log",
+  "description": "## Summary\n\nWhen the wait-for-spawns mechanism kills the running agent process (by design), the debug log shows exit_code=-1 with output_len=0 and stderr_len=0. This looks identical to a real crash or timeout, making log analysis confusing.\n\n## Observed in session 85b28d88\n\n9 out of 13 Claude invocations showed exit_code=-1 with zero output. On first inspection this appeared to be a critical bug with a 69% failure rate. After deep analysis, all 9 were confirmed to be intentional kills from the wait-for-spawns mechanism — the `wait-for-spawns` CLI was invoked 36-107ms before each kill.\n\n## Suggested fix\n\n1. Log an explicit message when the wait watcher triggers the kill:\n   ```go\n   debug.LogKV(\"loop\", \"wait-for-spawns: killing agent process to enter wait state\", \"turn_id\", turnID)\n   ```\n\n2. In the post-run logging, distinguish between wait-for-spawns kills and unexpected exits:\n   ```\n   // Instead of: agent finished exit_code=-1 output_len=0\n   // Log: agent interrupted by wait-for-spawns signal exit_code=-1 (expected)\n   ```\n\n3. Consider capturing partial output before killing — the agent may have produced useful streaming content that gets discarded when SIGKILL is sent. A graceful SIGTERM with a short deadline before SIGKILL would allow the stream parser to flush.\n\n## Files involved\n\n- internal/loop/loop.go: wait watcher goroutine (~lines 327-354), post-run logging\n- internal/agent/helpers.go: setupProcessGroup — uses SIGKILL directly, could use SIGTERM first",
+  "status": "open",
+  "priority": "low",
+  "labels": [
+    "dx",
+    "logging",
+    "loop"
+  ],
+  "created": "2026-02-13T16:29:41.263523432Z",
+  "updated": "2026-02-13T16:29:41.263523432Z"
+}

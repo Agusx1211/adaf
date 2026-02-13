@@ -1,0 +1,14 @@
+{
+  "id": 7,
+  "title": "No debug logging between recording flush and loop exit (diagnostic dead zone)",
+  "description": "## Summary\n\nIn internal/loop/loop.go, between line ~415 (recording flushed) and the loop return/continue, there are ZERO debug.LogKV calls on the normal (non-wait, non-error, non-interrupt) code path. This makes it impossible to diagnose blocking issues in post-turn processing.\n\n## Impact\n\nWhen investigating the broadcast backpressure deadlock (see related issue), the debug log showed a 27-minute gap between \"recording flushed\" and \"spawn loop finished\" with absolutely no log output. The blocking OnEnd callback at line 458 was invisible because there's no logging around it.\n\n## Observed in session 85b28d88\n\n- Lines 428-429 of debug log: 26m49s gap with zero entries\n- Lines 1514-1515: 1h21m6s gap with zero entries\n- Also: waitForAnySessionSpawns polling loop (looprun/runner.go:762-787) has no per-iteration logging, making G1 appear dead during waits\n\n## Suggested fix\n\nAdd debug.LogKV calls at these points in loop.go:\n- After IsWaiting check (~line 418)\n- After UpdateTurn (~line 454)\n- After OnEnd callback (~line 459) — this is the most important one\n- After drainInterrupt (~line 530)\n- After UpdateProfileStats (~line 543)\n- At turn increment (~line 546)\n- At MaxTurns return (~line 140)\n\nOptionally add periodic logging to waitForAnySessionSpawns polling loop (e.g. every 30s).\n\n## Files involved\n\n- internal/loop/loop.go: post-recording code path (lines 415-547)\n- internal/looprun/runner.go: waitForAnySessionSpawns polling loop (lines 762-787)",
+  "status": "open",
+  "priority": "low",
+  "labels": [
+    "dx",
+    "logging",
+    "loop"
+  ],
+  "created": "2026-02-13T16:29:30.482212461Z",
+  "updated": "2026-02-13T16:29:30.482212461Z"
+}
