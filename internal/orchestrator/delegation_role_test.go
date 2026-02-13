@@ -161,3 +161,88 @@ func TestSpawn_UsesResolvedRoleAndDelegationMetadata(t *testing.T) {
 		t.Fatalf("Handoff = false, want true")
 	}
 }
+
+func TestSpawn_RejectsImmediatelyWhenChildMaxInstancesReached(t *testing.T) {
+	repo := initGitRepo(t)
+	s := newTestStore(t, repo)
+	cfg := &config.GlobalConfig{
+		Profiles: []config.Profile{
+			{Name: "parent", Agent: "codex"},
+			{Name: "worker", Agent: "codex"},
+		},
+	}
+	o := New(s, cfg, repo)
+	o.instances["worker"] = 1
+
+	spawnID, err := o.Spawn(context.Background(), SpawnRequest{
+		ParentTurnID:  8,
+		ParentProfile: "parent",
+		ChildProfile:  "worker",
+		Task:          "do work",
+		Delegation: &config.DelegationConfig{
+			Profiles: []config.DelegationProfile{
+				{Name: "worker", MaxInstances: 1},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatalf("Spawn() error = nil, want max instances error")
+	}
+	if !strings.Contains(err.Error(), "child profile") || !strings.Contains(err.Error(), "max 1") {
+		t.Fatalf("Spawn() error = %q, want child max instances hint", err)
+	}
+	if spawnID != 0 {
+		t.Fatalf("spawnID = %d, want 0", spawnID)
+	}
+
+	spawns, listErr := s.ListSpawns()
+	if listErr != nil {
+		t.Fatalf("ListSpawns: %v", listErr)
+	}
+	if len(spawns) != 0 {
+		t.Fatalf("expected no spawn records on limit rejection, got %d", len(spawns))
+	}
+}
+
+func TestSpawn_RejectsImmediatelyWhenParentMaxParallelReached(t *testing.T) {
+	repo := initGitRepo(t)
+	s := newTestStore(t, repo)
+	cfg := &config.GlobalConfig{
+		Profiles: []config.Profile{
+			{Name: "parent", Agent: "codex"},
+			{Name: "worker", Agent: "codex"},
+		},
+	}
+	o := New(s, cfg, repo)
+	o.running["parent"] = 1
+
+	spawnID, err := o.Spawn(context.Background(), SpawnRequest{
+		ParentTurnID:  9,
+		ParentProfile: "parent",
+		ChildProfile:  "worker",
+		Task:          "do work",
+		Delegation: &config.DelegationConfig{
+			MaxParallel: 1,
+			Profiles: []config.DelegationProfile{
+				{Name: "worker"},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatalf("Spawn() error = nil, want max parallel error")
+	}
+	if !strings.Contains(err.Error(), "parent profile") || !strings.Contains(err.Error(), "max 1") {
+		t.Fatalf("Spawn() error = %q, want parent max parallel hint", err)
+	}
+	if spawnID != 0 {
+		t.Fatalf("spawnID = %d, want 0", spawnID)
+	}
+
+	spawns, listErr := s.ListSpawns()
+	if listErr != nil {
+		t.Fatalf("ListSpawns: %v", listErr)
+	}
+	if len(spawns) != 0 {
+		t.Fatalf("expected no spawn records on limit rejection, got %d", len(spawns))
+	}
+}

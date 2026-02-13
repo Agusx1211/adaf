@@ -14,7 +14,7 @@ type SpawnRecord struct {
 	Branch          string    `json:"branch,omitempty"`
 	WorktreePath    string    `json:"worktree_path,omitempty"`
 	ReadOnly        bool      `json:"read_only,omitempty"`
-	Status          string    `json:"status"` // "queued","running","awaiting_input","completed","failed","canceled","merged","rejected"
+	Status          string    `json:"status"` // "running","awaiting_input","completed","failed","canceled","merged","rejected"
 	Result          string    `json:"result,omitempty"`
 	ExitCode        int       `json:"exit_code,omitempty"`
 	Summary         string    `json:"summary,omitempty"` // child's final output for parent consumption

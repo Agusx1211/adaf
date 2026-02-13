@@ -35,8 +35,6 @@ func TestDeadWorktreePathsIncludesCanceled(t *testing.T) {
 	createSpawn("canceled", "/tmp/wt-canceled")
 	createSpawn("cancelled", "/tmp/wt-cancelled")
 	createSpawn("running", "/tmp/wt-running")
-	createSpawn("queued", "")
-
 	got := deadWorktreePaths(s)
 
 	for _, want := range []string{"/tmp/wt-completed", "/tmp/wt-canceled", "/tmp/wt-cancelled"} {

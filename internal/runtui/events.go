@@ -71,7 +71,7 @@ type SpawnInfo struct {
 	ChildTurnID   int
 	Profile       string
 	Role          string
-	Status        string // "queued", "running", "awaiting_input", "completed", "failed", "canceled", "merged", "rejected"
+	Status        string // "running", "awaiting_input", "completed", "failed", "canceled", "merged", "rejected"
 	Question      string // pending question when status is "awaiting_input"
 }
 

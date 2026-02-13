@@ -662,7 +662,7 @@ func collectHandoffs(s *store.Store, turnIDs []int) []store.HandoffInfo {
 			if _, ok := seen[rec.ID]; ok {
 				continue
 			}
-			if rec.Handoff && (rec.Status == "running" || rec.Status == "queued") {
+			if rec.Handoff && rec.Status == "running" {
 				seen[rec.ID] = struct{}{}
 				handoffs = append(handoffs, store.HandoffInfo{
 					SpawnID: rec.ID,

@@ -261,7 +261,7 @@ func TestCommandEntriesHierarchyAndHistory(t *testing.T) {
 	m.sessionOrder = []int{1, 2, 3, 4, 5, 6}
 	m.spawns = []SpawnInfo{
 		{ID: 10, ParentTurnID: 6, ChildTurnID: 60, Profile: "reviewer", Role: "qa", Status: "running"},
-		{ID: 11, ParentTurnID: 60, ParentSpawnID: 10, ChildTurnID: 61, Profile: "writer", Role: "documentator", Status: "queued"},
+		{ID: 11, ParentTurnID: 60, ParentSpawnID: 10, ChildTurnID: 61, Profile: "writer", Role: "documentator", Status: "running"},
 	}
 	m.spawnFirstSeen[10] = time.Now().Add(-30 * time.Second)
 	m.spawnFirstSeen[11] = time.Now().Add(-20 * time.Second)

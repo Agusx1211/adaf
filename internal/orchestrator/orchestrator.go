@@ -104,16 +104,6 @@ func (rb *eventRingBuffer) Snapshot() []stream.RawEvent {
 	return result
 }
 
-type pendingSpawn struct {
-	req SpawnRequest
-	ch  chan spawnOutcome
-}
-
-type spawnOutcome struct {
-	spawnID int
-	err     error
-}
-
 // Orchestrator manages sub-agent lifecycle.
 type Orchestrator struct {
 	store     *store.Store
@@ -124,10 +114,9 @@ type Orchestrator struct {
 	mu        sync.Mutex
 	running   map[string]int // parent profile -> count of running spawns
 	instances map[string]int // child profile -> count of running instances
-	queue     []*pendingSpawn
 	spawns    map[int]*activeSpawn
 	spawnWG   sync.WaitGroup // tracks running spawn goroutines
-	eventCh   chan any        // optional TUI event channel for real-time sub-agent events
+	eventCh   chan any       // optional TUI event channel for real-time sub-agent events
 }
 
 // New creates an Orchestrator.
@@ -169,7 +158,7 @@ func truncatePrompt(prompt string) (string, bool, int) {
 	return prompt[:cut] + suffix, true, origLen
 }
 
-// Spawn starts (or queues) a sub-agent.
+// Spawn starts a sub-agent.
 func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error) {
 	req.ChildRole = strings.ToLower(strings.TrimSpace(req.ChildRole))
 	debug.LogKV("orch", "Spawn() called",
@@ -228,17 +217,11 @@ func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error)
 	if maxInst > 0 {
 		currentInstances := o.instances[req.ChildProfile]
 		if currentInstances >= maxInst {
-			// Queue the spawn (will be released when an instance of this profile completes).
-			ch := make(chan spawnOutcome, 1)
-			o.queue = append(o.queue, &pendingSpawn{req: req, ch: ch})
 			o.mu.Unlock()
-
-			select {
-			case outcome := <-ch:
-				return outcome.spawnID, outcome.err
-			case <-ctx.Done():
-				return 0, ctx.Err()
-			}
+			return 0, fmt.Errorf(
+				"spawn limit reached: child profile %q has %d running instance(s) (max %d)",
+				req.ChildProfile, currentInstances, maxInst,
+			)
 		}
 	}
 
@@ -246,29 +229,24 @@ func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error)
 	maxPar := deleg.EffectiveMaxParallel()
 	currentRunning := o.running[req.ParentProfile]
 	if currentRunning >= maxPar {
-		// Queue the spawn.
-		ch := make(chan spawnOutcome, 1)
-		o.queue = append(o.queue, &pendingSpawn{req: req, ch: ch})
 		o.mu.Unlock()
-
-		// Wait for queue slot.
-		select {
-		case outcome := <-ch:
-			return outcome.spawnID, outcome.err
-		case <-ctx.Done():
-			return 0, ctx.Err()
-		}
+		return 0, fmt.Errorf(
+			"spawn limit reached: parent profile %q has %d running sub-agent(s) (max %d)",
+			req.ParentProfile, currentRunning, maxPar,
+		)
 	}
 
 	o.running[req.ParentProfile]++
 	o.instances[req.ChildProfile]++
+	runningCount := o.running[req.ParentProfile]
+	instanceCount := o.instances[req.ChildProfile]
 	o.mu.Unlock()
 
 	debug.LogKV("orch", "spawn starting immediately",
 		"parent_profile", req.ParentProfile,
 		"child_profile", req.ChildProfile,
-		"running", o.running[req.ParentProfile],
-		"instances", o.instances[req.ChildProfile],
+		"running", runningCount,
+		"instances", instanceCount,
 	)
 	return o.startSpawn(ctx, req, childProf)
 }
@@ -535,7 +513,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 			childCancel()
 			<-interruptDone
 		}()
-		defer o.onSpawnComplete(ctx, rec, req.ParentProfile)
+		defer o.onSpawnComplete(rec, req.ParentProfile)
 
 		l := &loop.Loop{
 			Store:       o.store,
@@ -925,7 +903,7 @@ func shortHash(hash string) string {
 	return hash
 }
 
-func (o *Orchestrator) onSpawnComplete(ctx context.Context, rec *store.SpawnRecord, parentProfile string) {
+func (o *Orchestrator) onSpawnComplete(rec *store.SpawnRecord, parentProfile string) {
 	debug.LogKV("orch", "onSpawnComplete",
 		"spawn_id", rec.ID,
 		"child_profile", rec.ChildProfile,
@@ -938,50 +916,6 @@ func (o *Orchestrator) onSpawnComplete(ctx context.Context, rec *store.SpawnReco
 	delete(o.spawns, rec.ID)
 	o.decrementRunningLocked(parentProfile)
 	o.decrementInstancesLocked(rec.ChildProfile)
-
-	// Check queue for next pending spawn that can now run.
-	// A queued spawn becomes eligible when both the delegation MaxParallel
-	// and the child's MaxInstances limits have room.
-	for i, pending := range o.queue {
-		parentProf := o.globalCfg.FindProfile(pending.req.ParentProfile)
-		childProf := o.globalCfg.FindProfile(pending.req.ChildProfile)
-		if parentProf == nil || childProf == nil {
-			// Remove invalid entry.
-			o.queue = append(o.queue[:i], o.queue[i+1:]...)
-			o.mu.Unlock()
-			pending.ch <- spawnOutcome{err: fmt.Errorf("profile not found")}
-			return
-		}
-
-		// Check parent concurrency limit from delegation config.
-		deleg := pending.req.Delegation
-		maxPar := 4
-		if deleg != nil {
-			maxPar = deleg.EffectiveMaxParallel()
-		}
-		if o.running[pending.req.ParentProfile] >= maxPar {
-			continue
-		}
-
-		// Check child instance limit (delegation profile overrides child profile).
-		maxInst := childProf.MaxInstances
-		if pending.req.ChildMaxInstances > 0 {
-			maxInst = pending.req.ChildMaxInstances
-		}
-		if maxInst > 0 && o.instances[pending.req.ChildProfile] >= maxInst {
-			continue
-		}
-
-		// This one can run.
-		o.queue = append(o.queue[:i], o.queue[i+1:]...)
-		o.running[pending.req.ParentProfile]++
-		o.instances[pending.req.ChildProfile]++
-		o.mu.Unlock()
-
-		spawnID, err := o.startSpawn(ctx, pending.req, childProf)
-		pending.ch <- spawnOutcome{spawnID: spawnID, err: err}
-		return
-	}
 	o.mu.Unlock()
 }
 

@@ -802,7 +802,7 @@ func (s *Store) CreateSpawn(rec *SpawnRecord) error {
 	rec.ID = s.nextID(dir)
 	rec.StartedAt = time.Now().UTC()
 	if rec.Status == "" {
-		rec.Status = "queued"
+		rec.Status = "running"
 	}
 	return s.writeJSONLocked(filepath.Join(dir, fmt.Sprintf("%d.json", rec.ID)), rec)
 }
