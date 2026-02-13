@@ -2,7 +2,7 @@
   "id": 12,
   "title": "Non-blocking interrupt sends silently drop guardrail violations",
   "description": "## Location\n- internal/orchestrator/orchestrator.go:493\n- internal/loop/loop.go:343\n\n## Problem\nselect { case ch \u003c- msg: default: } silently drops interrupts if channel is full (capacity 1). Guardrail violations can be ignored entirely with no logging or error.\n\n## Fix\nUse unbounded queue or increase buffer + log drops.",
-  "status": "open",
+  "status": "resolved",
   "priority": "high",
   "labels": [
     "bug",

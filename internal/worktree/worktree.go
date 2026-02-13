@@ -256,7 +256,9 @@ func (m *Manager) CleanupAll(ctx context.Context) error {
 		return err
 	}
 	for _, wt := range active {
-		m.RemoveWithBranch(ctx, wt.Path, wt.Branch)
+		if err := m.RemoveWithBranch(ctx, wt.Path, wt.Branch); err != nil {
+			debug.LogKV("worktree", "CleanupAll: remove failed", "path", wt.Path, "branch", wt.Branch, "error", err)
+		}
 	}
 	// Clean up the worktree directory itself.
 	base := filepath.Join(m.repoRoot, worktreeDir)
@@ -289,7 +291,9 @@ func (m *Manager) CleanupStale(ctx context.Context, maxAge time.Duration, deadPa
 			continue
 		}
 
-		m.RemoveWithBranch(ctx, wt.Path, wt.Branch)
+		if err := m.RemoveWithBranch(ctx, wt.Path, wt.Branch); err != nil {
+			debug.LogKV("worktree", "CleanupStale: remove failed", "path", wt.Path, "branch", wt.Branch, "error", err)
+		}
 		removed++
 	}
 

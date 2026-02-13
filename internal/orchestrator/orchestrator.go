@@ -324,7 +324,10 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 
 	if err := o.store.CreateSpawn(rec); err != nil {
 		if wtPath != "" {
-			o.worktrees.RemoveWithBranch(ctx, wtPath, rec.Branch)
+			if rmErr := o.worktrees.RemoveWithBranch(ctx, wtPath, rec.Branch); rmErr != nil {
+				debug.LogKV("orch", "worktree cleanup failed after spawn record error",
+					"worktree", wtPath, "branch", rec.Branch, "error", rmErr)
+			}
 		}
 		o.releaseSpawnSlot(req.ParentProfile, req.ChildProfile)
 		debug.LogKV("orch", "spawn record creation failed", "error", err)
@@ -345,7 +348,10 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 		rec.Result = "agent not found: " + childProf.Agent
 		o.store.UpdateSpawn(rec)
 		if wtPath != "" {
-			o.worktrees.RemoveWithBranch(ctx, wtPath, rec.Branch)
+			if rmErr := o.worktrees.RemoveWithBranch(ctx, wtPath, rec.Branch); rmErr != nil {
+				debug.LogKV("orch", "worktree cleanup failed after agent lookup error",
+					"worktree", wtPath, "branch", rec.Branch, "error", rmErr)
+			}
 		}
 		o.releaseSpawnSlot(req.ParentProfile, req.ChildProfile)
 		return rec.ID, fmt.Errorf("agent %q not found", childProf.Agent)
@@ -662,7 +668,10 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 		// Clean up read-only worktrees immediately — there's nothing to merge.
 		if rec.ReadOnly && rec.WorktreePath != "" {
 			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			o.worktrees.Remove(cleanCtx, rec.WorktreePath, false)
+			if rmErr := o.worktrees.Remove(cleanCtx, rec.WorktreePath, false); rmErr != nil {
+				debug.LogKV("orch", "read-only worktree cleanup failed",
+					"spawn_id", rec.ID, "worktree", rec.WorktreePath, "error", rmErr)
+			}
 			cleanCancel()
 		}
 		rec.Status = status
@@ -1291,7 +1300,10 @@ func (o *Orchestrator) Merge(ctx context.Context, spawnID int, squash bool) (str
 
 	// Clean up worktree.
 	if rec.WorktreePath != "" {
-		o.worktrees.RemoveWithBranch(ctx, rec.WorktreePath, rec.Branch)
+		if rmErr := o.worktrees.RemoveWithBranch(ctx, rec.WorktreePath, rec.Branch); rmErr != nil {
+			debug.LogKV("orch", "worktree cleanup failed after merge",
+				"spawn_id", spawnID, "worktree", rec.WorktreePath, "error", rmErr)
+		}
 	}
 
 	rec.Status = "merged"
@@ -1318,7 +1330,10 @@ func (o *Orchestrator) Reject(ctx context.Context, spawnID int) error {
 
 	// Clean up worktree.
 	if rec.WorktreePath != "" {
-		o.worktrees.RemoveWithBranch(ctx, rec.WorktreePath, rec.Branch)
+		if rmErr := o.worktrees.RemoveWithBranch(ctx, rec.WorktreePath, rec.Branch); rmErr != nil {
+			debug.LogKV("orch", "worktree cleanup failed after reject",
+				"spawn_id", spawnID, "worktree", rec.WorktreePath, "error", rmErr)
+		}
 	}
 
 	rec.Status = "rejected"
