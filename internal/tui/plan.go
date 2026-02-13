@@ -387,6 +387,7 @@ func (m AppModel) viewPlanMenu() string {
 	activeStyle := lipgloss.NewStyle().Foreground(ColorGreen).Bold(true)
 
 	var lines []string
+	cursorLine := -1
 	lines = append(lines, sectionStyle.Render("Plan Manager"))
 	lines = append(lines, "")
 
@@ -421,6 +422,7 @@ func (m AppModel) viewPlanMenu() string {
 			line := fmt.Sprintf("%s%-18s [%s] %s", prefix, id, status, title)
 			if i == m.planSel {
 				lines = append(lines, lipgloss.NewStyle().Foreground(ColorMauve).Bold(true).Render(truncateInputForDisplay(line, cw)))
+				cursorLine = len(lines) - 1
 			} else {
 				lines = append(lines, lipgloss.NewStyle().Foreground(ColorText).Render(truncateInputForDisplay(line, cw)))
 			}
@@ -435,7 +437,7 @@ func (m AppModel) viewPlanMenu() string {
 		lines = append(lines, dimStyle.Render("Last: "+truncateInputForDisplay(m.planActionMsg, cw-6)))
 	}
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
 	panel := style.Render(content)
 	return header + "\n" + panel + "\n" + statusBar
 }

@@ -42,15 +42,19 @@ func saveSettingsRoleCatalog(cfg *config.GlobalConfig) {
 	_ = config.Save(cfg)
 }
 
-func settingsPanelStyle() lipgloss.Style {
+func settingsPanelStyle(focused bool) lipgloss.Style {
+	borderColor := ColorSurface2
+	if focused {
+		borderColor = ColorMauve
+	}
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorSurface2).
+		BorderForeground(borderColor).
 		Padding(1, 2)
 }
 
-func renderSettingsPane(lines []string, outerW, outerH int) string {
-	style := settingsPanelStyle()
+func renderSettingsPane(lines []string, outerW, outerH int, focused bool) string {
+	style := settingsPanelStyle(focused)
 	hf, vf := style.GetFrameSize()
 	cw := outerW - hf
 	ch := outerH - vf
@@ -62,6 +66,38 @@ func renderSettingsPane(lines []string, outerW, outerH int) string {
 	}
 
 	content := fitLines(wrapRenderableLines(lines, cw), cw, ch)
+	return style.Render(content)
+}
+
+func renderSettingsPaneWithOffset(lines []string, outerW, outerH, offset int, focused bool) string {
+	style := settingsPanelStyle(focused)
+	hf, vf := style.GetFrameSize()
+	cw := outerW - hf
+	ch := outerH - vf
+	if cw < 1 {
+		cw = 1
+	}
+	if ch < 1 {
+		ch = 1
+	}
+
+	content := fitLinesWithOffset(wrapRenderableLines(lines, cw), cw, ch, offset)
+	return style.Render(content)
+}
+
+func renderSettingsPaneWithCursor(lines []string, outerW, outerH, cursorLine int, focused bool) string {
+	style := settingsPanelStyle(focused)
+	hf, vf := style.GetFrameSize()
+	cw := outerW - hf
+	ch := outerH - vf
+	if cw < 1 {
+		cw = 1
+	}
+	if ch < 1 {
+		ch = 1
+	}
+
+	content := fitLinesWithCursor(wrapRenderableLines(lines, cw), cw, ch, cursorLine)
 	return style.Render(content)
 }
 
@@ -80,7 +116,7 @@ func rolePromptPreview(roleName string, cfg *config.GlobalConfig) string {
 	return strings.TrimSpace(prompt.RolePrompt(&config.Profile{}, roleName, cfg))
 }
 
-func (m AppModel) renderSettingsSplitView(leftLines, rightLines []string) string {
+func (m AppModel) renderSettingsSplitView(leftLines, rightLines []string, leftCursorLine int) string {
 	header := m.renderHeader()
 	statusBar := m.renderStatusBar()
 
@@ -95,7 +131,13 @@ func (m AppModel) renderSettingsSplitView(leftLines, rightLines []string) string
 		combined = append(combined, "")
 		combined = append(combined, lipgloss.NewStyle().Bold(true).Foreground(ColorLavender).Render("Details"))
 		combined = append(combined, rightLines...)
-		panel := renderSettingsPane(combined, m.width, panelH)
+		scroll := m.stateScrollOffset()
+		panel := ""
+		if scroll > 0 {
+			panel = renderSettingsPaneWithOffset(combined, m.width, panelH, scroll, true)
+		} else {
+			panel = renderSettingsPaneWithCursor(combined, m.width, panelH, leftCursorLine, true)
+		}
 		return header + "\n" + panel + "\n" + statusBar
 	}
 
@@ -118,8 +160,10 @@ func (m AppModel) renderSettingsSplitView(leftLines, rightLines []string) string
 		rightOuter = 1
 	}
 
-	left := renderSettingsPane(leftLines, leftOuter, panelH)
-	right := renderSettingsPane(rightLines, rightOuter, panelH)
+	leftFocused := !m.isRightPaneFocused()
+	rightFocused := m.isRightPaneFocused()
+	left := renderSettingsPaneWithCursor(leftLines, leftOuter, panelH, leftCursorLine, leftFocused)
+	right := renderSettingsPaneWithOffset(rightLines, rightOuter, panelH, m.stateScrollOffset(), rightFocused)
 	return header + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, left, right) + "\n" + statusBar
 }
 
@@ -280,6 +324,7 @@ func (m AppModel) viewSettingsRolesRulesMenu() string {
 	}
 
 	var lines []string
+	cursorLine := -1
 	lines = append(lines, sectionStyle.Render("Settings — Roles & Rules"))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("Manage role definitions and reusable prompt rule sections."))
@@ -289,6 +334,7 @@ func (m AppModel) viewSettingsRolesRulesMenu() string {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(opt)
 			lines = append(lines, cursor+styled)
+			cursorLine = len(lines) - 1
 		} else {
 			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ColorText).Render(opt))
 		}
@@ -296,7 +342,7 @@ func (m AppModel) viewSettingsRolesRulesMenu() string {
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("j/k: navigate  enter: select  esc: back"))
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
 	panel := style.Render(content)
 	return header + "\n" + panel + "\n" + statusBar
 }
@@ -310,13 +356,29 @@ func (m AppModel) updateSettingsRolesList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
+		case "tab", "l", "right":
+			m.setRightPaneFocused(true)
+			return m, nil
+		case "shift+tab", "h", "left":
+			m.setRightPaneFocused(false)
+			return m, nil
 		case "j", "down":
+			if m.isRightPaneFocused() {
+				m.adjustStateScroll(1)
+				return m, nil
+			}
 			if len(m.globalCfg.Roles) > 0 {
 				m.settingsRolesSel = (m.settingsRolesSel + 1) % len(m.globalCfg.Roles)
+				m.resetStateScroll()
 			}
 		case "k", "up":
+			if m.isRightPaneFocused() {
+				m.adjustStateScroll(-1)
+				return m, nil
+			}
 			if len(m.globalCfg.Roles) > 0 {
 				m.settingsRolesSel = (m.settingsRolesSel - 1 + len(m.globalCfg.Roles)) % len(m.globalCfg.Roles)
+				m.resetStateScroll()
 			}
 		case "a":
 			m.settingsEditRoleIdx = -1
@@ -338,6 +400,7 @@ func (m AppModel) updateSettingsRolesList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			toDelete := m.globalCfg.Roles[m.settingsRolesSel].Name
 			m.globalCfg.RemoveRoleDefinition(toDelete)
 			m.clampSettingsRolesSel()
+			m.resetStateScroll()
 			saveSettingsRoleCatalog(m.globalCfg)
 			return m, nil
 		case "enter":
@@ -362,6 +425,7 @@ func (m AppModel) viewSettingsRolesList() string {
 	textStyle := lipgloss.NewStyle().Foreground(ColorText)
 
 	var left []string
+	cursorLine := -1
 	left = append(left, sectionStyle.Render("Settings — Roles"))
 	left = append(left, "")
 	left = append(left, dimStyle.Render("Browse roles on the left. Full composed prompt is on the right."))
@@ -384,6 +448,7 @@ func (m AppModel) viewSettingsRolesList() string {
 				cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 				styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
 				left = append(left, cursor+styled)
+				cursorLine = len(left) - 1
 			} else {
 				left = append(left, "  "+textStyle.Render(label))
 			}
@@ -392,10 +457,14 @@ func (m AppModel) viewSettingsRolesList() string {
 
 	left = append(left, "")
 	left = append(left, dimStyle.Render("a: add  r: rename  d: delete"))
-	left = append(left, dimStyle.Render("enter: edit role  esc: back"))
+	left = append(left, dimStyle.Render("enter: edit role  esc: back  tab/h/l: pane focus"))
 
 	var right []string
-	right = append(right, sectionStyle.Render("Role Details"))
+	rightTitle := "Role Details"
+	if m.isRightPaneFocused() {
+		rightTitle += " [focus]"
+	}
+	right = append(right, sectionStyle.Render(rightTitle))
 	right = append(right, "")
 	if len(m.globalCfg.Roles) == 0 {
 		right = append(right, dimStyle.Render("No role selected."))
@@ -437,7 +506,7 @@ func (m AppModel) viewSettingsRolesList() string {
 		}
 	}
 
-	return m.renderSettingsSplitView(left, right)
+	return m.renderSettingsSplitView(left, right, cursorLine)
 }
 
 // --- Role name input ---
@@ -548,13 +617,29 @@ func (m AppModel) updateSettingsRoleEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		role := &m.globalCfg.Roles[m.settingsEditRoleIdx]
 		switch msg.String() {
+		case "tab", "l", "right":
+			m.setRightPaneFocused(true)
+			return m, nil
+		case "shift+tab", "h", "left":
+			m.setRightPaneFocused(false)
+			return m, nil
 		case "j", "down":
+			if m.isRightPaneFocused() {
+				m.adjustStateScroll(1)
+				return m, nil
+			}
 			if len(m.globalCfg.PromptRules) > 0 {
 				m.settingsRoleRuleSel = (m.settingsRoleRuleSel + 1) % len(m.globalCfg.PromptRules)
+				m.resetStateScroll()
 			}
 		case "k", "up":
+			if m.isRightPaneFocused() {
+				m.adjustStateScroll(-1)
+				return m, nil
+			}
 			if len(m.globalCfg.PromptRules) > 0 {
 				m.settingsRoleRuleSel = (m.settingsRoleRuleSel - 1 + len(m.globalCfg.PromptRules)) % len(m.globalCfg.PromptRules)
+				m.resetStateScroll()
 			}
 		case " ":
 			if len(m.globalCfg.PromptRules) == 0 {
@@ -620,7 +705,7 @@ func (m AppModel) viewSettingsRoleEdit() string {
 			"",
 			dimStyle.Render("No selected role."),
 		}
-		return m.renderSettingsSplitView(left, right)
+		return m.renderSettingsSplitView(left, right, -1)
 	}
 
 	role := m.globalCfg.Roles[m.settingsEditRoleIdx]
@@ -634,6 +719,7 @@ func (m AppModel) viewSettingsRoleEdit() string {
 	}
 
 	var left []string
+	cursorLine := -1
 	left = append(left, sectionStyle.Render("Settings — Role: "+role.Name+defaultTag))
 	left = append(left, textStyle.Render("Mode: "+mode))
 	left = append(left, "")
@@ -650,6 +736,7 @@ func (m AppModel) viewSettingsRoleEdit() string {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
 			left = append(left, cursor+styled)
+			cursorLine = len(left) - 1
 		} else {
 			left = append(left, "  "+textStyle.Render(label))
 		}
@@ -658,10 +745,14 @@ func (m AppModel) viewSettingsRoleEdit() string {
 	left = append(left, "")
 	left = append(left, dimStyle.Render("space: toggle rule  w: toggle write mode  t: set default"))
 	left = append(left, dimStyle.Render("i: edit identity  r: rename role  e/enter: edit selected rule"))
-	left = append(left, dimStyle.Render("a: new rule  esc: back"))
+	left = append(left, dimStyle.Render("a: new rule  esc: back  tab/h/l: pane focus"))
 
 	var right []string
-	right = append(right, sectionStyle.Render("Rule Content"))
+	rightTitle := "Rule Content"
+	if m.isRightPaneFocused() {
+		rightTitle += " [focus]"
+	}
+	right = append(right, sectionStyle.Render(rightTitle))
 	right = append(right, "")
 	if len(m.globalCfg.PromptRules) == 0 {
 		right = append(right, dimStyle.Render("No prompt rules configured."))
@@ -681,7 +772,7 @@ func (m AppModel) viewSettingsRoleEdit() string {
 		}
 	}
 
-	return m.renderSettingsSplitView(left, right)
+	return m.renderSettingsSplitView(left, right, cursorLine)
 }
 
 // --- Rules list ---
@@ -693,13 +784,29 @@ func (m AppModel) updateSettingsRulesList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
+		case "tab", "l", "right":
+			m.setRightPaneFocused(true)
+			return m, nil
+		case "shift+tab", "h", "left":
+			m.setRightPaneFocused(false)
+			return m, nil
 		case "j", "down":
+			if m.isRightPaneFocused() {
+				m.adjustStateScroll(1)
+				return m, nil
+			}
 			if len(m.globalCfg.PromptRules) > 0 {
 				m.settingsRulesSel = (m.settingsRulesSel + 1) % len(m.globalCfg.PromptRules)
+				m.resetStateScroll()
 			}
 		case "k", "up":
+			if m.isRightPaneFocused() {
+				m.adjustStateScroll(-1)
+				return m, nil
+			}
 			if len(m.globalCfg.PromptRules) > 0 {
 				m.settingsRulesSel = (m.settingsRulesSel - 1 + len(m.globalCfg.PromptRules)) % len(m.globalCfg.PromptRules)
+				m.resetStateScroll()
 			}
 		case "a":
 			m.settingsEditRuleIdx = -1
@@ -721,6 +828,7 @@ func (m AppModel) updateSettingsRulesList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ruleID := m.globalCfg.PromptRules[m.settingsRulesSel].ID
 			m.globalCfg.RemovePromptRule(ruleID)
 			m.clampSettingsRulesSel()
+			m.resetStateScroll()
 			saveSettingsRoleCatalog(m.globalCfg)
 			return m, nil
 		case "e", "enter":
@@ -745,6 +853,7 @@ func (m AppModel) viewSettingsRulesList() string {
 	textStyle := lipgloss.NewStyle().Foreground(ColorText)
 
 	var left []string
+	cursorLine := -1
 	left = append(left, sectionStyle.Render("Settings — Prompt Rules"))
 	left = append(left, "")
 	left = append(left, dimStyle.Render("Select a rule to inspect full content on the right."))
@@ -759,6 +868,7 @@ func (m AppModel) viewSettingsRulesList() string {
 				cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 				styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
 				left = append(left, cursor+styled)
+				cursorLine = len(left) - 1
 			} else {
 				left = append(left, "  "+textStyle.Render(label))
 			}
@@ -767,10 +877,14 @@ func (m AppModel) viewSettingsRulesList() string {
 
 	left = append(left, "")
 	left = append(left, dimStyle.Render("a: add  r: rename id  d: delete"))
-	left = append(left, dimStyle.Render("e/enter: edit body  esc: back"))
+	left = append(left, dimStyle.Render("e/enter: edit body  esc: back  tab/h/l: pane focus"))
 
 	var right []string
-	right = append(right, sectionStyle.Render("Rule Content"))
+	rightTitle := "Rule Content"
+	if m.isRightPaneFocused() {
+		rightTitle += " [focus]"
+	}
+	right = append(right, sectionStyle.Render(rightTitle))
 	right = append(right, "")
 	if len(m.globalCfg.PromptRules) == 0 {
 		right = append(right, dimStyle.Render("No rule selected."))
@@ -786,7 +900,7 @@ func (m AppModel) viewSettingsRulesList() string {
 		}
 	}
 
-	return m.renderSettingsSplitView(left, right)
+	return m.renderSettingsSplitView(left, right, cursorLine)
 }
 
 // --- Rule ID input ---
@@ -870,7 +984,7 @@ func (m AppModel) viewSettingsRuleID() string {
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: continue/save  esc: cancel"))
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithCursor(lines, cw, ch, len(lines)-1)
 	panel := style.Render(content)
 	return header + "\n" + panel + "\n" + statusBar
 }

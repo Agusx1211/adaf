@@ -57,6 +57,7 @@ func (m AppModel) viewSettings() string {
 	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
 
 	var lines []string
+	cursorLine := -1
 	lines = append(lines, sectionStyle.Render("Settings"))
 	lines = append(lines, "")
 
@@ -93,6 +94,7 @@ func (m AppModel) viewSettings() string {
 		if i == m.settingsSel {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			lines = append(lines, cursor+line)
+			cursorLine = len(lines) - 1
 		} else {
 			lines = append(lines, "  "+line)
 		}
@@ -104,6 +106,7 @@ func (m AppModel) viewSettings() string {
 	if m.settingsSel == 3 {
 		cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorTeal).Render("> ")
 		lines = append(lines, cursor+backLabel)
+		cursorLine = len(lines) - 1
 	} else {
 		lines = append(lines, "  "+backLabel)
 	}
@@ -111,7 +114,7 @@ func (m AppModel) viewSettings() string {
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("j/k: navigate  enter: edit  esc: back"))
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
 	panel := style.Render(content)
 	return header + "\n" + panel + "\n" + statusBar
 }

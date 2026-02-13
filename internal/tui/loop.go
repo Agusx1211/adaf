@@ -396,6 +396,7 @@ func (m AppModel) viewLoopStepList() string {
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
 
 	var lines []string
+	cursorLine := -1
 	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Steps"))
 	lines = append(lines, dimStyle.Render("Loop: "+m.loopNameInput))
 	lines = append(lines, "")
@@ -429,6 +430,7 @@ func (m AppModel) viewLoopStepList() string {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorTeal).Render("> ")
 			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorTeal).Render(label)
 			lines = append(lines, cursor+styled)
+			cursorLine = len(lines) - 1
 		} else {
 			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ColorText).Render(label))
 		}
@@ -437,7 +439,7 @@ func (m AppModel) viewLoopStepList() string {
 	lines = append(lines, dimStyle.Render("a: add  enter: edit  d: delete  J/K: reorder"))
 	lines = append(lines, dimStyle.Render("s: save  esc: back"))
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
 	panel := style.Render(content)
 	return header + "\n" + panel + "\n" + statusBar
 }
@@ -480,6 +482,7 @@ func (m AppModel) viewLoopStepProfile() string {
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
 
 	var lines []string
+	cursorLine := -1
 	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Step Profile"))
 	lines = append(lines, "")
 
@@ -491,6 +494,7 @@ func (m AppModel) viewLoopStepProfile() string {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(name)
 			lines = append(lines, cursor+styled)
+			cursorLine = len(lines) - 1
 		} else {
 			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ColorText).Render(name))
 		}
@@ -498,7 +502,7 @@ func (m AppModel) viewLoopStepProfile() string {
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("j/k: navigate  enter: select  esc: back"))
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
 	panel := style.Render(content)
 	return header + "\n" + panel + "\n" + statusBar
 }
@@ -513,10 +517,26 @@ func (m AppModel) updateLoopStepRole(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
+		case "tab", "l", "right":
+			m.setRightPaneFocused(true)
+			return m, nil
+		case "shift+tab", "h", "left":
+			m.setRightPaneFocused(false)
+			return m, nil
 		case "j", "down":
+			if m.isRightPaneFocused() {
+				m.adjustStateScroll(1)
+				return m, nil
+			}
 			m.loopStepRoleSel = (m.loopStepRoleSel + 1) % len(roles)
+			m.resetStateScroll()
 		case "k", "up":
+			if m.isRightPaneFocused() {
+				m.adjustStateScroll(-1)
+				return m, nil
+			}
 			m.loopStepRoleSel = (m.loopStepRoleSel - 1 + len(roles)) % len(roles)
+			m.resetStateScroll()
 		case "enter":
 			m.state = stateLoopStepTurns
 		case "esc":
@@ -529,52 +549,134 @@ func (m AppModel) updateLoopStepRole(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m AppModel) viewLoopStepRole() string {
 	header := m.renderHeader()
 	statusBar := m.renderStatusBar()
-	style, cw, ch := profileWizardPanel(m)
-
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
 	textStyle := lipgloss.NewStyle().Foreground(ColorText)
 
-	var lines []string
-	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Step Role"))
-	lines = append(lines, "")
-
 	roles := config.AllRoles(m.globalCfg)
-	for i, role := range roles {
-		label := role
-		if i == m.loopStepRoleSel {
-			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
-			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
-			lines = append(lines, cursor+styled)
-		} else {
-			lines = append(lines, "  "+textStyle.Render(label))
-		}
+	selectedRole := ""
+	if len(roles) > 0 && m.loopStepRoleSel >= 0 && m.loopStepRoleSel < len(roles) {
+		selectedRole = roles[m.loopStepRoleSel]
 	}
 
-	if len(roles) > 0 && m.loopStepRoleSel >= 0 && m.loopStepRoleSel < len(roles) {
-		selectedRole := roles[m.loopStepRoleSel]
+	if m.width < 90 {
+		style, cw, ch := profileWizardPanel(m)
+		var lines []string
+		cursorLine := -1
+		lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Step Role"))
 		lines = append(lines, "")
-		lines = append(lines, sectionStyle.Render("Selected Role"))
-		lines = append(lines, textStyle.Render("Name: "+selectedRole))
+		for i, role := range roles {
+			if i == m.loopStepRoleSel {
+				cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
+				styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(role)
+				lines = append(lines, cursor+styled)
+				cursorLine = len(lines) - 1
+			} else {
+				lines = append(lines, "  "+textStyle.Render(role))
+			}
+		}
+
+		if selectedRole != "" {
+			lines = append(lines, "")
+			lines = append(lines, sectionStyle.Render("Composed Prompt"))
+			promptText := rolePromptPreview(selectedRole, m.globalCfg)
+			if promptText == "" {
+				lines = append(lines, dimStyle.Render("(empty prompt)"))
+			} else {
+				lines = appendMultiline(lines, promptText)
+			}
+		}
+
+		lines = append(lines, "")
+		lines = append(lines, dimStyle.Render("j/k: navigate  enter: continue  esc: back"))
+		content := fitLinesWithCursor(wrapRenderableLines(lines, cw), cw, ch, cursorLine)
+		panel := style.Render(content)
+		return header + "\n" + panel + "\n" + statusBar
+	}
+
+	panelH := m.height - 2
+	if panelH < 1 {
+		panelH = 1
+	}
+	leftOuter := m.width / 2
+	minPane := 34
+	if leftOuter < minPane {
+		leftOuter = minPane
+	}
+	if m.width-leftOuter < minPane {
+		leftOuter = m.width - minPane
+	}
+	if leftOuter < 1 {
+		leftOuter = 1
+	}
+	if leftOuter >= m.width {
+		leftOuter = m.width - 1
+	}
+	rightOuter := m.width - leftOuter
+	if rightOuter < 1 {
+		rightOuter = 1
+	}
+
+	var left []string
+	cursorLine := -1
+	leftTitle := m.loopWizardTitle() + " — Step Role"
+	if !m.isRightPaneFocused() {
+		leftTitle += " [focus]"
+	}
+	left = append(left, sectionStyle.Render(leftTitle))
+	left = append(left, "")
+	for i, role := range roles {
+		if i == m.loopStepRoleSel {
+			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
+			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(role)
+			left = append(left, cursor+styled)
+			cursorLine = len(left) - 1
+		} else {
+			left = append(left, "  "+textStyle.Render(role))
+		}
+	}
+	left = append(left, "")
+	left = append(left, dimStyle.Render("j/k: navigate roles  enter: continue  esc: back"))
+	left = append(left, dimStyle.Render("tab/h/l: pane focus"))
+
+	var right []string
+	rightTitle := "Role Prompt Preview"
+	if m.isRightPaneFocused() {
+		rightTitle += " [focus]"
+	}
+	right = append(right, sectionStyle.Render(rightTitle))
+	right = append(right, "")
+	if selectedRole == "" {
+		right = append(right, dimStyle.Render("No role selected."))
+	} else {
+		right = append(right, textStyle.Render("Role: "+selectedRole))
 		if m.globalCfg != nil {
 			if def := m.globalCfg.FindRoleDefinition(selectedRole); def != nil {
 				if title := strings.TrimSpace(def.Title); title != "" {
-					lines = append(lines, textStyle.Render("Title: "+title))
+					right = append(right, textStyle.Render("Title: "+title))
 				}
+				right = append(right, "")
 				if desc := strings.TrimSpace(def.Description); desc != "" {
-					lines = append(lines, dimStyle.Render("Description:"))
-					lines = appendMultiline(lines, desc)
+					right = append(right, sectionStyle.Render("Description"))
+					right = appendMultiline(right, desc)
+					right = append(right, "")
 				}
 			}
 		}
+		right = append(right, sectionStyle.Render("Composed Prompt"))
+		promptText := rolePromptPreview(selectedRole, m.globalCfg)
+		if promptText == "" {
+			right = append(right, dimStyle.Render("(empty prompt)"))
+		} else {
+			right = appendMultiline(right, promptText)
+		}
+		right = append(right, "")
+		right = append(right, dimStyle.Render("pgup/pgdn or ctrl+u/ctrl+d to page"))
 	}
 
-	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("j/k: navigate  enter: continue  esc: back"))
-
-	content := fitLines(wrapRenderableLines(lines, cw), cw, ch)
-	panel := style.Render(content)
-	return header + "\n" + panel + "\n" + statusBar
+	leftPanel := renderSettingsPaneWithCursor(left, leftOuter, panelH, cursorLine, !m.isRightPaneFocused())
+	rightPanel := renderSettingsPaneWithOffset(right, rightOuter, panelH, m.stateScrollOffset(), m.isRightPaneFocused())
+	return header + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel) + "\n" + statusBar
 }
 
 // --- Loop Step Turns ---
@@ -715,6 +817,7 @@ func (m AppModel) viewLoopStepTools() string {
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
 
 	var lines []string
+	cursorLine := -1
 	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Step Tools"))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("Which tools should this step have? (space to toggle)"))
@@ -742,6 +845,7 @@ func (m AppModel) viewLoopStepTools() string {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			nameStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
 			lines = append(lines, cursor+check+" "+nameStyled+desc)
+			cursorLine = len(lines) - 1
 		} else {
 			lines = append(lines, "  "+check+" "+lipgloss.NewStyle().Foreground(ColorText).Render(label)+desc)
 		}
@@ -750,7 +854,7 @@ func (m AppModel) viewLoopStepTools() string {
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("space: toggle  j/k: navigate  enter: delegation  esc: back"))
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
 	panel := style.Render(content)
 	return header + "\n" + panel + "\n" + statusBar
 }
@@ -882,6 +986,7 @@ func (m AppModel) viewLoopStepSpawn() string {
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
 
 	var lines []string
+	cursorLine := -1
 	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Delegation Tree"))
 	lines = append(lines, dimStyle.Render("Level: "+m.delegationPathLabel()))
 	lines = append(lines, "")
@@ -920,6 +1025,7 @@ func (m AppModel) viewLoopStepSpawn() string {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			nameStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
 			lines = append(lines, cursor+nameStyled)
+			cursorLine = len(lines) - 1
 		} else {
 			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ColorText).Render(label))
 		}
@@ -928,7 +1034,7 @@ func (m AppModel) viewLoopStepSpawn() string {
 	lines = append(lines, dimStyle.Render("a: add  d: delete  r: role  s: speed  space: handoff"))
 	lines = append(lines, dimStyle.Render("j/k: navigate  enter: open children  esc: up/back  S: save step"))
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
 	panel := style.Render(content)
 	return header + "\n" + panel + "\n" + statusBar
 }
@@ -979,6 +1085,7 @@ func (m AppModel) viewLoopStepSpawnCfg() string {
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
 
 	var lines []string
+	cursorLine := -1
 	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Add Delegation Rule"))
 	lines = append(lines, dimStyle.Render("Level: "+m.delegationPathLabel()))
 	lines = append(lines, "")
@@ -993,6 +1100,7 @@ func (m AppModel) viewLoopStepSpawnCfg() string {
 				cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 				styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
 				lines = append(lines, cursor+styled)
+				cursorLine = len(lines) - 1
 			} else {
 				lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ColorText).Render(label))
 			}
@@ -1002,7 +1110,7 @@ func (m AppModel) viewLoopStepSpawnCfg() string {
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("j/k: navigate  enter: add rule  esc: back"))
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
 	panel := style.Render(content)
 	return header + "\n" + panel + "\n" + statusBar
 }
@@ -1094,6 +1202,7 @@ func (m AppModel) viewLoopMenu() string {
 	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
 
 	var lines []string
+	cursorLine := -1
 	lines = append(lines, sectionStyle.Render("Edit Loop"))
 	lines = append(lines, "")
 
@@ -1110,6 +1219,7 @@ func (m AppModel) viewLoopMenu() string {
 		if i == m.loopMenuSel {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			lines = append(lines, cursor+line)
+			cursorLine = len(lines) - 1
 		} else {
 			lines = append(lines, "  "+line)
 		}
@@ -1121,6 +1231,7 @@ func (m AppModel) viewLoopMenu() string {
 	if m.loopMenuSel == 2 {
 		cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render("> ")
 		lines = append(lines, cursor+saveLabel)
+		cursorLine = len(lines) - 1
 	} else {
 		lines = append(lines, "  "+saveLabel)
 	}
@@ -1128,7 +1239,7 @@ func (m AppModel) viewLoopMenu() string {
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("j/k: navigate  enter: edit field  esc: cancel"))
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
 	panel := style.Render(content)
 	return header + "\n" + panel + "\n" + statusBar
 }

@@ -102,6 +102,8 @@ func renderSelector(
 	profileStats map[string]*store.ProfileStats,
 	loopStats map[string]*store.LoopStats,
 	width, height int,
+	rightScroll int,
+	rightFocused bool,
 ) string {
 	panelH := height - 2 // header + status bar
 	if panelH < 1 {
@@ -115,7 +117,7 @@ func renderSelector(
 		leftOuter = 0
 	}
 
-	left := renderProfileList(profiles, selected, leftOuter, panelH)
+	left := renderProfileList(profiles, selected, leftOuter, panelH, !rightFocused)
 	right := renderProjectPanel(
 		profiles,
 		selected,
@@ -131,6 +133,8 @@ func renderSelector(
 		loopStats,
 		rightOuter,
 		panelH,
+		rightScroll,
+		rightFocused,
 	)
 
 	if leftOuter == 0 {
@@ -139,10 +143,14 @@ func renderSelector(
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 }
 
-func renderProfileList(profiles []profileEntry, selected int, outerW, outerH int) string {
+func renderProfileList(profiles []profileEntry, selected int, outerW, outerH int, focused bool) string {
+	border := ColorSurface2
+	if focused {
+		border = ColorMauve
+	}
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorSurface2).
+		BorderForeground(border).
 		Padding(1, 1)
 
 	hf, vf := style.GetFrameSize()
@@ -156,6 +164,7 @@ func renderProfileList(profiles []profileEntry, selected int, outerW, outerH int
 	}
 
 	var lines []string
+	cursorLine := -1
 	lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(ColorLavender).Render("Profiles"))
 	lines = append(lines, "")
 
@@ -178,6 +187,7 @@ func renderProfileList(profiles []profileEntry, selected int, outerW, outerH int
 				cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render("> ")
 				nameStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render(name)
 				lines = append(lines, cursor+nameStyled)
+				cursorLine = len(lines) - 1
 			} else {
 				nameStyled := lipgloss.NewStyle().Foreground(ColorOverlay0).Render(name)
 				lines = append(lines, "  "+nameStyled)
@@ -191,6 +201,7 @@ func renderProfileList(profiles []profileEntry, selected int, outerW, outerH int
 				cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorTeal).Render("> ")
 				nameStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorTeal).Render(name)
 				lines = append(lines, cursor+nameStyled+" "+badge)
+				cursorLine = len(lines) - 1
 			} else {
 				nameStyled := lipgloss.NewStyle().Foreground(ColorText).Render(name)
 				lines = append(lines, "  "+nameStyled+" "+badge)
@@ -202,13 +213,14 @@ func renderProfileList(profiles []profileEntry, selected int, outerW, outerH int
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			nameStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(name)
 			lines = append(lines, cursor+nameStyled)
+			cursorLine = len(lines) - 1
 		} else {
 			nameStyled := lipgloss.NewStyle().Foreground(ColorText).Render(name)
 			lines = append(lines, "  "+nameStyled)
 		}
 	}
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
 	return style.Render(content)
 }
 
@@ -226,10 +238,16 @@ func renderProjectPanel(
 	profileStats map[string]*store.ProfileStats,
 	loopStats map[string]*store.LoopStats,
 	outerW, outerH int,
+	scrollOffset int,
+	focused bool,
 ) string {
+	border := ColorSurface2
+	if focused {
+		border = ColorMauve
+	}
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorSurface2).
+		BorderForeground(border).
 		Padding(1, 1)
 
 	hf, vf := style.GetFrameSize()
@@ -492,7 +510,7 @@ func renderProjectPanel(
 		}
 	}
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithOffset(lines, cw, ch, scrollOffset)
 	return style.Render(content)
 }
 
@@ -579,17 +597,57 @@ func truncateInputForDisplay(input string, maxWidth int) string {
 
 // fitLines is equivalent to runtui's fitToSize: exactly w cols and h lines.
 func fitLines(lines []string, w, h int) string {
+	return fitLinesWithOffset(lines, w, h, 0)
+}
+
+func fitLinesWithOffset(lines []string, w, h, offset int) string {
+	return fitPreparedLines(prepareLinesForFit(lines), w, h, offset)
+}
+
+func fitLinesWithCursor(lines []string, w, h, cursorLine int) string {
+	prepared := prepareLinesForFit(lines)
+	return fitPreparedLines(prepared, w, h, offsetForCursor(cursorLine, len(prepared), h))
+}
+
+func prepareLinesForFit(lines []string) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	prepared := make([]string, 0, len(lines))
+	for _, line := range lines {
+		parts := splitRenderableLines(line)
+		if len(parts) == 0 {
+			prepared = append(prepared, "")
+			continue
+		}
+		prepared = append(prepared, parts[0])
+	}
+	return prepared
+}
+
+func fitPreparedLines(lines []string, w, h, offset int) string {
+	if w < 1 {
+		w = 1
+	}
+	if h < 1 {
+		h = 1
+	}
+
+	maxOffset := maxLineOffset(len(lines), h)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > maxOffset {
+		offset = maxOffset
+	}
+
 	emptyLine := strings.Repeat(" ", w)
 	result := make([]string, h)
 
 	for i := 0; i < h; i++ {
-		if i < len(lines) {
-			line := lines[i]
-			parts := splitRenderableLines(line)
-			if len(parts) > 0 {
-				line = parts[0]
-			}
-			line = ansi.Truncate(line, w, "")
+		lineIdx := offset + i
+		if lineIdx < len(lines) {
+			line := ansi.Truncate(lines[lineIdx], w, "")
 			lw := lipgloss.Width(line)
 			if pad := w - lw; pad > 0 {
 				line += strings.Repeat(" ", pad)
@@ -600,6 +658,28 @@ func fitLines(lines []string, w, h int) string {
 		}
 	}
 	return strings.Join(result, "\n")
+}
+
+func maxLineOffset(totalLines, height int) int {
+	if totalLines <= height {
+		return 0
+	}
+	return totalLines - height
+}
+
+func offsetForCursor(cursorLine, totalLines, height int) int {
+	if cursorLine < 0 || totalLines <= height {
+		return 0
+	}
+	offset := cursorLine - (height / 2)
+	if offset < 0 {
+		offset = 0
+	}
+	maxOffset := maxLineOffset(totalLines, height)
+	if offset > maxOffset {
+		offset = maxOffset
+	}
+	return offset
 }
 
 func wrapRenderableLines(lines []string, width int) []string {

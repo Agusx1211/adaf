@@ -40,6 +40,44 @@ func TestFitLinesTruncatesWithoutWrapping(t *testing.T) {
 	}
 }
 
+func TestFitLinesWithOffsetWindowsContent(t *testing.T) {
+	width := 6
+	height := 3
+	lines := []string{"row0", "row1", "row2", "row3", "row4"}
+
+	out := fitLinesWithOffset(lines, width, height, 2)
+	got := splitRenderableLines(out)
+	if len(got) != height {
+		t.Fatalf("line count = %d, want %d", len(got), height)
+	}
+
+	if stripped := ansi.Strip(got[0]); stripped != "row2  " {
+		t.Fatalf("line[0] = %q, want %q", stripped, "row2  ")
+	}
+	if stripped := ansi.Strip(got[2]); stripped != "row4  " {
+		t.Fatalf("line[2] = %q, want %q", stripped, "row4  ")
+	}
+}
+
+func TestFitLinesWithCursorKeepsSelectionVisible(t *testing.T) {
+	width := 6
+	height := 3
+	lines := []string{"row0", "row1", "row2", "row3", "row4", "row5"}
+
+	out := fitLinesWithCursor(lines, width, height, 5)
+	got := splitRenderableLines(out)
+	if len(got) != height {
+		t.Fatalf("line count = %d, want %d", len(got), height)
+	}
+
+	if stripped := ansi.Strip(got[0]); stripped != "row3  " {
+		t.Fatalf("line[0] = %q, want %q", stripped, "row3  ")
+	}
+	if stripped := ansi.Strip(got[2]); stripped != "row5  " {
+		t.Fatalf("line[2] = %q, want %q", stripped, "row5  ")
+	}
+}
+
 func TestRenderSelectorKeepsFixedPanelHeight(t *testing.T) {
 	profiles := []profileEntry{
 		{
@@ -96,6 +134,8 @@ func TestRenderSelectorKeepsFixedPanelHeight(t *testing.T) {
 			nil,
 			width,
 			height,
+			0,
+			false,
 		)
 		if got := len(splitRenderableLines(out)); got != wantPanelHeight {
 			t.Fatalf("selected=%d panel height = %d, want %d", selected, got, wantPanelHeight)

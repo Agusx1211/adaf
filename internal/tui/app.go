@@ -76,6 +76,11 @@ type AppModel struct {
 	width  int
 	height int
 
+	// Per-state manual scroll offset for long detail panes.
+	viewScroll map[appState]int
+	// Per-state split-pane focus; false=left, true=right.
+	viewPaneFocus map[appState]bool
+
 	// Global config (profiles live here).
 	globalCfg *config.GlobalConfig
 
@@ -190,9 +195,11 @@ func NewApp(s *store.Store) AppModel {
 	}
 
 	m := AppModel{
-		store:     s,
-		state:     stateSelector,
-		globalCfg: globalCfg,
+		store:         s,
+		state:         stateSelector,
+		globalCfg:     globalCfg,
+		viewScroll:    map[appState]int{},
+		viewPaneFocus: map[appState]bool{},
 	}
 	m.loadProjectData()
 	m.rebuildProfiles()
@@ -280,6 +287,22 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, selectorRefreshTick()
 	}
 
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && m.state != stateRunning {
+		if m.handleGlobalScrollKey(keyMsg) {
+			return m, nil
+		}
+	}
+
+	prevState := m.state
+	updated, cmd := m.updateByState(msg)
+	if next, ok := updated.(AppModel); ok {
+		next.syncScrollState(prevState)
+		return next, cmd
+	}
+	return updated, cmd
+}
+
+func (m AppModel) updateByState(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.state {
 	case stateSelector:
 		return m.updateSelector(msg)
@@ -363,23 +386,42 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
+		case "tab", "right":
+			m.setRightPaneFocused(true)
+			return m, nil
+		case "shift+tab", "left":
+			m.setRightPaneFocused(false)
+			return m, nil
 		case "j", "down":
+			if m.isRightPaneFocused() {
+				m.adjustStateScroll(1)
+				return m, nil
+			}
 			if len(m.profiles) > 0 {
 				m.selected = (m.selected + 1) % len(m.profiles)
 				// Skip separators.
 				if m.profiles[m.selected].IsSeparator {
 					m.selected = (m.selected + 1) % len(m.profiles)
 				}
+				m.resetStateScroll()
 			}
 		case "k", "up":
+			if m.isRightPaneFocused() {
+				m.adjustStateScroll(-1)
+				return m, nil
+			}
 			if len(m.profiles) > 0 {
 				m.selected = (m.selected - 1 + len(m.profiles)) % len(m.profiles)
 				// Skip separators.
 				if m.profiles[m.selected].IsSeparator {
 					m.selected = (m.selected - 1 + len(m.profiles)) % len(m.profiles)
 				}
+				m.resetStateScroll()
 			}
 		case "enter":
+			if m.isRightPaneFocused() {
+				return m, nil
+			}
 			if len(m.profiles) > 0 {
 				return m.startAgent()
 			}
@@ -1011,6 +1053,8 @@ func (m AppModel) viewSelector() string {
 		m.cachedLoopStats,
 		m.width,
 		m.height,
+		m.stateScrollOffset(),
+		m.isRightPaneFocused(),
 	)
 	return header + "\n" + panels + "\n" + statusBar
 }
@@ -1025,6 +1069,7 @@ func (m AppModel) viewSessionPicker() string {
 	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
 
 	var lines []string
+	cursorLine := -1
 	lines = append(lines, sectionStyle.Render("Active Sessions"))
 	lines = append(lines, "")
 
@@ -1041,6 +1086,9 @@ func (m AppModel) viewSessionPicker() string {
 			title := fmt.Sprintf("#%d %s/%s", s.ID, s.ProfileName, s.AgentName)
 			status := selectorRuntimeStatusStyle(s.Status).Render("[" + s.Status + "]")
 			lines = append(lines, prefix+valueStyle.Render(truncateInputForDisplay(title, cw-18))+" "+status)
+			if i == m.sessionPickSel {
+				cursorLine = len(lines) - 1
+			}
 
 			detailParts := make([]string, 0, 3)
 			if s.ProjectName != "" {
@@ -1056,7 +1104,7 @@ func (m AppModel) viewSessionPicker() string {
 		lines = append(lines, dimStyle.Render("enter: attach  j/k: select  r: refresh  esc/q: back"))
 	}
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
 	panel := style.Render(content)
 	return header + "\n" + panel + "\n" + statusBar
 }
@@ -1088,9 +1136,16 @@ func (m AppModel) renderStatusBar() string {
 				lipgloss.NewStyle().Foreground(ColorSubtext0).Background(ColorSurface0).Render(" "+desc))
 	}
 
-	add("j/k", "navigate")
-	add("enter", "start")
-	if m.state == stateSelector {
+	switch m.state {
+	case stateSelector:
+		if m.isRightPaneFocused() {
+			add("j/k", "scroll details")
+			add("left/tab", "focus list")
+		} else {
+			add("j/k", "select")
+			add("right/tab", "focus details")
+			add("enter", "start")
+		}
 		add("n", "new profile")
 		add("l", "new loop")
 		add("p", "plans")
@@ -1106,12 +1161,117 @@ func (m AppModel) renderStatusBar() string {
 			}
 			add("!", truncateInputForDisplay(msg, maxW))
 		}
-	}
-	if m.state == stateSessionPicker {
+		add("q", "quit")
+	case stateSessionPicker:
+		add("j/k", "select")
+		add("enter", "attach")
 		add("r", "refresh")
 		add("esc", "back")
+		add("q", "back")
+	case statePlanMenu:
+		add("j/k", "select")
+		add("enter", "switch")
+		add("c", "create")
+		add("f/u", "freeze")
+		add("a/x", "done/cancel")
+		add("d", "delete")
+		add("n", "clear active")
+		add("esc", "back")
+		add("q", "back")
+	case statePlanCreateID, statePlanCreateTitle,
+		stateProfileName, stateProfileIntel, stateProfileDesc, stateProfileMaxInst,
+		stateLoopName, stateLoopStepTurns, stateLoopStepInstr,
+		stateSettingsPushoverUserKey, stateSettingsPushoverAppToken,
+		stateSettingsRoleName, stateSettingsRuleID:
+		add("type", "input")
+		add("enter", "confirm")
+		add("esc", "back")
+	case stateSettingsRuleBody:
+		add("type", "edit")
+		add("enter", "newline")
+		add("ctrl+s", "save")
+		add("esc", "back")
+	case stateProfileMenu, stateProfileAgent, stateProfileModel, stateProfileReasoning, stateProfileSpeed,
+		stateLoopStepProfile, stateLoopStepTools, stateLoopStepSpawnCfg,
+		stateLoopMenu, stateSettings, stateSettingsRolesRulesMenu:
+		add("j/k", "navigate")
+		add("enter", "select")
+		add("esc", "back")
+	case stateLoopStepRole:
+		if m.isRightPaneFocused() && m.stateHasSplitPaneLayout() {
+			add("j/k", "scroll prompt")
+			add("h/tab", "focus role list")
+		} else {
+			add("j/k", "navigate roles")
+			add("l/tab", "focus prompt")
+		}
+		add("enter", "continue")
+		add("esc", "back")
+	case stateLoopStepList:
+		add("j/k", "navigate")
+		add("a", "add")
+		add("enter", "edit")
+		add("d", "delete")
+		add("J/K", "reorder")
+		add("s", "save")
+		add("esc", "back")
+	case stateLoopStepSpawn:
+		add("j/k", "navigate")
+		add("a", "add rule")
+		add("d", "delete")
+		add("r", "role")
+		add("s", "speed")
+		add("space", "handoff")
+		add("S", "save step")
+		add("esc", "up/back")
+	case stateSettingsRolesList:
+		if m.isRightPaneFocused() && m.stateHasSplitPaneLayout() {
+			add("j/k", "scroll preview")
+			add("h/tab", "focus list")
+		} else {
+			add("j/k", "navigate")
+			add("l/tab", "focus preview")
+		}
+		add("enter", "edit")
+		add("a/r/d", "add/rename/delete")
+		add("esc", "back")
+	case stateSettingsRoleEdit:
+		if m.isRightPaneFocused() && m.stateHasSplitPaneLayout() {
+			add("j/k", "scroll preview")
+			add("h/tab", "focus list")
+		} else {
+			add("j/k", "navigate")
+			add("l/tab", "focus preview")
+		}
+		add("space", "toggle rule")
+		add("w", "write mode")
+		add("t", "default role")
+		add("i", "identity")
+		add("e", "edit rule")
+		add("a", "new rule")
+		add("esc", "back")
+	case stateSettingsRulesList:
+		if m.isRightPaneFocused() && m.stateHasSplitPaneLayout() {
+			add("j/k", "scroll preview")
+			add("h/tab", "focus list")
+		} else {
+			add("j/k", "navigate")
+			add("l/tab", "focus preview")
+		}
+		add("e", "edit")
+		add("a/r/d", "add/rename/delete")
+		add("esc", "back")
+	case stateConfirmDelete:
+		add("y", "confirm")
+		add("n/esc", "cancel")
+	default:
+		add("enter", "continue")
+		add("esc", "back")
 	}
-	add("q", "quit")
+
+	if m.stateSupportsManualScroll() {
+		add("pgup/dn", "scroll")
+	}
 
 	content := strings.Join(parts, lipgloss.NewStyle().Foreground(ColorSubtext0).Background(ColorSurface0).Render("  "))
 	return lipgloss.NewStyle().

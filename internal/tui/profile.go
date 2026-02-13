@@ -227,6 +227,7 @@ func (m AppModel) viewProfileMenu() string {
 	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
 
 	var lines []string
+	cursorLine := -1
 	lines = append(lines, sectionStyle.Render("Edit Profile"))
 	lines = append(lines, "")
 
@@ -283,6 +284,7 @@ func (m AppModel) viewProfileMenu() string {
 		if i == m.profileMenuSel {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			lines = append(lines, cursor+line)
+			cursorLine = len(lines) - 1
 		} else {
 			lines = append(lines, "  "+line)
 		}
@@ -294,6 +296,7 @@ func (m AppModel) viewProfileMenu() string {
 	if m.profileMenuSel == 8 {
 		cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render("> ")
 		lines = append(lines, cursor+saveLabel)
+		cursorLine = len(lines) - 1
 	} else {
 		lines = append(lines, "  "+saveLabel)
 	}
@@ -301,7 +304,7 @@ func (m AppModel) viewProfileMenu() string {
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("j/k: navigate  enter: edit field  esc: cancel"))
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
 	panel := style.Render(content)
 	return header + "\n" + panel + "\n" + statusBar
 }
@@ -745,6 +748,7 @@ func (m AppModel) viewProfileSpeed() string {
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
 
 	var lines []string
+	cursorLine := -1
 	lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Speed"))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("Select speed rating for this profile:"))
@@ -755,6 +759,7 @@ func (m AppModel) viewProfileSpeed() string {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(opt)
 			lines = append(lines, cursor+styled)
+			cursorLine = len(lines) - 1
 		} else {
 			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ColorText).Render(opt))
 		}
@@ -766,7 +771,7 @@ func (m AppModel) viewProfileSpeed() string {
 		lines = append(lines, dimStyle.Render("j/k: navigate  enter: create profile  esc: back"))
 	}
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
 	panel := style.Render(content)
 	return header + "\n" + panel + "\n" + statusBar
 }
@@ -831,6 +836,7 @@ func (m AppModel) viewProfileAgent() string {
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
 
 	var lines []string
+	cursorLine := -1
 	lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Select Agent"))
 	lines = append(lines, "")
 
@@ -839,6 +845,7 @@ func (m AppModel) viewProfileAgent() string {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			nameStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(name)
 			lines = append(lines, cursor+nameStyled)
+			cursorLine = len(lines) - 1
 		} else {
 			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ColorText).Render(name))
 		}
@@ -846,7 +853,7 @@ func (m AppModel) viewProfileAgent() string {
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("j/k: navigate  enter: select  esc: back"))
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
 	panel := style.Render(content)
 	return header + "\n" + panel + "\n" + statusBar
 }
@@ -866,6 +873,7 @@ func (m AppModel) viewProfileModel() string {
 	}
 
 	var lines []string
+	cursorLine := -1
 
 	if m.profileCustomModelMode {
 		lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Custom Model"))
@@ -890,6 +898,7 @@ func (m AppModel) viewProfileModel() string {
 					cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render("> ")
 					nameStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render(styled)
 					lines = append(lines, cursor+nameStyled)
+					cursorLine = len(lines) - 1
 				} else {
 					lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ColorOverlay0).Render(styled))
 				}
@@ -897,6 +906,7 @@ func (m AppModel) viewProfileModel() string {
 				cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 				modelStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(styled)
 				lines = append(lines, cursor+modelStyled)
+				cursorLine = len(lines) - 1
 			} else {
 				lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ColorText).Render(styled))
 			}
@@ -905,7 +915,7 @@ func (m AppModel) viewProfileModel() string {
 		lines = append(lines, dimStyle.Render("j/k: navigate  enter: select  esc: back"))
 	}
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
 	panel := style.Render(content)
 	return header + "\n" + panel + "\n" + statusBar
 }
@@ -925,6 +935,7 @@ func (m AppModel) viewProfileReasoning() string {
 	}
 
 	var lines []string
+	cursorLine := -1
 	lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Reasoning Level"))
 	lines = append(lines, dimStyle.Render("Agent: "+agentName+"  Model: "+m.profileSelectedModel))
 	lines = append(lines, "")
@@ -935,6 +946,7 @@ func (m AppModel) viewProfileReasoning() string {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
 			lines = append(lines, cursor+styled)
+			cursorLine = len(lines) - 1
 		} else {
 			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ColorText).Render(label))
 		}
@@ -942,7 +954,7 @@ func (m AppModel) viewProfileReasoning() string {
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("j/k: navigate  enter: select  esc: back"))
 
-	content := fitLines(lines, cw, ch)
+	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
 	panel := style.Render(content)
 	return header + "\n" + panel + "\n" + statusBar
 }
