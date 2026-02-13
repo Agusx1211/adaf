@@ -1,0 +1,14 @@
+{
+  "id": 14,
+  "title": "Recording flush failures silently swallowed",
+  "description": "## Location\n- internal/loop/loop.go:410-416\n\n## Problem\nFlush failure logged as warning but not returned. Turn data may be lost with no caller notification.",
+  "status": "open",
+  "priority": "high",
+  "labels": [
+    "bug",
+    "recording",
+    "loop"
+  ],
+  "created": "2026-02-13T16:32:06.051277705Z",
+  "updated": "2026-02-13T16:32:06.051277705Z"
+}

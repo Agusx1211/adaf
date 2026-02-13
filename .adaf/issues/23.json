@@ -1,0 +1,16 @@
+{
+  "id": 23,
+  "title": "Critical test coverage gaps across orchestrator, recording, and stream packages",
+  "description": "## Critical untested paths\n\n- orchestrator.Spawn() and startSpawn() — entire concurrent spawn lifecycle untested\n- orchestrator.onSpawnComplete() — cleanup, merge, resource release untested\n- recording/recorder.go — zero tests for the entire package\n- looprun/runner.go Run() — 850 lines, only 2 tests\n- Channel backpressure in stream parsing\n- Interrupt delivery under contention\n- Worktree cleanup failure paths\n- go test -race never run (not in Makefile)\n\n## Integration test gaps\n\n- Fake scripts don't simulate real agent behavior (crashes, slow output, unknown events)\n- No test for EventSink backpressure\n- No test for cmd.Wait() hanging\n- No test for session resume (ResumeSessionID)\n- No concurrent agent test\n- No test for Codex-to-Claude event translation edge cases\n- No test for process group cleanup (orphan child processes)\n\n## Suggested actions\n\n1. Add go test -race to Makefile (make race or integrate into make test)\n2. Add unit tests for orchestrator spawn lifecycle with mock agents\n3. Add tests for recording package\n4. Add backpressure tests for stream parsers\n5. Add integration test scripts that simulate crashes, slow output, and orphan processes",
+  "status": "open",
+  "priority": "medium",
+  "labels": [
+    "testing",
+    "orchestrator",
+    "recording",
+    "stream",
+    "loop"
+  ],
+  "created": "2026-02-13T16:32:45.066024873Z",
+  "updated": "2026-02-13T16:32:45.066024873Z"
+}

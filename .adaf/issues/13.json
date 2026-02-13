@@ -1,0 +1,14 @@
+{
+  "id": 13,
+  "title": "Worktree Remove() always returns nil even on failure",
+  "description": "## Location\n- internal/worktree/worktree.go:111-129\n\n## Problem\nEven if git worktree remove and os.RemoveAll both fail, Remove() returns nil. Callers think cleanup succeeded; stale worktrees accumulate silently.\n\n## Fix\nReturn real errors from Remove().",
+  "status": "open",
+  "priority": "high",
+  "labels": [
+    "bug",
+    "worktree",
+    "cleanup"
+  ],
+  "created": "2026-02-13T16:32:04.883415488Z",
+  "updated": "2026-02-13T16:32:04.883415488Z"
+}

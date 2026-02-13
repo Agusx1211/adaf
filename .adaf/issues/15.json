@@ -1,0 +1,14 @@
+{
+  "id": 15,
+  "title": "JSON marshaling errors dropped in Codex stream parser",
+  "description": "## Location\n- internal/stream/codex.go:273, 291, 314, 320\n\n## Problem\njson.Marshal errors silently ignored with _. Corrupted events may be forwarded to consumers.",
+  "status": "open",
+  "priority": "high",
+  "labels": [
+    "bug",
+    "stream",
+    "codex"
+  ],
+  "created": "2026-02-13T16:32:07.944511862Z",
+  "updated": "2026-02-13T16:32:07.944511862Z"
+}

@@ -1,0 +1,14 @@
+{
+  "id": 17,
+  "title": "Spawn record updated from multiple goroutines without sync",
+  "description": "## Location\n- internal/orchestrator/orchestrator.go (multiple locations update rec.Status, rec.Result)\n\n## Problem\nMain goroutine, event goroutine, and child loop goroutine all update the spawn record. No synchronization between writers. Data race potential.",
+  "status": "open",
+  "priority": "medium",
+  "labels": [
+    "bug",
+    "orchestrator",
+    "race"
+  ],
+  "created": "2026-02-13T16:32:16.367809612Z",
+  "updated": "2026-02-13T16:32:16.367809612Z"
+}

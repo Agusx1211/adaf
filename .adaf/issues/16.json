@@ -1,0 +1,15 @@
+{
+  "id": 16,
+  "title": "Polling-based coordination creates timing windows for stale signals",
+  "description": "## Location\n- internal/loop/loop.go:334 (100ms wait watcher)\n- internal/orchestrator/orchestrator.go:480 (250ms interrupt watcher)\n- internal/orchestrator/orchestrator.go:1025 (250ms WaitAny)\n\n## Problem\nAgent can complete a turn before wait signal is detected. Stale signal fires on wrong turn. All coordination is polling-based with 100-250ms windows.\n\n## Fix\nReplace with channel-based signaling to eliminate timing windows.",
+  "status": "open",
+  "priority": "medium",
+  "labels": [
+    "bug",
+    "loop",
+    "orchestrator",
+    "race"
+  ],
+  "created": "2026-02-13T16:32:09.835043731Z",
+  "updated": "2026-02-13T16:32:09.835043731Z"
+}
