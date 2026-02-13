@@ -590,7 +590,7 @@ func emitSpawnOutput(records []store.SpawnRecord, s *store.Store, offsets map[in
 			case "stderr":
 				data = "[stderr] " + ev.Data
 			case "claude_stream":
-				data = ev.Data
+				data = ev.Data + "\n"
 			default:
 				continue
 			}

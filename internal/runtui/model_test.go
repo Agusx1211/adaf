@@ -609,6 +609,271 @@ func TestIsTerminalSpawnStatusIncludesCanceled(t *testing.T) {
 	}
 }
 
+func TestRenderStreamEventLineCodex(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+
+	tests := []struct {
+		name     string
+		line     string
+		handled  bool
+		wantText string // Expected substring in the rendered lines (ANSI-stripped).
+	}{
+		{
+			name:     "thread.started",
+			line:     `{"type":"thread.started","thread_id":"th_abc123"}`,
+			handled:  true,
+			wantText: "[init] session=th_abc123",
+		},
+		{
+			name:    "turn.started skipped",
+			line:    `{"type":"turn.started"}`,
+			handled: true,
+		},
+		{
+			name:    "item.started skipped",
+			line:    `{"type":"item.started","item":{"type":"agent_message"}}`,
+			handled: true,
+		},
+		{
+			name:     "item.completed agent_message",
+			line:     `{"type":"item.completed","item":{"type":"agent_message","text":"Hello world"}}`,
+			handled:  true,
+			wantText: "Hello world",
+		},
+		{
+			name:     "item.completed reasoning",
+			line:     `{"type":"item.completed","item":{"type":"reasoning","text":"Let me think"}}`,
+			handled:  true,
+			wantText: "[thinking]",
+		},
+		{
+			name:     "item.completed command_execution",
+			line:     `{"type":"item.completed","item":{"type":"command_execution","command":"ls -la"}}`,
+			handled:  true,
+			wantText: "[tool:Bash]",
+		},
+		{
+			name:     "item.completed mcp_tool_call",
+			line:     `{"type":"item.completed","item":{"type":"mcp_tool_call","server":"my_server","tool":"my_tool"}}`,
+			handled:  true,
+			wantText: "[tool:my_server.my_tool]",
+		},
+		{
+			name:     "turn.completed",
+			line:     `{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":50}}`,
+			handled:  true,
+			wantText: "[result]",
+		},
+		{
+			name:     "turn.failed",
+			line:     `{"type":"turn.failed","error":{"message":"rate limit"}}`,
+			handled:  true,
+			wantText: "rate limit",
+		},
+		{
+			name:    "not codex",
+			line:    `{"type":"unknown_codex_type"}`,
+			handled: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := len(m.lines)
+			got := m.renderStreamEventLine("", tt.line)
+			if got != tt.handled {
+				t.Fatalf("renderStreamEventLine() = %v, want %v", got, tt.handled)
+			}
+			if tt.wantText != "" {
+				found := false
+				for _, line := range m.lines[before:] {
+					if strings.Contains(ansi.Strip(line.text), tt.wantText) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					var rendered []string
+					for _, line := range m.lines[before:] {
+						rendered = append(rendered, ansi.Strip(line.text))
+					}
+					t.Fatalf("expected %q in output, got: %v", tt.wantText, rendered)
+				}
+			}
+		})
+	}
+}
+
+func TestRenderStreamEventLineGemini(t *testing.T) {
+	m := NewModel("proj", nil, "gemini", "", make(chan any, 1), nil)
+
+	tests := []struct {
+		name     string
+		line     string
+		handled  bool
+		wantText string
+	}{
+		{
+			name:     "init",
+			line:     `{"type":"init","model":"gemini-2.5-pro"}`,
+			handled:  true,
+			wantText: "[init] model=gemini-2.5-pro",
+		},
+		{
+			name:     "message assistant",
+			line:     `{"type":"message","role":"assistant","content":"Here is the answer"}`,
+			handled:  true,
+			wantText: "Here is the answer",
+		},
+		{
+			name:    "message user skipped",
+			line:    `{"type":"message","role":"user","content":"prompt"}`,
+			handled: true,
+		},
+		{
+			name:     "tool_use",
+			line:     `{"type":"tool_use","tool_name":"Read"}`,
+			handled:  true,
+			wantText: "[tool:Read]",
+		},
+		{
+			name:    "tool_result skipped",
+			line:    `{"type":"tool_result","tool_id":"t1","status":"success"}`,
+			handled: true,
+		},
+		{
+			name:     "result",
+			line:     `{"type":"result","stats":{"input_tokens":200,"output_tokens":80}}`,
+			handled:  true,
+			wantText: "[result]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := len(m.lines)
+			got := m.renderStreamEventLine("", tt.line)
+			if got != tt.handled {
+				t.Fatalf("renderStreamEventLine() = %v, want %v", got, tt.handled)
+			}
+			if tt.wantText != "" {
+				found := false
+				for _, line := range m.lines[before:] {
+					if strings.Contains(ansi.Strip(line.text), tt.wantText) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					var rendered []string
+					for _, line := range m.lines[before:] {
+						rendered = append(rendered, ansi.Strip(line.text))
+					}
+					t.Fatalf("expected %q in output, got: %v", tt.wantText, rendered)
+				}
+			}
+		})
+	}
+}
+
+func TestRenderStreamEventLineClaude(t *testing.T) {
+	m := NewModel("proj", nil, "claude", "", make(chan any, 1), nil)
+
+	tests := []struct {
+		name     string
+		line     string
+		handled  bool
+		wantText string
+	}{
+		{
+			name:     "system init",
+			line:     `{"type":"system","subtype":"init","model":"claude-sonnet-4-5-20250514"}`,
+			handled:  true,
+			wantText: "[init] model=claude-sonnet-4-5-20250514",
+		},
+		{
+			name:    "system other",
+			line:    `{"type":"system","subtype":"status"}`,
+			handled: true,
+		},
+		{
+			name:     "assistant text",
+			line:     `{"type":"assistant","message":{"content":[{"type":"text","text":"Here is my response"}]}}`,
+			handled:  true,
+			wantText: "Here is my response",
+		},
+		{
+			name:     "assistant tool_use",
+			line:     `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]}}`,
+			handled:  true,
+			wantText: "[tool:Bash]",
+		},
+		{
+			name:    "user skipped",
+			line:    `{"type":"user","message":{"content":[{"type":"tool_result"}]}}`,
+			handled: true,
+		},
+		{
+			name:    "content_block_delta skipped",
+			line:    `{"type":"content_block_delta","delta":{"text":"hello"}}`,
+			handled: true,
+		},
+		{
+			name:     "result",
+			line:     `{"type":"result","total_cost_usd":0.05,"num_turns":3,"usage":{"input_tokens":1000,"output_tokens":500}}`,
+			handled:  true,
+			wantText: "[result]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := len(m.lines)
+			got := m.renderStreamEventLine("", tt.line)
+			if got != tt.handled {
+				t.Fatalf("renderStreamEventLine() = %v, want %v", got, tt.handled)
+			}
+			if tt.wantText != "" {
+				found := false
+				for _, line := range m.lines[before:] {
+					if strings.Contains(ansi.Strip(line.text), tt.wantText) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					var rendered []string
+					for _, line := range m.lines[before:] {
+						rendered = append(rendered, ansi.Strip(line.text))
+					}
+					t.Fatalf("expected %q in output, got: %v", tt.wantText, rendered)
+				}
+			}
+		})
+	}
+}
+
+func TestRenderStreamEventLineIgnoresNonJSON(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+
+	tests := []struct {
+		name string
+		line string
+	}{
+		{name: "plain text", line: "just some text output"},
+		{name: "invalid json", line: "{invalid json}"},
+		{name: "no type field", line: `{"role":"assistant","content":"hello"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if m.renderStreamEventLine("", tt.line) {
+				t.Fatalf("renderStreamEventLine(%q) = true, want false", tt.line)
+			}
+		})
+	}
+}
+
 func stripStyledLines(lines []string) []string {
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {

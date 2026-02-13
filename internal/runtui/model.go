@@ -1432,6 +1432,10 @@ func (m *Model) handleRawLine(scope, line string) {
 		return
 	}
 
+	if m.renderStreamEventLine(scope, line) {
+		return
+	}
+
 	trimmed := truncate(line, 400)
 	m.addScopedLine(scope, textStyle.Render(trimmed))
 	if sid := m.sessionIDForScope(scope); sid > 0 {
@@ -1522,6 +1526,362 @@ func (m *Model) renderVibeStreamingLine(scope, line string) bool {
 	}
 
 	return true
+}
+
+// renderStreamEventLine attempts to parse a raw JSON line as a codex, gemini,
+// or claude stream event and renders it in a human-readable form. Returns true
+// if the line was handled.
+func (m *Model) renderStreamEventLine(scope, line string) bool {
+	// Quick check: must look like JSON with a "type" field.
+	if len(line) == 0 || line[0] != '{' {
+		return false
+	}
+
+	// Peek at the type field to decide which parser to use.
+	var peek struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal([]byte(line), &peek); err != nil || peek.Type == "" {
+		return false
+	}
+
+	// Try codex event types first (they use dotted names).
+	if m.renderCodexStreamLine(scope, line, peek.Type) {
+		return true
+	}
+
+	// Try gemini event types.
+	if m.renderGeminiStreamLine(scope, line, peek.Type) {
+		return true
+	}
+
+	// Try claude event types.
+	if m.renderClaudeStreamLine(scope, line, peek.Type) {
+		return true
+	}
+
+	return false
+}
+
+// renderCodexStreamLine handles codex JSON events from claude_stream recordings.
+func (m *Model) renderCodexStreamLine(scope, line, eventType string) bool {
+	switch eventType {
+	case "thread.started":
+		var ev struct {
+			ThreadID string `json:"thread_id"`
+		}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			return false
+		}
+		m.addScopedLine(scope, initLabelStyle.Render(fmt.Sprintf("[init] session=%s", ev.ThreadID)))
+		m.addSimplifiedLine(scope, dimStyle.Render("initialized"))
+		return true
+
+	case "turn.started", "item.started", "item.updated":
+		// Skip intermediate events silently.
+		return true
+
+	case "item.completed":
+		var ev struct {
+			Item *struct {
+				Type             string            `json:"type"`
+				Text             string            `json:"text"`
+				Command          string            `json:"command"`
+				AggregatedOutput string            `json:"aggregated_output"`
+				ExitCode         *int              `json:"exit_code"`
+				Status           string            `json:"status"`
+				Server           string            `json:"server"`
+				Tool             string            `json:"tool"`
+				Arguments        json.RawMessage   `json:"arguments"`
+				Changes          []json.RawMessage `json:"changes"`
+			} `json:"item"`
+		}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Item == nil {
+			return false
+		}
+		switch ev.Item.Type {
+		case "agent_message":
+			if strings.TrimSpace(ev.Item.Text) == "" {
+				return true
+			}
+			m.addScopedLine(scope, textLabelStyle.Render("[text]"))
+			m.addScopedLine(scope, "  "+textStyle.Render(truncate(ev.Item.Text, 500)))
+			m.recordAssistantText(scope, ev.Item.Text)
+		case "reasoning":
+			if strings.TrimSpace(ev.Item.Text) == "" {
+				return true
+			}
+			m.addScopedLine(scope, thinkingLabelStyle.Render("[thinking]"))
+			m.addScopedLine(scope, "  "+thinkingTextStyle.Render(truncate(compactWhitespace(ev.Item.Text), 300)))
+		case "command_execution":
+			cmd := ev.Item.Command
+			if cmd == "" {
+				cmd = "command"
+			}
+			m.addScopedLine(scope, toolLabelStyle.Render("[tool:Bash]"))
+			m.recordToolCall(scope, "Bash")
+			m.addScopedLine(scope, "  "+toolInputStyle.Render(truncate(cmd, 200)))
+			if ev.Item.AggregatedOutput != "" {
+				m.addScopedLine(scope, "  "+dimStyle.Render(truncate(ev.Item.AggregatedOutput, 200)))
+			}
+		case "mcp_tool_call":
+			toolName := strings.Trim(strings.Join([]string{ev.Item.Server, ev.Item.Tool}, "."), ".")
+			if toolName == "" {
+				toolName = "mcp"
+			}
+			m.addScopedLine(scope, toolLabelStyle.Render(fmt.Sprintf("[tool:%s]", toolName)))
+			m.recordToolCall(scope, toolName)
+			if len(ev.Item.Arguments) > 0 {
+				m.addScopedLine(scope, "  "+toolInputStyle.Render(truncate(string(ev.Item.Arguments), 200)))
+			}
+		case "file_change":
+			m.addScopedLine(scope, toolLabelStyle.Render("[file]"))
+			m.addSimplifiedLine(scope, dimStyle.Render("file change"))
+		default:
+			return true
+		}
+		return true
+
+	case "turn.completed":
+		var ev struct {
+			Usage *struct {
+				InputTokens  int `json:"input_tokens"`
+				OutputTokens int `json:"output_tokens"`
+			} `json:"usage"`
+		}
+		json.Unmarshal([]byte(line), &ev)
+		summary := "done"
+		if ev.Usage != nil {
+			summary = fmt.Sprintf("in=%d out=%d", ev.Usage.InputTokens, ev.Usage.OutputTokens)
+		}
+		m.addScopedLine(scope, resultLabelStyle.Render("[result]")+" "+summary)
+		m.addSimplifiedLine(scope, dimStyle.Render("result"))
+		return true
+
+	case "turn.failed":
+		var ev struct {
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		json.Unmarshal([]byte(line), &ev)
+		msg := "failed"
+		if ev.Error != nil && ev.Error.Message != "" {
+			msg = truncate(ev.Error.Message, 200)
+		}
+		m.addScopedLine(scope, lipgloss.NewStyle().Foreground(theme.ColorRed).Render("[error] "+msg))
+		m.addSimplifiedLine(scope, dimStyle.Render("error"))
+		return true
+
+	case "error":
+		// Codex top-level error event.
+		var ev struct {
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		json.Unmarshal([]byte(line), &ev)
+		msg := "unknown error"
+		if ev.Error != nil && ev.Error.Message != "" {
+			msg = truncate(ev.Error.Message, 200)
+		}
+		m.addScopedLine(scope, lipgloss.NewStyle().Foreground(theme.ColorRed).Render("[error] "+msg))
+		m.addSimplifiedLine(scope, dimStyle.Render("error"))
+		return true
+
+	default:
+		return false
+	}
+}
+
+// renderGeminiStreamLine handles gemini JSON events from claude_stream recordings.
+func (m *Model) renderGeminiStreamLine(scope, line, eventType string) bool {
+	switch eventType {
+	case "init":
+		var ev struct {
+			Model string `json:"model"`
+		}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			return false
+		}
+		m.addScopedLine(scope, initLabelStyle.Render(fmt.Sprintf("[init] model=%s", ev.Model)))
+		m.addSimplifiedLine(scope, dimStyle.Render("initialized"))
+		return true
+
+	case "message":
+		var ev struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+			Delta   bool   `json:"delta"`
+		}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			return false
+		}
+		if ev.Role != "assistant" {
+			// Skip user messages.
+			return true
+		}
+		if strings.TrimSpace(ev.Content) == "" {
+			return true
+		}
+		m.addScopedLine(scope, textLabelStyle.Render("[text]"))
+		m.addScopedLine(scope, "  "+textStyle.Render(truncate(ev.Content, 500)))
+		m.recordAssistantText(scope, ev.Content)
+		return true
+
+	case "tool_use":
+		var ev struct {
+			ToolName string `json:"tool_name"`
+		}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			return false
+		}
+		name := ev.ToolName
+		if name == "" {
+			name = "tool"
+		}
+		m.addScopedLine(scope, toolLabelStyle.Render(fmt.Sprintf("[tool:%s]", name)))
+		m.recordToolCall(scope, name)
+		return true
+
+	case "tool_result":
+		// Skip tool results.
+		return true
+
+	case "result":
+		var ev struct {
+			Stats *struct {
+				InputTokens  int     `json:"input_tokens"`
+				OutputTokens int     `json:"output_tokens"`
+				DurationMS   float64 `json:"duration_ms"`
+			} `json:"stats"`
+		}
+		json.Unmarshal([]byte(line), &ev)
+		summary := "done"
+		if ev.Stats != nil {
+			summary = fmt.Sprintf("in=%d out=%d", ev.Stats.InputTokens, ev.Stats.OutputTokens)
+		}
+		m.addScopedLine(scope, resultLabelStyle.Render("[result]")+" "+summary)
+		m.addSimplifiedLine(scope, dimStyle.Render("result"))
+		return true
+
+	default:
+		return false
+	}
+}
+
+// renderClaudeStreamLine handles claude JSON events from claude_stream recordings.
+func (m *Model) renderClaudeStreamLine(scope, line, eventType string) bool {
+	switch eventType {
+	case "system":
+		var ev struct {
+			Subtype string `json:"subtype"`
+			Model   string `json:"model"`
+		}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			return false
+		}
+		if ev.Subtype == "init" {
+			m.addScopedLine(scope, initLabelStyle.Render(fmt.Sprintf("[init] model=%s", ev.Model)))
+			m.addSimplifiedLine(scope, dimStyle.Render("initialized"))
+		}
+		// Skip other system subtypes silently.
+		return true
+
+	case "assistant":
+		var ev struct {
+			Message *struct {
+				Content []struct {
+					Type  string          `json:"type"`
+					Text  string          `json:"text"`
+					Name  string          `json:"name"`
+					Input json.RawMessage `json:"input"`
+				} `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Message == nil {
+			return false
+		}
+		for _, block := range ev.Message.Content {
+			switch block.Type {
+			case "text":
+				if strings.TrimSpace(block.Text) == "" {
+					continue
+				}
+				text := block.Text
+				if len(text) > 500 {
+					text = text[:500] + "..."
+				}
+				m.addScopedLine(scope, textLabelStyle.Render("[text]"))
+				m.addScopedLine(scope, "  "+textStyle.Render(text))
+				m.recordAssistantText(scope, text)
+			case "tool_use":
+				name := block.Name
+				if name == "" {
+					name = "tool"
+				}
+				m.addScopedLine(scope, toolLabelStyle.Render(fmt.Sprintf("[tool:%s]", name)))
+				m.recordToolCall(scope, name)
+				if len(block.Input) > 0 {
+					m.renderToolInput(scope, name, string(block.Input))
+				}
+			case "thinking":
+				if strings.TrimSpace(block.Text) == "" {
+					continue
+				}
+				text := block.Text
+				if len(text) > 200 {
+					text = text[:200] + "..."
+				}
+				m.addScopedLine(scope, thinkingLabelStyle.Render("[thinking]"))
+				m.addScopedLine(scope, "  "+thinkingTextStyle.Render(compactWhitespace(text)))
+			}
+		}
+		return true
+
+	case "user":
+		// Skip user/tool-result events.
+		return true
+
+	case "content_block_start", "content_block_delta", "content_block_stop":
+		// Skip partial streaming events — the full assistant message covers these.
+		return true
+
+	case "result":
+		var ev struct {
+			TotalCostUSD float64 `json:"total_cost_usd"`
+			DurationMS   float64 `json:"duration_ms"`
+			NumTurns     int     `json:"num_turns"`
+			Usage        *struct {
+				InputTokens  int `json:"input_tokens"`
+				OutputTokens int `json:"output_tokens"`
+			} `json:"usage"`
+		}
+		json.Unmarshal([]byte(line), &ev)
+		var parts []string
+		if ev.TotalCostUSD > 0 {
+			parts = append(parts, fmt.Sprintf("cost=$%.4f", ev.TotalCostUSD))
+		}
+		if ev.DurationMS > 0 {
+			parts = append(parts, fmt.Sprintf("duration=%.1fs", ev.DurationMS/1000))
+		}
+		if ev.NumTurns > 0 {
+			parts = append(parts, fmt.Sprintf("turns=%d", ev.NumTurns))
+		}
+		if ev.Usage != nil {
+			parts = append(parts, fmt.Sprintf("in=%d out=%d", ev.Usage.InputTokens, ev.Usage.OutputTokens))
+		}
+		summary := "done"
+		if len(parts) > 0 {
+			summary = strings.Join(parts, " ")
+		}
+		m.addScopedLine(scope, resultLabelStyle.Render("[result]")+" "+summary)
+		m.addSimplifiedLine(scope, dimStyle.Render("result"))
+		return true
+
+	default:
+		return false
+	}
 }
 
 // --- Event handling ---
