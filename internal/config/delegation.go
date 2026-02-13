@@ -135,15 +135,12 @@ func normalizeRole(role string) string {
 // Priority:
 //  1. Role (single explicit role)
 //  2. Roles (multiple explicit roles)
-//  3. "junior"
+//  3. "developer"
 func (p *DelegationProfile) EffectiveRoles() ([]string, error) {
 	if p == nil {
 		return nil, nil
 	}
 	if role := normalizeRole(p.Role); role != "" {
-		if !ValidRole(role) {
-			return nil, fmt.Errorf("invalid delegation role %q for profile %q", p.Role, p.Name)
-		}
 		return []string{role}, nil
 	}
 	if len(p.Roles) > 0 {
@@ -153,9 +150,6 @@ func (p *DelegationProfile) EffectiveRoles() ([]string, error) {
 			role := normalizeRole(raw)
 			if role == "" {
 				continue
-			}
-			if !ValidRole(role) {
-				return nil, fmt.Errorf("invalid delegation role %q for profile %q", raw, p.Name)
 			}
 			if _, ok := seen[role]; ok {
 				continue
@@ -167,7 +161,7 @@ func (p *DelegationProfile) EffectiveRoles() ([]string, error) {
 			return roles, nil
 		}
 	}
-	return []string{RoleJunior}, nil
+	return []string{RoleDeveloper}, nil
 }
 
 type resolvedDelegationProfile struct {
@@ -190,10 +184,10 @@ func sortedRoleKeys(m map[string]struct{}) []string {
 		out = append(out, role)
 	}
 	order := map[string]int{
-		RoleManager:    0,
-		RoleSenior:     1,
-		RoleJunior:     2,
-		RoleSupervisor: 3,
+		RoleManager:       0,
+		RoleLeadDeveloper: 1,
+		RoleDeveloper:     2,
+		RoleSupervisor:    3,
 	}
 	sort.Slice(out, func(i, j int) bool {
 		li, lok := order[out[i]]
@@ -236,9 +230,6 @@ func (d *DelegationConfig) ResolveProfile(name, requestedRole string) (*Delegati
 		return nil, "", fmt.Errorf("delegation config is nil")
 	}
 	requestedRole = normalizeRole(requestedRole)
-	if requestedRole != "" && !ValidRole(requestedRole) {
-		return nil, "", fmt.Errorf("invalid role %q", requestedRole)
-	}
 
 	candidates := make([]resolvedDelegationProfile, 0, len(d.Profiles))
 	allRoles := make(map[string]struct{})

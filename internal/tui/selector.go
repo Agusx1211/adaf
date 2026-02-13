@@ -69,7 +69,7 @@ func buildProfileList(globalCfg *cfgpkg.GlobalConfig, agentsCfg *agent.AgentsCon
 			steps := make([]cfgpkg.LoopStep, len(l.Steps))
 			for i, step := range l.Steps {
 				steps[i] = step
-				steps[i].Role = cfgpkg.EffectiveStepRole(step.Role)
+				steps[i].Role = cfgpkg.EffectiveStepRole(step.Role, globalCfg)
 			}
 			entries = append(entries, profileEntry{
 				IsLoop:          true,
@@ -395,7 +395,10 @@ func renderProjectPanel(
 					if turns <= 0 {
 						turns = 1
 					}
-					role := cfgpkg.EffectiveRole(step.Role)
+					role := strings.ToLower(strings.TrimSpace(step.Role))
+					if role == "" {
+						role = cfgpkg.RoleDeveloper
+					}
 					spawnCount := 0
 					if step.Delegation != nil {
 						spawnCount = len(step.Delegation.Profiles)
@@ -493,25 +496,53 @@ func renderProjectPanel(
 	return style.Render(content)
 }
 
-// roleBadge returns a styled role badge like [MGR], [SR], [JR], [SUP].
+// roleBadge returns a styled role badge like [MGR], [LED], [DEV], [SUP].
 func roleBadge(role string) string {
+	role = strings.ToLower(strings.TrimSpace(role))
 	var tag string
 	var color lipgloss.TerminalColor
 	switch role {
 	case "manager":
 		tag = "MGR"
 		color = ColorPeach
-	case "senior":
-		tag = "SR"
+	case "lead-developer":
+		tag = "LED"
 		color = ColorBlue
-	case "junior":
-		tag = "JR"
+	case "developer":
+		tag = "DEV"
 		color = ColorGreen
 	case "supervisor":
 		tag = "SUP"
 		color = ColorYellow
+	case "ui-designer":
+		tag = "UI"
+		color = ColorMauve
+	case "qa":
+		tag = "QA"
+		color = ColorTeal
+	case "backend-designer":
+		tag = "BED"
+		color = ColorBlue
+	case "documentator":
+		tag = "DOC"
+		color = ColorLavender
+	case "reviewer":
+		tag = "REV"
+		color = ColorRed
+	case "scout":
+		tag = "SCT"
+		color = ColorTeal
+	case "researcher":
+		tag = "RSH"
+		color = ColorFlamingo
 	default:
-		tag = "JR"
+		tag = strings.ToUpper(role)
+		if len(tag) > 3 {
+			tag = tag[:3]
+		}
+		if tag == "" {
+			tag = "UNK"
+		}
 		color = ColorOverlay0
 	}
 	return lipgloss.NewStyle().Foreground(color).Render("[" + tag + "]")
@@ -569,6 +600,24 @@ func fitLines(lines []string, w, h int) string {
 		}
 	}
 	return strings.Join(result, "\n")
+}
+
+func wrapRenderableLines(lines []string, width int) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	if width < 1 {
+		width = 1
+	}
+
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		for _, part := range splitRenderableLines(line) {
+			wrapped := ansi.Wrap(part, width, " ")
+			out = append(out, splitRenderableLines(wrapped)...)
+		}
+	}
+	return out
 }
 
 func splitRenderableLines(s string) []string {

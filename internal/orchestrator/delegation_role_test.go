@@ -26,8 +26,8 @@ func TestSpawn_RequiresRoleWhenDelegationOptionIsAmbiguous(t *testing.T) {
 		Task:          "do work",
 		Delegation: &config.DelegationConfig{
 			Profiles: []config.DelegationProfile{
-				{Name: "worker", Role: config.RoleJunior},
-				{Name: "worker", Role: config.RoleSenior},
+				{Name: "worker", Role: config.RoleDeveloper},
+				{Name: "worker", Role: config.RoleLeadDeveloper},
 			},
 		},
 	})
@@ -73,6 +73,36 @@ func TestSpawn_RequiresDelegationRules(t *testing.T) {
 	}
 }
 
+func TestSpawn_RejectsRoleNotInCatalog(t *testing.T) {
+	repo := initGitRepo(t)
+	s := newTestStore(t, repo)
+	cfg := &config.GlobalConfig{
+		Profiles: []config.Profile{
+			{Name: "parent", Agent: "codex"},
+			{Name: "worker", Agent: "codex"},
+		},
+	}
+	o := New(s, cfg, repo)
+
+	_, err := o.Spawn(context.Background(), SpawnRequest{
+		ParentTurnID:  2,
+		ParentProfile: "parent",
+		ChildProfile:  "worker",
+		Task:          "do work",
+		Delegation: &config.DelegationConfig{
+			Profiles: []config.DelegationProfile{
+				{Name: "worker", Role: "not-a-role"},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatalf("Spawn() error = nil, want role-catalog validation error")
+	}
+	if !strings.Contains(err.Error(), "roles catalog") {
+		t.Fatalf("Spawn() error = %q, want roles catalog hint", err)
+	}
+}
+
 func TestSpawn_UsesResolvedRoleAndDelegationMetadata(t *testing.T) {
 	repo := initGitRepo(t)
 	s := newTestStore(t, repo)
@@ -88,19 +118,19 @@ func TestSpawn_UsesResolvedRoleAndDelegationMetadata(t *testing.T) {
 		ParentTurnID:  7,
 		ParentProfile: "parent",
 		ChildProfile:  "worker",
-		ChildRole:     config.RoleSenior,
+		ChildRole:     config.RoleLeadDeveloper,
 		Task:          "test",
 		Delegation: &config.DelegationConfig{
 			Profiles: []config.DelegationProfile{
 				{
 					Name:    "worker",
-					Role:    config.RoleJunior,
+					Role:    config.RoleDeveloper,
 					Speed:   "fast",
 					Handoff: false,
 				},
 				{
 					Name:    "worker",
-					Role:    config.RoleSenior,
+					Role:    config.RoleLeadDeveloper,
 					Speed:   "slow",
 					Handoff: true,
 				},
@@ -121,8 +151,8 @@ func TestSpawn_UsesResolvedRoleAndDelegationMetadata(t *testing.T) {
 	if rec == nil {
 		t.Fatalf("GetSpawn(%d) = nil", spawnID)
 	}
-	if rec.ChildRole != config.RoleSenior {
-		t.Fatalf("ChildRole = %q, want %q", rec.ChildRole, config.RoleSenior)
+	if rec.ChildRole != config.RoleLeadDeveloper {
+		t.Fatalf("ChildRole = %q, want %q", rec.ChildRole, config.RoleLeadDeveloper)
 	}
 	if rec.Speed != "slow" {
 		t.Fatalf("Speed = %q, want %q", rec.Speed, "slow")

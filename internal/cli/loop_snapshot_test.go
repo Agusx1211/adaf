@@ -10,8 +10,8 @@ func TestLoopProfilesSnapshot_CollectsNestedDelegationProfiles(t *testing.T) {
 	globalCfg := &config.GlobalConfig{
 		Profiles: []config.Profile{
 			{Name: "manager", Agent: "codex"},
-			{Name: "senior-dev", Agent: "codex"},
-			{Name: "junior-dev", Agent: "codex"},
+			{Name: "lead-dev", Agent: "codex"},
+			{Name: "developer", Agent: "codex"},
 			{Name: "scout", Agent: "codex"},
 		},
 	}
@@ -23,15 +23,15 @@ func TestLoopProfilesSnapshot_CollectsNestedDelegationProfiles(t *testing.T) {
 				Delegation: &config.DelegationConfig{
 					Profiles: []config.DelegationProfile{
 						{
-							Name: "senior-dev",
-							Role: config.RoleSenior,
+							Name: "lead-dev",
+							Role: config.RoleLeadDeveloper,
 							Delegation: &config.DelegationConfig{
 								Profiles: []config.DelegationProfile{
-									{Name: "scout", Role: config.RoleJunior},
+									{Name: "scout", Role: config.RoleDeveloper},
 								},
 							},
 						},
-						{Name: "junior-dev", Role: config.RoleJunior},
+						{Name: "developer", Role: config.RoleDeveloper},
 					},
 				},
 			},
@@ -47,7 +47,7 @@ func TestLoopProfilesSnapshot_CollectsNestedDelegationProfiles(t *testing.T) {
 	for _, p := range profiles {
 		got[p.Name] = struct{}{}
 	}
-	for _, name := range []string{"manager", "senior-dev", "junior-dev", "scout"} {
+	for _, name := range []string{"manager", "lead-dev", "developer", "scout"} {
 		if _, ok := got[name]; !ok {
 			t.Fatalf("profile %q missing from snapshot", name)
 		}

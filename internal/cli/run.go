@@ -133,7 +133,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		ReasoningLevel: reasoningLevel,
 	}
 
-	loopDef, maxCycles := buildRunLoopDefinition(agentName, profileName, prompt, maxTurns)
+	loopDef, maxCycles := buildRunLoopDefinition(agentName, profileName, prompt, maxTurns, globalCfg)
 
 	var commandOverrides map[string]string
 	if customCmd != "" {
@@ -184,14 +184,14 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	return streamRunSession(cmd.Context(), sessionID, projCfg.Name, agentName, effectivePlanID)
 }
 
-func buildRunLoopDefinition(agentName, profileName, prompt string, maxTurns int) (config.LoopDef, int) {
+func buildRunLoopDefinition(agentName, profileName, prompt string, maxTurns int, globalCfg *config.GlobalConfig) (config.LoopDef, int) {
 	stepTurns, maxCycles := runTurnConfig(maxTurns)
 	return config.LoopDef{
 		Name: "run:" + agentName,
 		Steps: []config.LoopStep{
 			{
 				Profile:      profileName,
-				Role:         config.RoleJunior,
+				Role:         config.DefaultRole(globalCfg),
 				Turns:        stepTurns,
 				Instructions: prompt,
 			},

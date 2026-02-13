@@ -240,7 +240,7 @@ Loops define cyclic workflows where multiple agent profiles take turns working o
       "steps": [
         {
           "profile": "builder",
-          "role": "junior",
+          "role": "developer",
           "turns": 3,
           "instructions": "Implement the next planned feature",
           "delegation": {
@@ -251,14 +251,14 @@ Loops define cyclic workflows where multiple agent profiles take turns working o
         },
         {
           "profile": "reviewer",
-          "role": "senior",
+          "role": "lead-developer",
           "turns": 1,
           "instructions": "Review and fix issues",
           "can_stop": true
         },
         {
           "profile": "tester",
-          "role": "junior",
+          "role": "developer",
           "turns": 1,
           "instructions": "Run tests and file issues"
         }
@@ -280,8 +280,8 @@ Agents can delegate subtasks to child agents that work in isolated git worktrees
 
 ```bash
 # From inside an agent session:
-adaf spawn --profile junior --task "Write unit tests for auth.go"
-adaf spawn --profile junior --task "Refactor database layer" --wait
+adaf spawn --profile builder --role developer --task "Write unit tests for auth.go"
+adaf spawn --profile builder --role developer --task "Refactor database layer" --wait
 
 # Monitor spawns
 adaf tree
@@ -423,7 +423,7 @@ adaf decision create \
   --rationale "Scales horizontally without session store"
 
 # Orchestrate
-adaf spawn --profile junior --task "Write tests for auth.go"
+adaf spawn --profile builder --role developer --task "Write tests for auth.go"
 adaf tree                                      # View spawn hierarchy
 ```
 

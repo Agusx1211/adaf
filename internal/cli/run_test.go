@@ -35,7 +35,7 @@ func TestRunTurnConfig(t *testing.T) {
 }
 
 func TestBuildRunLoopDefinition(t *testing.T) {
-	loopDef, maxCycles := buildRunLoopDefinition("codex", "run:codex", "fix bug", 4)
+	loopDef, maxCycles := buildRunLoopDefinition("codex", "run:codex", "fix bug", 4, nil)
 	if maxCycles != 1 {
 		t.Fatalf("maxCycles = %d, want 1", maxCycles)
 	}
@@ -49,8 +49,8 @@ func TestBuildRunLoopDefinition(t *testing.T) {
 	if step.Profile != "run:codex" {
 		t.Fatalf("step profile = %q, want %q", step.Profile, "run:codex")
 	}
-	if step.Role != config.RoleJunior {
-		t.Fatalf("step role = %q, want %q", step.Role, config.RoleJunior)
+	if step.Role != config.RoleDeveloper {
+		t.Fatalf("step role = %q, want %q", step.Role, config.RoleDeveloper)
 	}
 	if step.Turns != 4 {
 		t.Fatalf("step turns = %d, want 4", step.Turns)

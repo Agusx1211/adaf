@@ -25,7 +25,7 @@ type Profile struct {
 // LoopStep defines one step in a loop cycle.
 type LoopStep struct {
 	Profile      string            `json:"profile"`                // profile name reference
-	Role         string            `json:"role,omitempty"`         // "manager", "senior", "junior", "supervisor"
+	Role         string            `json:"role,omitempty"`         // role name from global roles catalog
 	Turns        int               `json:"turns,omitempty"`        // turns per step (0 = 1 turn)
 	Instructions string            `json:"instructions,omitempty"` // custom instructions appended to prompt
 	CanStop      bool              `json:"can_stop,omitempty"`     // can this step signal loop stop?
@@ -49,10 +49,13 @@ type PushoverConfig struct {
 
 // GlobalConfig holds user-level preferences stored in ~/.adaf/config.json.
 type GlobalConfig struct {
-	Agents   map[string]GlobalAgentConfig `json:"agents,omitempty"`
-	Profiles []Profile                    `json:"profiles,omitempty"`
-	Loops    []LoopDef                    `json:"loops,omitempty"`
-	Pushover PushoverConfig               `json:"pushover,omitempty"`
+	Agents      map[string]GlobalAgentConfig `json:"agents,omitempty"`
+	Profiles    []Profile                    `json:"profiles,omitempty"`
+	Loops       []LoopDef                    `json:"loops,omitempty"`
+	Pushover    PushoverConfig               `json:"pushover,omitempty"`
+	PromptRules []PromptRule                 `json:"prompt_rules,omitempty"`
+	Roles       []RoleDefinition             `json:"roles,omitempty"`
+	DefaultRole string                       `json:"default_role,omitempty"`
 }
 
 // GlobalAgentConfig holds per-agent overrides at the global (user) level.
@@ -82,7 +85,9 @@ func Load() (*GlobalConfig, error) {
 	data, err := os.ReadFile(configPath())
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return &GlobalConfig{Agents: make(map[string]GlobalAgentConfig)}, nil
+			cfg := &GlobalConfig{Agents: make(map[string]GlobalAgentConfig)}
+			EnsureDefaultRoleCatalog(cfg)
+			return cfg, nil
 		}
 		return nil, err
 	}
@@ -94,6 +99,7 @@ func Load() (*GlobalConfig, error) {
 	if cfg.Agents == nil {
 		cfg.Agents = make(map[string]GlobalAgentConfig)
 	}
+	EnsureDefaultRoleCatalog(&cfg)
 	return &cfg, nil
 }
 
@@ -105,6 +111,7 @@ func Save(cfg *GlobalConfig) error {
 	if cfg.Agents == nil {
 		cfg.Agents = make(map[string]GlobalAgentConfig)
 	}
+	EnsureDefaultRoleCatalog(cfg)
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

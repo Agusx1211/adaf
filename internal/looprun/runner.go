@@ -211,8 +211,8 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			streamCh := make(chan stream.RawEvent, 64)
 
 			// Set up guardrail monitor for this step.
-			effectiveRole := config.EffectiveStepRole(stepDef.Role)
-			monitor := guardrail.NewMonitor(effectiveRole, stepDef.Guardrails)
+			effectiveRole := config.EffectiveStepRole(stepDef.Role, cfg.GlobalCfg)
+			monitor := guardrail.NewMonitor(effectiveRole, stepDef.Guardrails, cfg.GlobalCfg)
 			interruptCh := make(chan string, 1)
 
 			// Track the current turn's cancel function (mutex-protected).

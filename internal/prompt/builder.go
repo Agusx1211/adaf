@@ -47,7 +47,7 @@ type BuildOpts struct {
 	Profile *config.Profile
 
 	// Role overrides the role prompt for this run context.
-	// When empty, prompt generation defaults to "junior".
+	// When empty, prompt generation defaults to the configured default role.
 	Role string
 
 	// GlobalCfg provides access to all profiles (for spawnable info).
@@ -162,9 +162,9 @@ func Build(opts BuildOpts) (string, error) {
 	// Guardrails notice.
 	effectiveRole := ""
 	if opts.Profile != nil {
-		effectiveRole = config.EffectiveStepRole(opts.Role)
+		effectiveRole = config.EffectiveStepRole(opts.Role, opts.GlobalCfg)
 	}
-	if opts.Guardrails && !config.CanWriteCode(effectiveRole) {
+	if opts.Guardrails && !config.CanWriteCode(effectiveRole, opts.GlobalCfg) {
 		b.WriteString("# Guardrails Active\n\n")
 		b.WriteString("**Runtime guardrails are enabled for your role.** ")
 		b.WriteString("You are NOT allowed to write or modify files. ")
@@ -298,6 +298,11 @@ func Build(opts BuildOpts) (string, error) {
 			fmt.Fprintf(&b, "- [%s] %s\n", msg.CreatedAt.Format("15:04:05"), msg.Content)
 		}
 		b.WriteString("\n")
+	}
+
+	// Parent communication commands are available whenever this session is a spawned sub-agent.
+	if opts.ParentTurnID > 0 {
+		b.WriteString(parentCommunicationSection())
 	}
 
 	// Loop context.

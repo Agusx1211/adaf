@@ -52,9 +52,9 @@ func TestDelegationSection_IncludesRoleDetails(t *testing.T) {
 		Profiles: []config.DelegationProfile{
 			{
 				Name: "worker",
-				Role: config.RoleSenior,
+				Role: config.RoleLeadDeveloper,
 				Delegation: &config.DelegationConfig{
-					Profiles: []config.DelegationProfile{{Name: "scout", Role: config.RoleJunior}},
+					Profiles: []config.DelegationProfile{{Name: "scout", Role: config.RoleDeveloper}},
 				},
 			},
 		},
@@ -66,7 +66,7 @@ func TestDelegationSection_IncludesRoleDetails(t *testing.T) {
 	}
 
 	got := delegationSection(deleg, globalCfg)
-	if !strings.Contains(got, "role=senior") {
+	if !strings.Contains(got, "role=lead-developer") {
 		t.Fatalf("expected role annotation in delegation section\nprompt:\n%s", got)
 	}
 	if !strings.Contains(got, "[child-spawn:1]") {
@@ -82,5 +82,85 @@ func TestReadOnlyPrompt_RequiresFinalMessageReport(t *testing.T) {
 	}
 	if !strings.Contains(got, "final assistant message") {
 		t.Fatalf("expected read-only prompt to require final assistant message reporting\nprompt:\n%s", got)
+	}
+}
+
+func TestRolePrompt_ComposesRulesFromCatalog(t *testing.T) {
+	globalCfg := &config.GlobalConfig{
+		Roles: []config.RoleDefinition{
+			{
+				Name:         "reviewer",
+				Title:        "REVIEWER",
+				Description:  "Read and assess changes.",
+				CanWriteCode: false,
+				RuleIDs:      []string{"r1", "r2"},
+			},
+		},
+		PromptRules: []config.PromptRule{
+			{ID: "r1", Body: "Rule one body."},
+			{ID: "r2", Body: "Rule two body."},
+		},
+		DefaultRole: "reviewer",
+	}
+	got := RolePrompt(&config.Profile{Name: "p1"}, "reviewer", globalCfg)
+
+	if !strings.Contains(got, "# Your Role: REVIEWER") {
+		t.Fatalf("expected role title in prompt\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "Rule one body.") {
+		t.Fatalf("expected first rule body in prompt\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "Rule two body.") {
+		t.Fatalf("expected second rule body in prompt\nprompt:\n%s", got)
+	}
+}
+
+func TestRolePrompt_DoesNotRenderUpstreamCommunicationRule(t *testing.T) {
+	globalCfg := &config.GlobalConfig{
+		Roles: []config.RoleDefinition{
+			{
+				Name:         "developer",
+				Title:        "DEVELOPER",
+				Description:  "Executes implementation.",
+				CanWriteCode: true,
+				RuleIDs:      []string{config.RuleDeveloperIdentity, config.RuleCommunicationUpstream},
+			},
+		},
+		PromptRules: []config.PromptRule{
+			{ID: config.RuleDeveloperIdentity, Body: "Developer identity."},
+			{ID: config.RuleCommunicationUpstream, Body: "## Communication Style: Upstream Only\n\n- `adaf parent-ask \"question\"`"},
+		},
+		DefaultRole: "developer",
+	}
+
+	got := RolePrompt(&config.Profile{Name: "p1"}, "developer", globalCfg)
+	if strings.Contains(got, "Communication Style: Upstream Only") {
+		t.Fatalf("upstream communication should not be role-fixed anymore\nprompt:\n%s", got)
+	}
+	if strings.Contains(got, "`adaf parent-ask \"question\"`") {
+		t.Fatalf("parent communication commands should come from runtime context, not role prompt\nprompt:\n%s", got)
+	}
+}
+
+func TestRolePrompt_RendersRoleIdentityFromRoleDefinition(t *testing.T) {
+	globalCfg := &config.GlobalConfig{
+		Roles: []config.RoleDefinition{
+			{
+				Name:         "qa",
+				Title:        "QA",
+				Identity:     "You are a QA role focused on high-signal verification.",
+				Description:  "Verification specialist.",
+				CanWriteCode: true,
+			},
+		},
+		PromptRules: []config.PromptRule{
+			{ID: "shared_checks", Body: "Always include repro steps."},
+		},
+		DefaultRole: "qa",
+	}
+
+	got := RolePrompt(&config.Profile{Name: "p1"}, "qa", globalCfg)
+	if !strings.Contains(got, "You are a QA role focused on high-signal verification.") {
+		t.Fatalf("role identity should render from role definition\nprompt:\n%s", got)
 	}
 }

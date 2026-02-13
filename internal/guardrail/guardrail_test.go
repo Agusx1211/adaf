@@ -16,10 +16,10 @@ func TestNewMonitor(t *testing.T) {
 	}{
 		{"manager enabled", "manager", true, false},
 		{"supervisor enabled", "supervisor", true, false},
-		{"senior enabled", "senior", true, true}, // can write code
-		{"junior enabled", "junior", true, true}, // can write code
+		{"lead developer enabled", "lead-developer", true, true}, // can write code
+		{"developer enabled", "developer", true, true},           // can write code
 		{"manager disabled", "manager", false, true},
-		{"empty role enabled", "", true, true}, // defaults to junior
+		{"empty role enabled", "", true, true}, // defaults to developer
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

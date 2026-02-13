@@ -13,40 +13,40 @@ func TestDelegationProfileEffectiveRoles(t *testing.T) {
 			name: "explicit single role",
 			prof: DelegationProfile{
 				Name: "worker",
-				Role: RoleSenior,
+				Role: RoleLeadDeveloper,
 			},
-			want: []string{RoleSenior},
+			want: []string{RoleLeadDeveloper},
 		},
 		{
 			name: "multiple explicit roles",
 			prof: DelegationProfile{
 				Name:  "worker",
-				Roles: []string{RoleJunior, RoleSenior, RoleJunior},
+				Roles: []string{RoleDeveloper, RoleLeadDeveloper, RoleDeveloper},
 			},
-			want: []string{RoleJunior, RoleSenior},
+			want: []string{RoleDeveloper, RoleLeadDeveloper},
 		},
 		{
-			name: "falls back to junior",
+			name: "falls back to developer",
 			prof: DelegationProfile{
 				Name: "worker",
 			},
-			want: []string{RoleJunior},
+			want: []string{RoleDeveloper},
 		},
 		{
-			name: "invalid explicit role",
+			name: "custom explicit role is accepted",
 			prof: DelegationProfile{
 				Name: "worker",
 				Role: "bad",
 			},
-			wantErr: true,
+			want: []string{"bad"},
 		},
 		{
-			name: "invalid role in list",
+			name: "custom role in list is accepted",
 			prof: DelegationProfile{
 				Name:  "worker",
-				Roles: []string{RoleJunior, "bad"},
+				Roles: []string{RoleDeveloper, "bad"},
 			},
-			wantErr: true,
+			want: []string{RoleDeveloper, "bad"},
 		},
 	}
 
@@ -77,26 +77,26 @@ func TestDelegationProfileEffectiveRoles(t *testing.T) {
 func TestDelegationResolveProfile(t *testing.T) {
 	d := &DelegationConfig{
 		Profiles: []DelegationProfile{
-			{Name: "worker", Role: RoleJunior},
-			{Name: "worker", Role: RoleSenior, Delegation: &DelegationConfig{Profiles: []DelegationProfile{{Name: "scout", Role: RoleJunior}}}},
-			{Name: "analyst", Roles: []string{RoleJunior, RoleSenior}},
+			{Name: "worker", Role: RoleDeveloper},
+			{Name: "worker", Role: RoleLeadDeveloper, Delegation: &DelegationConfig{Profiles: []DelegationProfile{{Name: "scout", Role: RoleDeveloper}}}},
+			{Name: "analyst", Roles: []string{RoleDeveloper, RoleLeadDeveloper}},
 			{Name: "unspecified"}, // no role set
 		},
 	}
 
 	t.Run("selects explicit role entry", func(t *testing.T) {
-		dp, role, err := d.ResolveProfile("worker", RoleSenior)
+		dp, role, err := d.ResolveProfile("worker", RoleLeadDeveloper)
 		if err != nil {
 			t.Fatalf("ResolveProfile() error = %v", err)
 		}
-		if role != RoleSenior {
-			t.Fatalf("role = %q, want %q", role, RoleSenior)
+		if role != RoleLeadDeveloper {
+			t.Fatalf("role = %q, want %q", role, RoleLeadDeveloper)
 		}
 		if dp == nil {
 			t.Fatal("resolved profile is nil")
 		}
-		if dp.Role != RoleSenior {
-			t.Fatalf("resolved profile role = %q, want %q", dp.Role, RoleSenior)
+		if dp.Role != RoleLeadDeveloper {
+			t.Fatalf("resolved profile role = %q, want %q", dp.Role, RoleLeadDeveloper)
 		}
 		if dp.Delegation == nil || !dp.Delegation.HasProfile("scout") {
 			t.Fatalf("resolved profile delegation missing expected child rules")
@@ -110,29 +110,29 @@ func TestDelegationResolveProfile(t *testing.T) {
 		}
 	})
 
-	t.Run("defaults to junior when role is missing", func(t *testing.T) {
+	t.Run("defaults to developer when role is missing", func(t *testing.T) {
 		dp, role, err := d.ResolveProfile("unspecified", "")
 		if err != nil {
 			t.Fatalf("ResolveProfile() error = %v", err)
 		}
-		if role != RoleJunior {
-			t.Fatalf("role = %q, want %q", role, RoleJunior)
+		if role != RoleDeveloper {
+			t.Fatalf("role = %q, want %q", role, RoleDeveloper)
 		}
-		if dp == nil || dp.Role != RoleJunior {
-			t.Fatalf("resolved role = %v, want %q", dp, RoleJunior)
+		if dp == nil || dp.Role != RoleDeveloper {
+			t.Fatalf("resolved role = %v, want %q", dp, RoleDeveloper)
 		}
 	})
 
 	t.Run("supports multi-role entry with explicit role", func(t *testing.T) {
-		dp, role, err := d.ResolveProfile("analyst", RoleJunior)
+		dp, role, err := d.ResolveProfile("analyst", RoleDeveloper)
 		if err != nil {
 			t.Fatalf("ResolveProfile() error = %v", err)
 		}
-		if role != RoleJunior {
-			t.Fatalf("role = %q, want %q", role, RoleJunior)
+		if role != RoleDeveloper {
+			t.Fatalf("role = %q, want %q", role, RoleDeveloper)
 		}
-		if dp == nil || dp.Role != RoleJunior {
-			t.Fatalf("resolved role = %v, want %q", dp, RoleJunior)
+		if dp == nil || dp.Role != RoleDeveloper {
+			t.Fatalf("resolved role = %v, want %q", dp, RoleDeveloper)
 		}
 		if len(dp.Roles) != 0 {
 			t.Fatalf("resolved profile roles should be normalized to single role, got %v", dp.Roles)
@@ -154,9 +154,9 @@ func TestDelegationCloneDeepCopy(t *testing.T) {
 		Profiles: []DelegationProfile{
 			{
 				Name:  "worker",
-				Roles: []string{RoleJunior, RoleSenior},
+				Roles: []string{RoleDeveloper, RoleLeadDeveloper},
 				Delegation: &DelegationConfig{
-					Profiles: []DelegationProfile{{Name: "scout", Role: RoleJunior}},
+					Profiles: []DelegationProfile{{Name: "scout", Role: RoleDeveloper}},
 				},
 			},
 		},
@@ -174,7 +174,7 @@ func TestDelegationCloneDeepCopy(t *testing.T) {
 	if orig.MaxParallel != 3 {
 		t.Fatalf("orig.MaxParallel changed to %d", orig.MaxParallel)
 	}
-	if orig.Profiles[0].Roles[0] != RoleJunior {
+	if orig.Profiles[0].Roles[0] != RoleDeveloper {
 		t.Fatalf("orig roles mutated: %v", orig.Profiles[0].Roles)
 	}
 	if orig.Profiles[0].Delegation.Profiles[0].Name != "scout" {

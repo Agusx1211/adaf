@@ -14,14 +14,14 @@ func TestEffectiveStepRole(t *testing.T) {
 			want:     RoleManager,
 		},
 		{
-			name:     "defaults to junior with empty values",
+			name:     "defaults to developer with empty values",
 			stepRole: "",
-			want:     RoleJunior,
+			want:     RoleDeveloper,
 		},
 		{
-			name:     "invalid values default to junior",
+			name:     "invalid values default to developer",
 			stepRole: "invalid",
-			want:     RoleJunior,
+			want:     RoleDeveloper,
 		},
 	}
 

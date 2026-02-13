@@ -169,15 +169,14 @@ func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error)
 		return 0, fmt.Errorf("child profile %q not found", req.ChildProfile)
 	}
 
-	if req.ChildRole != "" && !config.ValidRole(req.ChildRole) {
-		return 0, fmt.Errorf("invalid child role %q", req.ChildRole)
-	}
-
 	resolved, resolvedRole, err := deleg.ResolveProfile(req.ChildProfile, req.ChildRole)
 	if err != nil {
 		return 0, err
 	}
 	req.ChildRole = resolvedRole
+	if !config.ValidRole(req.ChildRole, o.globalCfg) {
+		return 0, fmt.Errorf("child role %q is not defined in the roles catalog", req.ChildRole)
+	}
 	req.ChildHandoff = resolved.Handoff
 	req.ChildSpeed = resolved.Speed
 	if resolved.MaxInstances > 0 {

@@ -49,6 +49,13 @@ const (
 	stateSettings                 // settings screen (pushover credentials, etc.)
 	stateSettingsPushoverUserKey  // input pushover user key
 	stateSettingsPushoverAppToken // input pushover app token
+	stateSettingsRolesRulesMenu   // roles/rules configuration menu
+	stateSettingsRolesList        // list/manage roles
+	stateSettingsRoleName         // input role name (new/rename)
+	stateSettingsRoleEdit         // edit role rule membership and write policy
+	stateSettingsRulesList        // list/manage prompt rules
+	stateSettingsRuleID           // input prompt rule ID (new/rename)
+	stateSettingsRuleBody         // multiline prompt rule body editor
 	stateSessionPicker            // choose which active session to attach
 	stateConfirmDelete            // confirmation before deleting a profile/loop
 )
@@ -135,6 +142,15 @@ type AppModel struct {
 	settingsSel              int    // cursor in settings menu
 	settingsPushoverUserKey  string // input buffer for pushover user key
 	settingsPushoverAppToken string // input buffer for pushover app token
+	settingsRolesRulesSel    int    // cursor in Roles/Rules menu
+	settingsRolesSel         int    // cursor in role list
+	settingsRoleRuleSel      int    // cursor in rule list when editing a role
+	settingsRulesSel         int    // cursor in prompt rule list
+	settingsEditRoleIdx      int    // edited role index (-1 = creating)
+	settingsEditRuleIdx      int    // edited prompt rule index (-1 = creating)
+	settingsRoleNameInput    string // role name input buffer
+	settingsRuleIDInput      string // prompt rule ID input buffer
+	settingsRuleBodyInput    string // prompt rule body editor buffer
 
 	// Cached project data for the selector.
 	project        *store.ProjectConfig
@@ -162,7 +178,14 @@ type AppModel struct {
 // NewApp creates the unified TUI app model.
 func NewApp(s *store.Store) AppModel {
 	globalCfg, _ := config.Load()
+	changed := false
 	if ensureDefaultProfiles(globalCfg) {
+		changed = true
+	}
+	if config.EnsureDefaultRoleCatalog(globalCfg) {
+		changed = true
+	}
+	if changed {
 		config.Save(globalCfg)
 	}
 
@@ -312,6 +335,20 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSettingsPushoverUserKey(msg)
 	case stateSettingsPushoverAppToken:
 		return m.updateSettingsPushoverAppToken(msg)
+	case stateSettingsRolesRulesMenu:
+		return m.updateSettingsRolesRulesMenu(msg)
+	case stateSettingsRolesList:
+		return m.updateSettingsRolesList(msg)
+	case stateSettingsRoleName:
+		return m.updateSettingsRoleName(msg)
+	case stateSettingsRoleEdit:
+		return m.updateSettingsRoleEdit(msg)
+	case stateSettingsRulesList:
+		return m.updateSettingsRulesList(msg)
+	case stateSettingsRuleID:
+		return m.updateSettingsRuleID(msg)
+	case stateSettingsRuleBody:
+		return m.updateSettingsRuleBody(msg)
 	case stateSessionPicker:
 		return m.updateSessionPicker(msg)
 	case stateConfirmDelete:
@@ -388,9 +425,19 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.showSessions()
 		case "S":
 			// Open settings.
+			config.EnsureDefaultRoleCatalog(m.globalCfg)
 			m.settingsSel = 0
 			m.settingsPushoverUserKey = m.globalCfg.Pushover.UserKey
 			m.settingsPushoverAppToken = m.globalCfg.Pushover.AppToken
+			m.settingsRolesRulesSel = 0
+			m.settingsRolesSel = 0
+			m.settingsRoleRuleSel = 0
+			m.settingsRulesSel = 0
+			m.settingsEditRoleIdx = -1
+			m.settingsEditRuleIdx = -1
+			m.settingsRoleNameInput = ""
+			m.settingsRuleIDInput = ""
+			m.settingsRuleBodyInput = ""
 			m.state = stateSettings
 			return m, nil
 		case "p":
@@ -850,7 +897,7 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 		Steps: []config.LoopStep{
 			{
 				Profile: prof.Name,
-				Role:    config.EffectiveStepRole(""),
+				Role:    config.EffectiveStepRole("", m.globalCfg),
 				Turns:   1,
 			},
 		},
@@ -917,6 +964,20 @@ func (m AppModel) View() string {
 		return m.viewSettingsPushoverUserKey()
 	case stateSettingsPushoverAppToken:
 		return m.viewSettingsPushoverAppToken()
+	case stateSettingsRolesRulesMenu:
+		return m.viewSettingsRolesRulesMenu()
+	case stateSettingsRolesList:
+		return m.viewSettingsRolesList()
+	case stateSettingsRoleName:
+		return m.viewSettingsRoleName()
+	case stateSettingsRoleEdit:
+		return m.viewSettingsRoleEdit()
+	case stateSettingsRulesList:
+		return m.viewSettingsRulesList()
+	case stateSettingsRuleID:
+		return m.viewSettingsRuleID()
+	case stateSettingsRuleBody:
+		return m.viewSettingsRuleBody()
 	case stateSessionPicker:
 		return m.viewSessionPicker()
 	case stateConfirmDelete:

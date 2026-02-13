@@ -53,11 +53,11 @@ type Monitor struct {
 
 // NewMonitor creates a guardrail monitor for the given role.
 // Returns nil if guardrails are not enabled or the role is allowed to write code.
-func NewMonitor(role string, enabled bool) *Monitor {
+func NewMonitor(role string, enabled bool, globalCfg ...*config.GlobalConfig) *Monitor {
 	if !enabled {
 		return nil
 	}
-	if config.CanWriteCode(role) {
+	if config.CanWriteCode(role, globalCfg...) {
 		return nil
 	}
 	return &Monitor{role: role}

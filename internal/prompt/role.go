@@ -11,43 +11,60 @@ import (
 // An agent NEVER sees its own intelligence rating.
 // Spawning capabilities are no longer emitted here — they come from delegationSection().
 func RolePrompt(profile *config.Profile, stepRole string, globalCfg *config.GlobalConfig) string {
-	role := config.EffectiveStepRole(stepRole)
+	role := config.EffectiveStepRole(stepRole, globalCfg)
+
+	roles := config.DefaultRoleDefinitions()
+	rules := config.DefaultPromptRules()
+	if globalCfg != nil {
+		config.EnsureDefaultRoleCatalog(globalCfg)
+		roles = globalCfg.Roles
+		rules = globalCfg.PromptRules
+	}
+
+	ruleBodies := make(map[string]string, len(rules))
+	for _, rule := range rules {
+		ruleID := strings.ToLower(strings.TrimSpace(rule.ID))
+		if ruleID == "" {
+			continue
+		}
+		ruleBodies[ruleID] = strings.TrimSpace(rule.Body)
+	}
+
+	roleTitle := strings.ToUpper(role)
+	roleIdentity := ""
+	roleDesc := ""
+	var ruleIDs []string
+	for _, def := range roles {
+		if strings.EqualFold(def.Name, role) {
+			if strings.TrimSpace(def.Title) != "" {
+				roleTitle = strings.TrimSpace(def.Title)
+			}
+			roleIdentity = strings.TrimSpace(def.Identity)
+			roleDesc = strings.TrimSpace(def.Description)
+			ruleIDs = append([]string(nil), def.RuleIDs...)
+			break
+		}
+	}
 
 	var b strings.Builder
-
-	switch role {
-	case config.RoleManager:
-		b.WriteString("# Your Role: MANAGER\n\n")
-		b.WriteString("You are a MANAGER agent. You do NOT write code or run tests directly. Your entire value comes from effective delegation and review.\n\n")
-		b.WriteString("## Core Principles\n\n")
-		b.WriteString("1. **Delegate aggressively.** Every piece of work — coding, investigation, testing, review — should be done by a sub-agent. Spawn early, spawn often, spawn in parallel.\n")
-		b.WriteString("2. **Prefer scouts over doing it yourself.** For reading files, checking git history, running tests, or inspecting the repo, spawn `--read-only` scouts. Your context window is expensive — save it for decisions. You can read a file directly when truly needed, but default to delegation.\n")
-		b.WriteString("3. **Maximize parallelism.** Spawn all independent tasks at once, then `wait-for-spawns`. Sequential spawning wastes time. If you have 3 tasks, spawn 3 agents simultaneously.\n")
-		b.WriteString("4. **Review every diff** with `adaf spawn-diff` before merging. When work needs corrections, prefer sending feedback via `spawn-message --interrupt` (if still running) or writing a precise corrective task rather than blindly rejecting and re-spawning.\n\n")
-		b.WriteString("## Anti-Patterns (avoid these)\n\n")
-		b.WriteString("- Spawning one agent at a time with `--wait` — this burns tokens while you idle. Use `wait-for-spawns`\n")
-		b.WriteString("- Doing 3 sequential spawn-reject-respawn cycles for the same issue — give better instructions upfront, or use `spawn-message` mid-flight\n")
-		b.WriteString("- Writing or editing any file yourself\n\n")
-		b.WriteString("Use the Delegation section below for available profiles and commands.\n\n")
-
-	case config.RoleSenior:
-		b.WriteString("# Your Role: LEAD DEVELOPER\n\n")
-		b.WriteString("You are an expert LEAD DEVELOPER agent. You write high-quality code and are expected to deliver excellent, well-tested solutions.\n\n")
-		b.WriteString("If delegation is available in this step, you may use it strategically for parallel work.\n\n")
-		b.WriteString(communicationCommands())
-
-	case config.RoleJunior:
-		b.WriteString("# Your Role: DEVELOPER\n\n")
-		b.WriteString("You are a skilled DEVELOPER agent. Focus exclusively on delivering high-quality, well-tested code for your assigned task.\n\n")
-		b.WriteString("If delegation is available in this step, only use it when it clearly improves delivery quality or speed.\n\n")
-		b.WriteString(communicationCommands())
-
-	case config.RoleSupervisor:
-		b.WriteString("# Your Role: SUPERVISOR\n\n")
-		b.WriteString("You are a SUPERVISOR agent. You review progress and provide guidance via notes. You do NOT write code.\n\n")
-		b.WriteString("## Supervisor Commands\n\n")
-		b.WriteString("- `adaf note add [--session <N>] --note \"guidance text\"` — Send a note to a running agent session\n")
-		b.WriteString("- `adaf note list [--session <N>]` — List supervisor notes\n\n")
+	b.WriteString("# Your Role: " + roleTitle + "\n\n")
+	if roleIdentity != "" {
+		b.WriteString(roleIdentity + "\n\n")
+	}
+	if roleDesc != "" {
+		b.WriteString(roleDesc + "\n\n")
+	}
+	for _, ruleID := range ruleIDs {
+		// Upstream communication is now runtime-contextual: it is injected
+		// automatically for spawned sub-agents only.
+		if strings.EqualFold(strings.TrimSpace(ruleID), config.RuleCommunicationUpstream) {
+			continue
+		}
+		body := ruleBodies[strings.ToLower(strings.TrimSpace(ruleID))]
+		if body == "" {
+			continue
+		}
+		b.WriteString(body + "\n\n")
 	}
 
 	if profile.Description != "" {
@@ -61,6 +78,15 @@ func RolePrompt(profile *config.Profile, stepRole string, globalCfg *config.Glob
 // ReadOnlyPrompt returns the read-only mode prompt section.
 func ReadOnlyPrompt() string {
 	return "# READ-ONLY MODE\n\nYou are in READ-ONLY mode. Do NOT create, modify, or delete any files. Only read and analyze.\n\nDo NOT write reports into repository files (for example `*.md`, `*.txt`, or TODO files). Return your report in your final assistant message.\n"
+}
+
+// parentCommunicationSection is included only when running as a spawned sub-agent.
+func parentCommunicationSection() string {
+	return "## Parent Communication\n\n" +
+		"You are running as a sub-agent. Use these commands to communicate with your parent session:\n\n" +
+		"- `adaf parent-ask \"question\"` — Ask your parent a question (blocks until answered)\n" +
+		"- `adaf parent-notify \"status update\"` — Send a non-blocking notification to parent\n" +
+		"- `adaf spawn-read-messages` — Read messages from parent\n\n"
 }
 
 // delegationSection builds the delegation/spawning prompt section from a DelegationConfig.
@@ -196,14 +222,5 @@ func delegationCommands() string {
 	b.WriteString("- If the issue is minor (e.g. stale files in diff), write a more detailed task description for the next spawn rather than iterating blindly\n")
 	b.WriteString("- If you've already rejected the same task twice, stop and rethink your task description — you are wasting resources\n\n")
 
-	return b.String()
-}
-
-func communicationCommands() string {
-	var b strings.Builder
-	b.WriteString("## Communication with Parent\n\n")
-	b.WriteString("- `adaf parent-ask \"question\"` — Ask your parent a question (blocks until answered)\n")
-	b.WriteString("- `adaf parent-notify \"status update\"` — Send a non-blocking notification to parent\n")
-	b.WriteString("- `adaf spawn-read-messages` — Read messages from parent\n\n")
 	return b.String()
 }

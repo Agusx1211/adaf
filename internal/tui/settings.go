@@ -12,7 +12,7 @@ import (
 )
 
 // settingsMenuItemCount is the number of items in the settings menu.
-const settingsMenuItemCount = 3 // Pushover User Key, Pushover App Token, Back
+const settingsMenuItemCount = 4 // Pushover User Key, Pushover App Token, Roles & Rules, Back
 
 // --- Settings Menu ---
 
@@ -32,7 +32,13 @@ func (m AppModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = stateSettingsPushoverUserKey
 			case 1: // Pushover App Token
 				m.state = stateSettingsPushoverAppToken
-			case 2: // Back
+			case 2: // Roles & Rules
+				m.settingsRolesRulesSel = 0
+				m.settingsRolesSel = 0
+				m.settingsRoleRuleSel = 0
+				m.settingsRulesSel = 0
+				m.state = stateSettingsRolesRulesMenu
+			case 3: // Back
 				m.state = stateSelector
 			}
 		}
@@ -79,6 +85,7 @@ func (m AppModel) viewSettings() string {
 	items := []menuItem{
 		{"Pushover User Key", maskedUserKey},
 		{"Pushover App Token", maskedAppToken},
+		{"Roles & Rules", "manage role definitions and prompt rules"},
 	}
 
 	for i, item := range items {
@@ -94,7 +101,7 @@ func (m AppModel) viewSettings() string {
 	// Back item.
 	lines = append(lines, "")
 	backLabel := lipgloss.NewStyle().Bold(true).Foreground(ColorTeal).Render("Back")
-	if m.settingsSel == 2 {
+	if m.settingsSel == 3 {
 		cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorTeal).Render("> ")
 		lines = append(lines, cursor+backLabel)
 	} else {

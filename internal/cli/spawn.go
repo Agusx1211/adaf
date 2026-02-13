@@ -33,9 +33,9 @@ that don't need a separate worktree.
 Must be called from within an adaf agent turn (ADAF_TURN_ID or ADAF_SESSION_ID set).
 
 Examples:
-  adaf spawn --profile junior --task "Write unit tests for auth.go"
-  adaf spawn --profile junior --task-file task.md --wait
-  adaf spawn --profile senior --task "Review PR #42" --read-only
+  adaf spawn --profile developer --task "Write unit tests for auth.go"
+  adaf spawn --profile developer --task-file task.md --wait
+  adaf spawn --profile lead-dev --task "Review PR #42" --read-only
   adaf spawn-status                       # Check all spawns
   adaf spawn-diff --spawn-id 3            # View changes
   adaf spawn-merge --spawn-id 3           # Merge changes`,
@@ -44,7 +44,7 @@ Examples:
 
 func init() {
 	spawnCmd.Flags().String("profile", "", "Profile name of the sub-agent to spawn (required)")
-	spawnCmd.Flags().String("role", "", "Role for the sub-agent (manager, senior, junior, supervisor)")
+	spawnCmd.Flags().String("role", "", "Role for the sub-agent")
 	spawnCmd.Flags().String("task", "", "Task description for the sub-agent")
 	spawnCmd.Flags().String("task-file", "", "Path to file containing task description (mutually exclusive with --task)")
 	spawnCmd.Flags().Bool("read-only", false, "Run sub-agent in read-only mode (no worktree)")
@@ -80,10 +80,13 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		}
 		task = string(data)
 	}
-	if childRole != "" && !config.ValidRole(childRole) {
-		return fmt.Errorf("invalid --role %q (valid: %s)", childRole, strings.Join(config.AllRoles(), ", "))
+	globalCfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
 	}
-
+	if childRole != "" && !config.ValidRole(childRole, globalCfg) {
+		return fmt.Errorf("invalid --role %q (valid: %s)", childRole, strings.Join(config.AllRoles(globalCfg), ", "))
+	}
 	parentTurnID, parentProfile, err := getTurnContext()
 	if err != nil {
 		return err

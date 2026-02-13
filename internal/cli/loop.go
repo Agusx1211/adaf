@@ -32,7 +32,7 @@ var loopCmd = &cobra.Command{
 for N turns, with support for inter-step messaging and stop signals.
 
 Loops are defined in ~/.adaf/config.json and can chain multiple agent profiles
-together (e.g., a "junior" agent writes code, then a "senior" agent reviews).
+together (e.g., a "developer" agent writes code, then a "lead-developer" role reviews).
 Steps can send Pushover notifications, post messages to subsequent steps,
 and signal the loop to stop.
 
@@ -126,7 +126,7 @@ func loopList(cmd *cobra.Command, args []string) error {
 			if turns <= 0 {
 				turns = 1
 			}
-			role := config.EffectiveStepRole(step.Role)
+			role := config.EffectiveStepRole(step.Role, globalCfg)
 			spawnCount := 0
 			if step.Delegation != nil {
 				spawnCount = len(step.Delegation.Profiles)

@@ -55,6 +55,63 @@ func TestBuild_MainAgentDoesNotIncludeSubAgentCommitRule(t *testing.T) {
 	}
 }
 
+func TestBuild_SubAgentIncludesParentCommunicationCommands(t *testing.T) {
+	s, project := initPromptTestStore(t)
+
+	profile := &config.Profile{
+		Name:  "dev",
+		Agent: "codex",
+	}
+
+	got, err := Build(BuildOpts{
+		Store:        s,
+		Project:      project,
+		Profile:      profile,
+		ParentTurnID: 100,
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if !strings.Contains(got, "`adaf parent-ask \"question\"`") {
+		t.Fatalf("missing parent-ask guidance in sub-agent prompt\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "`adaf parent-notify \"status update\"`") {
+		t.Fatalf("missing parent-notify guidance in sub-agent prompt\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "`adaf spawn-read-messages`") {
+		t.Fatalf("missing spawn-read-messages guidance in sub-agent prompt\nprompt:\n%s", got)
+	}
+}
+
+func TestBuild_MainAgentDoesNotIncludeParentCommunicationCommands(t *testing.T) {
+	s, project := initPromptTestStore(t)
+
+	profile := &config.Profile{
+		Name:  "dev",
+		Agent: "codex",
+	}
+
+	got, err := Build(BuildOpts{
+		Store:   s,
+		Project: project,
+		Profile: profile,
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if strings.Contains(got, "`adaf parent-ask \"question\"`") {
+		t.Fatalf("unexpected parent-ask guidance in main-agent prompt\nprompt:\n%s", got)
+	}
+	if strings.Contains(got, "`adaf parent-notify \"status update\"`") {
+		t.Fatalf("unexpected parent-notify guidance in main-agent prompt\nprompt:\n%s", got)
+	}
+	if strings.Contains(got, "`adaf spawn-read-messages`") {
+		t.Fatalf("unexpected spawn-read-messages guidance in main-agent prompt\nprompt:\n%s", got)
+	}
+}
+
 func initPromptTestStore(t *testing.T) (*store.Store, *store.ProjectConfig) {
 	t.Helper()
 	dir := t.TempDir()
