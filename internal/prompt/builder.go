@@ -53,6 +53,9 @@ type BuildOpts struct {
 	// ParentTurnID, if >0, provides parent context to the child.
 	ParentTurnID int
 
+	// CurrentTurnID, when >0, enables live runtime spawn context in prompts.
+	CurrentTurnID int
+
 	// SupervisorNotes are injected into the prompt.
 	SupervisorNotes []store.SupervisorNote
 
@@ -352,7 +355,17 @@ func Build(opts BuildOpts) (string, error) {
 	}
 
 	// Delegation section.
-	b.WriteString(delegationSection(opts.Delegation, opts.GlobalCfg))
+	var runningSpawns []store.SpawnRecord
+	if opts.Store != nil && opts.CurrentTurnID > 0 {
+		if records, err := opts.Store.SpawnsByParent(opts.CurrentTurnID); err == nil {
+			for _, rec := range records {
+				if isDelegationActiveSpawnStatus(rec.Status) {
+					runningSpawns = append(runningSpawns, rec)
+				}
+			}
+		}
+	}
+	b.WriteString(delegationSection(opts.Delegation, opts.GlobalCfg, runningSpawns))
 
 	// Wait results from a previous wait-for-spawns cycle.
 	if len(opts.WaitResults) > 0 {
@@ -474,3 +487,11 @@ func formatWaitResultInfo(wr WaitResultInfo) string {
 	return b.String()
 }
 
+func isDelegationActiveSpawnStatus(status string) bool {
+	switch status {
+	case "completed", "failed", "canceled", "cancelled", "merged", "rejected":
+		return false
+	default:
+		return true
+	}
+}

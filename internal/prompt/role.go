@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/agusx1211/adaf/internal/config"
+	"github.com/agusx1211/adaf/internal/store"
 )
 
 // RolePrompt returns the role-specific system prompt section for a profile.
@@ -94,12 +95,16 @@ func parentCommunicationSection() string {
 }
 
 // delegationSection builds the delegation/spawning prompt section from a DelegationConfig.
-func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalConfig) string {
+func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalConfig, runningSpawns []store.SpawnRecord) string {
 	if deleg == nil || len(deleg.Profiles) == 0 {
 		return "You cannot spawn sub-agents.\n\n"
 	}
 
 	var b strings.Builder
+	runningByProfile := make(map[string]int)
+	for _, rec := range runningSpawns {
+		runningByProfile[strings.ToLower(strings.TrimSpace(rec.ChildProfile))]++
+	}
 
 	b.WriteString("# Delegation\n\n")
 
@@ -126,13 +131,26 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 	b.WriteString("### Quick-Start Example\n\n")
 	b.WriteString("```bash\n")
 	b.WriteString("# 1. Spawn a scout to understand the codebase\n")
-	b.WriteString("adaf spawn --profile <name> --read-only --task \"Examine the repo structure, summarize key files, list failing tests\"\n")
+	b.WriteString("adaf spawn --profile <name> --role <role> --read-only --task \"Examine the repo structure, summarize key files, list failing tests\"\n")
 	b.WriteString("# 2. Spawn workers for independent tasks\n")
-	b.WriteString("adaf spawn --profile <name> --task-file /tmp/task1.md\n")
-	b.WriteString("adaf spawn --profile <name> --task-file /tmp/task2.md\n")
+	b.WriteString("adaf spawn --profile <name> --role <role> --task-file /tmp/task1.md\n")
+	b.WriteString("adaf spawn --profile <name> --role <role> --task-file /tmp/task2.md\n")
 	b.WriteString("# 3. Suspend — costs zero tokens while waiting\n")
 	b.WriteString("adaf wait-for-spawns\n")
 	b.WriteString("```\n\n")
+
+	if len(runningSpawns) > 0 {
+		b.WriteString("## Currently Running Spawns\n\n")
+		for _, rec := range runningSpawns {
+			line := fmt.Sprintf("- Spawn #%d — profile=%s", rec.ID, rec.ChildProfile)
+			if strings.TrimSpace(rec.ChildRole) != "" {
+				line += fmt.Sprintf(", role=%s", rec.ChildRole)
+			}
+			line += fmt.Sprintf(", status=%s", rec.Status)
+			b.WriteString(line + "\n")
+		}
+		b.WriteString("\n")
+	}
 
 	// Available profiles.
 	if len(deleg.Profiles) > 0 && globalCfg != nil {
@@ -164,6 +182,22 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 			}
 			if speed != "" {
 				line += fmt.Sprintf(", speed=%s", speed)
+			}
+			maxInstances := p.MaxInstances
+			if dp.MaxInstances > 0 {
+				maxInstances = dp.MaxInstances
+			}
+			if maxInstances > 0 {
+				line += fmt.Sprintf(", max_instances=%d", maxInstances)
+			}
+			running := runningByProfile[strings.ToLower(strings.TrimSpace(p.Name))]
+			if maxInstances > 0 {
+				line += fmt.Sprintf(", running=%d/%d", running, maxInstances)
+				if running >= maxInstances {
+					line += " [at-cap]"
+				}
+			} else if running > 0 {
+				line += fmt.Sprintf(", running=%d", running)
 			}
 			if dp.Handoff {
 				line += " [handoff]"

@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/agusx1211/adaf/internal/session"
 	"github.com/agusx1211/adaf/internal/store"
 )
 
@@ -192,9 +193,22 @@ func runSpawnMessage(cmd *cobra.Command, args []string) error {
 	}
 
 	if interrupt {
-		// Signal the interrupt so the orchestrator/loop can detect it.
+		if daemonSessionID, ok := currentDaemonSessionID(); ok {
+			resp, reqErr := session.RequestInterruptSpawn(daemonSessionID, spawnID, content)
+			if reqErr == nil && resp != nil && resp.OK {
+				fmt.Printf("Interrupt message sent to spawn #%d\n", spawnID)
+				return nil
+			}
+			if reqErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: daemon interrupt failed; falling back to file signal: %v\n", reqErr)
+			} else if resp != nil && strings.TrimSpace(resp.Error) != "" {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: daemon interrupt rejected; falling back to file signal: %s\n", resp.Error)
+			}
+		}
+
+		// Fallback for non-daemon mode.
 		if err := s.SignalInterrupt(spawnID, content); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to signal interrupt: %v\n", err)
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to signal interrupt fallback: %v\n", err)
 		}
 		fmt.Printf("Interrupt message sent to spawn #%d\n", spawnID)
 	} else {
@@ -277,8 +291,21 @@ func runWaitForSpawns(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := s.SignalWait(turnID); err != nil {
-		return fmt.Errorf("signaling wait: %w", err)
+	signaled := false
+	if daemonSessionID, ok := currentDaemonSessionID(); ok {
+		resp, reqErr := session.RequestWait(daemonSessionID, turnID)
+		if reqErr == nil && resp != nil && resp.OK {
+			signaled = true
+		} else if reqErr != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: daemon wait signal failed; falling back to file signal: %v\n", reqErr)
+		} else if resp != nil && strings.TrimSpace(resp.Error) != "" {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: daemon wait signal rejected; falling back to file signal: %s\n", resp.Error)
+		}
+	}
+	if !signaled {
+		if err := s.SignalWait(turnID); err != nil {
+			return fmt.Errorf("signaling wait: %w", err)
+		}
 	}
 
 	fmt.Println("Wait signal created. Stop now and end this turn — the loop will resume when all spawns complete.")

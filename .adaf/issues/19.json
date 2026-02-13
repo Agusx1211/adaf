@@ -2,7 +2,7 @@
   "id": 19,
   "title": "Goroutine cleanup chain can deadlock on nested defers",
   "description": "## Location\n- internal/orchestrator/orchestrator.go:501-520\n\n## Problem\nFour nested defers with channel close/wait dependencies. If event or interrupt goroutine hangs, the entire defer chain deadlocks and the spawn goroutine never completes.",
-  "status": "open",
+  "status": "resolved",
   "priority": "medium",
   "labels": [
     "bug",
@@ -10,5 +10,5 @@
     "deadlock"
   ],
   "created": "2026-02-13T16:32:21.278668263Z",
-  "updated": "2026-02-13T16:32:21.278668263Z"
+  "updated": "2026-02-13T17:36:07.950906628Z"
 }

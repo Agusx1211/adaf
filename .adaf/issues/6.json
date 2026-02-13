@@ -2,7 +2,7 @@
   "id": 6,
   "title": "Spawn constraint violations waste manager turns and API tokens",
   "description": "## Summary\n\nThe manager agent (Claude Opus) repeatedly hits spawn constraint walls because the prompt doesn't include enough information about current spawn state and profile capability restrictions. Each failed spawn wastes a tool-call round-trip and API tokens.\n\n## Observed failures in session 85b28d88\n\n1. **Concurrency limit hit**: \"spawn limit reached: child profile 'codex 5.3' has 1 running instance(s) (max 1)\" at 13:42:37 — manager tried to spawn a 2nd codex while one was already running.\n\n2. **Role capability mismatch**: \"profile 'codex 5.3' cannot be spawned as role 'scout'\" at 14:01:42 — manager tried to use codex as a read-only scout, but codex doesn't support the scout role.\n\n## Root cause\n\nThe system prompt / context provided to the manager agent does not include:\n- Currently running spawn instances and their profiles\n- Per-profile concurrency limits (max instances)\n- Per-profile role capability matrix (which profiles can be spawned as which roles)\n\nThe manager model has to guess, and guesses wrong.\n\n## Suggested fix\n\nInclude in the manager's prompt (or in the spawn tool description):\n- List of currently running spawns with their profiles and roles\n- Per-profile max instance count\n- Per-profile allowed roles (e.g. \"codex 5.3: developer, reviewer; devstral2: developer, scout, reviewer\")\n\nThis lets the model make informed spawning decisions and avoid wasted tool calls.\n\n## Files involved\n\n- internal/orchestrator/orchestrator.go: Spawn() — where limits are enforced\n- internal/prompt/ or pkg/protocol/: where the manager prompt is built\n- internal/agentmeta/catalog.go: where profile capabilities are defined",
-  "status": "open",
+  "status": "resolved",
   "priority": "medium",
   "labels": [
     "bug",
@@ -10,5 +10,5 @@
     "prompt"
   ],
   "created": "2026-02-13T16:29:19.117932889Z",
-  "updated": "2026-02-13T16:29:19.117932889Z"
+  "updated": "2026-02-13T17:36:07.916548007Z"
 }

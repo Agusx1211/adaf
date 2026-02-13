@@ -142,8 +142,10 @@ type WireDone struct {
 
 // WireControl is a client -> daemon control request.
 type WireControl struct {
-	Action string            `json:"action"`
-	Spawn  *WireControlSpawn `json:"spawn,omitempty"`
+	Action    string                `json:"action"`
+	Spawn     *WireControlSpawn     `json:"spawn,omitempty"`
+	Wait      *WireControlWait      `json:"wait,omitempty"`
+	Interrupt *WireControlInterrupt `json:"interrupt,omitempty"`
 }
 
 // WireControlSpawn carries a spawn request executed by the daemon.
@@ -158,6 +160,17 @@ type WireControlSpawn struct {
 	ReadOnly      bool                     `json:"read_only,omitempty"`
 	Wait          bool                     `json:"wait,omitempty"`
 	Delegation    *config.DelegationConfig `json:"delegation,omitempty"`
+}
+
+// WireControlWait carries a wait-for-spawns signal request.
+type WireControlWait struct {
+	TurnID int `json:"turn_id"`
+}
+
+// WireControlInterrupt carries an interrupt request for a running spawn.
+type WireControlInterrupt struct {
+	SpawnID int    `json:"spawn_id"`
+	Message string `json:"message"`
 }
 
 // WireControlResult is a daemon -> client reply for a control request.

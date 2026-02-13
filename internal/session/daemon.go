@@ -741,6 +741,36 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 				resp.Result = result.Result
 			}
 			return resp
+		case "wait":
+			if req.Wait == nil {
+				resp.Error = "missing wait request payload"
+				return resp
+			}
+			if req.Wait.TurnID <= 0 {
+				resp.Error = "wait request turn_id must be > 0"
+				return resp
+			}
+			if err := s.SignalWait(req.Wait.TurnID); err != nil {
+				resp.Error = err.Error()
+				return resp
+			}
+			resp.OK = true
+			return resp
+		case "interrupt_spawn":
+			if req.Interrupt == nil {
+				resp.Error = "missing interrupt request payload"
+				return resp
+			}
+			if req.Interrupt.SpawnID <= 0 {
+				resp.Error = "interrupt request spawn_id must be > 0"
+				return resp
+			}
+			if err := orch.InterruptSpawn(req.Interrupt.SpawnID, req.Interrupt.Message); err != nil {
+				resp.Error = err.Error()
+				return resp
+			}
+			resp.OK = true
+			return resp
 		default:
 			resp.Error = fmt.Sprintf("unsupported control action %q", req.Action)
 			return resp

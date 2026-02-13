@@ -331,21 +331,33 @@ func (l *Loop) Run(ctx context.Context) error {
 		if l.Store != nil {
 			go func(turnID int) {
 				defer close(waitWatcherDone)
-				ticker := time.NewTicker(100 * time.Millisecond)
-				defer ticker.Stop()
+				defer l.Store.ReleaseWaitSignal(turnID)
+				waitSignalCh := l.Store.WaitSignalChan(turnID)
+				pollTicker := time.NewTicker(2 * time.Second)
+				defer pollTicker.Stop()
+				if l.Store.IsWaiting(turnID) {
+					select {
+					case waitSignalSeen <- struct{}{}:
+					default:
+					}
+					turnCancel()
+					return
+				}
 				for {
 					select {
 					case <-turnCtx.Done():
 						return
-					case <-ticker.C:
-						if l.Store.IsWaiting(turnID) {
-							select {
-							case waitSignalSeen <- struct{}{}:
-							default:
-							}
-							turnCancel()
-							return
+					case <-waitSignalCh:
+					case <-pollTicker.C:
+						// Fallback for external signal writers in non-daemon mode.
+					}
+					if l.Store.IsWaiting(turnID) {
+						select {
+						case waitSignalSeen <- struct{}{}:
+						default:
 						}
+						turnCancel()
+						return
 					}
 				}
 			}(turnID)

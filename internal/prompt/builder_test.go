@@ -365,6 +365,70 @@ func TestBuild_SubAgentShowsAssignedIssues(t *testing.T) {
 	}
 }
 
+func TestBuild_DelegationIncludesRunningSpawnStateAndCapacity(t *testing.T) {
+	s, project := initPromptTestStore(t)
+
+	running := &store.SpawnRecord{
+		ParentTurnID:  77,
+		ParentProfile: "manager",
+		ChildProfile:  "worker",
+		ChildRole:     config.RoleDeveloper,
+		Task:          "active work",
+		Status:        "running",
+	}
+	if err := s.CreateSpawn(running); err != nil {
+		t.Fatalf("CreateSpawn(running): %v", err)
+	}
+	completed := &store.SpawnRecord{
+		ParentTurnID:  77,
+		ParentProfile: "manager",
+		ChildProfile:  "worker",
+		Task:          "done work",
+		Status:        "completed",
+	}
+	if err := s.CreateSpawn(completed); err != nil {
+		t.Fatalf("CreateSpawn(completed): %v", err)
+	}
+
+	profile := &config.Profile{Name: "manager", Agent: "claude"}
+	globalCfg := &config.GlobalConfig{
+		Profiles: []config.Profile{
+			{Name: "manager", Agent: "claude"},
+			{Name: "worker", Agent: "codex", MaxInstances: 1},
+		},
+	}
+	deleg := &config.DelegationConfig{
+		Profiles: []config.DelegationProfile{
+			{Name: "worker", Role: config.RoleDeveloper, MaxInstances: 1},
+		},
+	}
+
+	got, err := Build(BuildOpts{
+		Store:         s,
+		Project:       project,
+		Profile:       profile,
+		GlobalCfg:     globalCfg,
+		Delegation:    deleg,
+		CurrentTurnID: 77,
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if !strings.Contains(got, "Currently Running Spawns") {
+		t.Fatalf("missing running spawns section\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, fmt.Sprintf("Spawn #%d", running.ID)) {
+		t.Fatalf("missing running spawn id in prompt\nprompt:\n%s", got)
+	}
+	if strings.Contains(got, fmt.Sprintf("Spawn #%d", completed.ID)) {
+		t.Fatalf("completed spawn should not appear in running section\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "running=1/1") || !strings.Contains(got, "[at-cap]") {
+		t.Fatalf("missing capacity/running indicator in prompt\nprompt:\n%s", got)
+	}
+}
+
 func initPromptTestStore(t *testing.T) (*store.Store, *store.ProjectConfig) {
 	t.Helper()
 	dir := t.TempDir()

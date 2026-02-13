@@ -307,6 +307,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				StepHexID:    stepHexID,
 				PromptFunc: func(turnID int, supervisorNotes []store.SupervisorNote) string {
 					opts := promptOpts
+					opts.CurrentTurnID = turnID
 					opts.SupervisorNotes = supervisorNotes
 					built, err := promptpkg.Build(opts)
 					if err != nil {

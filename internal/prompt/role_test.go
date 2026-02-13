@@ -12,7 +12,7 @@ func TestDelegationSection_IncludesQuickstartWhenDelegationEnabled(t *testing.T)
 		Profiles: []config.DelegationProfile{
 			{Name: "worker"},
 		},
-	}, nil)
+	}, nil, nil)
 
 	hasSpawnFlow := strings.Contains(got, "ALWAYS use this pattern")
 	if !hasSpawnFlow {
@@ -36,12 +36,12 @@ func TestDelegationSection_IncludesQuickstartWhenDelegationEnabled(t *testing.T)
 }
 
 func TestDelegationSection_NoDelegation(t *testing.T) {
-	got := delegationSection(nil, nil)
+	got := delegationSection(nil, nil, nil)
 	if got != "You cannot spawn sub-agents.\n\n" {
 		t.Fatalf("delegationSection(nil) = %q, want %q", got, "You cannot spawn sub-agents.\n\n")
 	}
 
-	got = delegationSection(&config.DelegationConfig{}, nil)
+	got = delegationSection(&config.DelegationConfig{}, nil, nil)
 	if got != "You cannot spawn sub-agents.\n\n" {
 		t.Fatalf("delegationSection(empty) = %q, want %q", got, "You cannot spawn sub-agents.\n\n")
 	}
@@ -65,7 +65,7 @@ func TestDelegationSection_IncludesRoleDetails(t *testing.T) {
 		},
 	}
 
-	got := delegationSection(deleg, globalCfg)
+	got := delegationSection(deleg, globalCfg, nil)
 	if !strings.Contains(got, "role=lead-developer") {
 		t.Fatalf("expected role annotation in delegation section\nprompt:\n%s", got)
 	}

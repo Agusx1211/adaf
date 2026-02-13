@@ -1,4 +1,4 @@
-.PHONY: build install test clean lint fmt
+.PHONY: build install test race clean lint fmt
 
 BINARY=adaf
 BUILD_DIR=bin
@@ -15,6 +15,9 @@ install:
 
 test:
 	go test ./...
+
+race:
+	go test -race ./...
 
 clean:
 	rm -rf $(BUILD_DIR)

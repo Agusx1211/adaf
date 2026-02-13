@@ -15,7 +15,6 @@ import (
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/debug"
-	"github.com/agusx1211/adaf/internal/eventq"
 	"github.com/agusx1211/adaf/internal/guardrail"
 	"github.com/agusx1211/adaf/internal/loop"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
@@ -57,11 +56,36 @@ type SpawnResult struct {
 }
 
 type activeSpawn struct {
-	record      *store.SpawnRecord
+	spawnID       int
+	parentProfile string
+	childProfile  string
+
+	metaMu       sync.RWMutex
+	parentTurnID int
+	recordMu     sync.Mutex
+
 	cancel      context.CancelFunc
 	done        chan struct{}
 	eventBuffer *eventRingBuffer // circular buffer of recent events
 	interruptCh chan string      // signals the child loop about an interrupt
+}
+
+func (as *activeSpawn) ParentTurnID() int {
+	if as == nil {
+		return 0
+	}
+	as.metaMu.RLock()
+	defer as.metaMu.RUnlock()
+	return as.parentTurnID
+}
+
+func (as *activeSpawn) SetParentTurnID(turnID int) {
+	if as == nil {
+		return
+	}
+	as.metaMu.Lock()
+	as.parentTurnID = turnID
+	as.metaMu.Unlock()
 }
 
 // eventRingBuffer is a thread-safe circular buffer of recent stream events.
@@ -117,8 +141,10 @@ type Orchestrator struct {
 	running   map[string]int // parent profile -> count of running spawns
 	instances map[string]int // child profile -> count of running instances
 	spawns    map[int]*activeSpawn
-	spawnWG   sync.WaitGroup // tracks running spawn goroutines
-	eventCh   chan any       // optional TUI event channel for real-time sub-agent events
+	waitAny   map[int]chan struct{} // parent turn -> completion notification channel
+	waiters   map[int]int           // parent turn -> active WaitAny waiter count
+	spawnWG   sync.WaitGroup        // tracks running spawn goroutines
+	eventCh   chan any              // optional TUI event channel for real-time sub-agent events
 }
 
 // New creates an Orchestrator.
@@ -131,6 +157,8 @@ func New(s *store.Store, globalCfg *config.GlobalConfig, repoRoot string) *Orche
 		running:   make(map[string]int),
 		instances: make(map[string]int),
 		spawns:    make(map[int]*activeSpawn),
+		waitAny:   make(map[int]chan struct{}),
+		waiters:   make(map[int]int),
 	}
 }
 
@@ -149,11 +177,104 @@ func (o *Orchestrator) emitEvent(eventType string, msg any) bool {
 	if ch == nil {
 		return false
 	}
-	if eventq.Offer(ch, msg) {
+	sent, closed := safeOfferAny(ch, msg)
+	if sent {
 		return true
+	}
+	if closed {
+		o.mu.Lock()
+		if o.eventCh == ch {
+			o.eventCh = nil
+		}
+		o.mu.Unlock()
+		debug.LogKV("orch", "dropping tui event: channel closed", "type", eventType)
+		return false
 	}
 	debug.LogKV("orch", "dropping tui event due to backpressure", "type", eventType)
 	return false
+}
+
+func safeOfferAny(ch chan any, msg any) (sent bool, closed bool) {
+	defer func() {
+		if recover() != nil {
+			sent = false
+			closed = true
+		}
+	}()
+	select {
+	case ch <- msg:
+		return true, false
+	default:
+		return false, false
+	}
+}
+
+func (o *Orchestrator) acquireWaitAny(parentTurnID int) chan struct{} {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.waitAny == nil {
+		o.waitAny = make(map[int]chan struct{})
+	}
+	if o.waiters == nil {
+		o.waiters = make(map[int]int)
+	}
+	ch := o.waitAny[parentTurnID]
+	if ch == nil {
+		ch = make(chan struct{}, 1)
+		o.waitAny[parentTurnID] = ch
+	}
+	o.waiters[parentTurnID]++
+	return ch
+}
+
+func (o *Orchestrator) releaseWaitAny(parentTurnID int) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.waiters == nil {
+		return
+	}
+	next := o.waiters[parentTurnID] - 1
+	if next > 0 {
+		o.waiters[parentTurnID] = next
+		return
+	}
+	delete(o.waiters, parentTurnID)
+	delete(o.waitAny, parentTurnID)
+}
+
+func (o *Orchestrator) signalWaitAny(parentTurnID int) {
+	if parentTurnID <= 0 {
+		return
+	}
+	o.mu.Lock()
+	ch := o.waitAny[parentTurnID]
+	o.mu.Unlock()
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+}
+
+func (o *Orchestrator) withSpawnRecordLock(spawnID int, fn func(*store.SpawnRecord) error) error {
+	var as *activeSpawn
+	o.mu.Lock()
+	as = o.spawns[spawnID]
+	o.mu.Unlock()
+	if as != nil {
+		as.recordMu.Lock()
+		defer as.recordMu.Unlock()
+	}
+	rec, err := o.store.GetSpawn(spawnID)
+	if err != nil {
+		return err
+	}
+	if err := fn(rec); err != nil {
+		return err
+	}
+	return o.store.UpdateSpawn(rec)
 }
 
 const promptEventLimitBytes = 256 * 1024
@@ -436,11 +557,14 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 	interruptCh := make(chan string, 8)
 
 	as := &activeSpawn{
-		record:      rec,
-		cancel:      childCancel,
-		done:        done,
-		eventBuffer: eventBuf,
-		interruptCh: interruptCh,
+		spawnID:       rec.ID,
+		parentProfile: req.ParentProfile,
+		childProfile:  req.ChildProfile,
+		parentTurnID:  req.ParentTurnID,
+		cancel:        childCancel,
+		done:          done,
+		eventBuffer:   eventBuf,
+		interruptCh:   interruptCh,
 	}
 
 	o.mu.Lock()
@@ -500,14 +624,30 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 	interruptDone := make(chan struct{})
 	go func() {
 		defer close(interruptDone)
-		ticker := time.NewTicker(250 * time.Millisecond)
-		defer ticker.Stop()
+		defer o.store.ReleaseInterruptSignal(rec.ID)
+		signalCh := o.store.InterruptSignalChan(rec.ID)
+		pollTicker := time.NewTicker(2 * time.Second)
+		defer pollTicker.Stop()
 		for {
 			select {
 			case <-childCtx.Done():
 				return
-			case <-ticker.C:
-				msg := o.store.CheckInterrupt(rec.ID)
+			case msg := <-signalCh:
+				if strings.TrimSpace(msg) == "" {
+					continue
+				}
+				_ = o.store.ClearInterrupt(rec.ID)
+				select {
+				case interruptCh <- msg:
+				default:
+					debug.LogKV("orch", "interrupt dropped: channel full",
+						"spawn_id", rec.ID,
+					)
+				}
+				childCancel()
+			case <-pollTicker.C:
+				// Fallback for external writers that bypass this process-local channel.
+				msg := strings.TrimSpace(o.store.CheckInterrupt(rec.ID))
 				if msg == "" {
 					continue
 				}
@@ -528,21 +668,14 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 	o.spawnWG.Add(1)
 	go func() {
 		defer o.spawnWG.Done()
+		defer close(done)
+		defer o.onSpawnComplete(rec.ID, req.ParentProfile, req.ChildProfile)
+
 		debug.LogKV("orch", "spawn goroutine started",
 			"spawn_id", rec.ID,
 			"child_profile", req.ChildProfile,
 			"workdir", workDir,
 		)
-		defer close(done)
-		defer func() {
-			close(streamCh)
-			<-eventDone
-		}()
-		defer func() {
-			childCancel()
-			<-interruptDone
-		}()
-		defer o.onSpawnComplete(rec, req.ParentProfile)
 
 		l := &loop.Loop{
 			Store:       o.store,
@@ -551,8 +684,16 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 			PlanID:      parentPlanID,
 			ProfileName: req.ChildProfile,
 			OnStart: func(turnID int, turnHexID string) {
-				rec.ChildTurnID = turnID
-				o.store.UpdateSpawn(rec)
+				if err := o.withSpawnRecordLock(rec.ID, func(stored *store.SpawnRecord) error {
+					stored.ChildTurnID = turnID
+					return nil
+				}); err != nil {
+					debug.LogKV("orch", "failed to persist child turn id",
+						"spawn_id", rec.ID,
+						"turn_id", turnID,
+						"error", err,
+					)
+				}
 			},
 			OnPrompt: func(turnID int, turnHexID, prompt string, isResume bool) {
 				trimmed, truncated, origLen := truncatePrompt(prompt)
@@ -592,6 +733,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 					Task:            req.Task,
 					ReadOnly:        req.ReadOnly,
 					ParentTurnID:    req.ParentTurnID,
+					CurrentTurnID:   turnID,
 					Delegation:      req.ChildDelegation,
 					SupervisorNotes: supervisorNotes,
 					Messages:        msgs,
@@ -631,11 +773,12 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 			"child_profile", req.ChildProfile,
 			"error", err,
 		)
-		rec.CompletedAt = time.Now().UTC()
+		completedAt := time.Now().UTC()
 
 		// Capture child's final report for parent consumption.
 		// Prefer the last assistant message when available (for models that
 		// stream JSON transcript lines), otherwise fall back to raw output.
+		summary := ""
 		if l.LastResult != nil {
 			report, reportErr := extractSpawnReport(l.LastResult.Output)
 			if reportErr != nil {
@@ -645,20 +788,24 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 					"error", reportErr,
 					"output_len", len(l.LastResult.Output),
 				)
-				rec.Summary = missingSpawnReportMessage(rec.ID, reportErr)
+				summary = missingSpawnReportMessage(rec.ID, reportErr)
 			} else {
-				rec.Summary = report
+				summary = report
 			}
 		} else {
-			rec.Summary = missingSpawnReportMessage(rec.ID, errors.New("child returned no result payload"))
+			summary = missingSpawnReportMessage(rec.ID, errors.New("child returned no result payload"))
 		}
 
 		status, exitCode, result := classifySpawnCompletion(err, l.LastResult)
-		autoCommitNote, autoCommitErr := o.autoCommitSpawnWork(rec)
+		recSnapshot, snapErr := o.store.GetSpawn(rec.ID)
+		if snapErr != nil || recSnapshot == nil {
+			recSnapshot = rec
+		}
+		autoCommitNote, autoCommitErr := o.autoCommitSpawnWork(recSnapshot)
 		if status == "canceled" {
 			cancelNote := canceledSpawnMessage(autoCommitNote != "")
 			result = appendSpawnResult(result, cancelNote)
-			rec.Summary = appendSpawnSummary(rec.Summary, cancelNote)
+			summary = appendSpawnSummary(summary, cancelNote)
 		}
 		if autoCommitErr != nil {
 			result = appendSpawnResult(result, fmt.Sprintf("auto-commit fallback failed: %v", autoCommitErr))
@@ -666,18 +813,38 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 			result = appendSpawnResult(result, autoCommitNote)
 		}
 		// Clean up read-only worktrees immediately — there's nothing to merge.
-		if rec.ReadOnly && rec.WorktreePath != "" {
+		if recSnapshot.ReadOnly && recSnapshot.WorktreePath != "" {
 			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			if rmErr := o.worktrees.Remove(cleanCtx, rec.WorktreePath, false); rmErr != nil {
+			if rmErr := o.worktrees.Remove(cleanCtx, recSnapshot.WorktreePath, false); rmErr != nil {
 				debug.LogKV("orch", "read-only worktree cleanup failed",
-					"spawn_id", rec.ID, "worktree", rec.WorktreePath, "error", rmErr)
+					"spawn_id", rec.ID, "worktree", recSnapshot.WorktreePath, "error", rmErr)
 			}
 			cleanCancel()
 		}
-		rec.Status = status
-		rec.ExitCode = exitCode
-		rec.Result = result
-		o.store.UpdateSpawn(rec)
+		if err := o.withSpawnRecordLock(rec.ID, func(stored *store.SpawnRecord) error {
+			stored.CompletedAt = completedAt
+			stored.Summary = summary
+			stored.Status = status
+			stored.ExitCode = exitCode
+			stored.Result = result
+			return nil
+		}); err != nil {
+			debug.LogKV("orch", "failed to persist spawn completion",
+				"spawn_id", rec.ID,
+				"error", err,
+			)
+		}
+
+		parentTurnID := req.ParentTurnID
+		if finalRec, err := o.store.GetSpawn(rec.ID); err == nil && finalRec != nil && finalRec.ParentTurnID > 0 {
+			parentTurnID = finalRec.ParentTurnID
+		}
+		o.signalWaitAny(parentTurnID)
+
+		childCancel()
+		close(streamCh)
+		o.waitForAuxiliary("event bridge", rec.ID, eventDone)
+		o.waitForAuxiliary("interrupt watcher", rec.ID, interruptDone)
 	}()
 
 	if req.Wait {
@@ -932,19 +1099,42 @@ func shortHash(hash string) string {
 	return hash
 }
 
-func (o *Orchestrator) onSpawnComplete(rec *store.SpawnRecord, parentProfile string) {
+const auxiliaryGoroutineWaitTimeout = 3 * time.Second
+
+func (o *Orchestrator) waitForAuxiliary(name string, spawnID int, done <-chan struct{}) {
+	select {
+	case <-done:
+	case <-time.After(auxiliaryGoroutineWaitTimeout):
+		debug.LogKV("orch", "auxiliary goroutine timed out during cleanup",
+			"spawn_id", spawnID,
+			"name", name,
+			"timeout", auxiliaryGoroutineWaitTimeout,
+		)
+	}
+}
+
+func (o *Orchestrator) onSpawnComplete(spawnID int, parentProfile, childProfile string) {
+	status := ""
+	exitCode := 0
+	if rec, err := o.store.GetSpawn(spawnID); err == nil && rec != nil {
+		status = rec.Status
+		exitCode = rec.ExitCode
+		if childProfile == "" {
+			childProfile = rec.ChildProfile
+		}
+	}
 	debug.LogKV("orch", "onSpawnComplete",
-		"spawn_id", rec.ID,
-		"child_profile", rec.ChildProfile,
-		"status", rec.Status,
-		"exit_code", rec.ExitCode,
+		"spawn_id", spawnID,
+		"child_profile", childProfile,
+		"status", status,
+		"exit_code", exitCode,
 	)
-	_ = o.store.ClearInterrupt(rec.ID)
+	_ = o.store.ClearInterrupt(spawnID)
 
 	o.mu.Lock()
-	delete(o.spawns, rec.ID)
+	delete(o.spawns, spawnID)
 	o.decrementRunningLocked(parentProfile)
-	o.decrementInstancesLocked(rec.ChildProfile)
+	o.decrementInstancesLocked(childProfile)
 	o.mu.Unlock()
 }
 
@@ -1020,6 +1210,8 @@ func (o *Orchestrator) WaitAny(ctx context.Context, parentTurnID int, alreadySee
 		"parent_turn", parentTurnID,
 		"already_seen", len(alreadySeen),
 	)
+	waitAnyCh := o.acquireWaitAny(parentTurnID)
+	defer o.releaseWaitAny(parentTurnID)
 	records, _ := o.store.SpawnsByParent(parentTurnID)
 	pending := make(map[int]struct{})
 	var completed []int
@@ -1047,28 +1239,26 @@ func (o *Orchestrator) WaitAny(ctx context.Context, parentTurnID int, alreadySee
 		return nil, false
 	}
 
-	// Poll until at least one pending spawn reaches a terminal state that
+	// Wait until at least one pending spawn reaches a terminal state that
 	// has not already been delivered, or all spawns are terminal.
 	if len(completed) == 0 && len(pending) > 0 {
-		debug.LogKV("orch", "WaitAny polling",
+		debug.LogKV("orch", "WaitAny waiting for completion signal",
 			"parent_turn", parentTurnID,
 			"already_seen", len(alreadySeen),
 			"pending", len(pending),
 		)
 		waitStart := time.Now()
-		ticker := time.NewTicker(250 * time.Millisecond)
-		defer ticker.Stop()
 
 		for len(completed) == 0 && len(pending) > 0 {
 			select {
 			case <-ctx.Done():
-				debug.LogKV("orch", "WaitAny cancelled during poll",
+				debug.LogKV("orch", "WaitAny cancelled while waiting",
 					"parent_turn", parentTurnID,
 					"wait_duration", time.Since(waitStart),
 					"pending", len(pending),
 				)
 				return nil, false
-			case <-ticker.C:
+			case <-waitAnyCh:
 			}
 			for id := range pending {
 				rec, err := o.store.GetSpawn(id)
@@ -1085,7 +1275,7 @@ func (o *Orchestrator) WaitAny(ctx context.Context, parentTurnID int, alreadySee
 				}
 			}
 		}
-		debug.LogKV("orch", "WaitAny poll complete",
+		debug.LogKV("orch", "WaitAny signal wait complete",
 			"parent_turn", parentTurnID,
 			"wait_duration", time.Since(waitStart),
 			"already_seen", len(alreadySeen),
@@ -1170,10 +1360,10 @@ func (o *Orchestrator) WaitForRunningSpawns(parentTurnIDs []int, timeout time.Du
 	targets := make([]waitTarget, 0, len(o.spawns))
 	for _, as := range o.spawns {
 		if len(parentFilter) > 0 {
-			if as.record == nil {
+			if as == nil {
 				continue
 			}
-			if _, ok := parentFilter[as.record.ParentTurnID]; !ok {
+			if _, ok := parentFilter[as.ParentTurnID()]; !ok {
 				continue
 			}
 		}
@@ -1423,22 +1613,20 @@ func (o *Orchestrator) cleanupStaleWorktrees() {
 
 // ReparentSpawn updates a spawn's parent turn ID, used for handoff across loop steps.
 func (o *Orchestrator) ReparentSpawn(spawnID, newParentTurnID int) error {
-	rec, err := o.store.GetSpawn(spawnID)
-	if err != nil {
+	if err := o.withSpawnRecordLock(spawnID, func(rec *store.SpawnRecord) error {
+		rec.ParentTurnID = newParentTurnID
+		rec.HandedOffToTurn = newParentTurnID
+		return nil
+	}); err != nil {
 		return fmt.Errorf("spawn %d not found: %w", spawnID, err)
-	}
-	rec.ParentTurnID = newParentTurnID
-	rec.HandedOffToTurn = newParentTurnID
-	if err := o.store.UpdateSpawn(rec); err != nil {
-		return err
 	}
 
 	o.mu.Lock()
-	if as, ok := o.spawns[spawnID]; ok && as.record != nil {
-		as.record.ParentTurnID = newParentTurnID
-		as.record.HandedOffToTurn = newParentTurnID
-	}
+	as, ok := o.spawns[spawnID]
 	o.mu.Unlock()
+	if ok && as != nil {
+		as.SetParentTurnID(newParentTurnID)
+	}
 	return nil
 }
 
@@ -1448,13 +1636,15 @@ func (o *Orchestrator) ActiveSpawnsForParent(parentTurnID int) []int {
 	defer o.mu.Unlock()
 	var ids []int
 	for _, as := range o.spawns {
-		if as.record.ParentTurnID == parentTurnID {
-			ids = append(ids, as.record.ID)
+		if as == nil {
+			continue
+		}
+		if as.ParentTurnID() == parentTurnID {
+			ids = append(ids, as.spawnID)
 		}
 	}
 	return ids
 }
-
 func isTerminalSpawnStatus(status string) bool {
 	switch status {
 	case "completed", "failed", "canceled", "cancelled", "merged", "rejected":
