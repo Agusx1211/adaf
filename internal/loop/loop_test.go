@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -283,6 +285,40 @@ func TestLoopRunReturnsContextCanceledAndMarksCancelled(t *testing.T) {
 	}
 	if turns[0].BuildState != "cancelled" {
 		t.Fatalf("build state = %q, want %q", turns[0].BuildState, "cancelled")
+	}
+}
+
+func TestLoopRunReturnsErrorWhenRecordingFlushFails(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "test", RepoPath: dir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
+	}
+
+	// Block SaveRecording/MkdirAll by replacing the expected turn record path with a file.
+	blockPath := filepath.Join(s.Root(), "records", "1")
+	if err := os.WriteFile(blockPath, []byte("block"), 0644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", blockPath, err)
+	}
+
+	l := &Loop{
+		Store: s,
+		Agent: &stubAgent{},
+		Config: agent.Config{
+			Prompt:   "base",
+			MaxTurns: 1,
+		},
+	}
+
+	err = l.Run(context.Background())
+	if err == nil {
+		t.Fatalf("Loop.Run() error = nil, want flush error")
+	}
+	if !strings.Contains(err.Error(), "flushing recording for turn 1") {
+		t.Fatalf("Loop.Run() error = %v, want flush context", err)
 	}
 }
 

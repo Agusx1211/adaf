@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+var codexMarshalJSON = json.Marshal
+
 type codexEvent struct {
 	Type     string      `json:"type"`
 	ThreadID string      `json:"thread_id,omitempty"`
@@ -146,18 +148,21 @@ func parseCodexLine(raw []byte) (ClaudeEvent, bool, error) {
 		if ev.Item == nil {
 			return ClaudeEvent{}, false, nil
 		}
-		mapped, ok := codexItemToClaude(ev.Type, *ev.Item)
+		mapped, ok, err := codexItemToClaude(ev.Type, *ev.Item)
+		if err != nil {
+			return ClaudeEvent{}, false, err
+		}
 		return mapped, ok, nil
 	default:
 		return ClaudeEvent{}, false, nil
 	}
 }
 
-func codexItemToClaude(eventType string, item codexItem) (ClaudeEvent, bool) {
+func codexItemToClaude(eventType string, item codexItem) (ClaudeEvent, bool, error) {
 	switch item.Type {
 	case "agent_message":
 		if strings.TrimSpace(item.Text) == "" {
-			return ClaudeEvent{}, false
+			return ClaudeEvent{}, false, nil
 		}
 		return ClaudeEvent{
 			Type: "assistant",
@@ -170,10 +175,10 @@ func codexItemToClaude(eventType string, item codexItem) (ClaudeEvent, bool) {
 					},
 				},
 			},
-		}, true
+		}, true, nil
 	case "reasoning":
 		if strings.TrimSpace(item.Text) == "" {
-			return ClaudeEvent{}, false
+			return ClaudeEvent{}, false, nil
 		}
 		return ClaudeEvent{
 			Type: "assistant",
@@ -186,7 +191,7 @@ func codexItemToClaude(eventType string, item codexItem) (ClaudeEvent, bool) {
 					},
 				},
 			},
-		}, true
+		}, true, nil
 	case "command_execution":
 		return codexCommandExecutionToClaude(eventType, item)
 	case "mcp_tool_call":
@@ -194,7 +199,7 @@ func codexItemToClaude(eventType string, item codexItem) (ClaudeEvent, bool) {
 	case "file_change":
 		summary := codexFileChangeSummary(item)
 		if summary == "" {
-			return ClaudeEvent{}, false
+			return ClaudeEvent{}, false, nil
 		}
 		return ClaudeEvent{
 			Type: "assistant",
@@ -207,10 +212,10 @@ func codexItemToClaude(eventType string, item codexItem) (ClaudeEvent, bool) {
 					},
 				},
 			},
-		}, true
+		}, true, nil
 	case "todo_list":
 		if len(item.Items) == 0 {
-			return ClaudeEvent{}, false
+			return ClaudeEvent{}, false, nil
 		}
 		var b strings.Builder
 		for _, todo := range item.Items {
@@ -225,7 +230,7 @@ func codexItemToClaude(eventType string, item codexItem) (ClaudeEvent, bool) {
 		}
 		text := strings.TrimSpace(b.String())
 		if text == "" {
-			return ClaudeEvent{}, false
+			return ClaudeEvent{}, false, nil
 		}
 		return ClaudeEvent{
 			Type: "assistant",
@@ -238,20 +243,20 @@ func codexItemToClaude(eventType string, item codexItem) (ClaudeEvent, bool) {
 					},
 				},
 			},
-		}, true
+		}, true, nil
 	case "web_search":
 		if eventType == "item.started" {
 			input := `{}`
 			if strings.TrimSpace(item.Query) != "" {
 				input = fmt.Sprintf(`{"query":%q}`, item.Query)
 			}
-			return codexToolUseEvent(item.ID, "web_search", []byte(input)), true
+			return codexToolUseEvent(item.ID, "web_search", []byte(input)), true, nil
 		}
 		resultText := item.Query
 		if resultText == "" {
 			resultText = "web search completed"
 		}
-		return codexToolResultEvent(item.ID, false, []byte(fmt.Sprintf("%q", resultText))), true
+		return codexToolResultEvent(item.ID, false, []byte(fmt.Sprintf("%q", resultText))), true, nil
 	case "error":
 		msg := "unknown error"
 		if item.Error != nil && strings.TrimSpace(item.Error.Message) != "" {
@@ -260,20 +265,23 @@ func codexItemToClaude(eventType string, item codexItem) (ClaudeEvent, bool) {
 		return ClaudeEvent{
 			Type:       "error",
 			ResultText: msg,
-		}, true
+		}, true, nil
 	default:
-		return ClaudeEvent{}, false
+		return ClaudeEvent{}, false, nil
 	}
 }
 
-func codexCommandExecutionToClaude(eventType string, item codexItem) (ClaudeEvent, bool) {
+func codexCommandExecutionToClaude(eventType string, item codexItem) (ClaudeEvent, bool, error) {
 	status := strings.ToLower(strings.TrimSpace(item.Status))
 	isStart := eventType == "item.started" || status == "" || status == "in_progress"
 	if isStart {
-		inputJSON, _ := json.Marshal(map[string]string{
+		inputJSON, err := codexMarshalJSON(map[string]string{
 			"command": item.Command,
 		})
-		return codexToolUseEvent(item.ID, "Bash", inputJSON), true
+		if err != nil {
+			return ClaudeEvent{}, false, fmt.Errorf("marshal command_execution input: %w", err)
+		}
+		return codexToolUseEvent(item.ID, "Bash", inputJSON), true, nil
 	}
 
 	isError := status == "failed" || status == "declined" || (item.ExitCode != nil && *item.ExitCode != 0)
@@ -288,11 +296,14 @@ func codexCommandExecutionToClaude(eventType string, item codexItem) (ClaudeEven
 			text = "command finished"
 		}
 	}
-	content, _ := json.Marshal(text)
-	return codexToolResultEvent(item.ID, isError, content), true
+	content, err := codexMarshalJSON(text)
+	if err != nil {
+		return ClaudeEvent{}, false, fmt.Errorf("marshal command_execution result: %w", err)
+	}
+	return codexToolResultEvent(item.ID, isError, content), true, nil
 }
 
-func codexMCPToolToClaude(eventType string, item codexItem) (ClaudeEvent, bool) {
+func codexMCPToolToClaude(eventType string, item codexItem) (ClaudeEvent, bool, error) {
 	status := strings.ToLower(strings.TrimSpace(item.Status))
 	isStart := eventType == "item.started" || status == "" || status == "in_progress"
 	toolName := strings.Trim(strings.Join([]string{item.Server, item.Tool}, "."), ".")
@@ -305,20 +316,26 @@ func codexMCPToolToClaude(eventType string, item codexItem) (ClaudeEvent, bool) 
 		if len(input) == 0 {
 			input = []byte("{}")
 		}
-		return codexToolUseEvent(item.ID, toolName, input), true
+		return codexToolUseEvent(item.ID, toolName, input), true, nil
 	}
 
 	isError := status == "failed"
 	if item.Error != nil && strings.TrimSpace(item.Error.Message) != "" {
 		isError = true
-		msgJSON, _ := json.Marshal(item.Error.Message)
-		return codexToolResultEvent(item.ID, true, msgJSON), true
+		msgJSON, err := codexMarshalJSON(item.Error.Message)
+		if err != nil {
+			return ClaudeEvent{}, false, fmt.Errorf("marshal mcp_tool_call error result: %w", err)
+		}
+		return codexToolResultEvent(item.ID, true, msgJSON), true, nil
 	}
 	if len(item.Result) > 0 {
-		return codexToolResultEvent(item.ID, isError, item.Result), true
+		return codexToolResultEvent(item.ID, isError, item.Result), true, nil
 	}
-	okJSON, _ := json.Marshal("ok")
-	return codexToolResultEvent(item.ID, isError, okJSON), true
+	okJSON, err := codexMarshalJSON("ok")
+	if err != nil {
+		return ClaudeEvent{}, false, fmt.Errorf("marshal mcp_tool_call default result: %w", err)
+	}
+	return codexToolResultEvent(item.ID, isError, okJSON), true, nil
 }
 
 func codexToolUseEvent(id, name string, input []byte) ClaudeEvent {

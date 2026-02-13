@@ -408,9 +408,9 @@ func (l *Loop) Run(ctx context.Context) error {
 		}
 
 		// Flush the recording to the store.
-		if flushErr := rec.Flush(); flushErr != nil {
+		flushErr := rec.Flush()
+		if flushErr != nil {
 			debug.LogKV("loop", "recording flush failed", "turn_id", turnID, "error", flushErr)
-			fmt.Printf("warning: failed to flush recording for turn %d: %v\n", turnID, flushErr)
 		} else {
 			debug.LogKV("loop", "recording flushed", "turn_id", turnID)
 		}
@@ -456,6 +456,13 @@ func (l *Loop) Run(ctx context.Context) error {
 		// Notify listener.
 		if l.OnEnd != nil {
 			l.OnEnd(turnID, turnHexID, result)
+		}
+		if flushErr != nil {
+			flushRunErr := fmt.Errorf("flushing recording for turn %d: %w", turnID, flushErr)
+			if runErr != nil {
+				return errors.Join(runErr, flushRunErr)
+			}
+			return flushRunErr
 		}
 
 		// Check for wait-for-spawns signal first. This is turn control flow,

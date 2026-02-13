@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -122,5 +123,58 @@ not json
 	}
 	if second.Err == nil {
 		t.Fatal("second.Err = nil, want parse error")
+	}
+}
+
+func TestParseCodexMarshalFailuresAreReported(t *testing.T) {
+	tests := []struct {
+		name    string
+		line    string
+		wantErr string
+	}{
+		{
+			name:    "command start tool use payload",
+			line:    `{"type":"item.started","item":{"id":"cmd-1","type":"command_execution","command":"ls","status":"in_progress"}}`,
+			wantErr: "marshal command_execution input",
+		},
+		{
+			name:    "command completion tool result payload",
+			line:    `{"type":"item.completed","item":{"id":"cmd-2","type":"command_execution","command":"ls","aggregated_output":"ok","status":"completed"}}`,
+			wantErr: "marshal command_execution result",
+		},
+		{
+			name:    "mcp error result payload",
+			line:    `{"type":"item.completed","item":{"id":"mcp-1","type":"mcp_tool_call","server":"fs","tool":"read","status":"failed","error":{"message":"boom"}}}`,
+			wantErr: "marshal mcp_tool_call error result",
+		},
+		{
+			name:    "mcp default ok payload",
+			line:    `{"type":"item.completed","item":{"id":"mcp-2","type":"mcp_tool_call","server":"fs","tool":"read","status":"completed"}}`,
+			wantErr: "marshal mcp_tool_call default result",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origMarshal := codexMarshalJSON
+			codexMarshalJSON = func(v any) ([]byte, error) {
+				return nil, errors.New("marshal failed")
+			}
+			t.Cleanup(func() {
+				codexMarshalJSON = origMarshal
+			})
+
+			ch := ParseCodex(context.Background(), strings.NewReader(tt.line+"\n"))
+			ev, ok := <-ch
+			if !ok {
+				t.Fatalf("expected one event, got closed channel")
+			}
+			if ev.Err == nil {
+				t.Fatalf("ev.Err = nil, want marshal error")
+			}
+			if !strings.Contains(ev.Err.Error(), tt.wantErr) {
+				t.Fatalf("ev.Err = %v, want substring %q", ev.Err, tt.wantErr)
+			}
+		})
 	}
 }
