@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -96,71 +95,32 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 		cmd.Stdin = stdinReader
 	}
 
-	// Environment: inherit + overlay.
-	cmd.Env = os.Environ()
-	for k, v := range cfg.Env {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
-
-	// Determine stdout/stderr writers, respecting cfg overrides.
-	stdoutW := cfg.Stdout
-	if stdoutW == nil {
-		stdoutW = os.Stdout
-	}
-	stderrW := cfg.Stderr
-	if stderrW == nil {
-		stderrW = os.Stderr
-	}
-
-	// Capture output.
-	var stdoutBuf, stderrBuf bytes.Buffer
-	stdoutWriters := []io.Writer{
-		&stdoutBuf,
-		recorder.WrapWriter(stdoutW, "stdout"),
-	}
-	if w := newEventSinkWriter(cfg.EventSink, cfg.TurnID, ""); w != nil {
-		stdoutWriters = append(stdoutWriters, w)
-	}
-	cmd.Stdout = io.MultiWriter(stdoutWriters...)
-
-	stderrWriters := []io.Writer{
-		&stderrBuf,
-		recorder.WrapWriter(stderrW, "stderr"),
-	}
-	if w := newEventSinkWriter(cfg.EventSink, cfg.TurnID, "[stderr] "); w != nil {
-		stderrWriters = append(stderrWriters, w)
-	}
-	cmd.Stderr = io.MultiWriter(stderrWriters...)
-
-	recorder.RecordMeta("agent", "vibe")
-	recorder.RecordMeta("command", cmdName+" "+strings.Join(args, " "))
-	recorder.RecordMeta("workdir", cfg.WorkDir)
+	setupEnv(cmd, cfg.Env)
+	bo := setupBufferOutput(cmd, cfg, recorder)
+	recordMeta(recorder, "vibe", cmdName, args, cfg.WorkDir)
 
 	start := time.Now()
 	debug.LogKV("agent.vibe", "process starting", "binary", cmdName)
 	err := cmd.Run()
 	duration := time.Since(start)
 
-	exitCode := 0
+	exitCode, err := extractExitCode(err)
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			debug.LogKV("agent.vibe", "cmd.Run() error (not ExitError)", "error", err)
-			return nil, fmt.Errorf("vibe agent: failed to run command: %w", err)
-		}
+		debug.LogKV("agent.vibe", "cmd.Run() error (not ExitError)", "error", err)
+		return nil, fmt.Errorf("vibe agent: failed to run command: %w", err)
 	}
+
 	debug.LogKV("agent.vibe", "process finished",
 		"exit_code", exitCode,
 		"duration", duration,
-		"output_len", stdoutBuf.Len(),
+		"output_len", bo.StdoutBuf.Len(),
 	)
 
 	return &Result{
 		ExitCode: exitCode,
 		Duration: duration,
-		Output:   stdoutBuf.String(),
-		Error:    stderrBuf.String(),
+		Output:   bo.StdoutBuf.String(),
+		Error:    bo.StderrBuf.String(),
 	}, nil
 }
 
