@@ -58,6 +58,21 @@ var turnCreateCmd = &cobra.Command{
 	RunE:    runTurnCreate,
 }
 
+var turnSearchCmd = &cobra.Command{
+	Use:   "search",
+	Short: "Search turn records by keyword",
+	Long: `Search turn records for a keyword across all text fields.
+
+Searches Objective, WhatWasBuilt, KeyDecisions, NextSteps, Challenges,
+KnownIssues, and CurrentState fields (case-insensitive substring match).
+
+Examples:
+  adaf log search --query "authentication"
+  adaf log search --query "refactor" --agent claude --limit 5
+  adaf log search --query "test" --plan my-plan`,
+	RunE: runTurnSearch,
+}
+
 func init() {
 	turnListCmd.Flags().String("plan", "", "Filter turns by plan ID")
 
@@ -77,10 +92,17 @@ func init() {
 	_ = turnCreateCmd.MarkFlagRequired("agent")
 	_ = turnCreateCmd.MarkFlagRequired("objective")
 
+	turnSearchCmd.Flags().String("query", "", "Search query (required)")
+	turnSearchCmd.Flags().String("plan", "", "Filter by plan ID")
+	turnSearchCmd.Flags().String("agent", "", "Filter by agent name")
+	turnSearchCmd.Flags().Int("limit", 10, "Maximum number of results")
+	_ = turnSearchCmd.MarkFlagRequired("query")
+
 	turnCmd.AddCommand(turnListCmd)
 	turnCmd.AddCommand(turnShowCmd)
 	turnCmd.AddCommand(turnLatestCmd)
 	turnCmd.AddCommand(turnCreateCmd)
+	turnCmd.AddCommand(turnSearchCmd)
 	rootCmd.AddCommand(turnCmd)
 }
 
@@ -308,6 +330,100 @@ func printTurn(turn *store.Turn) {
 	printLogSection("Next Steps", turn.NextSteps)
 
 	fmt.Println()
+}
+
+func runTurnSearch(cmd *cobra.Command, args []string) error {
+	s, err := openStoreRequired()
+	if err != nil {
+		return err
+	}
+
+	query, _ := cmd.Flags().GetString("query")
+	planFilter, _ := cmd.Flags().GetString("plan")
+	agentFilter, _ := cmd.Flags().GetString("agent")
+	limit, _ := cmd.Flags().GetInt("limit")
+
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return fmt.Errorf("--query is required")
+	}
+	queryLower := strings.ToLower(query)
+
+	planFilter = strings.TrimSpace(planFilter)
+	if planFilter != "" {
+		if err := validatePlanID(planFilter); err != nil {
+			return err
+		}
+	}
+	agentFilter = strings.TrimSpace(strings.ToLower(agentFilter))
+
+	turns, err := s.ListTurns()
+	if err != nil {
+		return fmt.Errorf("listing turns: %w", err)
+	}
+
+	var matches []store.Turn
+	for _, t := range turns {
+		if planFilter != "" && t.PlanID != planFilter {
+			continue
+		}
+		if agentFilter != "" && strings.ToLower(t.Agent) != agentFilter {
+			continue
+		}
+		if turnMatchesQuery(t, queryLower) {
+			matches = append(matches, t)
+		}
+	}
+
+	printHeader("Search Results")
+
+	if len(matches) == 0 {
+		fmt.Printf("  %sNo turns matching %q.%s\n\n", colorDim, query, colorReset)
+		return nil
+	}
+
+	// Show most recent matches first, up to limit.
+	if len(matches) > limit {
+		matches = matches[len(matches)-limit:]
+	}
+
+	headers := []string{"ID", "DATE", "AGENT", "PLAN", "OBJECTIVE"}
+	var rows [][]string
+	for _, t := range matches {
+		plan := "shared"
+		if t.PlanID != "" {
+			plan = t.PlanID
+		}
+		rows = append(rows, []string{
+			fmt.Sprintf("#%d", t.ID),
+			t.Date.Format("2006-01-02"),
+			t.Agent,
+			plan,
+			truncate(t.Objective, 50),
+		})
+	}
+	printTable(headers, rows)
+
+	fmt.Printf("\n  %sMatches: %d (showing %d)%s\n\n", colorDim, len(matches), len(rows), colorReset)
+	return nil
+}
+
+func turnMatchesQuery(t store.Turn, queryLower string) bool {
+	fields := []string{
+		t.Objective,
+		t.WhatWasBuilt,
+		t.KeyDecisions,
+		t.NextSteps,
+		t.Challenges,
+		t.KnownIssues,
+		t.CurrentState,
+	}
+	for _, f := range fields {
+		if f != "" && strings.Contains(strings.ToLower(f), queryLower) {
+			return true
+		}
+	}
+	return false
 }
 
 func printLogSection(title, content string) {

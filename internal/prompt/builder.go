@@ -9,10 +9,7 @@ import (
 	"github.com/agusx1211/adaf/internal/store"
 )
 
-const (
-	maxLastSessionObjective = 500
-	maxLastSessionField     = 300
-)
+const maxRecentTurns = 5
 
 // LoopPromptContext provides loop-specific context for prompt generation.
 type LoopPromptContext struct {
@@ -136,7 +133,7 @@ func Build(opts BuildOpts) (string, error) {
 		}
 	}
 
-	latest, _ := s.LatestTurn()
+	allTurns, _ := s.ListTurns()
 
 	// Role-specific header.
 	if opts.Profile != nil {
@@ -239,21 +236,69 @@ func Build(opts BuildOpts) (string, error) {
 	// Context.
 	b.WriteString("# Context\n\n")
 
-	if latest != nil {
-		b.WriteString("## Last Session\n")
-		if latest.Objective != "" {
-			fmt.Fprintf(&b, "- Objective: %s\n", summarizeForContext(latest.Objective, maxLastSessionObjective))
+	if len(allTurns) > 0 {
+		totalTurns := len(allTurns)
+		start := totalTurns - maxRecentTurns
+		if start < 0 {
+			start = 0
 		}
-		if latest.WhatWasBuilt != "" {
-			fmt.Fprintf(&b, "- Built: %s\n", summarizeForContext(latest.WhatWasBuilt, maxLastSessionField))
+		recentTurns := allTurns[start:]
+
+		b.WriteString("## Recent Session Logs\n\n")
+		if totalTurns > len(recentTurns) {
+			fmt.Fprintf(&b, "There are %d session logs total. Showing the %d most recent:\n\n", totalTurns, len(recentTurns))
 		}
-		if latest.NextSteps != "" {
-			fmt.Fprintf(&b, "- Next steps: %s\n", summarizeForContext(latest.NextSteps, maxLastSessionField))
+
+		for i, turn := range recentTurns {
+			isLatest := i == len(recentTurns)-1
+
+			fmt.Fprintf(&b, "### Turn #%d", turn.ID)
+			if !turn.Date.IsZero() {
+				fmt.Fprintf(&b, " (%s", turn.Date.Format("2006-01-02"))
+				if turn.Agent != "" {
+					fmt.Fprintf(&b, ", %s", turn.Agent)
+				}
+				b.WriteString(")")
+			}
+			b.WriteString("\n")
+
+			if isLatest {
+				// Most recent turn: full detail.
+				if turn.Objective != "" {
+					fmt.Fprintf(&b, "- Objective: %s\n", turn.Objective)
+				}
+				if turn.WhatWasBuilt != "" {
+					fmt.Fprintf(&b, "- Built: %s\n", turn.WhatWasBuilt)
+				}
+				if turn.KeyDecisions != "" {
+					fmt.Fprintf(&b, "- Key decisions: %s\n", turn.KeyDecisions)
+				}
+				if turn.Challenges != "" {
+					fmt.Fprintf(&b, "- Challenges: %s\n", turn.Challenges)
+				}
+				if turn.CurrentState != "" {
+					fmt.Fprintf(&b, "- Current state: %s\n", turn.CurrentState)
+				}
+				if turn.KnownIssues != "" {
+					fmt.Fprintf(&b, "- Known issues: %s\n", turn.KnownIssues)
+				}
+				if turn.NextSteps != "" {
+					fmt.Fprintf(&b, "- Next steps: %s\n", turn.NextSteps)
+				}
+				if turn.BuildState != "" {
+					fmt.Fprintf(&b, "- Build state: %s\n", turn.BuildState)
+				}
+			} else {
+				// Older turns: condensed view.
+				if turn.Objective != "" {
+					fmt.Fprintf(&b, "- Objective: %s\n", turn.Objective)
+				}
+				if turn.WhatWasBuilt != "" {
+					fmt.Fprintf(&b, "- Built: %s\n", turn.WhatWasBuilt)
+				}
+			}
+			b.WriteString("\n")
 		}
-		if latest.KnownIssues != "" {
-			fmt.Fprintf(&b, "- Known issues: %s\n", summarizeForContext(latest.KnownIssues, maxLastSessionField))
-		}
-		b.WriteString("\n")
 	}
 
 	var issues []store.Issue
@@ -408,18 +453,3 @@ func formatWaitResultInfo(wr WaitResultInfo) string {
 	return b.String()
 }
 
-func summarizeForContext(s string, max int) string {
-	if max <= 0 {
-		return ""
-	}
-	s = strings.ReplaceAll(s, "\r", " ")
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.Join(strings.Fields(s), " ")
-	if len(s) <= max {
-		return s
-	}
-	if max <= 3 {
-		return s[:max]
-	}
-	return s[:max-3] + "..."
-}

@@ -30,7 +30,9 @@ You have access to the ` + "`adaf`" + ` CLI for managing project state. Use it t
 - ` + "`adaf status`" + ` — Overview of project (plan progress, open issues, recent sessions)
 - ` + "`adaf plan show`" + ` — View the current plan with all phases and their status
 - ` + "`adaf log latest`" + ` — Read the most recent session log to understand where things stand
+- ` + "`adaf log list`" + ` — List all session logs (shows ID, date, agent, objective)
 - ` + "`adaf log show <id>`" + ` — Read a specific session log
+- ` + "`adaf log search --query \"keyword\"`" + ` — Search session logs by keyword (across all fields)
 
 ### Issues
 - ` + "`adaf issue list`" + ` — List all open issues
@@ -38,8 +40,29 @@ You have access to the ` + "`adaf`" + ` CLI for managing project state. Use it t
 - ` + "`adaf issue create --title \"...\" --description \"...\" --priority high`" + ` — Report a new issue
 - ` + "`adaf issue update <id> --status resolved`" + ` — Mark an issue as resolved
 
-### Session Logging (do this at the end of every session)
-- ` + "`adaf log create --agent <your-name> --objective \"...\" --built \"...\" --state \"...\" --next \"...\"`" + ` — Write your session log
+### Session Logging (REQUIRED at the end of every session)
+
+Write a detailed session log before finishing. This is the primary handoff mechanism — the next agent relies on your log to pick up where you left off.
+
+` + "```" + `
+adaf log create --agent <your-name> \
+  --objective "What you set out to do" \
+  --built "What you actually built/changed" \
+  --state "Current state of the codebase" \
+  --next "Specific next steps for the next agent" \
+  --issues "Known issues or TODOs left behind" \
+  --decisions "Key decisions you made and why" \
+  --challenges "Difficulties encountered" \
+  --build-state "go build: OK, go test: 2 failures in pkg/foo"
+` + "```" + `
+
+**Quality guidelines:**
+- Be specific: reference exact file paths, function names, and test names
+- Always include build state: does ` + "`go build`" + ` succeed? Do tests pass? Which ones fail?
+- Next steps should be specific enough for a new agent to start working immediately
+- Known issues should reference specific files/lines where TODOs or problems exist
+- If you made architectural decisions, also record them with ` + "`adaf decision create`" + ` and mention them in your --decisions field
+- Use ` + "`adaf log search --query \"keyword\"`" + ` to find relevant prior session context when needed
 
 ### Decisions
 - ` + "`adaf decision list`" + ` — Review past architectural decisions
@@ -80,11 +103,12 @@ Use ` + "`--read-only`" + ` scouts for any information gathering (repo structure
 
 ## Session Protocol
 
-1. **Orient**: Run ` + "`adaf status`" + ` and ` + "`adaf log latest`" + ` to understand current state
-2. **Decide**: Pick the highest-impact work based on the plan and open issues
-3. **Work**: Build, test, integrate
-4. **Log**: Write your session log with ` + "`adaf log create`" + `
-5. **Commit**: Commit your code changes
+1. **Orient**: Run ` + "`adaf status`" + ` and ` + "`adaf log latest`" + ` to understand current state. If you need more history, use ` + "`adaf log list`" + ` and ` + "`adaf log show <id>`" + ` or ` + "`adaf log search --query \"...\"`" + `
+2. **Decide**: Pick the highest-impact work based on the plan, open issues, and the previous session's next steps
+3. **Work**: Build, test, integrate. Run tests frequently. Ensure ` + "`go build`" + ` passes before moving on
+4. **Record decisions**: If you made architectural choices, run ` + "`adaf decision create --title \"...\" --context \"...\" --decision \"...\" --rationale \"...\"`" + `
+5. **Log**: Write a detailed session log with ` + "`adaf log create`" + ` — include ALL fields, especially --build-state, --next, and --issues
+6. **Commit**: Commit your code changes
 `
 }
 
