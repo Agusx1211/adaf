@@ -59,6 +59,9 @@ type BuildOpts struct {
 	// Messages from parent agent (for child prompts).
 	Messages []store.SpawnMessage
 
+	// IssueIDs are specific issues assigned to this sub-agent by the parent.
+	IssueIDs []int
+
 	// LoopContext provides loop-specific context (nil if not in a loop).
 	LoopContext *LoopPromptContext
 
@@ -164,63 +167,6 @@ func Build(opts BuildOpts) (string, error) {
 		b.WriteString("Delegate all coding work to sub-agents instead.\n\n")
 	}
 
-	// Objective.
-	b.WriteString("# Objective\n\n")
-	b.WriteString("Project: " + project.Name + "\n\n")
-	if plan != nil {
-		fmt.Fprintf(&b, "You are working on plan: **%s**", plan.ID)
-		if plan.Title != "" {
-			fmt.Fprintf(&b, " — %s", plan.Title)
-		}
-		b.WriteString("\n\n")
-	}
-
-	if opts.Task != "" {
-		b.WriteString(opts.Task + "\n\n")
-	} else {
-		var currentPhase *store.PlanPhase
-		if plan != nil && len(plan.Phases) > 0 {
-			for i := range plan.Phases {
-				p := &plan.Phases[i]
-				if p.Status == "not_started" || p.Status == "in_progress" {
-					currentPhase = p
-					break
-				}
-			}
-		}
-
-		if currentPhase != nil {
-			fmt.Fprintf(&b, "Your task is to work on phase **%s: %s**.\n\n", currentPhase.ID, currentPhase.Title)
-			if currentPhase.Description != "" {
-				b.WriteString(currentPhase.Description + "\n\n")
-			}
-		} else if plan != nil && plan.Title != "" {
-			b.WriteString("All planned phases are complete. Look for remaining open issues or improvements.\n\n")
-		} else {
-			b.WriteString("No plan is set. Explore the codebase and address any open issues.\n\n")
-		}
-
-		// Neighboring phases.
-		if currentPhase != nil && plan != nil && len(plan.Phases) > 1 {
-			b.WriteString("## Neighboring Phases\n")
-			for i, p := range plan.Phases {
-				if p.ID == currentPhase.ID {
-					if i > 0 {
-						prev := plan.Phases[i-1]
-						fmt.Fprintf(&b, "- Previous: [%s] %s: %s\n", prev.Status, prev.ID, prev.Title)
-					}
-					fmt.Fprintf(&b, "- **Current: [%s] %s: %s**\n", p.Status, p.ID, p.Title)
-					if i < len(plan.Phases)-1 {
-						next := plan.Phases[i+1]
-						fmt.Fprintf(&b, "- Next: [%s] %s: %s\n", next.Status, next.ID, next.Title)
-					}
-					break
-				}
-			}
-			b.WriteString("\n")
-		}
-	}
-
 	// Rules.
 	b.WriteString("# Rules\n\n")
 	b.WriteString("- Write code, run tests, and ensure everything compiles before finishing.\n")
@@ -236,7 +182,10 @@ func Build(opts BuildOpts) (string, error) {
 	// Context.
 	b.WriteString("# Context\n\n")
 
-	if len(allTurns) > 0 {
+	isSubAgent := opts.ParentTurnID > 0
+
+	// Recent session logs — only for top-level agents, not sub-agents.
+	if !isSubAgent && len(allTurns) > 0 {
 		totalTurns := len(allTurns)
 		start := totalTurns - maxRecentTurns
 		if start < 0 {
@@ -301,24 +250,39 @@ func Build(opts BuildOpts) (string, error) {
 		}
 	}
 
-	var issues []store.Issue
-	if effectivePlanID != "" {
-		issues, _ = s.ListIssuesForPlan(effectivePlanID)
-	} else {
-		issues, _ = s.ListSharedIssues()
-	}
-	var relevant []store.Issue
-	for _, iss := range issues {
-		if iss.Status == "open" || iss.Status == "in_progress" {
-			relevant = append(relevant, iss)
-		}
-	}
-	if len(relevant) > 0 {
-		b.WriteString("## Open Issues\n")
-		for _, iss := range relevant {
+	// Issues section.
+	if isSubAgent && len(opts.IssueIDs) > 0 {
+		// Sub-agent with assigned issues: show only those.
+		b.WriteString("## Assigned Issues\n")
+		for _, issID := range opts.IssueIDs {
+			iss, err := s.GetIssue(issID)
+			if err != nil {
+				continue
+			}
 			fmt.Fprintf(&b, "- #%d [%s] %s: %s\n", iss.ID, iss.Priority, iss.Title, iss.Description)
 		}
 		b.WriteString("\n")
+	} else if !isSubAgent {
+		// Top-level agent: show all open issues.
+		var issues []store.Issue
+		if effectivePlanID != "" {
+			issues, _ = s.ListIssuesForPlan(effectivePlanID)
+		} else {
+			issues, _ = s.ListSharedIssues()
+		}
+		var relevant []store.Issue
+		for _, iss := range issues {
+			if iss.Status == "open" || iss.Status == "in_progress" {
+				relevant = append(relevant, iss)
+			}
+		}
+		if len(relevant) > 0 {
+			b.WriteString("## Open Issues\n")
+			for _, iss := range relevant {
+				fmt.Fprintf(&b, "- #%d [%s] %s: %s\n", iss.ID, iss.Priority, iss.Title, iss.Description)
+			}
+			b.WriteString("\n")
+		}
 	}
 
 	// Supervisor notes.
@@ -417,6 +381,63 @@ func Build(opts BuildOpts) (string, error) {
 			fmt.Fprintf(&b, "  Use `adaf spawn-status --spawn-id %d` to check progress.\n\n", h.SpawnID)
 		}
 		b.WriteString("You can manage these exactly like your own spawns (wait, diff, merge, reject).\n\n")
+	}
+
+	// Objective — placed last so the agent's immediate focus lands here.
+	b.WriteString("# Objective\n\n")
+	b.WriteString("Project: " + project.Name + "\n\n")
+	if plan != nil {
+		fmt.Fprintf(&b, "You are working on plan: **%s**", plan.ID)
+		if plan.Title != "" {
+			fmt.Fprintf(&b, " — %s", plan.Title)
+		}
+		b.WriteString("\n\n")
+	}
+
+	if opts.Task != "" {
+		b.WriteString(opts.Task + "\n\n")
+	} else {
+		var currentPhase *store.PlanPhase
+		if plan != nil && len(plan.Phases) > 0 {
+			for i := range plan.Phases {
+				p := &plan.Phases[i]
+				if p.Status == "not_started" || p.Status == "in_progress" {
+					currentPhase = p
+					break
+				}
+			}
+		}
+
+		if currentPhase != nil {
+			fmt.Fprintf(&b, "Your task is to work on phase **%s: %s**.\n\n", currentPhase.ID, currentPhase.Title)
+			if currentPhase.Description != "" {
+				b.WriteString(currentPhase.Description + "\n\n")
+			}
+		} else if plan != nil && plan.Title != "" {
+			b.WriteString("All planned phases are complete. Look for remaining open issues or improvements.\n\n")
+		} else {
+			b.WriteString("No plan is set. Explore the codebase and address any open issues.\n\n")
+		}
+
+		// Neighboring phases.
+		if currentPhase != nil && plan != nil && len(plan.Phases) > 1 {
+			b.WriteString("## Neighboring Phases\n")
+			for i, p := range plan.Phases {
+				if p.ID == currentPhase.ID {
+					if i > 0 {
+						prev := plan.Phases[i-1]
+						fmt.Fprintf(&b, "- Previous: [%s] %s: %s\n", prev.Status, prev.ID, prev.Title)
+					}
+					fmt.Fprintf(&b, "- **Current: [%s] %s: %s**\n", p.Status, p.ID, p.Title)
+					if i < len(plan.Phases)-1 {
+						next := plan.Phases[i+1]
+						fmt.Fprintf(&b, "- Next: [%s] %s: %s\n", next.Status, next.ID, next.Title)
+					}
+					break
+				}
+			}
+			b.WriteString("\n")
+		}
 	}
 
 	return b.String(), nil
