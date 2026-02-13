@@ -596,6 +596,77 @@ func (m AppModel) updateLoopStepRole(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func selectedRoleAt(roles []string, idx int) string {
+	if len(roles) == 0 || idx < 0 || idx >= len(roles) {
+		return ""
+	}
+	return roles[idx]
+}
+
+func rolePromptPreviewLines(selectedRole string, globalCfg *config.GlobalConfig, sectionStyle, dimStyle, textStyle lipgloss.Style) []string {
+	if selectedRole == "" {
+		return []string{dimStyle.Render("No role selected.")}
+	}
+
+	lines := []string{textStyle.Render("Role: " + selectedRole)}
+	if globalCfg != nil {
+		if def := globalCfg.FindRoleDefinition(selectedRole); def != nil {
+			if title := strings.TrimSpace(def.Title); title != "" {
+				lines = append(lines, textStyle.Render("Title: "+title))
+			}
+			lines = append(lines, "")
+			if desc := strings.TrimSpace(def.Description); desc != "" {
+				lines = append(lines, sectionStyle.Render("Description"))
+				lines = appendMultiline(lines, desc)
+				lines = append(lines, "")
+			}
+		}
+	}
+
+	lines = append(lines, sectionStyle.Render("Composed Prompt"))
+	promptText := rolePromptPreview(selectedRole, globalCfg)
+	if promptText == "" {
+		lines = append(lines, dimStyle.Render("(empty prompt)"))
+	} else {
+		lines = appendMultiline(lines, promptText)
+	}
+	lines = append(lines, "")
+	lines = append(lines, dimStyle.Render("pgup/pgdn or ctrl+u/ctrl+d to page"))
+	return lines
+}
+
+func (m AppModel) renderLoopRoleSplitView(leftLines, rightLines []string, leftCursorLine int) string {
+	header := m.renderHeader()
+	statusBar := m.renderStatusBar()
+
+	panelH := m.height - 2
+	if panelH < 1 {
+		panelH = 1
+	}
+	leftOuter := m.width / 2
+	minPane := 34
+	if leftOuter < minPane {
+		leftOuter = minPane
+	}
+	if m.width-leftOuter < minPane {
+		leftOuter = m.width - minPane
+	}
+	if leftOuter < 1 {
+		leftOuter = 1
+	}
+	if leftOuter >= m.width {
+		leftOuter = m.width - 1
+	}
+	rightOuter := m.width - leftOuter
+	if rightOuter < 1 {
+		rightOuter = 1
+	}
+
+	leftPanel := renderSettingsPaneWithCursor(leftLines, leftOuter, panelH, leftCursorLine, !m.isRightPaneFocused())
+	rightPanel := renderSettingsPaneWithOffset(rightLines, rightOuter, panelH, m.stateScrollOffset(), m.isRightPaneFocused())
+	return header + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel) + "\n" + statusBar
+}
+
 func (m AppModel) viewLoopStepRole() string {
 	header := m.renderHeader()
 	statusBar := m.renderStatusBar()
@@ -604,10 +675,7 @@ func (m AppModel) viewLoopStepRole() string {
 	textStyle := lipgloss.NewStyle().Foreground(ColorText)
 
 	roles := config.AllRoles(m.globalCfg)
-	selectedRole := ""
-	if len(roles) > 0 && m.loopStepRoleSel >= 0 && m.loopStepRoleSel < len(roles) {
-		selectedRole = roles[m.loopStepRoleSel]
-	}
+	selectedRole := selectedRoleAt(roles, m.loopStepRoleSel)
 
 	if m.width < 90 {
 		style, cw, ch := profileWizardPanel(m)
@@ -644,29 +712,6 @@ func (m AppModel) viewLoopStepRole() string {
 		return header + "\n" + panel + "\n" + statusBar
 	}
 
-	panelH := m.height - 2
-	if panelH < 1 {
-		panelH = 1
-	}
-	leftOuter := m.width / 2
-	minPane := 34
-	if leftOuter < minPane {
-		leftOuter = minPane
-	}
-	if m.width-leftOuter < minPane {
-		leftOuter = m.width - minPane
-	}
-	if leftOuter < 1 {
-		leftOuter = 1
-	}
-	if leftOuter >= m.width {
-		leftOuter = m.width - 1
-	}
-	rightOuter := m.width - leftOuter
-	if rightOuter < 1 {
-		rightOuter = 1
-	}
-
 	var left []string
 	cursorLine := -1
 	leftTitle := m.loopWizardTitle() + " — Step Role"
@@ -696,37 +741,9 @@ func (m AppModel) viewLoopStepRole() string {
 	}
 	right = append(right, sectionStyle.Render(rightTitle))
 	right = append(right, "")
-	if selectedRole == "" {
-		right = append(right, dimStyle.Render("No role selected."))
-	} else {
-		right = append(right, textStyle.Render("Role: "+selectedRole))
-		if m.globalCfg != nil {
-			if def := m.globalCfg.FindRoleDefinition(selectedRole); def != nil {
-				if title := strings.TrimSpace(def.Title); title != "" {
-					right = append(right, textStyle.Render("Title: "+title))
-				}
-				right = append(right, "")
-				if desc := strings.TrimSpace(def.Description); desc != "" {
-					right = append(right, sectionStyle.Render("Description"))
-					right = appendMultiline(right, desc)
-					right = append(right, "")
-				}
-			}
-		}
-		right = append(right, sectionStyle.Render("Composed Prompt"))
-		promptText := rolePromptPreview(selectedRole, m.globalCfg)
-		if promptText == "" {
-			right = append(right, dimStyle.Render("(empty prompt)"))
-		} else {
-			right = appendMultiline(right, promptText)
-		}
-		right = append(right, "")
-		right = append(right, dimStyle.Render("pgup/pgdn or ctrl+u/ctrl+d to page"))
-	}
+	right = append(right, rolePromptPreviewLines(selectedRole, m.globalCfg, sectionStyle, dimStyle, textStyle)...)
 
-	leftPanel := renderSettingsPaneWithCursor(left, leftOuter, panelH, cursorLine, !m.isRightPaneFocused())
-	rightPanel := renderSettingsPaneWithOffset(right, rightOuter, panelH, m.stateScrollOffset(), m.isRightPaneFocused())
-	return header + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel) + "\n" + statusBar
+	return m.renderLoopRoleSplitView(left, right, cursorLine)
 }
 
 // --- Loop Step Turns ---
@@ -1116,10 +1133,26 @@ func (m AppModel) updateLoopStepSpawnRoles(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
+		case "tab", "l", "right":
+			m.setRightPaneFocused(true)
+			return m, nil
+		case "shift+tab", "h", "left":
+			m.setRightPaneFocused(false)
+			return m, nil
 		case "j", "down":
+			if m.isRightPaneFocused() {
+				m.adjustStateScroll(1)
+				return m, nil
+			}
 			m.loopStepSpawnRoleSel = (m.loopStepSpawnRoleSel + 1) % len(roles)
+			m.resetStateScroll()
 		case "k", "up":
+			if m.isRightPaneFocused() {
+				m.adjustStateScroll(-1)
+				return m, nil
+			}
 			m.loopStepSpawnRoleSel = (m.loopStepSpawnRoleSel - 1 + len(roles)) % len(roles)
+			m.resetStateScroll()
 		case " ":
 			selectedRole := roles[m.loopStepSpawnRoleSel]
 			node.Roles = toggleDelegationRole(node.Roles, selectedRole, m.globalCfg)
@@ -1135,20 +1168,19 @@ func (m AppModel) updateLoopStepSpawnRoles(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m AppModel) viewLoopStepSpawnRoles() string {
 	header := m.renderHeader()
 	statusBar := m.renderStatusBar()
-	style, cw, ch := profileWizardPanel(m)
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-
-	var lines []string
-	cursorLine := -1
-	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Delegation Roles"))
-	lines = append(lines, dimStyle.Render("Level: "+m.delegationPathLabel()))
-	lines = append(lines, "")
+	textStyle := lipgloss.NewStyle().Foreground(ColorText)
 
 	node := m.currentDelegationNode()
 	roles := config.AllRoles(m.globalCfg)
 	if node == nil || len(roles) == 0 {
+		style, cw, ch := profileWizardPanel(m)
+		var lines []string
+		lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Delegation Roles"))
+		lines = append(lines, dimStyle.Render("Level: "+m.delegationPathLabel()))
+		lines = append(lines, "")
 		lines = append(lines, dimStyle.Render("No selected rule or no roles available."))
 		lines = append(lines, "")
 		lines = append(lines, dimStyle.Render("esc: back"))
@@ -1158,9 +1190,60 @@ func (m AppModel) viewLoopStepSpawnRoles() string {
 	}
 
 	node.Roles = ensureDelegationRoles(node.Roles, m.globalCfg)
-	lines = append(lines, dimStyle.Render("Toggle roles for: "+node.Profile))
-	lines = append(lines, dimStyle.Render("At least one role must remain selected."))
-	lines = append(lines, "")
+	selectedRole := selectedRoleAt(roles, m.loopStepSpawnRoleSel)
+
+	if m.width < 90 {
+		style, cw, ch := profileWizardPanel(m)
+		var lines []string
+		cursorLine := -1
+		lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Delegation Roles"))
+		lines = append(lines, dimStyle.Render("Level: "+m.delegationPathLabel()))
+		lines = append(lines, "")
+		lines = append(lines, dimStyle.Render("Toggle roles for: "+node.Profile))
+		lines = append(lines, dimStyle.Render("At least one role must remain selected."))
+		lines = append(lines, "")
+
+		for i, role := range roles {
+			marker := "[ ]"
+			if delegationRoleListContains(node.Roles, role) {
+				marker = "[x]"
+			}
+			label := fmt.Sprintf("%s %s", marker, role)
+			if i == m.loopStepSpawnRoleSel {
+				cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
+				styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
+				lines = append(lines, cursor+styled)
+				cursorLine = len(lines) - 1
+			} else {
+				lines = append(lines, "  "+textStyle.Render(label))
+			}
+		}
+
+		lines = append(lines, "")
+		lines = append(lines, sectionStyle.Render("Role Prompt Preview"))
+		lines = append(lines, textStyle.Render("Rule: "+node.Profile))
+		lines = append(lines, "")
+		lines = append(lines, rolePromptPreviewLines(selectedRole, m.globalCfg, sectionStyle, dimStyle, textStyle)...)
+		lines = append(lines, "")
+		lines = append(lines, dimStyle.Render("space: toggle  j/k: navigate  enter: done  esc: back"))
+
+		content := fitLinesWithCursor(wrapRenderableLines(lines, cw), cw, ch, cursorLine)
+		panel := style.Render(content)
+		return header + "\n" + panel + "\n" + statusBar
+	}
+
+	var left []string
+	cursorLine := -1
+	leftTitle := m.loopWizardTitle() + " — Delegation Roles"
+	if !m.isRightPaneFocused() {
+		leftTitle += " [focus]"
+	}
+	left = append(left, sectionStyle.Render(leftTitle))
+	left = append(left, dimStyle.Render("Level: "+m.delegationPathLabel()))
+	left = append(left, "")
+	left = append(left, dimStyle.Render("Toggle roles for: "+node.Profile))
+	left = append(left, dimStyle.Render("At least one role must remain selected."))
+	left = append(left, "")
 
 	for i, role := range roles {
 		marker := "[ ]"
@@ -1171,19 +1254,29 @@ func (m AppModel) viewLoopStepSpawnRoles() string {
 		if i == m.loopStepSpawnRoleSel {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
-			lines = append(lines, cursor+styled)
-			cursorLine = len(lines) - 1
+			left = append(left, cursor+styled)
+			cursorLine = len(left) - 1
 		} else {
-			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ColorText).Render(label))
+			left = append(left, "  "+textStyle.Render(label))
 		}
 	}
 
-	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("space: toggle  j/k: navigate  enter: done  esc: back"))
+	left = append(left, "")
+	left = append(left, dimStyle.Render("space: toggle  j/k: navigate  enter: done  esc: back"))
+	left = append(left, dimStyle.Render("tab/h/l: pane focus"))
 
-	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
-	panel := style.Render(content)
-	return header + "\n" + panel + "\n" + statusBar
+	var right []string
+	rightTitle := "Role Prompt Preview"
+	if m.isRightPaneFocused() {
+		rightTitle += " [focus]"
+	}
+	right = append(right, sectionStyle.Render(rightTitle))
+	right = append(right, "")
+	right = append(right, textStyle.Render("Rule: "+node.Profile))
+	right = append(right, "")
+	right = append(right, rolePromptPreviewLines(selectedRole, m.globalCfg, sectionStyle, dimStyle, textStyle)...)
+
+	return m.renderLoopRoleSplitView(left, right, cursorLine)
 }
 
 // --- Loop Step Spawn Add Rule ---

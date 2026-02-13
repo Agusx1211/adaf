@@ -87,6 +87,37 @@ func TestUpdateLoopStepRoleJScrollsPromptWhenRightFocused(t *testing.T) {
 	}
 }
 
+func TestUpdateLoopStepSpawnRolesJScrollsPromptWhenRightFocused(t *testing.T) {
+	cfg := &config.GlobalConfig{}
+	config.EnsureDefaultRoleCatalog(cfg)
+
+	m := AppModel{
+		state:     stateLoopStepSpawnRoles,
+		width:     120,
+		height:    30,
+		globalCfg: cfg,
+		loopStepDelegRoots: []*loopDelegationNode{
+			{
+				Profile: "worker",
+				Roles:   []string{config.RoleDeveloper},
+			},
+		},
+		viewScroll:           map[appState]int{},
+		viewPaneFocus:        map[appState]bool{},
+		loopStepSpawnRoleSel: 0,
+	}
+	m.setRightPaneFocused(true)
+
+	updated, _ := m.updateLoopStepSpawnRoles(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	got := updated.(AppModel)
+	if got.loopStepSpawnRoleSel != 0 {
+		t.Fatalf("loopStepSpawnRoleSel = %d, want 0", got.loopStepSpawnRoleSel)
+	}
+	if got.stateScrollOffset() <= 0 {
+		t.Fatalf("scroll offset = %d, want > 0", got.stateScrollOffset())
+	}
+}
+
 func TestUpdateSelectorJScrollsDetailsWhenRightFocused(t *testing.T) {
 	m := AppModel{
 		state:  stateSelector,

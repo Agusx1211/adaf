@@ -59,7 +59,7 @@ func (m AppModel) pageScrollStep() int {
 
 func (m AppModel) stateSupportsManualScroll() bool {
 	switch m.state {
-	case stateSelector, stateSettingsRolesList, stateSettingsRoleEdit, stateSettingsRulesList, stateLoopStepRole:
+	case stateSelector, stateSettingsRolesList, stateSettingsRoleEdit, stateSettingsRulesList, stateLoopStepRole, stateLoopStepSpawnRoles:
 		return true
 	default:
 		return false
@@ -68,7 +68,7 @@ func (m AppModel) stateSupportsManualScroll() bool {
 
 func (m AppModel) stateSupportsPaneFocus() bool {
 	switch m.state {
-	case stateSelector, stateSettingsRolesList, stateSettingsRoleEdit, stateSettingsRulesList, stateLoopStepRole:
+	case stateSelector, stateSettingsRolesList, stateSettingsRoleEdit, stateSettingsRulesList, stateLoopStepRole, stateLoopStepSpawnRoles:
 		return true
 	default:
 		return false
@@ -81,7 +81,7 @@ func (m AppModel) stateHasSplitPaneLayout() bool {
 		return m.width > selectorLeftWidth+20
 	case stateSettingsRolesList, stateSettingsRoleEdit, stateSettingsRulesList:
 		return m.width >= 80
-	case stateLoopStepRole:
+	case stateLoopStepRole, stateLoopStepSpawnRoles:
 		return m.width >= 90
 	default:
 		return false
@@ -123,7 +123,7 @@ func (m AppModel) canAdjustDetailScroll() bool {
 	switch m.state {
 	case stateSelector:
 		return m.stateHasSplitPaneLayout()
-	case stateSettingsRolesList, stateSettingsRoleEdit, stateSettingsRulesList, stateLoopStepRole:
+	case stateSettingsRolesList, stateSettingsRoleEdit, stateSettingsRulesList, stateLoopStepRole, stateLoopStepSpawnRoles:
 		if !m.stateHasSplitPaneLayout() {
 			return true
 		}

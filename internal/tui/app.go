@@ -1231,7 +1231,13 @@ func (m AppModel) renderStatusBar() string {
 		add("S", "save step")
 		add("esc", "up/back")
 	case stateLoopStepSpawnRoles:
-		add("j/k", "navigate roles")
+		if m.isRightPaneFocused() && m.stateHasSplitPaneLayout() {
+			add("j/k", "scroll prompt")
+			add("h/tab", "focus role list")
+		} else {
+			add("j/k", "navigate roles")
+			add("l/tab", "focus prompt")
+		}
 		add("space", "toggle role")
 		add("enter", "done")
 		add("esc", "back")
