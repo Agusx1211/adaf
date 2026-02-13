@@ -100,9 +100,9 @@ printf 'ok\n'
 
 func TestExtractVibeSessionID(t *testing.T) {
 	tests := []struct {
-		name    string
-		setup   func(t *testing.T, dir string)
-		want    string
+		name  string
+		setup func(t *testing.T, dir string)
+		want  string
 	}{
 		{
 			name:  "empty directory",

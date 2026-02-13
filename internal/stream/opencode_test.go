@@ -8,13 +8,13 @@ import (
 
 func TestParseOpencode(t *testing.T) {
 	tests := []struct {
-		name      string
-		input     string
-		wantType  string
-		wantSub   string
-		wantText  string
-		wantSess  string
-		wantSkip  bool // true if the event should be ignored (no parsed type)
+		name     string
+		input    string
+		wantType string
+		wantSub  string
+		wantText string
+		wantSess string
+		wantSkip bool // true if the event should be ignored (no parsed type)
 	}{
 		{
 			name:     "text event",
