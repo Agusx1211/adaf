@@ -204,6 +204,11 @@ func (m *Model) bumpStats(scope string, fn func(*detailStats)) {
 	fn(st)
 }
 
+func (m *Model) markAssistantBoundary(scope string) {
+	delete(m.assistantMessagesByScope, scope)
+	delete(m.lastMessageByScope, scope)
+}
+
 func (m *Model) recordAssistantText(scope, text string) {
 	compact := strings.TrimSpace(compactWhitespace(text))
 	if compact == "" {
@@ -250,6 +255,7 @@ func (m *Model) updateFinalMessageSnapshot(scope, turnHexID string) {
 
 func (m *Model) recordToolCall(scope, toolName string) {
 	_ = toolName
+	m.markAssistantBoundary(scope)
 	m.bumpStats(scope, func(st *detailStats) { st.ToolCalls++ })
 	m.addSimplifiedLine(scope, dimStyle.Render("tool call"))
 }

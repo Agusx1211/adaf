@@ -672,6 +672,67 @@ func TestLastMessageLayerAggregatesAssistantTextBlocks(t *testing.T) {
 	}
 }
 
+func TestLastMessageLayerUsesOnlyPostToolAssistantSegment(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+
+	updated, _ := m.Update(AgentStartedMsg{SessionID: 9, TurnHexID: "abc"})
+	m1 := updated.(Model)
+	updated, _ = m1.Update(AgentEventMsg{
+		Event: stream.ClaudeEvent{
+			Type: "assistant",
+			AssistantMessage: &stream.AssistantMessage{
+				Role: "assistant",
+				Content: []stream.ContentBlock{
+					{Type: "text", Text: "Early status"},
+				},
+			},
+		},
+	})
+	m2 := updated.(Model)
+	updated, _ = m2.Update(AgentEventMsg{
+		Event: stream.ClaudeEvent{
+			Type: "assistant",
+			AssistantMessage: &stream.AssistantMessage{
+				Role: "assistant",
+				Content: []stream.ContentBlock{
+					{Type: "tool_use", Name: "Bash"},
+				},
+			},
+		},
+	})
+	m3 := updated.(Model)
+	updated, _ = m3.Update(AgentEventMsg{
+		Event: stream.ClaudeEvent{
+			Type: "assistant",
+			AssistantMessage: &stream.AssistantMessage{
+				Role: "assistant",
+				Content: []stream.ContentBlock{
+					{Type: "text", Text: "Final report"},
+				},
+			},
+		},
+	})
+	m4 := updated.(Model)
+	updated, _ = m4.Update(AgentFinishedMsg{
+		SessionID: 9,
+		TurnHexID: "abc",
+		Result: &agent.Result{
+			ExitCode: 0,
+			Duration: time.Second,
+		},
+	})
+	m5 := updated.(Model)
+	m5.detailLayer = detailLayerLastMessage
+
+	rendered := strings.Join(stripStyledLines(m5.detailLines(80)), "\n")
+	if strings.Contains(rendered, "Early status") {
+		t.Fatalf("last-message layer should exclude pre-tool assistant chatter:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Final report") {
+		t.Fatalf("last-message layer missing final assistant segment:\n%s", rendered)
+	}
+}
+
 func TestLastMessageLayerUpdatesWhenAssistantTextArrivesAfterFinish(t *testing.T) {
 	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
 

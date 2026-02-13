@@ -154,29 +154,70 @@ func setupStreamStderr(cmd *exec.Cmd, cfg Config, recorder *recording.Recorder) 
 	return ss
 }
 
-// defaultAccumulateText extracts and accumulates text content from stream
-// events. It handles all event types produced by claude, codex, and gemini:
-//   - "assistant": complete message blocks with text content
-//   - "content_block_delta": incremental text deltas
-//   - "result": final authoritative text (replaces any accumulated text)
+// defaultAccumulateText keeps a concise assistant report from stream events.
+// It intentionally drops interim chatter that happened before the most recent
+// tool call by resetting on tool-use boundaries. This gives parent handoffs a
+// stable "final segment" rather than a full transcript dump.
+//
+// Event handling:
+//   - "assistant": append text blocks; reset first if the event includes tool_use
+//   - "user": reset when it carries tool_result blocks
+//   - "content_block_start": reset on tool_use block starts
+//   - "content_block_delta": append text deltas (best-effort partial streaming)
+//   - "result": authoritative final text replaces everything when present
 func defaultAccumulateText(ev stream.ClaudeEvent, buf *strings.Builder) {
+	appendSegment := func(text string) {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return
+		}
+		if buf.Len() > 0 {
+			buf.WriteString("\n\n")
+		}
+		buf.WriteString(text)
+	}
+
 	switch ev.Type {
 	case "assistant":
 		if ev.AssistantMessage != nil {
+			var (
+				sawToolUse bool
+				textParts  strings.Builder
+			)
 			for _, block := range ev.AssistantMessage.Content {
-				if block.Type == "text" {
-					buf.WriteString(block.Text)
+				switch block.Type {
+				case "tool_use":
+					sawToolUse = true
+				case "text":
+					textParts.WriteString(block.Text)
 				}
 			}
+			if sawToolUse {
+				buf.Reset()
+			}
+			appendSegment(textParts.String())
+		}
+	case "user":
+		if ev.AssistantMessage != nil {
+			for _, block := range ev.AssistantMessage.Content {
+				if block.Type == "tool_result" {
+					buf.Reset()
+					break
+				}
+			}
+		}
+	case "content_block_start":
+		if ev.ContentBlock != nil && ev.ContentBlock.Type == "tool_use" {
+			buf.Reset()
 		}
 	case "content_block_delta":
 		if ev.Delta != nil && ev.Delta.Type == "text_delta" {
 			buf.WriteString(ev.Delta.Text)
 		}
 	case "result":
-		if ev.ResultText != "" {
+		if strings.TrimSpace(ev.ResultText) != "" {
 			buf.Reset()
-			buf.WriteString(ev.ResultText)
+			buf.WriteString(strings.TrimSpace(ev.ResultText))
 		}
 	}
 }

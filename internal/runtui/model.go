@@ -1555,6 +1555,7 @@ func (m *Model) renderVibeStreamingLine(scope, line string) bool {
 			}
 		}
 	case "tool":
+		m.markAssistantBoundary(scope)
 		m.addScopedLine(scope, toolResultStyle.Render("[result]"))
 		m.addSimplifiedLine(scope, dimStyle.Render("tool result"))
 		if strings.TrimSpace(msg.Content) != "" {
@@ -1862,7 +1863,9 @@ func (m *Model) renderGeminiStreamLine(scope, line, eventType string) bool {
 		return true
 
 	case "tool_result":
-		// Skip tool results.
+		m.markAssistantBoundary(scope)
+		// Skip rendering tool results in detail raw text; they still define
+		// the boundary for what counts as the final assistant message.
 		return true
 
 	case "result":
@@ -1957,7 +1960,9 @@ func (m *Model) renderClaudeStreamLine(scope, line, eventType string) bool {
 		return true
 
 	case "user":
-		// Skip user/tool-result events.
+		// User events in Claude stream mode usually carry tool results; treat
+		// them as the boundary for final-message capture.
+		m.markAssistantBoundary(scope)
 		return true
 
 	case "content_block_start", "content_block_delta", "content_block_stop":
@@ -2084,6 +2089,7 @@ func (m *Model) handleEvent(ev stream.ClaudeEvent) {
 		if ev.AssistantMessage != nil {
 			for _, block := range ev.AssistantMessage.Content {
 				if block.Type == "tool_result" {
+					m.markAssistantBoundary(scope)
 					content := block.ToolContentText()
 					if content == "" {
 						m.addScopedLine(scope, dimStyle.Render("[empty result]"))
