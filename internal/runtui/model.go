@@ -156,6 +156,10 @@ type Model struct {
 	// Raw output accumulators per scope for line-based rendering.
 	rawRemainder map[string]string
 
+	// Stderr deduplication state per scope.
+	lastStderrByScope map[string]string
+	stderrRepeatCount map[string]int
+
 	// Prompt and final-message snapshots by scope.
 	promptsByScope           map[string]promptSnapshot
 	latestPromptScope        string
@@ -195,6 +199,8 @@ func NewModel(projectName string, plan *store.Plan, agentName, modelName string,
 		spawnFirstSeen:           make(map[int]time.Time),
 		spawnStatus:              make(map[int]string),
 		rawRemainder:             make(map[string]string),
+		lastStderrByScope:        make(map[string]string),
+		stderrRepeatCount:        make(map[string]int),
 		statsByScope:             make(map[string]*detailStats),
 		promptsByScope:           make(map[string]promptSnapshot),
 		lastMessageByScope:       make(map[string]string),
@@ -1447,6 +1453,7 @@ func (m *Model) flushRawRemainder(scope string) {
 		m.handleRawLine(scope, rem)
 	}
 	delete(m.rawRemainder, scope)
+	m.flushStderrRepeat(scope)
 }
 
 func (m *Model) flushAllRawRemainders() {
@@ -1466,6 +1473,10 @@ func (m *Model) handleRawLine(scope, line string) {
 	}
 
 	if m.renderStreamEventLine(scope, line) {
+		return
+	}
+
+	if m.renderStderrLine(scope, line) {
 		return
 	}
 
@@ -1559,6 +1570,79 @@ func (m *Model) renderVibeStreamingLine(scope, line string) bool {
 	}
 
 	return true
+}
+
+// stderrCategory classifies a stderr line body.
+type stderrCategory int
+
+const (
+	stderrGeneric     stderrCategory = iota
+	stderrDeprecation                // Node.js deprecation warnings
+	stderrInfo                       // Informational messages (YOLO mode, credentials, etc.)
+)
+
+// classifyStderr returns the category for a stderr line body (without the [stderr] prefix).
+func classifyStderr(body string) stderrCategory {
+	lower := strings.ToLower(body)
+	// Deprecation warnings from Node.js.
+	if strings.Contains(body, "DeprecationWarning:") ||
+		strings.HasPrefix(body, "(Use `node --trace-deprecation") ||
+		strings.HasPrefix(body, "(node:") {
+		return stderrDeprecation
+	}
+	// Known informational messages.
+	if strings.Contains(lower, "yolo mode") ||
+		strings.Contains(lower, "loaded cached credentials") ||
+		strings.Contains(lower, "hook registry initialized") ||
+		strings.Contains(lower, "mode is enabled") {
+		return stderrInfo
+	}
+	return stderrGeneric
+}
+
+// renderStderrLine handles lines that start with "[stderr] ". Returns true if
+// the line was consumed (callers should skip further processing).
+func (m *Model) renderStderrLine(scope, line string) bool {
+	if !strings.HasPrefix(line, "[stderr] ") {
+		return false
+	}
+	body := strings.TrimSpace(strings.TrimPrefix(line, "[stderr] "))
+	if body == "" {
+		// Empty stderr line — consume silently.
+		return true
+	}
+
+	// Deduplication: suppress consecutive identical stderr within a scope.
+	if last, ok := m.lastStderrByScope[scope]; ok && last == body {
+		m.stderrRepeatCount[scope]++
+		return true
+	}
+	// Flush any pending repeat annotation before rendering a new line.
+	m.flushStderrRepeat(scope)
+	m.lastStderrByScope[scope] = body
+	m.stderrRepeatCount[scope] = 0
+
+	truncBody := truncate(body, 400)
+	switch classifyStderr(body) {
+	case stderrDeprecation:
+		m.addScopedLine(scope, stderrDimStyle.Render("[stderr] "+truncBody))
+	case stderrInfo:
+		m.addScopedLine(scope, dimStyle.Render("[stderr] "+truncBody))
+	default: // stderrGeneric
+		m.addScopedLine(scope, stderrLabelStyle.Render("[stderr]")+" "+dimStyle.Render(truncBody))
+	}
+	return true
+}
+
+// flushStderrRepeat emits a suppression annotation if consecutive identical
+// stderr lines were deduplicated for the given scope, then resets state.
+func (m *Model) flushStderrRepeat(scope string) {
+	if count := m.stderrRepeatCount[scope]; count > 0 {
+		note := fmt.Sprintf("  (%d identical lines suppressed)", count)
+		m.addScopedLine(scope, stderrDimStyle.Render(note))
+	}
+	delete(m.lastStderrByScope, scope)
+	delete(m.stderrRepeatCount, scope)
 }
 
 // renderStreamEventLine attempts to parse a raw JSON line as a codex, gemini,

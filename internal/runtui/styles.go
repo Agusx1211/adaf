@@ -105,4 +105,11 @@ var (
 	resultLabelStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(theme.ColorGreen)
+
+	stderrLabelStyle = lipgloss.NewStyle().
+				Foreground(theme.ColorYellow)
+
+	stderrDimStyle = lipgloss.NewStyle().
+			Foreground(theme.ColorOverlay0).
+			Italic(true)
 )

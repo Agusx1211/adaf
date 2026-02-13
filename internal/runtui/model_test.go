@@ -1007,6 +1007,187 @@ func TestRenderStreamEventLineIgnoresNonJSON(t *testing.T) {
 	}
 }
 
+func TestClassifyStderr(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want stderrCategory
+	}{
+		{
+			name: "deprecation warning",
+			body: "(node:3321676) [DEP0040] DeprecationWarning: The `punycode` module is deprecated.",
+			want: stderrDeprecation,
+		},
+		{
+			name: "trace deprecation hint",
+			body: "(Use `node --trace-deprecation ...` to show where the warning was created)",
+			want: stderrDeprecation,
+		},
+		{
+			name: "node pid prefix",
+			body: "(node:12345) some other warning",
+			want: stderrDeprecation,
+		},
+		{
+			name: "yolo mode info",
+			body: "YOLO mode is enabled. All tool calls will be automatically approved.",
+			want: stderrInfo,
+		},
+		{
+			name: "loaded cached credentials",
+			body: "Loaded cached credentials.",
+			want: stderrInfo,
+		},
+		{
+			name: "hook registry",
+			body: "Hook registry initialized with 0 hook entries",
+			want: stderrInfo,
+		},
+		{
+			name: "mode is enabled",
+			body: "Some mode is enabled for this session",
+			want: stderrInfo,
+		},
+		{
+			name: "generic error",
+			body: "Error: connection refused",
+			want: stderrGeneric,
+		},
+		{
+			name: "generic unknown",
+			body: "something unexpected happened",
+			want: stderrGeneric,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyStderr(tt.body)
+			if got != tt.want {
+				t.Fatalf("classifyStderr(%q) = %v, want %v", tt.body, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRenderStderrLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		line     string
+		handled  bool
+		wantText string // Expected substring in the rendered line (ANSI-stripped). Empty = no line added.
+	}{
+		{
+			name:     "deprecation renders dim",
+			line:     "[stderr] (node:123) [DEP0040] DeprecationWarning: punycode is deprecated",
+			handled:  true,
+			wantText: "[stderr]",
+		},
+		{
+			name:     "info renders dim",
+			line:     "[stderr] YOLO mode is enabled.",
+			handled:  true,
+			wantText: "[stderr] YOLO mode is enabled.",
+		},
+		{
+			name:     "generic renders with label",
+			line:     "[stderr] Error: connection refused",
+			handled:  true,
+			wantText: "[stderr]",
+		},
+		{
+			name:    "empty stderr body consumed",
+			line:    "[stderr]  ",
+			handled: true,
+		},
+		{
+			name:    "non-stderr not handled",
+			line:    "regular output line",
+			handled: false,
+		},
+		{
+			name:    "json not handled",
+			line:    `{"type":"assistant"}`,
+			handled: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+			before := len(m.lines)
+			got := m.renderStderrLine("session:1", tt.line)
+			if got != tt.handled {
+				t.Fatalf("renderStderrLine(%q) = %v, want %v", tt.line, got, tt.handled)
+			}
+			if tt.wantText != "" {
+				found := false
+				for _, line := range m.lines[before:] {
+					if strings.Contains(ansi.Strip(line.text), tt.wantText) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					var rendered []string
+					for _, line := range m.lines[before:] {
+						rendered = append(rendered, ansi.Strip(line.text))
+					}
+					t.Fatalf("expected %q in output, got: %v", tt.wantText, rendered)
+				}
+			}
+		})
+	}
+}
+
+func TestStderrDeduplication(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+	scope := "session:1"
+	line := "[stderr] YOLO mode is enabled. All tool calls will be automatically approved."
+
+	// Send the same stderr line 5 times.
+	for i := 0; i < 5; i++ {
+		m.renderStderrLine(scope, line)
+	}
+
+	// Only the first occurrence should have been rendered as a visible line.
+	count := 0
+	for _, l := range m.lines {
+		if strings.Contains(ansi.Strip(l.text), "YOLO mode") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 rendered YOLO mode line, got %d", count)
+	}
+
+	// Flush should emit a suppression annotation.
+	before := len(m.lines)
+	m.flushStderrRepeat(scope)
+	suppressed := false
+	for _, l := range m.lines[before:] {
+		plain := ansi.Strip(l.text)
+		if strings.Contains(plain, "4 identical lines suppressed") {
+			suppressed = true
+			break
+		}
+	}
+	if !suppressed {
+		var rendered []string
+		for _, l := range m.lines[before:] {
+			rendered = append(rendered, ansi.Strip(l.text))
+		}
+		t.Fatalf("expected suppression annotation, got: %v", rendered)
+	}
+
+	// After flush, state should be cleared — calling again should not emit.
+	before2 := len(m.lines)
+	m.flushStderrRepeat(scope)
+	if len(m.lines) != before2 {
+		t.Fatalf("second flush added %d lines, want 0", len(m.lines)-before2)
+	}
+}
+
 func stripStyledLines(lines []string) []string {
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
