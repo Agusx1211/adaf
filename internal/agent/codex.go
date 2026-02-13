@@ -2,13 +2,9 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
-	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/agusx1211/adaf/internal/debug"
@@ -76,14 +72,6 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 		args = append(args, "--json")
 	}
 
-	// codex exec accepts prompt via positional arg or stdin.
-	// We pass prompt through stdin to avoid argv size limits on long prompts.
-	var stdinReader io.Reader
-	if cfg.Prompt != "" {
-		stdinReader = strings.NewReader(cfg.Prompt)
-		recorder.RecordStdin(cfg.Prompt)
-	}
-
 	debug.LogKV("agent.codex", "building command",
 		"binary", cmdName,
 		"args", strings.Join(args, " "),
@@ -94,28 +82,12 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
-	if stdinReader != nil {
-		cmd.Stdin = stdinReader
-	}
 
-	// Start the process in its own process group so that context
-	// cancellation can kill the entire tree (codex may spawn sandbox
-	// children that keep stdout/stderr pipes open).
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			// Kill the entire process group (negative PID).
-			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-		return nil
-	}
+	setupStdin(cmd, cfg.Prompt, recorder)
+	setupProcessGroup(cmd)
 	cmd.WaitDelay = 5 * time.Second
 
-	// Environment: inherit + overlay.
-	cmd.Env = os.Environ()
-	for k, v := range cfg.Env {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
+	setupEnv(cmd, cfg.Env)
 	cmd.Env = withDefaultCodexRustLog(cmd.Env)
 
 	// Set up stdout pipe for streaming JSONL parsing.
@@ -124,24 +96,8 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 		return nil, fmt.Errorf("codex agent: stdout pipe: %w", err)
 	}
 
-	stderrW := cfg.Stderr
-	if stderrW == nil {
-		stderrW = os.Stderr
-	}
-
-	var stderrBuf strings.Builder
-	stderrWriters := []io.Writer{
-		&stderrBuf,
-		recorder.WrapWriter(stderrW, "stderr"),
-	}
-	if w := newEventSinkWriter(cfg.EventSink, cfg.TurnID, "[stderr] "); w != nil {
-		stderrWriters = append(stderrWriters, w)
-	}
-	cmd.Stderr = io.MultiWriter(stderrWriters...)
-
-	recorder.RecordMeta("agent", "codex")
-	recorder.RecordMeta("command", cmdName+" "+strings.Join(args, " "))
-	recorder.RecordMeta("workdir", cfg.WorkDir)
+	ss := setupStreamStderr(cmd, cfg, recorder)
+	recordMeta(recorder, "codex", cmdName, args, cfg.WorkDir)
 
 	start := time.Now()
 	if err := cmd.Start(); err != nil {
@@ -151,104 +107,29 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 	debug.LogKV("agent.codex", "process started", "pid", cmd.Process.Pid)
 
 	events := stream.ParseCodex(ctx, stdoutPipe)
-	var textBuf strings.Builder
-	var agentSessionID string
-
-	accumulateText := func(ev stream.ClaudeEvent) {
-		switch ev.Type {
-		case "assistant":
-			if ev.AssistantMessage != nil {
-				for _, block := range ev.AssistantMessage.Content {
-					if block.Type == "text" {
-						textBuf.WriteString(block.Text)
-					}
-				}
-			}
-		case "result":
-			if ev.ResultText != "" {
-				textBuf.Reset()
-				textBuf.WriteString(ev.ResultText)
-			}
-		}
-	}
-
-	if cfg.EventSink != nil {
-		for ev := range events {
-			if len(ev.Raw) > 0 {
-				recorder.RecordStream(string(ev.Raw))
-			}
-			if ev.Err != nil || ev.Parsed.Type == "" {
-				continue
-			}
-			if ev.Parsed.Type == "system" && ev.Parsed.Subtype == "init" && ev.Parsed.TurnID != "" {
-				agentSessionID = ev.Parsed.TurnID
-			}
-			ev.TurnID = cfg.TurnID
-			cfg.EventSink <- ev
-			accumulateText(ev.Parsed)
-		}
-	} else {
-		stdoutW := cfg.Stdout
-		if stdoutW == nil {
-			stdoutW = os.Stdout
-		}
-		display := stream.NewDisplay(stdoutW)
-
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case ev, ok := <-events:
-				if !ok {
-					goto done
-				}
-				if len(ev.Raw) > 0 {
-					recorder.RecordStream(string(ev.Raw))
-				}
-				if ev.Err != nil || ev.Parsed.Type == "" {
-					continue
-				}
-				if ev.Parsed.Type == "system" && ev.Parsed.Subtype == "init" && ev.Parsed.TurnID != "" {
-					agentSessionID = ev.Parsed.TurnID
-				}
-				display.Handle(ev.Parsed)
-				accumulateText(ev.Parsed)
-			case <-ticker.C:
-				elapsed := time.Since(start).Round(time.Second)
-				fmt.Fprintf(stderrW, "\033[2m[status]\033[0m agent running for %s...\n", elapsed)
-			}
-		}
-
-	done:
-		display.Finish()
-	}
+	text, agentSessionID := runStreamLoop(cfg, events, recorder, start, ss.W)
 
 	waitErr := cmd.Wait()
 	duration := time.Since(start)
 
-	exitCode := 0
-	if waitErr != nil {
-		var exitErr *exec.ExitError
-		if errors.As(waitErr, &exitErr) {
-			exitCode = exitErr.ExitCode()
-		} else {
-			debug.LogKV("agent.codex", "cmd.Wait() error (not ExitError)", "error", waitErr)
-			return nil, fmt.Errorf("codex agent: failed to run command: %w", waitErr)
-		}
+	exitCode, err := extractExitCode(waitErr)
+	if err != nil {
+		debug.LogKV("agent.codex", "cmd.Wait() error (not ExitError)", "error", err)
+		return nil, fmt.Errorf("codex agent: failed to run command: %w", err)
 	}
+
 	debug.LogKV("agent.codex", "process finished",
 		"exit_code", exitCode,
 		"duration", duration,
-		"output_len", textBuf.Len(),
+		"output_len", len(text),
 		"agent_session_id", agentSessionID,
 	)
 
 	return &Result{
 		ExitCode:       exitCode,
 		Duration:       duration,
-		Output:         textBuf.String(),
-		Error:          stderrBuf.String(),
+		Output:         text,
+		Error:          ss.Buf.String(),
 		AgentSessionID: agentSessionID,
 	}, nil
 }
