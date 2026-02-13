@@ -1,11 +1,8 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -52,77 +49,34 @@ func (g *GenericAgent) Run(ctx context.Context, cfg Config, recorder *recording.
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
 
-	// Build environment: inherit current env, then overlay extras.
-	cmd.Env = os.Environ()
-	for k, v := range cfg.Env {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
+	setupEnv(cmd, cfg.Env)
+	setupStdin(cmd, cfg.Prompt, recorder)
+	bo := setupBufferOutput(cmd, cfg, recorder)
 
-	// If a prompt is provided, pipe it to stdin.
-	if cfg.Prompt != "" {
-		cmd.Stdin = strings.NewReader(cfg.Prompt)
-		recorder.RecordStdin(cfg.Prompt)
-	}
-
-	// Capture stdout and stderr, streaming to both the recorder and
-	// in-memory buffers so we can return the full output in Result.
-	var stdoutBuf, stderrBuf bytes.Buffer
-	stdoutW := cfg.Stdout
-	if stdoutW == nil {
-		stdoutW = os.Stdout
-	}
-	stderrW := cfg.Stderr
-	if stderrW == nil {
-		stderrW = os.Stderr
-	}
-
-	stdoutWriters := []io.Writer{
-		&stdoutBuf,
-		recorder.WrapWriter(stdoutW, "stdout"),
-	}
-	if w := newEventSinkWriter(cfg.EventSink, cfg.TurnID, ""); w != nil {
-		stdoutWriters = append(stdoutWriters, w)
-	}
-
-	stderrWriters := []io.Writer{
-		&stderrBuf,
-		recorder.WrapWriter(stderrW, "stderr"),
-	}
-	if w := newEventSinkWriter(cfg.EventSink, cfg.TurnID, "[stderr] "); w != nil {
-		stderrWriters = append(stderrWriters, w)
-	}
-
-	cmd.Stdout = io.MultiWriter(stdoutWriters...)
-	cmd.Stderr = io.MultiWriter(stderrWriters...)
-
-	recorder.RecordMeta("command", cmdName+" "+strings.Join(args, " "))
-	recorder.RecordMeta("workdir", cfg.WorkDir)
+	recordMeta(recorder, g.name, cmdName, args, cfg.WorkDir)
 
 	start := time.Now()
 	debug.LogKV("agent.generic", "process starting", "name", g.name, "binary", cmdName)
 	err := cmd.Run()
 	duration := time.Since(start)
 
-	exitCode := 0
+	exitCode, err := extractExitCode(err)
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			debug.LogKV("agent.generic", "cmd.Run() error (not ExitError)", "name", g.name, "error", err)
-			return nil, fmt.Errorf("agent %q: failed to run command: %w", g.name, err)
-		}
+		debug.LogKV("agent.generic", "cmd.Run() error (not ExitError)", "name", g.name, "error", err)
+		return nil, fmt.Errorf("agent %q: failed to run command: %w", g.name, err)
 	}
+
 	debug.LogKV("agent.generic", "process finished",
 		"name", g.name,
 		"exit_code", exitCode,
 		"duration", duration,
-		"output_len", stdoutBuf.Len(),
+		"output_len", bo.StdoutBuf.Len(),
 	)
 
 	return &Result{
 		ExitCode: exitCode,
 		Duration: duration,
-		Output:   stdoutBuf.String(),
-		Error:    stderrBuf.String(),
+		Output:   bo.StdoutBuf.String(),
+		Error:    bo.StderrBuf.String(),
 	}, nil
 }
