@@ -479,13 +479,27 @@ func pollSpawnStatus(ctx context.Context, s *store.Store, parentTurnID int, even
 
 		emitSpawnOutput(records, s, spawnOffsets, eventCh)
 
+		turnToSpawn := make(map[int]int, len(records))
+		for _, rec := range records {
+			if rec.ChildTurnID > 0 {
+				turnToSpawn[rec.ChildTurnID] = rec.ID
+			}
+		}
+
 		spawns := make([]runtui.SpawnInfo, 0, len(records))
 		for _, rec := range records {
+			parentSpawnID := 0
+			if rec.ParentTurnID > 0 {
+				parentSpawnID = turnToSpawn[rec.ParentTurnID]
+			}
 			info := runtui.SpawnInfo{
-				ID:           rec.ID,
-				ParentTurnID: rec.ParentTurnID,
-				Profile:      rec.ChildProfile,
-				Status:       rec.Status,
+				ID:            rec.ID,
+				ParentTurnID:  rec.ParentTurnID,
+				ParentSpawnID: parentSpawnID,
+				ChildTurnID:   rec.ChildTurnID,
+				Profile:       rec.ChildProfile,
+				Role:          rec.ChildRole,
+				Status:        rec.Status,
 			}
 			if rec.Status == "awaiting_input" {
 				if ask, err := s.PendingAsk(rec.ID); err == nil && ask != nil {
@@ -598,7 +612,7 @@ func spawnSnapshotFingerprint(spawns []runtui.SpawnInfo) string {
 	}
 	var b strings.Builder
 	for _, sp := range spawns {
-		b.WriteString(fmt.Sprintf("%d|%d|%s|%s|%s;", sp.ID, sp.ParentTurnID, sp.Profile, sp.Status, sp.Question))
+		b.WriteString(fmt.Sprintf("%d|%d|%d|%d|%s|%s|%s|%s;", sp.ID, sp.ParentTurnID, sp.ParentSpawnID, sp.ChildTurnID, sp.Profile, sp.Role, sp.Status, sp.Question))
 	}
 	return b.String()
 }

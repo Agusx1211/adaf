@@ -89,11 +89,14 @@ type WireFinished struct {
 
 // WireSpawnInfo describes a spawn entry.
 type WireSpawnInfo struct {
-	ID           int    `json:"id"`
-	ParentTurnID int    `json:"parent_turn_id,omitempty"`
-	Profile      string `json:"profile"`
-	Status       string `json:"status"`
-	Question     string `json:"question,omitempty"`
+	ID            int    `json:"id"`
+	ParentTurnID  int    `json:"parent_turn_id,omitempty"`
+	ParentSpawnID int    `json:"parent_spawn_id,omitempty"`
+	ChildTurnID   int    `json:"child_turn_id,omitempty"`
+	Profile       string `json:"profile"`
+	Role          string `json:"role,omitempty"`
+	Status        string `json:"status"`
+	Question      string `json:"question,omitempty"`
 }
 
 // WireSpawn carries spawn hierarchy updates.

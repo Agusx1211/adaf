@@ -163,11 +163,14 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 			spawns := make([]runtui.SpawnInfo, len(data.Spawns))
 			for i, s := range data.Spawns {
 				spawns[i] = runtui.SpawnInfo{
-					ID:           s.ID,
-					ParentTurnID: s.ParentTurnID,
-					Profile:      s.Profile,
-					Status:       s.Status,
-					Question:     s.Question,
+					ID:            s.ID,
+					ParentTurnID:  s.ParentTurnID,
+					ParentSpawnID: s.ParentSpawnID,
+					ChildTurnID:   s.ChildTurnID,
+					Profile:       s.Profile,
+					Role:          s.Role,
+					Status:        s.Status,
+					Question:      s.Question,
 				}
 			}
 			eventCh <- runtui.SpawnStatusMsg{Spawns: spawns}

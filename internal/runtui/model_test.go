@@ -247,7 +247,7 @@ func TestWaitForSpawnsResumeSameTurn(t *testing.T) {
 	}
 }
 
-func TestCommandEntriesHierarchyAndCompletedTurnCap(t *testing.T) {
+func TestCommandEntriesHierarchyAndHistory(t *testing.T) {
 	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
 	now := time.Now().Add(-10 * time.Minute)
 	m.sessions = map[int]*sessionStatus{
@@ -260,9 +260,11 @@ func TestCommandEntriesHierarchyAndCompletedTurnCap(t *testing.T) {
 	}
 	m.sessionOrder = []int{1, 2, 3, 4, 5, 6}
 	m.spawns = []SpawnInfo{
-		{ID: 10, ParentTurnID: 6, Profile: "reviewer", Status: "running"},
+		{ID: 10, ParentTurnID: 6, ChildTurnID: 60, Profile: "reviewer", Role: "qa", Status: "running"},
+		{ID: 11, ParentTurnID: 60, ParentSpawnID: 10, ChildTurnID: 61, Profile: "writer", Role: "documentator", Status: "queued"},
 	}
 	m.spawnFirstSeen[10] = time.Now().Add(-30 * time.Second)
+	m.spawnFirstSeen[11] = time.Now().Add(-20 * time.Second)
 
 	entries := m.commandEntries()
 	completedCount := 0
@@ -271,17 +273,11 @@ func TestCommandEntriesHierarchyAndCompletedTurnCap(t *testing.T) {
 			completedCount++
 		}
 	}
-	if completedCount != 3 {
-		t.Fatalf("completed entries = %d, want 3", completedCount)
+	if completedCount != 5 {
+		t.Fatalf("completed entries = %d, want 5", completedCount)
 	}
 
-	for _, entry := range entries {
-		if entry.scope == "session:1" || entry.scope == "session:2" {
-			t.Fatalf("unexpected old completed session in entries: %q", entry.scope)
-		}
-	}
-
-	parentIdx, childIdx := -1, -1
+	parentIdx, childIdx, nestedIdx := -1, -1, -1
 	for i, entry := range entries {
 		if entry.scope == "session:6" {
 			parentIdx = i
@@ -292,19 +288,31 @@ func TestCommandEntriesHierarchyAndCompletedTurnCap(t *testing.T) {
 				t.Fatalf("spawn entry depth = %d, want 1", entry.depth)
 			}
 		}
+		if entry.scope == "spawn:11" {
+			nestedIdx = i
+			if entry.depth != 2 {
+				t.Fatalf("nested spawn entry depth = %d, want 2", entry.depth)
+			}
+		}
 	}
-	if parentIdx == -1 || childIdx == -1 {
-		t.Fatalf("missing parent or child entries: parent=%d child=%d", parentIdx, childIdx)
+	if parentIdx == -1 || childIdx == -1 || nestedIdx == -1 {
+		t.Fatalf("missing hierarchy entries: parent=%d child=%d nested=%d", parentIdx, childIdx, nestedIdx)
 	}
 	if childIdx <= parentIdx {
 		t.Fatalf("spawn entry index = %d, want greater than parent index %d", childIdx, parentIdx)
 	}
+	if nestedIdx <= childIdx {
+		t.Fatalf("nested spawn entry index = %d, want greater than parent spawn index %d", nestedIdx, childIdx)
+	}
 
 	var lines []string
-	m.appendAgentsList(&lines, 80, entries)
+	_ = m.appendAgentsList(&lines, 80, entries)
 	rendered := strings.Join(stripStyledLines(lines), "\n")
-	if !strings.Contains(rendered, "|- spawn #10 reviewer") {
-		t.Fatalf("agents list did not render hierarchy prefix; output:\n%s", rendered)
+	if !strings.Contains(rendered, "+- #10 reviewer as qa") {
+		t.Fatalf("agents list missing spawn role/title; output:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "|  +- #11 writer as documentator") {
+		t.Fatalf("agents list missing nested hierarchy prefix; output:\n%s", rendered)
 	}
 }
 
@@ -369,6 +377,51 @@ func TestIssueSelectionWithKeyboard(t *testing.T) {
 	}
 	if got.selectedScope() != "" {
 		t.Fatalf("selectedScope = %q, want empty in issue mode", got.selectedScope())
+	}
+}
+
+func TestPlanAndLogDetailModes(t *testing.T) {
+	m := NewModel("proj", &store.Plan{
+		ID:     "p1",
+		Title:  "Roadmap",
+		Status: "active",
+		Phases: []store.PlanPhase{
+			{ID: "phase-a", Title: "Plan", Status: "in_progress", Priority: 1, Description: "Build plan"},
+			{ID: "phase-b", Title: "Ship", Status: "not_started", Priority: 2, Description: "Ship feature"},
+		},
+	}, "codex", "", make(chan any, 1), nil)
+	m.leftSection = leftSectionPlan
+	m.selectedPhase = 1
+
+	planLines := strings.Join(stripStyledLines(m.detailLines(80)), "\n")
+	if !strings.Contains(planLines, "Phase 2/2") {
+		t.Fatalf("plan detail did not render selected phase, got: %q", planLines)
+	}
+	if !strings.Contains(planLines, "Ship") {
+		t.Fatalf("plan detail did not include selected phase title, got: %q", planLines)
+	}
+
+	m.leftSection = leftSectionLogs
+	m.turns = []store.Turn{
+		{
+			ID:           12,
+			Date:         time.Now().Add(-time.Minute),
+			Agent:        "codex",
+			ProfileName:  "reviewer",
+			Objective:    "Audit changes",
+			WhatWasBuilt: "Added tests",
+			CurrentState: "All green",
+			NextSteps:    "Merge",
+			BuildState:   "passing",
+		},
+	}
+
+	logLines := strings.Join(stripStyledLines(m.detailLines(80)), "\n")
+	if !strings.Contains(logLines, "Turn #12") {
+		t.Fatalf("log detail did not render selected turn, got: %q", logLines)
+	}
+	if !strings.Contains(logLines, "Audit changes") {
+		t.Fatalf("log detail did not include objective, got: %q", logLines)
 	}
 }
 

@@ -65,11 +65,14 @@ type SpawnStatusMsg struct {
 
 // SpawnInfo describes a spawn entry for the hierarchy view.
 type SpawnInfo struct {
-	ID           int
-	ParentTurnID int
-	Profile      string
-	Status       string // "queued", "running", "awaiting_input", "completed", "failed", "merged", "rejected"
-	Question     string // pending question when status is "awaiting_input"
+	ID            int
+	ParentTurnID  int
+	ParentSpawnID int
+	ChildTurnID   int
+	Profile       string
+	Role          string
+	Status        string // "queued", "running", "awaiting_input", "completed", "failed", "merged", "rejected"
+	Question      string // pending question when status is "awaiting_input"
 }
 
 // LoopStepStartMsg signals that a loop step has started.

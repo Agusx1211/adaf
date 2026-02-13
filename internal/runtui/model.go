@@ -19,8 +19,7 @@ import (
 )
 
 const (
-	leftPanelOuterWidth      = 44
-	maxVisibleCompletedTurns = 3
+	leftPanelOuterWidth = 44
 )
 
 type paneFocus int
@@ -36,6 +35,8 @@ const (
 	leftSectionAgents leftPanelSection = iota
 	leftSectionIssues
 	leftSectionDocs
+	leftSectionPlan
+	leftSectionLogs
 )
 
 type scopedLine struct {
@@ -148,6 +149,9 @@ type Model struct {
 	leftSection   leftPanelSection
 	selectedIssue int
 	selectedDoc   int
+	selectedPhase int
+	turns         []store.Turn
+	selectedTurn  int
 
 	// Raw output accumulators per scope for line-based rendering.
 	rawRemainder map[string]string
@@ -245,6 +249,13 @@ func (m *Model) reloadProjectData() {
 	if run, err := m.projectStore.ActiveLoopRun(); err == nil {
 		m.activeLoop = run
 	}
+	if turns, err := m.projectStore.ListTurns(); err == nil {
+		// Show newest turns first in Logs view.
+		for i, j := 0, len(turns)-1; i < j; i, j = i+1, j-1 {
+			turns[i], turns[j] = turns[j], turns[i]
+		}
+		m.turns = turns
+	}
 	if len(m.issues) == 0 {
 		m.selectedIssue = 0
 	} else if m.selectedIssue >= len(m.issues) {
@@ -254,6 +265,16 @@ func (m *Model) reloadProjectData() {
 		m.selectedDoc = 0
 	} else if m.selectedDoc >= len(m.docs) {
 		m.selectedDoc = len(m.docs) - 1
+	}
+	if m.plan == nil || len(m.plan.Phases) == 0 {
+		m.selectedPhase = 0
+	} else if m.selectedPhase >= len(m.plan.Phases) {
+		m.selectedPhase = len(m.plan.Phases) - 1
+	}
+	if len(m.turns) == 0 {
+		m.selectedTurn = 0
+	} else if m.selectedTurn >= len(m.turns) {
+		m.selectedTurn = len(m.turns) - 1
 	}
 	m.refreshStoreActivity()
 	m.lastDataLoad = time.Now()
@@ -609,6 +630,34 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.scrollPos = 0
 			m.autoScroll = false
+		case leftSectionPlan:
+			if m.plan == nil || len(m.plan.Phases) == 0 {
+				m.selectedPhase = 0
+				return
+			}
+			m.selectedPhase += delta
+			if m.selectedPhase < 0 {
+				m.selectedPhase = 0
+			}
+			if m.selectedPhase >= len(m.plan.Phases) {
+				m.selectedPhase = len(m.plan.Phases) - 1
+			}
+			m.scrollPos = 0
+			m.autoScroll = false
+		case leftSectionLogs:
+			if len(m.turns) == 0 {
+				m.selectedTurn = 0
+				return
+			}
+			m.selectedTurn += delta
+			if m.selectedTurn < 0 {
+				m.selectedTurn = 0
+			}
+			if m.selectedTurn >= len(m.turns) {
+				m.selectedTurn = len(m.turns) - 1
+			}
+			m.scrollPos = 0
+			m.autoScroll = false
 		default:
 			entries := m.commandEntries()
 			if len(entries) == 0 {
@@ -717,6 +766,26 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.scrollPos = 0
 			m.autoScroll = false
+		case leftSectionPlan:
+			if m.plan == nil || len(m.plan.Phases) == 0 {
+				m.selectedPhase = 0
+			} else if start {
+				m.selectedPhase = 0
+			} else {
+				m.selectedPhase = len(m.plan.Phases) - 1
+			}
+			m.scrollPos = 0
+			m.autoScroll = false
+		case leftSectionLogs:
+			if len(m.turns) == 0 {
+				m.selectedTurn = 0
+			} else if start {
+				m.selectedTurn = 0
+			} else {
+				m.selectedTurn = len(m.turns) - 1
+			}
+			m.scrollPos = 0
+			m.autoScroll = false
 		default:
 			entries := m.commandEntries()
 			if len(entries) == 0 {
@@ -772,6 +841,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.setLeftSection(leftSectionIssues)
 	case "3":
 		m.setLeftSection(leftSectionDocs)
+	case "4":
+		m.setLeftSection(leftSectionPlan)
+	case "5":
+		m.setLeftSection(leftSectionLogs)
 	case "t":
 		if m.focus == focusDetail && m.leftSection == leftSectionAgents {
 			m.cycleDetailLayer(1)
@@ -1710,7 +1783,7 @@ func (m Model) renderStatusBar() string {
 		parts = append(parts, shortcut("pgup/dn", "page"))
 		parts = append(parts, shortcut("tab", "command"))
 	}
-	parts = append(parts, shortcut("1/2/3", "views"))
+	parts = append(parts, shortcut("1-5", "views"))
 	if m.leftSection == leftSectionAgents {
 		parts = append(parts, shortcut("[/]", "agent"))
 		if m.focus == focusDetail {
@@ -1756,6 +1829,30 @@ func (m Model) renderStatusBar() string {
 		}
 		parts = append(parts, statusValueStyle.Render("doc="+m.docs[idx].ID))
 	}
+	if m.leftSection == leftSectionPlan && m.plan != nil && len(m.plan.Phases) > 0 {
+		idx := m.selectedPhase
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= len(m.plan.Phases) {
+			idx = len(m.plan.Phases) - 1
+		}
+		phaseID := strings.TrimSpace(m.plan.Phases[idx].ID)
+		if phaseID == "" {
+			phaseID = fmt.Sprintf("%d", idx+1)
+		}
+		parts = append(parts, statusValueStyle.Render("phase="+phaseID))
+	}
+	if m.leftSection == leftSectionLogs && len(m.turns) > 0 {
+		idx := m.selectedTurn
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= len(m.turns) {
+			idx = len(m.turns) - 1
+		}
+		parts = append(parts, statusValueStyle.Render(fmt.Sprintf("turn=#%d", m.turns[idx].ID)))
+	}
 
 	if m.done {
 		parts = append(parts, shortcut("esc", "back"))
@@ -1780,6 +1877,10 @@ func (m Model) leftSectionLabel() string {
 		return "issues"
 	case leftSectionDocs:
 		return "docs"
+	case leftSectionPlan:
+		return "plan"
+	case leftSectionLogs:
+		return "logs"
 	default:
 		return "agents"
 	}
@@ -1867,37 +1968,24 @@ func (m Model) commandEntries() []commandEntry {
 		entries[0].action = "monitoring"
 	}
 
-	spawnsByParent := make(map[int][]SpawnInfo)
-	if len(m.spawns) > 0 {
-		spawns := append([]SpawnInfo(nil), m.spawns...)
-		sort.Slice(spawns, func(i, j int) bool {
-			return spawns[i].ID < spawns[j].ID
-		})
-		for _, sp := range spawns {
-			spawnsByParent[sp.ParentTurnID] = append(spawnsByParent[sp.ParentTurnID], sp)
+	spawns := append([]SpawnInfo(nil), m.spawns...)
+	sort.Slice(spawns, func(i, j int) bool {
+		return spawns[i].ID < spawns[j].ID
+	})
+	childrenByParent := make(map[string][]SpawnInfo, len(spawns))
+	rootSpawns := make([]SpawnInfo, 0, len(spawns))
+	for _, sp := range spawns {
+		parentScope := ""
+		if sp.ParentSpawnID > 0 {
+			parentScope = m.spawnScope(sp.ParentSpawnID)
+		} else if sp.ParentTurnID > 0 {
+			parentScope = m.sessionScope(sp.ParentTurnID)
 		}
-	}
-
-	keepCompleted := make(map[int]struct{})
-	keptCompleted := 0
-	for i := len(m.sessionOrder) - 1; i >= 0; i-- {
-		if keptCompleted >= maxVisibleCompletedTurns {
-			break
-		}
-		sid := m.sessionOrder[i]
-		s := m.sessions[sid]
-		if s == nil {
+		if parentScope == "" {
+			rootSpawns = append(rootSpawns, sp)
 			continue
 		}
-		status := strings.TrimSpace(s.Status)
-		if status == "" {
-			status = "running"
-		}
-		if status != "completed" {
-			continue
-		}
-		keepCompleted[sid] = struct{}{}
-		keptCompleted++
+		childrenByParent[parentScope] = append(childrenByParent[parentScope], sp)
 	}
 
 	now := time.Now()
@@ -1911,22 +1999,51 @@ func (m Model) commandEntries() []commandEntry {
 			}
 			duration = d.String()
 		}
-		action := "spawn"
-		if sp.Question != "" {
-			action = "awaiting input"
+		title := fmt.Sprintf("#%d %s", sp.ID, sp.Profile)
+		if role := strings.TrimSpace(sp.Role); role != "" {
+			title += " as " + role
 		}
-		title := fmt.Sprintf("spawn #%d %s", sp.ID, sp.Profile)
 		if includeParentHint && sp.ParentTurnID > 0 {
 			title += fmt.Sprintf(" (turn #%d)", sp.ParentTurnID)
+		}
+		status := strings.TrimSpace(sp.Status)
+		if status == "" {
+			status = "running"
+		}
+		var actionParts []string
+		if role := strings.TrimSpace(sp.Role); role != "" {
+			actionParts = append(actionParts, "role="+role)
+		}
+		if sp.Status == "awaiting_input" || strings.TrimSpace(sp.Question) != "" {
+			actionParts = append(actionParts, "awaiting input")
+		}
+		if includeParentHint && sp.ParentTurnID > 0 {
+			actionParts = append(actionParts, fmt.Sprintf("parent turn #%d", sp.ParentTurnID))
+		}
+		if len(actionParts) == 0 {
+			actionParts = append(actionParts, "delegated")
 		}
 		entries = append(entries, commandEntry{
 			scope:    m.spawnScope(sp.ID),
 			title:    title,
-			status:   sp.Status,
-			action:   action,
+			status:   status,
+			action:   strings.Join(actionParts, " · "),
 			duration: duration,
 			depth:    depth,
 		})
+	}
+	seenSpawns := make(map[int]struct{}, len(spawns))
+	var appendSpawnTree func(parentScope string, depth int)
+	appendSpawnTree = func(parentScope string, depth int) {
+		children := childrenByParent[parentScope]
+		for _, sp := range children {
+			if _, seen := seenSpawns[sp.ID]; seen {
+				continue
+			}
+			seenSpawns[sp.ID] = struct{}{}
+			appendSpawn(sp, depth, false)
+			appendSpawnTree(m.spawnScope(sp.ID), depth+1)
+		}
 	}
 
 	for _, sid := range m.sessionOrder {
@@ -1937,11 +2054,6 @@ func (m Model) commandEntries() []commandEntry {
 		status := strings.TrimSpace(s.Status)
 		if status == "" {
 			status = "running"
-		}
-		if status == "completed" {
-			if _, ok := keepCompleted[sid]; !ok {
-				continue
-			}
 		}
 		title := fmt.Sprintf("turn #%d %s", s.ID, s.Agent)
 		if s.Profile != "" {
@@ -1974,24 +2086,25 @@ func (m Model) commandEntries() []commandEntry {
 			duration: duration,
 			depth:    0,
 		})
-		children := spawnsByParent[s.ID]
-		for _, sp := range children {
-			appendSpawn(sp, 1, false)
-		}
-		delete(spawnsByParent, s.ID)
+		appendSpawnTree(m.sessionScope(s.ID), 1)
 	}
 
-	if len(spawnsByParent) > 0 {
-		parentIDs := make([]int, 0, len(spawnsByParent))
-		for parentID := range spawnsByParent {
-			parentIDs = append(parentIDs, parentID)
+	for _, sp := range rootSpawns {
+		if _, seen := seenSpawns[sp.ID]; seen {
+			continue
 		}
-		sort.Ints(parentIDs)
-		for _, parentID := range parentIDs {
-			for _, sp := range spawnsByParent[parentID] {
-				appendSpawn(sp, 0, true)
-			}
+		seenSpawns[sp.ID] = struct{}{}
+		appendSpawn(sp, 0, sp.ParentTurnID > 0)
+		appendSpawnTree(m.spawnScope(sp.ID), 1)
+	}
+
+	for _, sp := range spawns {
+		if _, seen := seenSpawns[sp.ID]; seen {
+			continue
 		}
+		seenSpawns[sp.ID] = struct{}{}
+		appendSpawn(sp, 0, true)
+		appendSpawnTree(m.spawnScope(sp.ID), 1)
 	}
 
 	return entries
@@ -2009,13 +2122,18 @@ func (m Model) renderLeftPanel(outerW, outerH int) string {
 	}
 
 	var lines []string
+	cursorLine := -1
 	lines = append(lines, sectionTitleStyle.Render("Command Center"))
 	if m.focus == focusCommand {
 		lines = append(lines, dimStyle.Render("focus: left panel"))
 	} else {
 		lines = append(lines, dimStyle.Render("focus: detail"))
 	}
-	lines = append(lines, dimStyle.Render("tab focus · 1/2/3 sections · t/T detail layer"))
+	helpLine := "tab focus · 1-5 views"
+	if m.leftSection == leftSectionAgents {
+		helpLine += " · t/T detail layer"
+	}
+	lines = append(lines, dimStyle.Render(helpLine))
 	if m.leftSection == leftSectionAgents {
 		lines = append(lines, dimStyle.Render("[/] cycle running agents"))
 	} else {
@@ -2048,15 +2166,25 @@ func (m Model) renderLeftPanel(outerW, outerH int) string {
 	lines = append(lines, leftViewChip(m.leftSection == leftSectionAgents, fmt.Sprintf("1 Agents (%d)", len(entries))))
 	lines = append(lines, leftViewChip(m.leftSection == leftSectionIssues, fmt.Sprintf("2 Issues (%d)", len(m.issues))))
 	lines = append(lines, leftViewChip(m.leftSection == leftSectionDocs, fmt.Sprintf("3 Docs (%d)", len(m.docs))))
+	planCount := 0
+	if m.plan != nil {
+		planCount = len(m.plan.Phases)
+	}
+	lines = append(lines, leftViewChip(m.leftSection == leftSectionPlan, fmt.Sprintf("4 Plan (%d)", planCount)))
+	lines = append(lines, leftViewChip(m.leftSection == leftSectionLogs, fmt.Sprintf("5 Logs (%d)", len(m.turns))))
 	lines = append(lines, "")
 
 	switch m.leftSection {
 	case leftSectionIssues:
-		m.appendIssuesList(&lines, cw)
+		cursorLine = m.appendIssuesList(&lines, cw)
 	case leftSectionDocs:
-		m.appendDocsList(&lines, cw)
+		cursorLine = m.appendDocsList(&lines, cw)
+	case leftSectionPlan:
+		cursorLine = m.appendPlanList(&lines, cw)
+	case leftSectionLogs:
+		cursorLine = m.appendLogsList(&lines, cw)
 	default:
-		m.appendAgentsList(&lines, cw, entries)
+		cursorLine = m.appendAgentsList(&lines, cw, entries)
 	}
 	lines = append(lines, "")
 
@@ -2070,21 +2198,7 @@ func (m Model) renderLeftPanel(outerW, outerH int) string {
 	}
 	lines = append(lines, dimStyle.Render(truncate(usage, cw)))
 
-	if m.plan != nil && len(m.plan.Phases) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, sectionTitleStyle.Render("Plan"))
-		limit := len(m.plan.Phases)
-		if limit > 6 {
-			limit = 6
-		}
-		for i := 0; i < limit; i++ {
-			phase := m.plan.Phases[i]
-			indicator := theme.PhaseStatusIndicator(phase.Status)
-			lines = append(lines, indicator+truncate(phase.Title, cw-2))
-		}
-	}
-
-	content := fitToSize(lines, cw, ch)
+	content := fitToSizeWithCursor(lines, cw, ch, cursorLine)
 	return leftPanelStyle.Render(content)
 }
 
@@ -2095,12 +2209,20 @@ func leftViewChip(active bool, text string) string {
 	return dimStyle.Render("  " + text)
 }
 
-func (m Model) appendAgentsList(lines *[]string, cw int, entries []commandEntry) {
+func hierarchyPrefix(depth int) string {
+	if depth <= 0 {
+		return ""
+	}
+	return strings.Repeat("|  ", depth-1) + "+- "
+}
+
+func (m Model) appendAgentsList(lines *[]string, cw int, entries []commandEntry) int {
 	*lines = append(*lines, sectionTitleStyle.Render("Agents"))
 	if len(entries) == 0 {
 		*lines = append(*lines, dimStyle.Render("  no active entries"))
-		return
+		return -1
 	}
+	cursorLine := -1
 	selected := m.selectedEntry
 	if selected < 0 {
 		selected = 0
@@ -2118,13 +2240,16 @@ func (m Model) appendAgentsList(lines *[]string, cw int, entries []commandEntry)
 		status := statusStyle(entry.status).Render(entry.status)
 		title := entry.title
 		if entry.depth > 0 {
-			title = strings.Repeat("  ", entry.depth) + "|- " + title
+			title = hierarchyPrefix(entry.depth) + title
 		}
 		line := fmt.Sprintf("%s%s [%s]", prefix, titleStyle.Render(truncate(title, cw-8)), status)
 		*lines = append(*lines, line)
+		if i == selected {
+			cursorLine = len(*lines) - 1
+		}
 		metaPrefix := "   "
 		if entry.depth > 0 {
-			metaPrefix += strings.Repeat("  ", entry.depth) + "   "
+			metaPrefix += strings.Repeat("  ", entry.depth)
 		}
 		maxMetaWidth := cw - len(metaPrefix)
 		if maxMetaWidth < 1 {
@@ -2133,14 +2258,16 @@ func (m Model) appendAgentsList(lines *[]string, cw int, entries []commandEntry)
 		meta := dimStyle.Render(metaPrefix + truncate(entry.duration+" · "+entry.action, maxMetaWidth))
 		*lines = append(*lines, meta)
 	}
+	return cursorLine
 }
 
-func (m Model) appendIssuesList(lines *[]string, cw int) {
+func (m Model) appendIssuesList(lines *[]string, cw int) int {
 	*lines = append(*lines, sectionTitleStyle.Render("Issues"))
 	if len(m.issues) == 0 {
 		*lines = append(*lines, dimStyle.Render("  no issues recorded"))
-		return
+		return -1
 	}
+	cursorLine := -1
 	selected := m.selectedIssue
 	if selected < 0 {
 		selected = 0
@@ -2157,19 +2284,24 @@ func (m Model) appendIssuesList(lines *[]string, cw int) {
 		}
 		title := fmt.Sprintf("#%d %s", issue.ID, truncate(issue.Title, cw-8))
 		*lines = append(*lines, prefix+titleStyle.Render(title))
+		if i == selected {
+			cursorLine = len(*lines) - 1
+		}
 		meta := fmt.Sprintf("   %s · %s",
 			issuePriorityStyle(issue.Priority).Render(issue.Priority),
 			issueStatusStyle(issue.Status).Render(issue.Status))
 		*lines = append(*lines, truncate(meta, cw))
 	}
+	return cursorLine
 }
 
-func (m Model) appendDocsList(lines *[]string, cw int) {
+func (m Model) appendDocsList(lines *[]string, cw int) int {
 	*lines = append(*lines, sectionTitleStyle.Render("Docs"))
 	if len(m.docs) == 0 {
 		*lines = append(*lines, dimStyle.Render("  no docs recorded"))
-		return
+		return -1
 	}
+	cursorLine := -1
 	selected := m.selectedDoc
 	if selected < 0 {
 		selected = 0
@@ -2186,9 +2318,110 @@ func (m Model) appendDocsList(lines *[]string, cw int) {
 		}
 		title := fmt.Sprintf("[%s] %s", doc.ID, truncate(doc.Title, cw-8))
 		*lines = append(*lines, prefix+titleStyle.Render(title))
+		if i == selected {
+			cursorLine = len(*lines) - 1
+		}
 		meta := fmt.Sprintf("   %s · %d chars", formatTimeAgoShort(doc.Updated), len(doc.Content))
 		*lines = append(*lines, dimStyle.Render(truncate(meta, cw)))
 	}
+	return cursorLine
+}
+
+func (m Model) appendPlanList(lines *[]string, cw int) int {
+	*lines = append(*lines, sectionTitleStyle.Render("Plan"))
+	if m.plan == nil {
+		*lines = append(*lines, dimStyle.Render("  no active plan"))
+		return -1
+	}
+
+	title := strings.TrimSpace(m.plan.Title)
+	if title == "" {
+		title = "(untitled)"
+	}
+	status := strings.TrimSpace(m.plan.Status)
+	if status == "" {
+		status = "active"
+	}
+	*lines = append(*lines, valueStyle.Render("  "+truncate(m.plan.ID+" · "+title, cw-2)))
+	*lines = append(*lines, dimStyle.Render("  status: "+status))
+	if len(m.plan.Phases) == 0 {
+		*lines = append(*lines, dimStyle.Render("  no phases"))
+		return -1
+	}
+
+	*lines = append(*lines, "")
+	*lines = append(*lines, sectionTitleStyle.Render("Phases"))
+	selected := m.selectedPhase
+	if selected < 0 {
+		selected = 0
+	}
+	if selected >= len(m.plan.Phases) {
+		selected = len(m.plan.Phases) - 1
+	}
+	cursorLine := -1
+	for i, phase := range m.plan.Phases {
+		prefix := "  "
+		titleStyle := valueStyle
+		if i == selected {
+			prefix = "> "
+			titleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.ColorTeal)
+		}
+		indicator := theme.PhaseStatusIndicator(phase.Status)
+		name := phase.Title
+		if strings.TrimSpace(name) == "" {
+			name = phase.ID
+		}
+		*lines = append(*lines, prefix+titleStyle.Render(indicator+truncate(name, cw-8)))
+		if i == selected {
+			cursorLine = len(*lines) - 1
+		}
+		metaID := strings.TrimSpace(phase.ID)
+		if metaID == "" {
+			metaID = fmt.Sprintf("phase-%d", i+1)
+		}
+		meta := fmt.Sprintf("   %s · %s", metaID, phase.Status)
+		*lines = append(*lines, dimStyle.Render(truncate(meta, cw)))
+	}
+	return cursorLine
+}
+
+func (m Model) appendLogsList(lines *[]string, cw int) int {
+	*lines = append(*lines, sectionTitleStyle.Render("Logs"))
+	if len(m.turns) == 0 {
+		*lines = append(*lines, dimStyle.Render("  no turn logs yet"))
+		return -1
+	}
+	selected := m.selectedTurn
+	if selected < 0 {
+		selected = 0
+	}
+	if selected >= len(m.turns) {
+		selected = len(m.turns) - 1
+	}
+	cursorLine := -1
+	for i, turn := range m.turns {
+		prefix := "  "
+		titleStyle := valueStyle
+		if i == selected {
+			prefix = "> "
+			titleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.ColorTeal)
+		}
+		profile := strings.TrimSpace(turn.ProfileName)
+		if profile == "" {
+			profile = strings.TrimSpace(turn.Agent)
+		}
+		if profile == "" {
+			profile = "turn"
+		}
+		title := fmt.Sprintf("#%d %s", turn.ID, profile)
+		*lines = append(*lines, prefix+titleStyle.Render(truncate(title, cw-8)))
+		if i == selected {
+			cursorLine = len(*lines) - 1
+		}
+		meta := fmt.Sprintf("   %s · %s", turn.Date.Format("2006-01-02 15:04"), truncate(compactWhitespace(turn.Objective), cw-26))
+		*lines = append(*lines, dimStyle.Render(truncate(meta, cw)))
+	}
+	return cursorLine
 }
 
 func fieldLine(label, value string) string {
@@ -2250,6 +2483,10 @@ func (m Model) detailLines(width int) []string {
 		return wrapRenderableLines(m.issueDetailLines(), width)
 	case leftSectionDocs:
 		return wrapRenderableLines(m.docDetailLines(), width)
+	case leftSectionPlan:
+		return wrapRenderableLines(m.planDetailLines(), width)
+	case leftSectionLogs:
+		return wrapRenderableLines(m.logDetailLines(), width)
 	}
 
 	var lines []string
@@ -2350,6 +2587,161 @@ func (m Model) docDetailLines() []string {
 	return lines
 }
 
+func (m Model) planDetailLines() []string {
+	if m.plan == nil {
+		return []string{
+			sectionTitleStyle.Render("Plan"),
+			"",
+			dimStyle.Render("No active plan available."),
+		}
+	}
+
+	status := strings.TrimSpace(m.plan.Status)
+	if status == "" {
+		status = "active"
+	}
+	title := strings.TrimSpace(m.plan.Title)
+	if title == "" {
+		title = "(untitled)"
+	}
+	lines := []string{
+		sectionTitleStyle.Render("Plan " + m.plan.ID),
+		fieldLine("Status", status),
+		fieldLine("Updated", m.plan.Updated.Format("2006-01-02 15:04")),
+		fieldLine("Phases", fmt.Sprintf("%d", len(m.plan.Phases))),
+		"",
+		sectionTitleStyle.Render("Title"),
+		textStyle.Render(title),
+	}
+	if strings.TrimSpace(m.plan.Description) != "" {
+		lines = append(lines, "")
+		lines = append(lines, sectionTitleStyle.Render("Description"))
+		for _, line := range splitRenderableLines(m.plan.Description) {
+			lines = append(lines, textStyle.Render(line))
+		}
+	}
+
+	if len(m.plan.Phases) == 0 {
+		lines = append(lines, "", dimStyle.Render("No phases defined."))
+		return lines
+	}
+
+	idx := m.selectedPhase
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(m.plan.Phases) {
+		idx = len(m.plan.Phases) - 1
+	}
+	phase := m.plan.Phases[idx]
+	phaseID := strings.TrimSpace(phase.ID)
+	if phaseID == "" {
+		phaseID = fmt.Sprintf("phase-%d", idx+1)
+	}
+	phaseTitle := strings.TrimSpace(phase.Title)
+	if phaseTitle == "" {
+		phaseTitle = "(untitled phase)"
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, sectionTitleStyle.Render(fmt.Sprintf("Phase %d/%d", idx+1, len(m.plan.Phases))))
+	lines = append(lines, fieldLine("ID", phaseID))
+	lines = append(lines, fieldLine("Status", phase.Status))
+	lines = append(lines, fieldLine("Priority", fmt.Sprintf("%d", phase.Priority)))
+	if len(phase.DependsOn) > 0 {
+		lines = append(lines, fieldLine("Depends", strings.Join(phase.DependsOn, ", ")))
+	}
+	lines = append(lines, "")
+	lines = append(lines, sectionTitleStyle.Render("Phase Title"))
+	lines = append(lines, textStyle.Render(phaseTitle))
+	lines = append(lines, "")
+	lines = append(lines, sectionTitleStyle.Render("Phase Description"))
+	if strings.TrimSpace(phase.Description) == "" {
+		lines = append(lines, dimStyle.Render("No phase description."))
+	} else {
+		for _, line := range splitRenderableLines(phase.Description) {
+			lines = append(lines, textStyle.Render(line))
+		}
+	}
+	return lines
+}
+
+func (m Model) logDetailLines() []string {
+	if len(m.turns) == 0 {
+		return []string{
+			sectionTitleStyle.Render("Logs"),
+			"",
+			dimStyle.Render("No turn logs captured yet."),
+		}
+	}
+
+	idx := m.selectedTurn
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(m.turns) {
+		idx = len(m.turns) - 1
+	}
+	turn := m.turns[idx]
+
+	profile := strings.TrimSpace(turn.ProfileName)
+	if profile == "" {
+		profile = "(unknown)"
+	}
+	agentLabel := strings.TrimSpace(turn.Agent)
+	if strings.TrimSpace(turn.AgentModel) != "" {
+		agentLabel += " · " + strings.TrimSpace(turn.AgentModel)
+	}
+	if strings.TrimSpace(turn.HexID) != "" {
+		agentLabel += " [" + strings.TrimSpace(turn.HexID) + "]"
+	}
+
+	lines := []string{
+		sectionTitleStyle.Render(fmt.Sprintf("Turn #%d", turn.ID)),
+		fieldLine("Date", turn.Date.Format("2006-01-02 15:04:05")),
+		fieldLine("Profile", profile),
+		fieldLine("Agent", agentLabel),
+		fieldLine("Duration", fmt.Sprintf("%ds", turn.DurationSecs)),
+	}
+	if strings.TrimSpace(turn.PlanID) != "" {
+		lines = append(lines, fieldLine("Plan", turn.PlanID))
+	}
+	if strings.TrimSpace(turn.LoopRunHexID) != "" {
+		lines = append(lines, fieldLine("Run", turn.LoopRunHexID))
+	}
+	if strings.TrimSpace(turn.StepHexID) != "" {
+		lines = append(lines, fieldLine("Step", turn.StepHexID))
+	}
+	if strings.TrimSpace(turn.CommitHash) != "" {
+		lines = append(lines, fieldLine("Commit", turn.CommitHash))
+	}
+
+	appendSection := func(title, body string) {
+		if strings.TrimSpace(body) == "" {
+			return
+		}
+		lines = append(lines, "")
+		lines = append(lines, sectionTitleStyle.Render(title))
+		for _, line := range splitRenderableLines(body) {
+			lines = append(lines, textStyle.Render(line))
+		}
+	}
+
+	appendSection("Objective", turn.Objective)
+	appendSection("What Was Built", turn.WhatWasBuilt)
+	appendSection("Key Decisions", turn.KeyDecisions)
+	appendSection("Challenges", turn.Challenges)
+	appendSection("Current State", turn.CurrentState)
+	appendSection("Known Issues", turn.KnownIssues)
+	appendSection("Next Steps", turn.NextSteps)
+	appendSection("Build State", turn.BuildState)
+
+	if len(lines) == 0 {
+		return []string{dimStyle.Render("No log details available.")}
+	}
+	return lines
+}
+
 // --- Utility ---
 
 // fitToSize takes a slice of styled lines and produces a string that is
@@ -2378,6 +2770,25 @@ func fitToSize(lines []string, w, h int) string {
 		}
 	}
 	return strings.Join(result, "\n")
+}
+
+func fitToSizeWithCursor(lines []string, w, h, cursorLine int) string {
+	if cursorLine < 0 || len(lines) <= h {
+		return fitToSize(lines, w, h)
+	}
+	start := cursorLine - (h / 2)
+	if start < 0 {
+		start = 0
+	}
+	maxStart := len(lines) - h
+	if start > maxStart {
+		start = maxStart
+	}
+	end := start + h
+	if end > len(lines) {
+		end = len(lines)
+	}
+	return fitToSize(lines[start:end], w, h)
 }
 
 func wrapRenderableLines(lines []string, width int) []string {

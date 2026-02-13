@@ -718,11 +718,14 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 				spawns := make([]WireSpawnInfo, len(ev.Spawns))
 				for i, sp := range ev.Spawns {
 					spawns[i] = WireSpawnInfo{
-						ID:           sp.ID,
-						ParentTurnID: sp.ParentTurnID,
-						Profile:      sp.Profile,
-						Status:       sp.Status,
-						Question:     sp.Question,
+						ID:            sp.ID,
+						ParentTurnID:  sp.ParentTurnID,
+						ParentSpawnID: sp.ParentSpawnID,
+						ChildTurnID:   sp.ChildTurnID,
+						Profile:       sp.Profile,
+						Role:          sp.Role,
+						Status:        sp.Status,
+						Question:      sp.Question,
 					}
 				}
 				line, _ := EncodeMsg(MsgSpawn, WireSpawn{Spawns: spawns})
