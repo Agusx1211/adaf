@@ -96,6 +96,12 @@ type Model struct {
 	scrollPos  int
 	autoScroll bool
 	focus      paneFocus
+	// Current detail layer for the right panel in agent view.
+	detailLayer detailLayer
+	// Derived layer content and metrics.
+	simplifiedLines []scopedLine
+	activityLines   []scopedLine
+	statsByScope    map[string]*detailStats
 
 	// Streaming delta accumulator. Use pointers so Model value copies do not
 	// trip strings.Builder copy checks in Bubble Tea update cycles.
@@ -145,27 +151,55 @@ type Model struct {
 
 	// Raw output accumulators per scope for line-based rendering.
 	rawRemainder map[string]string
+
+	// Prompt and final-message snapshots by scope.
+	promptsByScope      map[string]promptSnapshot
+	latestPromptScope   string
+	lastMessageByScope  map[string]string
+	finalMessageByScope map[string]finalMessageSnapshot
+	latestFinalScope    string
+
+	// Store-change activity tracking snapshots.
+	activityBaselineReady bool
+	activityLoopRunID     int
+	knownIssues           map[int]store.Issue
+	knownDocs             map[string]store.Doc
+	knownNotes            map[int]struct{}
+	knownLoopMessages     map[string]struct{}
+	knownSpawns           map[int]store.SpawnRecord
+	knownSpawnMessages    map[string]struct{}
 }
 
 // NewModel creates a new Model with the given configuration.
 func NewModel(projectName string, plan *store.Plan, agentName, modelName string, eventCh chan any, cancel context.CancelFunc) Model {
 	return Model{
-		projectName:    projectName,
-		plan:           plan,
-		agentName:      agentName,
-		modelName:      modelName,
-		startTime:      time.Now(),
-		autoScroll:     true,
-		focus:          focusDetail,
-		eventCh:        eventCh,
-		cancelFunc:     cancel,
-		streamBuf:      &strings.Builder{},
-		toolInputBuf:   &strings.Builder{},
-		sessions:       make(map[int]*sessionStatus),
-		spawnFirstSeen: make(map[int]time.Time),
-		spawnStatus:    make(map[int]string),
-		rawRemainder:   make(map[string]string),
-		leftSection:    leftSectionAgents,
+		projectName:         projectName,
+		plan:                plan,
+		agentName:           agentName,
+		modelName:           modelName,
+		startTime:           time.Now(),
+		autoScroll:          true,
+		focus:               focusDetail,
+		detailLayer:         detailLayerRaw,
+		eventCh:             eventCh,
+		cancelFunc:          cancel,
+		streamBuf:           &strings.Builder{},
+		toolInputBuf:        &strings.Builder{},
+		sessions:            make(map[int]*sessionStatus),
+		spawnFirstSeen:      make(map[int]time.Time),
+		spawnStatus:         make(map[int]string),
+		rawRemainder:        make(map[string]string),
+		statsByScope:        make(map[string]*detailStats),
+		promptsByScope:      make(map[string]promptSnapshot),
+		lastMessageByScope:  make(map[string]string),
+		finalMessageByScope: make(map[string]finalMessageSnapshot),
+		knownIssues:         make(map[int]store.Issue),
+		knownDocs:           make(map[string]store.Doc),
+		knownNotes:          make(map[int]struct{}),
+		knownLoopMessages:   make(map[string]struct{}),
+		knownSpawns:         make(map[int]store.SpawnRecord),
+		knownSpawnMessages:  make(map[string]struct{}),
+		leftSection:         leftSectionAgents,
 	}
 }
 
@@ -221,6 +255,7 @@ func (m *Model) reloadProjectData() {
 	} else if m.selectedDoc >= len(m.docs) {
 		m.selectedDoc = len(m.docs) - 1
 	}
+	m.refreshStoreActivity()
 	m.lastDataLoad = time.Now()
 }
 
@@ -312,6 +347,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !hadPrev || prev != sp.Status {
 				scope := m.spawnScope(sp.ID)
 				m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf("[spawn #%d] %s -> %s", sp.ID, sp.Profile, sp.Status)))
+				m.addSimplifiedLine(scope, dimStyle.Render("spawn update"))
+				m.bumpStats(scope, func(st *detailStats) { st.Spawns++ })
 				if sp.Question != "" {
 					m.addScopedLine(scope, dimStyle.Render("  Q: "+truncate(sp.Question, 180)))
 				}
@@ -338,6 +375,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case GuardrailViolationMsg:
 		m.addLine(lipgloss.NewStyle().Foreground(theme.ColorRed).Bold(true).Render(
 			fmt.Sprintf("[guardrail] %s attempted %s — turn interrupted", msg.Role, msg.Tool)))
+		m.addSimplifiedLine("", dimStyle.Render(fmt.Sprintf("guardrail blocked %s for %s", msg.Tool, msg.Role)))
 		return m, waitForEvent(m.eventCh)
 
 	case AgentStartedMsg:
@@ -374,6 +412,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			turnLabel += " started"
 		}
 		m.addScopedLine(scope, dimStyle.Render(turnLabel))
+		m.addSimplifiedLine(scope, dimStyle.Render("turn started"))
+		return m, waitForEvent(m.eventCh)
+
+	case AgentPromptMsg:
+		scope := m.sessionScope(msg.SessionID)
+		if scope == "" && m.sessionID > 0 {
+			scope = m.sessionScope(m.sessionID)
+		}
+		m.recordAgentPrompt(scope, msg)
 		return m, waitForEvent(m.eventCh)
 
 	case AgentFinishedMsg:
@@ -402,9 +449,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.WaitForSpawns {
 				m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf("<<< Turn #%d%s waiting for spawns (exit=%d, %s)",
 					msg.SessionID, hexTag, msg.Result.ExitCode, msg.Result.Duration.Round(time.Second))))
+				m.addSimplifiedLine(scope, dimStyle.Render("waiting for spawns"))
 			} else {
 				m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf("<<< Turn #%d%s finished (exit=%d, %s)",
 					msg.SessionID, hexTag, msg.Result.ExitCode, msg.Result.Duration.Round(time.Second))))
+				m.addSimplifiedLine(scope, dimStyle.Render("turn finished"))
 			}
 		} else if msg.Err != nil {
 			s.EndedAt = s.LastUpdate
@@ -412,6 +461,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s.Action = "error"
 			m.addScopedLine(scope, lipgloss.NewStyle().Foreground(theme.ColorRed).Render(
 				fmt.Sprintf("<<< Turn #%d%s error: %v", msg.SessionID, hexTag, msg.Err)))
+			m.addSimplifiedLine(scope, dimStyle.Render("turn failed"))
+		}
+		if final := strings.TrimSpace(m.lastMessageByScope[scope]); final != "" && !msg.WaitForSpawns {
+			m.finalMessageByScope[scope] = finalMessageSnapshot{
+				Text:      final,
+				TurnHexID: msg.TurnHexID,
+				UpdatedAt: time.Now(),
+			}
+			m.latestFinalScope = scope
 		}
 		return m, waitForEvent(m.eventCh)
 
@@ -459,6 +517,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			stepLine += "]"
 		}
 		m.addLine(initLabelStyle.Render(stepLine))
+		m.addSimplifiedLine("", dimStyle.Render("loop step started"))
 		return m, waitForEvent(m.eventCh)
 
 	case LoopStepEndMsg:
@@ -471,6 +530,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			stepEndLine += fmt.Sprintf(" [step:%s]", msg.StepHexID)
 		}
 		m.addLine(dimStyle.Render(stepEndLine))
+		m.addSimplifiedLine("", dimStyle.Render("loop step completed"))
 		return m, waitForEvent(m.eventCh)
 
 	case LoopDoneMsg:
@@ -562,8 +622,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.selectedEntry >= len(entries) {
 				m.selectedEntry = len(entries) - 1
 			}
-			m.scrollToBottom()
-			m.autoScroll = true
+			if m.detailLayer == detailLayerRaw {
+				m.scrollToBottom()
+				m.autoScroll = true
+			} else {
+				m.scrollPos = 0
+				m.autoScroll = false
+			}
 		}
 	}
 	cycleActiveAgent := func(delta int) {
@@ -606,8 +671,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				m.selectedEntry = active[len(active)-1]
 			}
-			m.scrollToBottom()
-			m.autoScroll = true
+			if m.detailLayer == detailLayerRaw {
+				m.scrollToBottom()
+				m.autoScroll = true
+			} else {
+				m.scrollPos = 0
+				m.autoScroll = false
+			}
 			return
 		}
 
@@ -617,8 +687,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			pos = (pos - 1 + len(active)) % len(active)
 		}
 		m.selectedEntry = active[pos]
-		m.scrollToBottom()
-		m.autoScroll = true
+		if m.detailLayer == detailLayerRaw {
+			m.scrollToBottom()
+			m.autoScroll = true
+		} else {
+			m.scrollPos = 0
+			m.autoScroll = false
+		}
 	}
 	moveToBoundary := func(start bool) {
 		switch m.leftSection {
@@ -651,8 +726,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				m.selectedEntry = len(entries) - 1
 			}
-			m.scrollToBottom()
-			m.autoScroll = true
+			if m.detailLayer == detailLayerRaw {
+				m.scrollToBottom()
+				m.autoScroll = true
+			} else {
+				m.scrollPos = 0
+				m.autoScroll = false
+			}
 		}
 	}
 
@@ -675,7 +755,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		// Not in session mode: page down.
-		m.scrollDown(m.rcHeight() / 2)
+		m.scrollDown(m.detailViewportHeight() / 2)
 	case "tab":
 		if m.focus == focusDetail {
 			m.focus = focusCommand
@@ -692,6 +772,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.setLeftSection(leftSectionIssues)
 	case "3":
 		m.setLeftSection(leftSectionDocs)
+	case "t":
+		if m.focus == focusDetail && m.leftSection == leftSectionAgents {
+			m.cycleDetailLayer(1)
+		}
+	case "T":
+		if m.focus == focusDetail && m.leftSection == leftSectionAgents {
+			m.cycleDetailLayer(-1)
+		}
 	case "]", "n":
 		cycleActiveAgent(1)
 	case "[", "p":
@@ -727,11 +815,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "pgdown":
 		if m.focus == focusDetail {
-			m.scrollDown(m.rcHeight() / 2)
+			m.scrollDown(m.detailViewportHeight() / 2)
 		}
 	case "pgup", "ctrl+u":
 		if m.focus == focusDetail {
-			m.scrollUp(m.rcHeight() / 2)
+			m.scrollUp(m.detailViewportHeight() / 2)
 		}
 	case "home", "g":
 		if m.focus == focusDetail {
@@ -758,8 +846,13 @@ func (m *Model) setLeftSection(section leftPanelSection) {
 	m.leftSection = section
 	switch section {
 	case leftSectionAgents:
-		m.scrollToBottom()
-		m.autoScroll = true
+		if m.detailLayer == detailLayerRaw {
+			m.scrollToBottom()
+			m.autoScroll = true
+		} else {
+			m.scrollPos = 0
+			m.autoScroll = false
+		}
 	default:
 		m.scrollPos = 0
 		m.autoScroll = false
@@ -795,7 +888,7 @@ func (m *Model) scrollToBottom() {
 }
 
 func (m Model) maxScroll() int {
-	vh := m.rcHeight()
+	vh := m.detailViewportHeight()
 	total := m.totalLines()
 	if total <= vh {
 		return 0
@@ -1295,6 +1388,7 @@ func (m *Model) renderVibeStreamingLine(scope, line string) bool {
 	switch msg.Role {
 	case "system":
 		m.addScopedLine(scope, initLabelStyle.Render("[vibe:system] context loaded"))
+		m.addSimplifiedLine(scope, dimStyle.Render("initialized"))
 		if sid := m.sessionIDForScope(scope); sid > 0 {
 			m.setSessionAction(sid, "loading context")
 		}
@@ -1304,6 +1398,7 @@ func (m *Model) renderVibeStreamingLine(scope, line string) bool {
 			text = "prompt received"
 		}
 		m.addScopedLine(scope, dimStyle.Render("[vibe:user] "+truncate(text, 200)))
+		m.addSimplifiedLine(scope, dimStyle.Render("prompt received"))
 		if sid := m.sessionIDForScope(scope); sid > 0 {
 			m.setSessionAction(sid, "processing prompt")
 		}
@@ -1322,6 +1417,7 @@ func (m *Model) renderVibeStreamingLine(scope, line string) bool {
 				name = "tool"
 			}
 			m.addScopedLine(scope, toolLabelStyle.Render(fmt.Sprintf("[tool:%s]", name)))
+			m.recordToolCall(scope, name)
 			if tc.Function.Arguments != "" {
 				m.addScopedLine(scope, "  "+toolInputStyle.Render(truncate(compactWhitespace(tc.Function.Arguments), 200)))
 			}
@@ -1332,12 +1428,14 @@ func (m *Model) renderVibeStreamingLine(scope, line string) bool {
 		if strings.TrimSpace(msg.Content) != "" {
 			m.addScopedLine(scope, textLabelStyle.Render("[text]"))
 			m.addScopedLine(scope, "  "+textStyle.Render(truncate(msg.Content, 500)))
+			m.recordAssistantText(scope, msg.Content)
 			if sid := m.sessionIDForScope(scope); sid > 0 {
 				m.setSessionAction(sid, "responding")
 			}
 		}
 	case "tool":
 		m.addScopedLine(scope, toolResultStyle.Render("[result]"))
+		m.addSimplifiedLine(scope, dimStyle.Render("tool result"))
 		if strings.TrimSpace(msg.Content) != "" {
 			for _, part := range splitRenderableLines(truncate(msg.Content, 400)) {
 				m.addScopedLine(scope, dimStyle.Render("  "+part))
@@ -1375,6 +1473,7 @@ func (m *Model) handleEvent(ev stream.ClaudeEvent) {
 	case "system":
 		m.addScopedLine(scope, initLabelStyle.Render(
 			fmt.Sprintf("[init] session=%s model=%s", ev.TurnID, ev.Model)))
+		m.addSimplifiedLine(scope, dimStyle.Render("initialized"))
 		if ev.Model != "" {
 			m.modelName = ev.Model
 			if sessionID > 0 {
@@ -1396,11 +1495,13 @@ func (m *Model) handleEvent(ev stream.ClaudeEvent) {
 					}
 					m.addScopedLine(scope, textLabelStyle.Render("[text]"))
 					m.addScopedLine(scope, "  "+textStyle.Render(text))
+					m.recordAssistantText(scope, text)
 					if sessionID > 0 {
 						m.setSessionAction(sessionID, "responding")
 					}
 				case "tool_use":
 					m.addScopedLine(scope, toolLabelStyle.Render(fmt.Sprintf("[tool:%s]", block.Name)))
+					m.recordToolCall(scope, block.Name)
 					m.renderToolInput(scope, block.Name, string(block.Input))
 					if sessionID > 0 {
 						action := "running tool"
@@ -1411,6 +1512,7 @@ func (m *Model) handleEvent(ev stream.ClaudeEvent) {
 					}
 				case "tool_result":
 					m.addScopedLine(scope, toolResultStyle.Render("[tool_result]"))
+					m.addSimplifiedLine(scope, dimStyle.Render("tool result"))
 					if sessionID > 0 {
 						m.setSessionAction(sessionID, "processing tool result")
 					}
@@ -1477,6 +1579,7 @@ func (m *Model) handleEvent(ev stream.ClaudeEvent) {
 				}
 			case "tool_use":
 				m.addScopedLine(scope, toolLabelStyle.Render(fmt.Sprintf("[tool:%s]", ev.ContentBlock.Name)))
+				m.recordToolCall(scope, ev.ContentBlock.Name)
 				if sessionID > 0 {
 					action := "running tool"
 					if ev.ContentBlock.Name != "" {
@@ -1539,12 +1642,13 @@ func (m *Model) handleEvent(ev stream.ClaudeEvent) {
 			summary = strings.Join(parts, " ")
 		}
 		m.addScopedLine(scope, resultLabelStyle.Render("[result]")+" "+summary)
+		m.addSimplifiedLine(scope, dimStyle.Render("result"))
 		if sessionID > 0 {
 			m.setSessionAction(sessionID, "turn complete")
 		}
 
 	case "message":
-		// Silently ignored.
+		m.addSimplifiedLine(scope, dimStyle.Render("message"))
 
 	default:
 		if ev.Type != "" {
@@ -1609,10 +1713,13 @@ func (m Model) renderStatusBar() string {
 	parts = append(parts, shortcut("1/2/3", "views"))
 	if m.leftSection == leftSectionAgents {
 		parts = append(parts, shortcut("[/]", "agent"))
+		if m.focus == focusDetail {
+			parts = append(parts, shortcut("t/T", "layer"))
+		}
 	}
 
 	total := m.totalLines()
-	vh := m.rcHeight()
+	vh := m.detailViewportHeight()
 	if total > vh {
 		pct := 0
 		ms := m.maxScroll()
@@ -1623,6 +1730,9 @@ func (m Model) renderStatusBar() string {
 	}
 
 	parts = append(parts, statusValueStyle.Render("view="+m.leftSectionLabel()))
+	if m.leftSection == leftSectionAgents {
+		parts = append(parts, statusValueStyle.Render("layer="+m.detailLayerLabel()))
+	}
 	if selected := m.selectedScope(); selected != "" {
 		parts = append(parts, statusValueStyle.Render("detail="+selected))
 	}
@@ -1905,7 +2015,7 @@ func (m Model) renderLeftPanel(outerW, outerH int) string {
 	} else {
 		lines = append(lines, dimStyle.Render("focus: detail"))
 	}
-	lines = append(lines, dimStyle.Render("tab focus · 1/2/3 sections"))
+	lines = append(lines, dimStyle.Render("tab focus · 1/2/3 sections · t/T detail layer"))
 	if m.leftSection == leftSectionAgents {
 		lines = append(lines, dimStyle.Render("[/] cycle running agents"))
 	} else {
@@ -2096,8 +2206,16 @@ func (m Model) renderRightPanel(outerW, outerH int) string {
 		ch = 1
 	}
 
-	visible := m.getVisibleLines(ch, cw)
-	content := fitToSize(visible, cw, ch)
+	headerLines := m.detailHeaderLines()
+	viewportHeight := ch - len(headerLines)
+	if viewportHeight < 1 {
+		viewportHeight = 1
+	}
+	visible := m.getVisibleLines(viewportHeight, cw)
+	combined := make([]string, 0, len(headerLines)+len(visible))
+	combined = append(combined, headerLines...)
+	combined = append(combined, visible...)
+	content := fitToSize(combined, cw, ch)
 	return rightPanelStyle.Render(content)
 }
 
@@ -2134,11 +2252,18 @@ func (m Model) detailLines(width int) []string {
 		return wrapRenderableLines(m.docDetailLines(), width)
 	}
 
-	lines := append([]string(nil), m.filteredLines()...)
-	if m.streamBuf != nil && m.streamBuf.Len() > 0 && m.scopeVisible(m.currentScope) {
-		prefixAll := m.shouldPrefixAllOutput()
-		partial := m.styleDelta(m.streamBuf.String())
-		lines = append(lines, m.maybePrefixedLine(m.currentScope, partial, prefixAll))
+	var lines []string
+	switch m.detailLayer {
+	case detailLayerSimplified:
+		lines = m.simplifiedDetailLines()
+	case detailLayerPrompt:
+		lines = m.promptDetailLines()
+	case detailLayerLastMessage:
+		lines = m.finalMessageDetailLines()
+	case detailLayerActivity:
+		lines = m.activityDetailLines()
+	default:
+		lines = m.rawDetailLines()
 	}
 	return wrapRenderableLines(lines, width)
 }

@@ -681,6 +681,16 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 					RunHexID:  ev.RunHexID,
 				})
 				b.broadcast(line)
+			case runtui.AgentPromptMsg:
+				line, _ := EncodeMsg(MsgPrompt, WirePrompt{
+					SessionID:      ev.SessionID,
+					TurnHexID:      ev.TurnHexID,
+					Prompt:         ev.Prompt,
+					IsResume:       ev.IsResume,
+					Truncated:      ev.Truncated,
+					OriginalLength: ev.OriginalLength,
+				})
+				b.broadcast(line)
 			case runtui.AgentFinishedMsg:
 				wf := WireFinished{SessionID: ev.SessionID, TurnHexID: ev.TurnHexID}
 				wf.WaitForSpawns = ev.WaitForSpawns

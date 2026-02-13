@@ -25,6 +25,16 @@ type AgentStartedMsg struct {
 	RunHexID  string
 }
 
+// AgentPromptMsg carries the exact prompt that is about to be sent to a turn.
+type AgentPromptMsg struct {
+	SessionID      int
+	TurnHexID      string
+	Prompt         string
+	IsResume       bool
+	Truncated      bool
+	OriginalLength int
+}
+
 // AgentFinishedMsg signals that a single agent session completed.
 type AgentFinishedMsg struct {
 	SessionID     int

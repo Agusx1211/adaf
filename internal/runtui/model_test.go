@@ -455,6 +455,83 @@ func TestRawOutputRoutesToSpawnScope(t *testing.T) {
 	}
 }
 
+func TestDetailLayerCycleKeys(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+	m.focus = focusDetail
+	m.leftSection = leftSectionAgents
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m1 := updated.(Model)
+	if m1.detailLayer != detailLayerSimplified {
+		t.Fatalf("detailLayer after 't' = %v, want %v", m1.detailLayer, detailLayerSimplified)
+	}
+
+	updated, _ = m1.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	m2 := updated.(Model)
+	if m2.detailLayer != detailLayerRaw {
+		t.Fatalf("detailLayer after 'T' = %v, want %v", m2.detailLayer, detailLayerRaw)
+	}
+}
+
+func TestPromptLayerShowsCapturedPrompt(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+
+	updated, _ := m.Update(AgentStartedMsg{SessionID: 5, TurnHexID: "turnhex"})
+	m1 := updated.(Model)
+	updated, _ = m1.Update(AgentPromptMsg{
+		SessionID:      5,
+		TurnHexID:      "turnhex",
+		Prompt:         "line one\nline two",
+		IsResume:       true,
+		Truncated:      true,
+		OriginalLength: 9999,
+	})
+	m2 := updated.(Model)
+	m2.detailLayer = detailLayerPrompt
+
+	rendered := strings.Join(stripStyledLines(m2.detailLines(80)), "\n")
+	if !strings.Contains(rendered, "line one") || !strings.Contains(rendered, "line two") {
+		t.Fatalf("prompt detail missing prompt body:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "resume prompt") {
+		t.Fatalf("prompt detail missing metadata:\n%s", rendered)
+	}
+}
+
+func TestLastMessageLayerShowsFinishedAssistantText(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+
+	updated, _ := m.Update(AgentStartedMsg{SessionID: 9, TurnHexID: "abc"})
+	m1 := updated.(Model)
+	updated, _ = m1.Update(AgentEventMsg{
+		Event: stream.ClaudeEvent{
+			Type: "assistant",
+			AssistantMessage: &stream.AssistantMessage{
+				Role: "assistant",
+				Content: []stream.ContentBlock{
+					{Type: "text", Text: "Final answer payload"},
+				},
+			},
+		},
+	})
+	m2 := updated.(Model)
+	updated, _ = m2.Update(AgentFinishedMsg{
+		SessionID: 9,
+		TurnHexID: "abc",
+		Result: &agent.Result{
+			ExitCode: 0,
+			Duration: time.Second,
+		},
+	})
+	m3 := updated.(Model)
+	m3.detailLayer = detailLayerLastMessage
+
+	rendered := strings.Join(stripStyledLines(m3.detailLines(80)), "\n")
+	if !strings.Contains(rendered, "Final answer payload") {
+		t.Fatalf("last-message layer missing assistant text:\n%s", rendered)
+	}
+}
+
 func stripStyledLines(lines []string) []string {
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {

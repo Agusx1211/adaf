@@ -11,6 +11,7 @@ import (
 const (
 	MsgMeta          = "meta"            // Session metadata (sent first on connect)
 	MsgStarted       = "started"         // Agent session started
+	MsgPrompt        = "prompt"          // Agent turn prompt payload
 	MsgEvent         = "event"           // Claude stream event
 	MsgRaw           = "raw"             // Raw text output (non-Claude agents)
 	MsgFinished      = "finished"        // Single agent session finished
@@ -52,6 +53,16 @@ type WireStarted struct {
 	TurnHexID string `json:"turn_hex_id,omitempty"`
 	StepHexID string `json:"step_hex_id,omitempty"`
 	RunHexID  string `json:"run_hex_id,omitempty"`
+}
+
+// WirePrompt carries the prompt payload for a turn.
+type WirePrompt struct {
+	SessionID      int    `json:"session_id"`
+	TurnHexID      string `json:"turn_hex_id,omitempty"`
+	Prompt         string `json:"prompt"`
+	IsResume       bool   `json:"is_resume,omitempty"`
+	Truncated      bool   `json:"truncated,omitempty"`
+	OriginalLength int    `json:"original_length,omitempty"`
 }
 
 // WireEvent carries a parsed Claude stream event.

@@ -47,6 +47,7 @@ type RunConfig struct {
 }
 
 const spawnCleanupGracePeriod = 12 * time.Second
+const promptEventLimitBytes = 256 * 1024
 
 // Run is the blocking loop execution implementation.
 func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
@@ -308,6 +309,17 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 					currentTurnCancel = cancel
 					turnCancelMu.Unlock()
 				},
+				OnPrompt: func(turnID int, turnHexID, prompt string, isResume bool) {
+					trimmedPrompt, truncated, originalLen := truncatePromptForEvent(prompt)
+					eventCh <- runtui.AgentPromptMsg{
+						SessionID:      turnID,
+						TurnHexID:      turnHexID,
+						Prompt:         trimmedPrompt,
+						IsResume:       isResume,
+						Truncated:      truncated,
+						OriginalLength: originalLen,
+					}
+				},
 				OnStart: func(turnID int, turnHexID string) {
 					if !handoffsReparented && len(handoffs) > 0 {
 						reparentHandoffs(cfg.Store, handoffs, turnID)
@@ -398,6 +410,23 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			}
 		}
 	}
+}
+
+func truncatePromptForEvent(prompt string) (string, bool, int) {
+	origLen := len(prompt)
+	if origLen <= promptEventLimitBytes {
+		return prompt, false, origLen
+	}
+	if promptEventLimitBytes <= 0 {
+		return "", true, origLen
+	}
+	suffix := fmt.Sprintf("\n\n[Prompt truncated to %d bytes for live UI transport; original=%d bytes]\n",
+		promptEventLimitBytes, origLen)
+	cut := promptEventLimitBytes
+	if cut > len(prompt) {
+		cut = len(prompt)
+	}
+	return prompt[:cut] + suffix, true, origLen
 }
 
 func waitForSpawnCleanupOnCancel(stepTurnIDs []int, timeout time.Duration) {

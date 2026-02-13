@@ -108,6 +108,20 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 				RunHexID:  data.RunHexID,
 			}
 
+		case MsgPrompt:
+			data, err := DecodeData[WirePrompt](msg)
+			if err != nil {
+				continue
+			}
+			eventCh <- runtui.AgentPromptMsg{
+				SessionID:      data.SessionID,
+				TurnHexID:      data.TurnHexID,
+				Prompt:         data.Prompt,
+				IsResume:       data.IsResume,
+				Truncated:      data.Truncated,
+				OriginalLength: data.OriginalLength,
+			}
+
 		case MsgEvent:
 			data, err := DecodeData[WireEvent](msg)
 			if err != nil {

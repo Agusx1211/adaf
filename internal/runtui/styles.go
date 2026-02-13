@@ -48,6 +48,17 @@ var (
 				Bold(true).
 				Foreground(theme.ColorLavender)
 
+	detailTabActiveStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(theme.ColorBase).
+				Background(theme.ColorBlue).
+				Padding(0, 1)
+
+	detailTabInactiveStyle = lipgloss.NewStyle().
+				Foreground(theme.ColorSubtext0).
+				Background(theme.ColorSurface0).
+				Padding(0, 1)
+
 	labelStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(theme.ColorMauve).

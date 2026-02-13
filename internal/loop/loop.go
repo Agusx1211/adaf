@@ -59,6 +59,10 @@ type Loop struct {
 	// The turnID and turnHexID of the upcoming run are passed as arguments.
 	OnStart func(turnID int, turnHexID string)
 
+	// OnPrompt is called after the prompt is finalized for the turn and before
+	// the agent starts.
+	OnPrompt func(turnID int, turnHexID, prompt string, isResume bool)
+
 	// OnEnd is called after each iteration completes (successfully or not).
 	// The turnID, turnHexID, and the result (which may be nil on error) are passed.
 	OnEnd func(turnID int, turnHexID string, result *agent.Result)
@@ -292,6 +296,9 @@ func (l *Loop) Run(ctx context.Context) error {
 		}
 
 		// Notify listener.
+		if l.OnPrompt != nil {
+			l.OnPrompt(turnID, turnHexID, cfg.Prompt, isResume)
+		}
 		if l.OnStart != nil {
 			l.OnStart(turnID, turnHexID)
 		}

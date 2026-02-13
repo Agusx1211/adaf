@@ -83,6 +83,62 @@ func TestStreamEventsForwardsLoopMessages(t *testing.T) {
 	}
 }
 
+func TestStreamEventsForwardsPromptMessages(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+
+	c := &Client{
+		conn:    clientConn,
+		scanner: bufio.NewScanner(clientConn),
+	}
+
+	eventCh := make(chan any, 8)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- c.StreamEvents(eventCh, nil)
+	}()
+
+	writeWireMsg(t, serverConn, MsgPrompt, WirePrompt{
+		SessionID:      4,
+		TurnHexID:      "abc123",
+		Prompt:         "hello prompt",
+		IsResume:       true,
+		Truncated:      true,
+		OriginalLength: 4096,
+	})
+	writeWireMsg(t, serverConn, MsgDone, WireDone{})
+	_ = serverConn.Close()
+
+	var got []any
+	for ev := range eventCh {
+		got = append(got, ev)
+	}
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("StreamEvents() error = %v", err)
+	}
+	var msg runtui.AgentPromptMsg
+	found := false
+	for _, ev := range got {
+		pm, ok := ev.(runtui.AgentPromptMsg)
+		if !ok {
+			continue
+		}
+		msg = pm
+		found = true
+		break
+	}
+	if !found {
+		t.Fatalf("missing runtui.AgentPromptMsg in events: %#v", got)
+	}
+	if msg.SessionID != 4 || msg.TurnHexID != "abc123" || msg.Prompt != "hello prompt" {
+		t.Fatalf("unexpected AgentPromptMsg: %+v", msg)
+	}
+	if !msg.IsResume || !msg.Truncated || msg.OriginalLength != 4096 {
+		t.Fatalf("unexpected prompt flags: %+v", msg)
+	}
+}
+
 func writeWireMsg(t *testing.T, conn net.Conn, msgType string, payload any) {
 	t.Helper()
 	line, err := EncodeMsg(msgType, payload)
