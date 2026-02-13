@@ -15,6 +15,7 @@ import (
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/debug"
+	"github.com/agusx1211/adaf/internal/eventq"
 	"github.com/agusx1211/adaf/internal/guardrail"
 	"github.com/agusx1211/adaf/internal/loop"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
@@ -139,6 +140,20 @@ func (o *Orchestrator) SetEventCh(ch chan any) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.eventCh = ch
+}
+
+func (o *Orchestrator) emitEvent(eventType string, msg any) bool {
+	o.mu.Lock()
+	ch := o.eventCh
+	o.mu.Unlock()
+	if ch == nil {
+		return false
+	}
+	if eventq.Offer(ch, msg) {
+		return true
+	}
+	debug.LogKV("orch", "dropping tui event due to backpressure", "type", eventType)
+	return false
 }
 
 const promptEventLimitBytes = 256 * 1024
@@ -439,25 +454,22 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 		for ev := range streamCh {
 			eventBuf.Add(ev)
 
-			if o.eventCh == nil {
-				continue
-			}
 			if ev.Err != nil {
 				continue
 			}
 			if ev.Text != "" {
-				o.eventCh <- runtui.AgentRawOutputMsg{Data: ev.Text, SessionID: -rec.ID}
+				o.emitEvent("agent_raw_output", runtui.AgentRawOutputMsg{Data: ev.Text, SessionID: -rec.ID})
 				continue
 			}
-			o.eventCh <- runtui.AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw}
+			o.emitEvent("agent_event", runtui.AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw})
 
 			// Guardrail check on parsed events.
 			if monitor != nil {
 				if toolName := monitor.CheckEvent(ev.Parsed); toolName != "" {
-					o.eventCh <- runtui.GuardrailViolationMsg{
+					o.emitEvent("guardrail_violation", runtui.GuardrailViolationMsg{
 						Tool: toolName,
 						Role: effectiveRole,
-					}
+					})
 					msg := guardrail.WarningMessage(effectiveRole, toolName, monitor.Violations())
 					select {
 					case interruptCh <- msg:
@@ -529,26 +541,22 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 				o.store.UpdateSpawn(rec)
 			},
 			OnPrompt: func(turnID int, turnHexID, prompt string, isResume bool) {
-				if o.eventCh != nil {
-					trimmed, truncated, origLen := truncatePrompt(prompt)
-					o.eventCh <- runtui.AgentPromptMsg{
-						SessionID:      -rec.ID,
-						TurnHexID:      turnHexID,
-						Prompt:         trimmed,
-						IsResume:       isResume,
-						Truncated:      truncated,
-						OriginalLength: origLen,
-					}
-				}
+				trimmed, truncated, origLen := truncatePrompt(prompt)
+				o.emitEvent("agent_prompt", runtui.AgentPromptMsg{
+					SessionID:      -rec.ID,
+					TurnHexID:      turnHexID,
+					Prompt:         trimmed,
+					IsResume:       isResume,
+					Truncated:      truncated,
+					OriginalLength: origLen,
+				})
 			},
 			OnEnd: func(turnID int, turnHexID string, result *agent.Result) {
-				if o.eventCh != nil {
-					o.eventCh <- runtui.AgentFinishedMsg{
-						SessionID: -rec.ID,
-						TurnHexID: turnHexID,
-						Result:    result,
-					}
-				}
+				o.emitEvent("agent_finished", runtui.AgentFinishedMsg{
+					SessionID: -rec.ID,
+					TurnHexID: turnHexID,
+					Result:    result,
+				})
 			},
 			OnTurnContext: func(cancel context.CancelFunc) {
 				turnCancelMu.Lock()

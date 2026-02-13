@@ -306,8 +306,8 @@ func TestHandleClientReplaysFromFileWhenBufferTrimmed(t *testing.T) {
 		b.broadcast(line)
 	}
 
-	serverConn, clientConn := net.Pipe()
-	defer clientConn.Close()
+	serverConn, peerConn := net.Pipe()
+	defer peerConn.Close()
 
 	doneCh := make(chan struct{})
 	go func() {
@@ -315,7 +315,7 @@ func TestHandleClientReplaysFromFileWhenBufferTrimmed(t *testing.T) {
 		close(doneCh)
 	}()
 
-	sc := bufio.NewScanner(clientConn)
+	sc := bufio.NewScanner(peerConn)
 	sc.Buffer(make([]byte, 1024), 1024*1024)
 	rawCount := 0
 	liveSeen := false
@@ -337,7 +337,7 @@ func TestHandleClientReplaysFromFileWhenBufferTrimmed(t *testing.T) {
 	}
 
 done:
-	_ = clientConn.Close()
+	_ = peerConn.Close()
 	select {
 	case <-doneCh:
 	case <-time.After(2 * time.Second):
@@ -475,6 +475,58 @@ func TestBroadcasterConcurrentAttachAndBroadcast(t *testing.T) {
 			t.Fatalf("client %d timed out waiting for MsgLive", i)
 		}
 	}
+}
+
+func TestBroadcastDropsSlowClientWithoutBlocking(t *testing.T) {
+	eventsPath := filepath.Join(t.TempDir(), "events.jsonl")
+	eventsFile, err := os.OpenFile(eventsPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		t.Fatalf("open events file: %v", err)
+	}
+	defer eventsFile.Close()
+
+	b := &broadcaster{
+		eventsFile: eventsFile,
+		meta:       WireMeta{SessionID: 10},
+	}
+
+	serverConn, peerConn := net.Pipe()
+	defer peerConn.Close()
+
+	var cc *clientConn
+	cc = newClientConn(serverConn, func(err error) {
+		b.removeClient(cc)
+	})
+	cc.startWriter()
+
+	b.mu.Lock()
+	b.clients = append(b.clients, cc)
+	b.mu.Unlock()
+
+	line, err := EncodeMsg(MsgRaw, WireRaw{Data: strings.Repeat("x", 512)})
+	if err != nil {
+		t.Fatalf("EncodeMsg raw: %v", err)
+	}
+
+	start := time.Now()
+	for i := 0; i < 2000; i++ {
+		b.broadcast(line)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("broadcast loop took %s; expected non-blocking behavior", elapsed)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		b.mu.Lock()
+		n := len(b.clients)
+		b.mu.Unlock()
+		if n == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("slow client was not dropped after queue backpressure")
 }
 
 func TestHandleClientControlRequest(t *testing.T) {

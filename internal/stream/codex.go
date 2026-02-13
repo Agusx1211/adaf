@@ -76,18 +76,18 @@ func ParseCodex(ctx context.Context, r io.Reader) <-chan RawEvent {
 
 			parsed, ok, err := parseCodexLine(raw)
 			if err != nil {
-				ch <- RawEvent{Raw: raw, Err: err}
+				offerRawEvent(ctx, ch, RawEvent{Raw: raw, Err: err}, "codex")
 				continue
 			}
 			if !ok {
-				ch <- RawEvent{Raw: raw}
+				offerRawEvent(ctx, ch, RawEvent{Raw: raw}, "codex")
 				continue
 			}
-			ch <- RawEvent{Raw: raw, Parsed: parsed}
+			offerRawEvent(ctx, ch, RawEvent{Raw: raw, Parsed: parsed}, "codex")
 		}
 
 		if err := scanner.Err(); err != nil {
-			ch <- RawEvent{Err: err}
+			offerRawEvent(ctx, ch, RawEvent{Err: err}, "codex")
 		}
 	}()
 	return ch

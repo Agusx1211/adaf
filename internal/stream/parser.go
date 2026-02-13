@@ -36,15 +36,15 @@ func Parse(ctx context.Context, r io.Reader) <-chan RawEvent {
 
 			var ev ClaudeEvent
 			if err := json.Unmarshal(raw, &ev); err != nil {
-				ch <- RawEvent{Raw: raw, Err: err}
+				offerRawEvent(ctx, ch, RawEvent{Raw: raw, Err: err}, "claude")
 				continue
 			}
 
-			ch <- RawEvent{Raw: raw, Parsed: ev}
+			offerRawEvent(ctx, ch, RawEvent{Raw: raw, Parsed: ev}, "claude")
 		}
 
 		if err := scanner.Err(); err != nil {
-			ch <- RawEvent{Err: err}
+			offerRawEvent(ctx, ch, RawEvent{Err: err}, "claude")
 		}
 	}()
 	return ch

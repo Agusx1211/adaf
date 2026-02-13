@@ -1,8 +1,8 @@
 {
   "id": 9,
   "title": "EventSink blocking send deadlocks agent stdout capture",
-  "description": "## Location\n- internal/agent/helpers.go:247 (cfg.EventSink \u003c- ev)\n- internal/agent/eventsink_writer.go:27\n\n## Problem\nBlocking channel send with no select/timeout. If TUI consumer is slow, the agent's stdout/stderr capture blocks, which blocks the child process, which prevents cmd.Wait() from returning.\n\nThis is a different blocking point in the same backpressure chain as issue #5 (broadcast deadlock). Issue #5 blocks at OnEnd -\u003e eventCh -\u003e broadcast(). This issue blocks at the streaming event level — the agent can't even flush stdout if the EventSink is full.\n\n## Fix\nUse non-blocking send with overflow buffer, or select with timeout.\n\n## Related\n- Issue #5: Broadcast backpressure deadlock (downstream in the same pipeline)",
-  "status": "open",
+  "description": "## Location\n- internal/agent/helpers.go:247 (cfg.EventSink <- ev)\n- internal/agent/eventsink_writer.go:27\n\n## Problem\nBlocking channel send with no select/timeout. If TUI consumer is slow, the agent's stdout/stderr capture blocks, which blocks the child process, which prevents cmd.Wait() from returning.\n\nThis is a different blocking point in the same backpressure chain as issue #5 (broadcast deadlock). Issue #5 blocks at OnEnd -> eventCh -> broadcast(). This issue blocks at the streaming event level — the agent can't even flush stdout if the EventSink is full.\n\n## Fix\nUse non-blocking send with overflow buffer, or select with timeout.\n\n## Related\n- Issue #5: Broadcast backpressure deadlock (downstream in the same pipeline)",
+  "status": "resolved",
   "priority": "critical",
   "labels": [
     "bug",
@@ -11,5 +11,5 @@
     "deadlock"
   ],
   "created": "2026-02-13T16:31:52.268682775Z",
-  "updated": "2026-02-13T16:31:52.268682775Z"
+  "updated": "2026-02-13T16:46:32Z"
 }

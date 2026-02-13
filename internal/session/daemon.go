@@ -258,9 +258,12 @@ type broadcaster struct {
 }
 
 type clientConn struct {
-	conn   net.Conn
-	writer *bufio.Writer
-	mu     sync.Mutex
+	conn     net.Conn
+	writer   *bufio.Writer
+	sendCh   chan []byte
+	closeCh  chan struct{}
+	closeMu  sync.Once
+	writeErr func(error)
 }
 
 type bufferedEvent struct {
@@ -268,7 +271,11 @@ type bufferedEvent struct {
 	Line []byte
 }
 
-const defaultMaxReplayEvents = 4096
+const (
+	defaultMaxReplayEvents = 4096
+	clientSendQueueSize    = 512
+	clientWriteTimeout     = 5 * time.Second
+)
 
 func (b *broadcaster) acceptLoop(listener net.Listener, cancelAgent context.CancelFunc) {
 	for {
@@ -281,24 +288,30 @@ func (b *broadcaster) acceptLoop(listener net.Listener, cancelAgent context.Canc
 }
 
 func (b *broadcaster) handleClient(conn net.Conn, cancelAgent context.CancelFunc) {
-	cc := &clientConn{
-		conn:   conn,
-		writer: bufio.NewWriter(conn),
-	}
+	var cc *clientConn
+	cc = newClientConn(conn, func(err error) {
+		fmt.Fprintf(os.Stderr, "session %d: disconnecting slow client: %v\n", b.meta.SessionID, err)
+		b.removeClient(cc)
+	})
+	defer cc.close()
 
 	// Send metadata.
 	metaLine, _ := EncodeMsg(MsgMeta, b.meta)
-	cc.writeLine(metaLine)
+	if err := cc.writeImmediate(metaLine); err != nil {
+		return
+	}
 
 	// Replay a stable snapshot then register for live events.
 	seq1 := b.currentSeq()
 	if err := b.replayRange(cc, 1, seq1); err != nil {
 		fmt.Fprintf(os.Stderr, "session %d: replay range 1..%d failed: %v\n", b.meta.SessionID, seq1, err)
+		return
 	}
 
 	seq2 := b.currentSeq()
 	if err := b.replayRange(cc, seq1+1, seq2); err != nil {
 		fmt.Fprintf(os.Stderr, "session %d: replay range %d..%d failed: %v\n", b.meta.SessionID, seq1+1, seq2, err)
+		return
 	}
 
 	b.mu.Lock()
@@ -310,17 +323,25 @@ func (b *broadcaster) handleClient(conn net.Conn, cancelAgent context.CancelFunc
 	if seq3 > seq2 {
 		if ok3 {
 			for _, line := range replay3 {
-				cc.writeLine(line)
+				if err := cc.writeImmediate(line); err != nil {
+					b.removeClient(cc)
+					return
+				}
 			}
 		} else if err := b.replayFromFileRange(cc, seq2+1, seq3); err != nil {
 			fmt.Fprintf(os.Stderr, "session %d: replay range %d..%d failed: %v\n", b.meta.SessionID, seq2+1, seq3, err)
+			b.removeClient(cc)
+			return
 		}
 	}
 
 	// Send live marker after replay/catchup.
 	liveLine, _ := EncodeMsg(MsgLive, nil)
-	cc.writeLine(liveLine)
-	cc.flush()
+	if err := cc.writeImmediate(liveLine); err != nil {
+		b.removeClient(cc)
+		return
+	}
+	cc.startWriter()
 
 	// Read control messages from the client.
 	scanner := bufio.NewScanner(conn)
@@ -348,13 +369,14 @@ func (b *broadcaster) handleClient(conn net.Conn, cancelAgent context.CancelFunc
 			resp = b.runControl(*req)
 		}
 		respLine, _ := EncodeMsg(MsgControlResult, resp)
-		cc.writeLine(respLine)
-		cc.flush()
+		if !cc.enqueue(respLine) {
+			b.removeClient(cc)
+			return
+		}
 	}
 
 	// Client disconnected.
 	b.removeClient(cc)
-	conn.Close()
 }
 
 func (b *broadcaster) setControlHandler(h func(WireControl) WireControlResult) {
@@ -384,9 +406,10 @@ func (b *broadcaster) removeClient(cc *clientConn) {
 	for i, c := range b.clients {
 		if c == cc {
 			b.clients = append(b.clients[:i], b.clients[i+1:]...)
-			return
+			break
 		}
 	}
+	cc.close()
 }
 
 func (b *broadcaster) currentSeq() int64 {
@@ -405,7 +428,9 @@ func (b *broadcaster) replayRange(cc *clientConn, fromSeq, toSeq int64) error {
 	b.mu.Unlock()
 	if ok {
 		for _, line := range lines {
-			cc.writeLine(line)
+			if err := cc.writeImmediate(line); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
@@ -470,7 +495,9 @@ func (b *broadcaster) replayFromFileRange(cc *clientConn, fromSeq, toSeq int64) 
 		if len(line) > 0 {
 			seq++
 			if seq >= fromSeq && seq <= toSeq {
-				cc.writeLine(line)
+				if writeErr := cc.writeImmediate(line); writeErr != nil {
+					return writeErr
+				}
 			}
 			if seq >= toSeq {
 				return nil
@@ -516,8 +543,10 @@ func (b *broadcaster) broadcast(line []byte) {
 	b.mu.Unlock()
 
 	for _, cc := range clients {
-		cc.writeLine(lineCopy)
-		cc.flush()
+		if !cc.enqueue(lineCopy) {
+			fmt.Fprintf(os.Stderr, "session %d: dropping slow client due to outbound backpressure\n", b.meta.SessionID)
+			b.removeClient(cc)
+		}
 	}
 }
 
@@ -540,16 +569,69 @@ func (b *broadcaster) waitForClients(timeout time.Duration) {
 	}
 }
 
-func (cc *clientConn) writeLine(data []byte) {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-	cc.writer.Write(data)
+func newClientConn(conn net.Conn, onWriteErr func(error)) *clientConn {
+	return &clientConn{
+		conn:     conn,
+		writer:   bufio.NewWriter(conn),
+		sendCh:   make(chan []byte, clientSendQueueSize),
+		closeCh:  make(chan struct{}),
+		writeErr: onWriteErr,
+	}
 }
 
-func (cc *clientConn) flush() {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-	cc.writer.Flush()
+func (cc *clientConn) startWriter() {
+	go func() {
+		for {
+			select {
+			case <-cc.closeCh:
+				return
+			case data := <-cc.sendCh:
+				if err := cc.writeImmediate(data); err != nil {
+					if cc.writeErr != nil {
+						cc.writeErr(err)
+					} else {
+						cc.close()
+					}
+					return
+				}
+			}
+		}
+	}()
+}
+
+func (cc *clientConn) enqueue(data []byte) bool {
+	select {
+	case <-cc.closeCh:
+		return false
+	default:
+	}
+	select {
+	case cc.sendCh <- data:
+		return true
+	default:
+		return false
+	}
+}
+
+func (cc *clientConn) close() {
+	cc.closeMu.Do(func() {
+		close(cc.closeCh)
+		_ = cc.conn.Close()
+	})
+}
+
+func (cc *clientConn) writeImmediate(data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+	if err := cc.conn.SetWriteDeadline(time.Now().Add(clientWriteTimeout)); err != nil {
+		return err
+	}
+	defer cc.conn.SetWriteDeadline(time.Time{})
+	if _, err := cc.writer.Write(data); err != nil {
+		return err
+	}
+	return cc.writer.Flush()
 }
 
 // runLoop runs the loop runtime and broadcasts events through the broadcaster.

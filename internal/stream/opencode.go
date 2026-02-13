@@ -81,18 +81,18 @@ func ParseOpencode(ctx context.Context, r io.Reader) <-chan RawEvent {
 
 			parsed, ok, err := parseOpencodeLine(raw)
 			if err != nil {
-				ch <- RawEvent{Raw: raw, Err: err}
+				offerRawEvent(ctx, ch, RawEvent{Raw: raw, Err: err}, "opencode")
 				continue
 			}
 			if !ok {
-				ch <- RawEvent{Raw: raw}
+				offerRawEvent(ctx, ch, RawEvent{Raw: raw}, "opencode")
 				continue
 			}
-			ch <- RawEvent{Raw: raw, Parsed: parsed}
+			offerRawEvent(ctx, ch, RawEvent{Raw: raw, Parsed: parsed}, "opencode")
 		}
 
 		if err := scanner.Err(); err != nil {
-			ch <- RawEvent{Err: err}
+			offerRawEvent(ctx, ch, RawEvent{Err: err}, "opencode")
 		}
 	}()
 	return ch

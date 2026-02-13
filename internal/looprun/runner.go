@@ -17,6 +17,7 @@ import (
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/debug"
+	"github.com/agusx1211/adaf/internal/eventq"
 	"github.com/agusx1211/adaf/internal/guardrail"
 	"github.com/agusx1211/adaf/internal/hexid"
 	"github.com/agusx1211/adaf/internal/loop"
@@ -48,6 +49,17 @@ type RunConfig struct {
 
 const spawnCleanupGracePeriod = 12 * time.Second
 const promptEventLimitBytes = 256 * 1024
+
+func emitLoopEvent(eventCh chan any, eventType string, event any) bool {
+	if eventCh == nil {
+		return false
+	}
+	if eventq.Offer(eventCh, event) {
+		return true
+	}
+	debug.LogKV("looprun", "dropping tui event due to backpressure", "type", eventType)
+	return false
+}
 
 // Run is the blocking loop execution implementation.
 func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
@@ -151,7 +163,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			}
 
 			// Emit step start event.
-			eventCh <- runtui.LoopStepStartMsg{
+			emitLoopEvent(eventCh, "loop_step_start", runtui.LoopStepStartMsg{
 				RunID:      run.ID,
 				RunHexID:   run.HexID,
 				StepHexID:  stepHexID,
@@ -160,7 +172,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				Profile:    prof.Name,
 				Turns:      turns,
 				TotalSteps: len(loopDef.Steps),
-			}
+			})
 
 			// Build agent config.
 			agentCfg := buildAgentConfig(cfg, prof, run.ID, stepIdx, run.HexID, stepHexID)
@@ -227,18 +239,18 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 						continue
 					}
 					if ev.Text != "" {
-						eventCh <- runtui.AgentRawOutputMsg{Data: ev.Text, SessionID: ev.TurnID}
+						emitLoopEvent(eventCh, "agent_raw_output", runtui.AgentRawOutputMsg{Data: ev.Text, SessionID: ev.TurnID})
 						continue
 					}
-					eventCh <- runtui.AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw}
+					emitLoopEvent(eventCh, "agent_event", runtui.AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw})
 
 					// Guardrail check on parsed events.
 					if monitor != nil {
 						if toolName := monitor.CheckEvent(ev.Parsed); toolName != "" {
-							eventCh <- runtui.GuardrailViolationMsg{
+							emitLoopEvent(eventCh, "guardrail_violation", runtui.GuardrailViolationMsg{
 								Tool: toolName,
 								Role: effectiveRole,
-							}
+							})
 							msg := guardrail.WarningMessage(effectiveRole, toolName, monitor.Violations())
 							select {
 							case interruptCh <- msg:
@@ -311,14 +323,14 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				},
 				OnPrompt: func(turnID int, turnHexID, prompt string, isResume bool) {
 					trimmedPrompt, truncated, originalLen := truncatePromptForEvent(prompt)
-					eventCh <- runtui.AgentPromptMsg{
+					emitLoopEvent(eventCh, "agent_prompt", runtui.AgentPromptMsg{
 						SessionID:      turnID,
 						TurnHexID:      turnHexID,
 						Prompt:         trimmedPrompt,
 						IsResume:       isResume,
 						Truncated:      truncated,
 						OriginalLength: originalLen,
-					}
+					})
 				},
 				OnStart: func(turnID int, turnHexID string) {
 					if !handoffsReparented && len(handoffs) > 0 {
@@ -331,12 +343,12 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 						run.TurnIDs = append(run.TurnIDs, turnID)
 					}
 					cfg.Store.UpdateLoopRun(run)
-					eventCh <- runtui.AgentStartedMsg{
+					emitLoopEvent(eventCh, "agent_started", runtui.AgentStartedMsg{
 						SessionID: turnID,
 						TurnHexID: turnHexID,
 						StepHexID: stepHexID,
 						RunHexID:  run.HexID,
-					}
+					})
 
 					startPoll(turnID)
 				},
@@ -345,12 +357,12 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 					// wait-for-spawns, loop.OnWait will block next and we still
 					// need realtime child output/status updates in the TUI.
 					waitingForSpawns := cfg.Store != nil && cfg.Store.IsWaiting(turnID)
-					eventCh <- runtui.AgentFinishedMsg{
+					emitLoopEvent(eventCh, "agent_finished", runtui.AgentFinishedMsg{
 						SessionID:     turnID,
 						TurnHexID:     turnHexID,
 						WaitForSpawns: waitingForSpawns,
 						Result:        result,
-					}
+					})
 				},
 				OnWait: func(ctx context.Context, turnID int, alreadySeen map[int]struct{}) ([]loop.WaitResult, bool) {
 					return waitForAnySessionSpawns(ctx, cfg.Store, turnID, alreadySeen)
@@ -381,7 +393,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			cfg.Store.UpdateLoopRun(run)
 
 			// Emit step end event.
-			eventCh <- runtui.LoopStepEndMsg{
+			emitLoopEvent(eventCh, "loop_step_end", runtui.LoopStepEndMsg{
 				RunID:      run.ID,
 				RunHexID:   run.HexID,
 				StepHexID:  stepHexID,
@@ -389,7 +401,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				StepIndex:  stepIdx,
 				Profile:    prof.Name,
 				TotalSteps: len(loopDef.Steps),
-			}
+			})
 
 			if loopErr != nil {
 				if ctx.Err() != nil {
@@ -524,7 +536,7 @@ func pollSpawnStatus(ctx context.Context, s *store.Store, parentTurnID int, even
 			return
 		}
 		lastSnapshot = snapshot
-		eventCh <- runtui.SpawnStatusMsg{Spawns: spawns}
+		emitLoopEvent(eventCh, "spawn_status", runtui.SpawnStatusMsg{Spawns: spawns})
 	}
 
 	poll(true)
@@ -598,10 +610,10 @@ func emitSpawnOutput(records []store.SpawnRecord, s *store.Store, offsets map[in
 				continue
 			}
 
-			eventCh <- runtui.AgentRawOutputMsg{
+			emitLoopEvent(eventCh, "spawn_raw_output", runtui.AgentRawOutputMsg{
 				Data:      data,
 				SessionID: -rec.ID, // Negative SessionID maps to spawn scope in runtui.
-			}
+			})
 		}
 	}
 }

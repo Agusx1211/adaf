@@ -2,7 +2,7 @@
   "id": 10,
   "title": "Stream parser can deadlock on full channel",
   "description": "## Location\n- internal/stream/parser.go:39\n- internal/stream/codex.go:66\n- internal/stream/gemini.go:159\n\n## Problem\nParser goroutine sends to a 64-capacity buffered channel. If consumer blocks, parser blocks on send, which blocks bufio.Scanner.Scan(), which blocks the pipe read, which prevents child process from flushing stdout and exiting.\n\nThis is another point in the backpressure chain (see issues #5, #9). The parser sits between the child process stdout pipe and the event consumer.\n\n## Fix\nAdd context check in send path, or use larger buffer with backpressure signal.\n\n## Related\n- Issue #5: Broadcast backpressure deadlock\n- Issue #9: EventSink blocking send",
-  "status": "open",
+  "status": "resolved",
   "priority": "critical",
   "labels": [
     "bug",
@@ -10,5 +10,5 @@
     "deadlock"
   ],
   "created": "2026-02-13T16:31:53.68630537Z",
-  "updated": "2026-02-13T16:31:53.68630537Z"
+  "updated": "2026-02-13T16:46:32Z"
 }

@@ -20,6 +20,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/agusx1211/adaf/internal/debug"
+	"github.com/agusx1211/adaf/internal/eventq"
 	"github.com/agusx1211/adaf/internal/recording"
 	"github.com/agusx1211/adaf/internal/stream"
 )
@@ -233,6 +235,7 @@ func runStreamLoop(cfg Config, events <-chan stream.RawEvent, recorder *recordin
 
 	if cfg.EventSink != nil {
 		// TUI mode: forward events to the sink channel for the TUI to render.
+		dropped := 0
 		for ev := range events {
 			if len(ev.Raw) > 0 {
 				recorder.RecordStream(string(ev.Raw))
@@ -244,7 +247,12 @@ func runStreamLoop(cfg Config, events <-chan stream.RawEvent, recorder *recordin
 				sessionID = ev.Parsed.TurnID
 			}
 			ev.TurnID = cfg.TurnID
-			cfg.EventSink <- ev
+			if !eventq.Offer(cfg.EventSink, ev) {
+				dropped++
+				if dropped == 1 || dropped%100 == 0 {
+					debug.LogKV("agent.stream", "dropping stream event due to backpressure", "turn_id", cfg.TurnID, "dropped", dropped, "event_type", ev.Parsed.Type)
+				}
+			}
 			defaultAccumulateText(ev.Parsed, &textBuf)
 		}
 	} else {

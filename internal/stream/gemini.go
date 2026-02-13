@@ -175,22 +175,22 @@ func ParseGemini(ctx context.Context, r io.Reader) <-chan RawEvent {
 
 			var ge GeminiEvent
 			if err := json.Unmarshal(raw, &ge); err != nil {
-				ch <- RawEvent{Raw: raw, Err: err}
+				offerRawEvent(ctx, ch, RawEvent{Raw: raw, Err: err}, "gemini")
 				continue
 			}
 
 			ce, ok := GeminiToClaudeEvent(ge)
 			if !ok {
 				// Still record the raw line even if we skip the event.
-				ch <- RawEvent{Raw: raw}
+				offerRawEvent(ctx, ch, RawEvent{Raw: raw}, "gemini")
 				continue
 			}
 
-			ch <- RawEvent{Raw: raw, Parsed: ce}
+			offerRawEvent(ctx, ch, RawEvent{Raw: raw, Parsed: ce}, "gemini")
 		}
 
 		if err := scanner.Err(); err != nil {
-			ch <- RawEvent{Err: err}
+			offerRawEvent(ctx, ch, RawEvent{Err: err}, "gemini")
 		}
 	}()
 	return ch
