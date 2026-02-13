@@ -76,6 +76,7 @@ func (g *GeminiAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 
 	// Use shared helpers for process group, environment, stderr, and metadata.
 	setupProcessGroup(cmd)
+	cmd.WaitDelay = 5 * time.Second
 	setupEnv(cmd, cfg.Env)
 	ss := setupStreamStderr(cmd, cfg, recorder)
 	recordMeta(recorder, "gemini", cmdName, args, cfg.WorkDir)

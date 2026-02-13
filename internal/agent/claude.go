@@ -69,6 +69,7 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 
 	// Use shared helpers for common setup.
 	setupProcessGroup(cmd)
+	cmd.WaitDelay = 5 * time.Second
 	setupEnv(cmd, cfg.Env)
 	setupStdin(cmd, cfg.Prompt, recorder)
 
