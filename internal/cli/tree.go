@@ -143,6 +143,8 @@ func coloredStatus(status string) string {
 		return colorDim + colorGreen + status + colorReset
 	case "failed":
 		return colorRed + status + colorReset
+	case "canceled", "cancelled":
+		return colorDim + colorRed + status + colorReset
 	case "rejected":
 		return colorRed + status + colorReset
 	default:
@@ -161,5 +163,5 @@ func elapsedStr(r store.SpawnRecord) string {
 }
 
 func isTerminalStatus(status string) bool {
-	return status == "completed" || status == "failed" || status == "merged" || status == "rejected"
+	return isTerminalSpawnStatus(status)
 }

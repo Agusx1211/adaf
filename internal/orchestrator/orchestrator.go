@@ -712,7 +712,10 @@ func canceledSpawnMessage(autoCommitted bool) string {
 }
 
 // extractSpawnReport returns the child agent's last assistant message as-is.
-// If no assistant message can be extracted, it returns an error.
+// If the output is plain text (not JSON event lines), it falls back to
+// returning the trimmed output so stream-agent summaries remain usable.
+// If neither an assistant message nor plain text can be extracted, it returns
+// an error.
 func extractSpawnReport(output string) (string, error) {
 	trimmed := strings.TrimSpace(output)
 	if trimmed == "" {
@@ -721,22 +724,34 @@ func extractSpawnReport(output string) (string, error) {
 
 	lines := strings.Split(trimmed, "\n")
 	lastAssistant := ""
+	jsonLineCount := 0
+	jsonParsedCount := 0
+	seenNonJSON := false
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if line == "" || !strings.HasPrefix(line, "{") {
+		if line == "" {
 			continue
 		}
+		if !strings.HasPrefix(line, "{") {
+			seenNonJSON = true
+			continue
+		}
+		jsonLineCount++
 
 		var raw map[string]any
 		if err := json.Unmarshal([]byte(line), &raw); err != nil {
 			continue
 		}
+		jsonParsedCount++
 		if msg := assistantMessageFromJSON(raw); msg != "" {
 			lastAssistant = msg
 		}
 	}
 
 	if strings.TrimSpace(lastAssistant) == "" {
+		if seenNonJSON || jsonLineCount == 0 || jsonParsedCount == 0 {
+			return trimmed, nil
+		}
 		return "", errors.New("no assistant message found in child output")
 	}
 	return lastAssistant, nil
@@ -1376,7 +1391,7 @@ func (o *Orchestrator) ActiveSpawnsForParent(parentTurnID int) []int {
 
 func isTerminalSpawnStatus(status string) bool {
 	switch status {
-	case "completed", "failed", "canceled", "merged", "rejected":
+	case "completed", "failed", "canceled", "cancelled", "merged", "rejected":
 		return true
 	default:
 		return false

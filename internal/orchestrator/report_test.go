@@ -10,9 +10,9 @@ func TestExtractSpawnReport(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:    "plain text without assistant is error",
-			input:   "final plain output",
-			wantErr: true,
+			name:   "plain text falls back to trimmed output",
+			input:  "final plain output",
+			expect: "final plain output",
 		},
 		{
 			name: "vibe style role content",
@@ -37,6 +37,18 @@ func TestExtractSpawnReport(t *testing.T) {
 			input: `{"role":"tool","content":"tool output"}
 {"role":"user","content":"prompt"}`,
 			wantErr: true,
+		},
+		{
+			name:   "invalid json falls back to plain text",
+			input:  `{"broken"`,
+			expect: `{"broken"`,
+		},
+		{
+			name: "mixed json and plain text falls back to plain text",
+			input: `{"type":"tool","name":"x"}
+final plain output`,
+			expect: `{"type":"tool","name":"x"}
+final plain output`,
 		},
 		{
 			name:    "empty output is error",

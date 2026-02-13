@@ -1229,7 +1229,7 @@ func isActiveSessionStatus(status string) bool {
 
 func isTerminalSpawnStatus(status string) bool {
 	switch status {
-	case "completed", "failed", "merged", "rejected":
+	case "completed", "failed", "canceled", "cancelled", "merged", "rejected":
 		return true
 	default:
 		return false

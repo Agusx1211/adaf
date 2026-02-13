@@ -83,8 +83,7 @@ func deadWorktreePaths(s *store.Store) map[string]bool {
 		if rec.WorktreePath == "" {
 			continue
 		}
-		switch rec.Status {
-		case "completed", "failed", "merged", "rejected":
+		if isTerminalSpawnStatus(rec.Status) {
 			dead[rec.WorktreePath] = true
 		}
 	}

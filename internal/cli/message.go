@@ -71,7 +71,7 @@ func runParentAsk(cmd *cobra.Command, args []string) error {
 	for time.Now().Before(deadline) {
 		// Check if spawn was completed/failed externally.
 		rec, err = s.GetSpawn(spawnID)
-		if err == nil && (rec.Status == "completed" || rec.Status == "failed" || rec.Status == "rejected") {
+		if err == nil && isTerminalSpawnStatus(rec.Status) {
 			return fmt.Errorf("spawn was terminated while waiting for reply (status=%s)", rec.Status)
 		}
 

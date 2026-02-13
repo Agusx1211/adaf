@@ -397,7 +397,7 @@ func runSpawnWatch(cmd *cobra.Command, args []string) error {
 		if rec.ChildTurnID > 0 {
 			break
 		}
-		if rec.Status == "completed" || rec.Status == "failed" || rec.Status == "merged" || rec.Status == "rejected" {
+		if isTerminalSpawnStatus(rec.Status) {
 			fmt.Printf("Spawn #%d is already %s\n", spawnID, rec.Status)
 			return nil
 		}
@@ -415,7 +415,7 @@ func runSpawnWatch(cmd *cobra.Command, args []string) error {
 	for {
 		// Check if spawn is terminal.
 		rec, _ = s.GetSpawn(spawnID)
-		terminal := rec != nil && (rec.Status == "completed" || rec.Status == "failed" || rec.Status == "merged" || rec.Status == "rejected")
+		terminal := rec != nil && isTerminalSpawnStatus(rec.Status)
 
 		f, err := os.Open(eventsPath)
 		if err != nil {

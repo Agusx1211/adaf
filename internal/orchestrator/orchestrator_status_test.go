@@ -120,4 +120,7 @@ func TestIsTerminalSpawnStatusIncludesCanceled(t *testing.T) {
 	if !isTerminalSpawnStatus("canceled") {
 		t.Fatalf("isTerminalSpawnStatus(canceled) = false, want true")
 	}
+	if !isTerminalSpawnStatus("cancelled") {
+		t.Fatalf("isTerminalSpawnStatus(cancelled) = false, want true")
+	}
 }
