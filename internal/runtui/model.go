@@ -157,11 +157,13 @@ type Model struct {
 	rawRemainder map[string]string
 
 	// Prompt and final-message snapshots by scope.
-	promptsByScope      map[string]promptSnapshot
-	latestPromptScope   string
-	lastMessageByScope  map[string]string
-	finalMessageByScope map[string]finalMessageSnapshot
-	latestFinalScope    string
+	promptsByScope           map[string]promptSnapshot
+	latestPromptScope        string
+	lastMessageByScope       map[string]string
+	assistantMessagesByScope map[string][]string
+	finalMessageByScope      map[string]finalMessageSnapshot
+	finalizedTurnHexByScope  map[string]string
+	latestFinalScope         string
 
 	// Store-change activity tracking snapshots.
 	activityBaselineReady bool
@@ -177,33 +179,35 @@ type Model struct {
 // NewModel creates a new Model with the given configuration.
 func NewModel(projectName string, plan *store.Plan, agentName, modelName string, eventCh chan any, cancel context.CancelFunc) Model {
 	return Model{
-		projectName:         projectName,
-		plan:                plan,
-		agentName:           agentName,
-		modelName:           modelName,
-		startTime:           time.Now(),
-		autoScroll:          true,
-		focus:               focusDetail,
-		detailLayer:         detailLayerRaw,
-		eventCh:             eventCh,
-		cancelFunc:          cancel,
-		streamBuf:           &strings.Builder{},
-		toolInputBuf:        &strings.Builder{},
-		sessions:            make(map[int]*sessionStatus),
-		spawnFirstSeen:      make(map[int]time.Time),
-		spawnStatus:         make(map[int]string),
-		rawRemainder:        make(map[string]string),
-		statsByScope:        make(map[string]*detailStats),
-		promptsByScope:      make(map[string]promptSnapshot),
-		lastMessageByScope:  make(map[string]string),
-		finalMessageByScope: make(map[string]finalMessageSnapshot),
-		knownIssues:         make(map[int]store.Issue),
-		knownDocs:           make(map[string]store.Doc),
-		knownNotes:          make(map[int]struct{}),
-		knownLoopMessages:   make(map[string]struct{}),
-		knownSpawns:         make(map[int]store.SpawnRecord),
-		knownSpawnMessages:  make(map[string]struct{}),
-		leftSection:         leftSectionAgents,
+		projectName:              projectName,
+		plan:                     plan,
+		agentName:                agentName,
+		modelName:                modelName,
+		startTime:                time.Now(),
+		autoScroll:               true,
+		focus:                    focusDetail,
+		detailLayer:              detailLayerRaw,
+		eventCh:                  eventCh,
+		cancelFunc:               cancel,
+		streamBuf:                &strings.Builder{},
+		toolInputBuf:             &strings.Builder{},
+		sessions:                 make(map[int]*sessionStatus),
+		spawnFirstSeen:           make(map[int]time.Time),
+		spawnStatus:              make(map[int]string),
+		rawRemainder:             make(map[string]string),
+		statsByScope:             make(map[string]*detailStats),
+		promptsByScope:           make(map[string]promptSnapshot),
+		lastMessageByScope:       make(map[string]string),
+		assistantMessagesByScope: make(map[string][]string),
+		finalMessageByScope:      make(map[string]finalMessageSnapshot),
+		finalizedTurnHexByScope:  make(map[string]string),
+		knownIssues:              make(map[int]store.Issue),
+		knownDocs:                make(map[string]store.Doc),
+		knownNotes:               make(map[int]struct{}),
+		knownLoopMessages:        make(map[string]struct{}),
+		knownSpawns:              make(map[int]store.SpawnRecord),
+		knownSpawnMessages:       make(map[string]struct{}),
+		leftSection:              leftSectionAgents,
 	}
 }
 
@@ -433,6 +437,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		s.EndedAt = time.Time{}
 		s.LastUpdate = now
 		scope := m.sessionScope(sessionID)
+		if !resuming {
+			delete(m.lastMessageByScope, scope)
+			delete(m.assistantMessagesByScope, scope)
+		}
+		delete(m.finalizedTurnHexByScope, scope)
 		turnLabel := fmt.Sprintf(">>> Turn #%d", sessionID)
 		if msg.TurnHexID != "" {
 			turnLabel += fmt.Sprintf(" [%s]", msg.TurnHexID)
@@ -510,13 +519,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				fmt.Sprintf("<<< %s #%d%s error: %v", logEntity, logID, hexTag, msg.Err)))
 			m.addSimplifiedLine(scope, dimStyle.Render("turn failed"))
 		}
-		if final := strings.TrimSpace(m.lastMessageByScope[scope]); final != "" && !msg.WaitForSpawns {
-			m.finalMessageByScope[scope] = finalMessageSnapshot{
-				Text:      final,
-				TurnHexID: msg.TurnHexID,
-				UpdatedAt: time.Now(),
-			}
-			m.latestFinalScope = scope
+		if msg.WaitForSpawns {
+			delete(m.finalizedTurnHexByScope, scope)
+		} else {
+			m.finalizedTurnHexByScope[scope] = msg.TurnHexID
+			m.updateFinalMessageSnapshot(scope, msg.TurnHexID)
 		}
 		return m, waitForEvent(m.eventCh)
 

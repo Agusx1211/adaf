@@ -626,6 +626,98 @@ func TestLastMessageLayerShowsFinishedAssistantText(t *testing.T) {
 	}
 }
 
+func TestLastMessageLayerAggregatesAssistantTextBlocks(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+
+	updated, _ := m.Update(AgentStartedMsg{SessionID: 9, TurnHexID: "abc"})
+	m1 := updated.(Model)
+	updated, _ = m1.Update(AgentEventMsg{
+		Event: stream.ClaudeEvent{
+			Type: "assistant",
+			AssistantMessage: &stream.AssistantMessage{
+				Role: "assistant",
+				Content: []stream.ContentBlock{
+					{Type: "text", Text: "First chunk"},
+				},
+			},
+		},
+	})
+	m2 := updated.(Model)
+	updated, _ = m2.Update(AgentEventMsg{
+		Event: stream.ClaudeEvent{
+			Type: "assistant",
+			AssistantMessage: &stream.AssistantMessage{
+				Role: "assistant",
+				Content: []stream.ContentBlock{
+					{Type: "text", Text: "Second chunk"},
+				},
+			},
+		},
+	})
+	m3 := updated.(Model)
+	updated, _ = m3.Update(AgentFinishedMsg{
+		SessionID: 9,
+		TurnHexID: "abc",
+		Result: &agent.Result{
+			ExitCode: 0,
+			Duration: time.Second,
+		},
+	})
+	m4 := updated.(Model)
+	m4.detailLayer = detailLayerLastMessage
+
+	rendered := strings.Join(stripStyledLines(m4.detailLines(80)), "\n")
+	if !strings.Contains(rendered, "First chunk") || !strings.Contains(rendered, "Second chunk") {
+		t.Fatalf("last-message layer missing aggregated assistant text:\n%s", rendered)
+	}
+}
+
+func TestLastMessageLayerUpdatesWhenAssistantTextArrivesAfterFinish(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+
+	updated, _ := m.Update(AgentStartedMsg{SessionID: 9, TurnHexID: "abc"})
+	m1 := updated.(Model)
+	updated, _ = m1.Update(AgentEventMsg{
+		Event: stream.ClaudeEvent{
+			Type: "assistant",
+			AssistantMessage: &stream.AssistantMessage{
+				Role: "assistant",
+				Content: []stream.ContentBlock{
+					{Type: "text", Text: "Early chunk"},
+				},
+			},
+		},
+	})
+	m2 := updated.(Model)
+	updated, _ = m2.Update(AgentFinishedMsg{
+		SessionID: 9,
+		TurnHexID: "abc",
+		Result: &agent.Result{
+			ExitCode: 0,
+			Duration: time.Second,
+		},
+	})
+	m3 := updated.(Model)
+	updated, _ = m3.Update(AgentEventMsg{
+		Event: stream.ClaudeEvent{
+			Type: "assistant",
+			AssistantMessage: &stream.AssistantMessage{
+				Role: "assistant",
+				Content: []stream.ContentBlock{
+					{Type: "text", Text: "Late chunk"},
+				},
+			},
+		},
+	})
+	m4 := updated.(Model)
+	m4.detailLayer = detailLayerLastMessage
+
+	rendered := strings.Join(stripStyledLines(m4.detailLines(80)), "\n")
+	if !strings.Contains(rendered, "Late chunk") {
+		t.Fatalf("last-message layer missing late assistant text:\n%s", rendered)
+	}
+}
+
 func TestIsTerminalSpawnStatusIncludesCanceled(t *testing.T) {
 	tests := []struct {
 		name   string

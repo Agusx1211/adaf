@@ -209,9 +209,43 @@ func (m *Model) recordAssistantText(scope, text string) {
 	if compact == "" {
 		return
 	}
+	chunks := m.assistantMessagesByScope[scope]
+	if n := len(chunks); n == 0 || chunks[n-1] != compact {
+		m.assistantMessagesByScope[scope] = append(chunks, compact)
+	}
 	m.lastMessageByScope[scope] = compact
+	if turnHexID, closed := m.finalizedTurnHexByScope[scope]; closed {
+		m.updateFinalMessageSnapshot(scope, turnHexID)
+	}
 	m.bumpStats(scope, func(st *detailStats) { st.AssistantMessages++ })
 	m.addSimplifiedLine(scope, dimStyle.Render("assistant message"))
+}
+
+func (m *Model) latestAssistantMessage(scope string) string {
+	chunks := m.assistantMessagesByScope[scope]
+	if len(chunks) > 0 {
+		return strings.TrimSpace(strings.Join(chunks, "\n\n"))
+	}
+	return strings.TrimSpace(m.lastMessageByScope[scope])
+}
+
+func (m *Model) updateFinalMessageSnapshot(scope, turnHexID string) {
+	final := m.latestAssistantMessage(scope)
+	if final == "" {
+		return
+	}
+	snap := finalMessageSnapshot{
+		Text:      final,
+		TurnHexID: turnHexID,
+		UpdatedAt: time.Now(),
+	}
+	if snap.TurnHexID == "" {
+		if prev, ok := m.finalMessageByScope[scope]; ok && prev.TurnHexID != "" {
+			snap.TurnHexID = prev.TurnHexID
+		}
+	}
+	m.finalMessageByScope[scope] = snap
+	m.latestFinalScope = scope
 }
 
 func (m *Model) recordToolCall(scope, toolName string) {
