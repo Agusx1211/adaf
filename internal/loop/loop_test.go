@@ -306,7 +306,7 @@ func TestLoopWaitForSpawnsResumesSameTurn(t *testing.T) {
 			Prompt:   "base",
 			MaxTurns: 1,
 		},
-		OnWait: func(turnID int, alreadySeen map[int]struct{}) ([]WaitResult, bool) {
+		OnWait: func(_ context.Context, turnID int, alreadySeen map[int]struct{}) ([]WaitResult, bool) {
 			waited = append(waited, turnID)
 			return []WaitResult{
 				{SpawnID: 7, Profile: "scout", Status: "completed", Summary: "done"},
@@ -376,7 +376,7 @@ func TestLoopWaitForSpawnsStopsTurnImmediately(t *testing.T) {
 			Prompt:   "base",
 			MaxTurns: 1,
 		},
-		OnWait: func(turnID int, alreadySeen map[int]struct{}) ([]WaitResult, bool) {
+		OnWait: func(_ context.Context, turnID int, alreadySeen map[int]struct{}) ([]WaitResult, bool) {
 			waited = append(waited, turnID)
 			return []WaitResult{{SpawnID: 11, Profile: "scout", Status: "completed", Summary: "done"}}, false
 		},
@@ -424,7 +424,7 @@ func TestLoopOnWaitSeenSpawnIDsAccumulateAndResetByTurn(t *testing.T) {
 			Prompt:   "base",
 			MaxTurns: 2,
 		},
-		OnWait: func(turnID int, alreadySeen map[int]struct{}) ([]WaitResult, bool) {
+		OnWait: func(_ context.Context, turnID int, alreadySeen map[int]struct{}) ([]WaitResult, bool) {
 			waited = append(waited, turnID)
 			seenCounts = append(seenCounts, len(alreadySeen))
 

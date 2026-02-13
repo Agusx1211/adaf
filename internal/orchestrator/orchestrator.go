@@ -500,9 +500,9 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 				})
 				return newPrompt
 			},
-			OnWait: func(turnID int, alreadySeen map[int]struct{}) ([]loop.WaitResult, bool) {
+			OnWait: func(ctx context.Context, turnID int, alreadySeen map[int]struct{}) ([]loop.WaitResult, bool) {
 				// Wait for at least one of this child's own spawns to complete.
-				results, morePending := o.WaitAny(turnID, alreadySeen)
+				results, morePending := o.WaitAny(ctx, turnID, alreadySeen)
 				var wr []loop.WaitResult
 				for _, r := range results {
 					childRec, _ := o.store.GetSpawn(r.SpawnID)
@@ -942,7 +942,7 @@ func (o *Orchestrator) Wait(parentTurnID int) []SpawnResult {
 // parent turn reaches a terminal state, then returns newly completed results
 // only. alreadySeen contains spawn IDs returned in prior wait cycles for this
 // turn. The bool return indicates whether more spawns are still running.
-func (o *Orchestrator) WaitAny(parentTurnID int, alreadySeen map[int]struct{}) ([]SpawnResult, bool) {
+func (o *Orchestrator) WaitAny(ctx context.Context, parentTurnID int, alreadySeen map[int]struct{}) ([]SpawnResult, bool) {
 	debug.LogKV("orch", "WaitAny() called",
 		"parent_turn", parentTurnID,
 		"already_seen", len(alreadySeen),
@@ -987,7 +987,16 @@ func (o *Orchestrator) WaitAny(parentTurnID int, alreadySeen map[int]struct{}) (
 		defer ticker.Stop()
 
 		for len(completed) == 0 && len(pending) > 0 {
-			<-ticker.C
+			select {
+			case <-ctx.Done():
+				debug.LogKV("orch", "WaitAny cancelled during poll",
+					"parent_turn", parentTurnID,
+					"wait_duration", time.Since(waitStart),
+					"pending", len(pending),
+				)
+				return nil, false
+			case <-ticker.C:
+			}
 			for id := range pending {
 				rec, err := o.store.GetSpawn(id)
 				if err != nil {

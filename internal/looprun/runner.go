@@ -352,8 +352,8 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 						Result:        result,
 					}
 				},
-				OnWait: func(turnID int, alreadySeen map[int]struct{}) ([]loop.WaitResult, bool) {
-					return waitForAnySessionSpawns(cfg.Store, turnID, alreadySeen)
+				OnWait: func(ctx context.Context, turnID int, alreadySeen map[int]struct{}) ([]loop.WaitResult, bool) {
+					return waitForAnySessionSpawns(ctx, cfg.Store, turnID, alreadySeen)
 				},
 			}
 
@@ -708,7 +708,7 @@ func reparentHandoffs(s *store.Store, handoffs []store.HandoffInfo, newParentTur
 // completed spawns only. alreadySeen contains spawn IDs already returned in
 // prior wait cycles for this turn. The bool return indicates whether more
 // spawns are still running (wait-for-any semantics).
-func waitForAnySessionSpawns(s *store.Store, parentTurnID int, alreadySeen map[int]struct{}) ([]loop.WaitResult, bool) {
+func waitForAnySessionSpawns(ctx context.Context, s *store.Store, parentTurnID int, alreadySeen map[int]struct{}) ([]loop.WaitResult, bool) {
 	debug.LogKV("looprun", "waitForAnySessionSpawns() called",
 		"parent_turn", parentTurnID,
 		"already_seen", len(alreadySeen),
@@ -760,7 +760,16 @@ func waitForAnySessionSpawns(s *store.Store, parentTurnID int, alreadySeen map[i
 		ticker := time.NewTicker(250 * time.Millisecond)
 		defer ticker.Stop()
 		for len(completed) == 0 && len(pending) > 0 {
-			<-ticker.C
+			select {
+			case <-ctx.Done():
+				debug.LogKV("looprun", "waitForAnySessionSpawns cancelled during poll",
+					"parent_turn", parentTurnID,
+					"wait_duration", time.Since(waitStart),
+					"pending", len(pending),
+				)
+				return nil, false
+			case <-ticker.C:
+			}
 			for id := range pending {
 				rec, err := s.GetSpawn(id)
 				if err != nil {
