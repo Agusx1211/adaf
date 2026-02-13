@@ -508,6 +508,47 @@ func TestRawOutputRoutesToSpawnScope(t *testing.T) {
 	}
 }
 
+func TestAgentFinishedSpawnDoesNotPanic(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+
+	updated, _ := m.Update(AgentRawOutputMsg{
+		SessionID: -9,
+		Data:      "spawn output line",
+	})
+	m1, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("updated model type = %T, want runtui.Model", updated)
+	}
+
+	updated, _ = m1.Update(AgentFinishedMsg{
+		SessionID: -9,
+		Result: &agent.Result{
+			ExitCode: 0,
+			Duration: time.Second,
+		},
+	})
+	m2, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("updated model type = %T, want runtui.Model", updated)
+	}
+
+	if len(m2.sessionOrder) != 0 {
+		t.Fatalf("sessionOrder len = %d, want 0 for spawn-only events", len(m2.sessionOrder))
+	}
+
+	found := false
+	for _, line := range m2.lines {
+		plain := ansi.Strip(line.text)
+		if line.scope == "spawn:9" && strings.Contains(plain, "Spawn #9") && strings.Contains(plain, "finished") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected spawn finished line to be rendered in spawn scope")
+	}
+}
+
 func TestDetailLayerCycleKeys(t *testing.T) {
 	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
 	m.focus = focusDetail

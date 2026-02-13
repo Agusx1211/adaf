@@ -400,10 +400,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForEvent(m.eventCh)
 
 	case AgentStartedMsg:
-		m.finalizeWaitingSessions(msg.SessionID)
-		m.sessionID = msg.SessionID
+		sessionID := msg.SessionID
+		if sessionID <= 0 {
+			sessionID = m.sessionID
+		}
+		if sessionID <= 0 {
+			return m, waitForEvent(m.eventCh)
+		}
+		m.finalizeWaitingSessions(sessionID)
+		m.sessionID = sessionID
 		now := time.Now()
-		s := m.ensureSession(msg.SessionID)
+		s := m.ensureSession(sessionID)
+		if s == nil {
+			return m, waitForEvent(m.eventCh)
+		}
 		resuming := isWaitingSessionStatus(s.Status)
 		if s.Agent == "" {
 			s.Agent = m.agentName
@@ -422,8 +432,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		s.EndedAt = time.Time{}
 		s.LastUpdate = now
-		scope := m.sessionScope(msg.SessionID)
-		turnLabel := fmt.Sprintf(">>> Turn #%d", msg.SessionID)
+		scope := m.sessionScope(sessionID)
+		turnLabel := fmt.Sprintf(">>> Turn #%d", sessionID)
 		if msg.TurnHexID != "" {
 			turnLabel += fmt.Sprintf(" [%s]", msg.TurnHexID)
 		}
@@ -446,42 +456,58 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case AgentFinishedMsg:
 		scope := m.sessionScope(msg.SessionID)
+		if scope == "" && m.sessionID > 0 {
+			scope = m.sessionScope(m.sessionID)
+		}
 		m.flushRawRemainder(scope)
 		s := m.ensureSession(msg.SessionID)
-		s.LastUpdate = time.Now()
+		now := time.Now()
+		if s != nil {
+			s.LastUpdate = now
+		}
+		logEntity := "Turn"
+		logID := msg.SessionID
+		if msg.SessionID < 0 {
+			logEntity = "Spawn"
+			logID = -msg.SessionID
+		}
 		hexTag := ""
 		if msg.TurnHexID != "" {
 			hexTag = fmt.Sprintf(" [%s]", msg.TurnHexID)
 		}
 		if msg.Result != nil {
-			s.EndedAt = s.LastUpdate
-			switch {
-			case msg.WaitForSpawns:
-				s.Status = "waiting_for_spawns"
-				s.Action = "waiting for spawns"
-			case msg.Result.ExitCode == 0:
-				s.Status = "completed"
-			default:
-				s.Status = "failed"
-			}
-			if !msg.WaitForSpawns {
-				s.Action = fmt.Sprintf("finished (exit=%d)", msg.Result.ExitCode)
+			if s != nil {
+				s.EndedAt = now
+				switch {
+				case msg.WaitForSpawns:
+					s.Status = "waiting_for_spawns"
+					s.Action = "waiting for spawns"
+				case msg.Result.ExitCode == 0:
+					s.Status = "completed"
+				default:
+					s.Status = "failed"
+				}
+				if !msg.WaitForSpawns {
+					s.Action = fmt.Sprintf("finished (exit=%d)", msg.Result.ExitCode)
+				}
 			}
 			if msg.WaitForSpawns {
-				m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf("<<< Turn #%d%s waiting for spawns (exit=%d, %s)",
-					msg.SessionID, hexTag, msg.Result.ExitCode, msg.Result.Duration.Round(time.Second))))
+				m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf("<<< %s #%d%s waiting for spawns (exit=%d, %s)",
+					logEntity, logID, hexTag, msg.Result.ExitCode, msg.Result.Duration.Round(time.Second))))
 				m.addSimplifiedLine(scope, dimStyle.Render("waiting for spawns"))
 			} else {
-				m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf("<<< Turn #%d%s finished (exit=%d, %s)",
-					msg.SessionID, hexTag, msg.Result.ExitCode, msg.Result.Duration.Round(time.Second))))
+				m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf("<<< %s #%d%s finished (exit=%d, %s)",
+					logEntity, logID, hexTag, msg.Result.ExitCode, msg.Result.Duration.Round(time.Second))))
 				m.addSimplifiedLine(scope, dimStyle.Render("turn finished"))
 			}
 		} else if msg.Err != nil {
-			s.EndedAt = s.LastUpdate
-			s.Status = "failed"
-			s.Action = "error"
+			if s != nil {
+				s.EndedAt = now
+				s.Status = "failed"
+				s.Action = "error"
+			}
 			m.addScopedLine(scope, lipgloss.NewStyle().Foreground(theme.ColorRed).Render(
-				fmt.Sprintf("<<< Turn #%d%s error: %v", msg.SessionID, hexTag, msg.Err)))
+				fmt.Sprintf("<<< %s #%d%s error: %v", logEntity, logID, hexTag, msg.Err)))
 			m.addSimplifiedLine(scope, dimStyle.Render("turn failed"))
 		}
 		if final := strings.TrimSpace(m.lastMessageByScope[scope]); final != "" && !msg.WaitForSpawns {
