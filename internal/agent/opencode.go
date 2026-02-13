@@ -1,15 +1,10 @@
 package agent
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"fmt"
-	"io"
-	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/agusx1211/adaf/internal/debug"
@@ -59,12 +54,6 @@ func (o *OpencodeAgent) Run(ctx context.Context, cfg Config, recorder *recording
 	args = append(args, "run")
 	args = append(args, cfg.Args...)
 
-	var stdinReader io.Reader
-	if cfg.Prompt != "" {
-		stdinReader = strings.NewReader(cfg.Prompt)
-		recorder.RecordStdin(cfg.Prompt)
-	}
-
 	debug.LogKV("agent.opencode", "building command",
 		"binary", cmdName,
 		"args", strings.Join(args, " "),
@@ -74,88 +63,41 @@ func (o *OpencodeAgent) Run(ctx context.Context, cfg Config, recorder *recording
 
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
-	if stdinReader != nil {
-		cmd.Stdin = stdinReader
-	}
 
 	// Start the process in its own process group. OpenCode is distributed
 	// as a Node.js shim that spawns a compiled Bun binary, which in turn
 	// may spawn MCP servers and other children. Without process group
 	// kill, cancellation would only kill the shim, leaving the real
 	// binary and its children running.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-		return nil
-	}
+	setupProcessGroup(cmd)
 	cmd.WaitDelay = 5 * time.Second
 
-	// Environment: inherit + overlay.
-	cmd.Env = os.Environ()
-	for k, v := range cfg.Env {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
-
-	// Determine stdout/stderr writers, respecting cfg overrides.
-	stdoutW := cfg.Stdout
-	if stdoutW == nil {
-		stdoutW = os.Stdout
-	}
-	stderrW := cfg.Stderr
-	if stderrW == nil {
-		stderrW = os.Stderr
-	}
-
-	var stdoutBuf, stderrBuf bytes.Buffer
-	stdoutWriters := []io.Writer{
-		&stdoutBuf,
-		recorder.WrapWriter(stdoutW, "stdout"),
-	}
-	if w := newEventSinkWriter(cfg.EventSink, cfg.TurnID, ""); w != nil {
-		stdoutWriters = append(stdoutWriters, w)
-	}
-	cmd.Stdout = io.MultiWriter(stdoutWriters...)
-
-	stderrWriters := []io.Writer{
-		&stderrBuf,
-		recorder.WrapWriter(stderrW, "stderr"),
-	}
-	if w := newEventSinkWriter(cfg.EventSink, cfg.TurnID, "[stderr] "); w != nil {
-		stderrWriters = append(stderrWriters, w)
-	}
-	cmd.Stderr = io.MultiWriter(stderrWriters...)
-
-	recorder.RecordMeta("agent", "opencode")
-	recorder.RecordMeta("command", cmdName+" "+strings.Join(args, " "))
-	recorder.RecordMeta("workdir", cfg.WorkDir)
+	setupEnv(cmd, cfg.Env)
+	setupStdin(cmd, cfg.Prompt, recorder)
+	bo := setupBufferOutput(cmd, cfg, recorder)
+	recordMeta(recorder, "opencode", cmdName, args, cfg.WorkDir)
 
 	start := time.Now()
 	debug.LogKV("agent.opencode", "process starting", "binary", cmdName)
 	err := cmd.Run()
 	duration := time.Since(start)
 
-	exitCode := 0
+	exitCode, err := extractExitCode(err)
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			exitCode = exitErr.ExitCode()
-		} else {
-			debug.LogKV("agent.opencode", "cmd.Run() error (not ExitError)", "error", err)
-			return nil, fmt.Errorf("opencode agent: failed to run command: %w", err)
-		}
+		debug.LogKV("agent.opencode", "cmd.Run() error (not ExitError)", "error", err)
+		return nil, fmt.Errorf("opencode agent: failed to run command: %w", err)
 	}
+
 	debug.LogKV("agent.opencode", "process finished",
 		"exit_code", exitCode,
 		"duration", duration,
-		"output_len", stdoutBuf.Len(),
+		"output_len", bo.StdoutBuf.Len(),
 	)
 
 	return &Result{
 		ExitCode: exitCode,
 		Duration: duration,
-		Output:   stdoutBuf.String(),
-		Error:    stderrBuf.String(),
+		Output:   bo.StdoutBuf.String(),
+		Error:    bo.StderrBuf.String(),
 	}, nil
 }
