@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -32,17 +34,14 @@ func init() {
 	webCmd.Flags().String("key", "", "Path to TLS key file (for --tls=custom)")
 	webCmd.Flags().String("auth-token", "", "Require Bearer token for API access")
 	webCmd.Flags().Float64("rate-limit", 0, "Max requests per second per IP (0 = unlimited)")
+	webCmd.Flags().StringSlice("projects", nil, "Comma-separated list of project directories to serve")
+	webCmd.Flags().Bool("multi", false, "Auto-discover projects in parent directory")
 	rootCmd.AddCommand(webCmd)
 }
 
 func runWeb(cmd *cobra.Command, args []string) error {
 	if session.IsAgentContext() {
 		return fmt.Errorf("web is not available inside an agent context")
-	}
-
-	s, err := openStoreRequired()
-	if err != nil {
-		return err
 	}
 
 	port, _ := cmd.Flags().GetInt("port")
@@ -53,6 +52,13 @@ func runWeb(cmd *cobra.Command, args []string) error {
 	keyFile, _ := cmd.Flags().GetString("key")
 	authToken, _ := cmd.Flags().GetString("auth-token")
 	rateLimit, _ := cmd.Flags().GetFloat64("rate-limit")
+	projects, _ := cmd.Flags().GetStringSlice("projects")
+	multi, _ := cmd.Flags().GetBool("multi")
+	useProjects := cmd.Flags().Changed("projects")
+
+	if useProjects && multi {
+		return fmt.Errorf("--projects and --multi cannot be used together")
+	}
 
 	if expose {
 		host = "0.0.0.0"
@@ -73,7 +79,7 @@ func runWeb(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--tls=custom requires both --cert and --key")
 	}
 
-	srv := webserver.New(s, webserver.Options{
+	opts := webserver.Options{
 		Host:      host,
 		Port:      port,
 		TLSMode:   tlsMode,
@@ -81,12 +87,122 @@ func runWeb(cmd *cobra.Command, args []string) error {
 		KeyFile:   keyFile,
 		AuthToken: authToken,
 		RateLimit: rateLimit,
-	})
+	}
+
+	var srv *webserver.Server
+	var servedProjectIDs []string
+
+	if useProjects {
+		registry := webserver.NewProjectRegistry()
+		currentDir, err := currentDirAbs()
+		if err != nil {
+			return err
+		}
+
+		defaultID := ""
+		for _, rawPath := range projects {
+			projectPath := strings.TrimSpace(rawPath)
+			if projectPath == "" {
+				continue
+			}
+
+			absPath, err := filepath.Abs(projectPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to resolve project path %q: %v\n", projectPath, err)
+				continue
+			}
+			absPath = filepath.Clean(absPath)
+
+			info, err := os.Stat(absPath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					fmt.Fprintf(os.Stderr, "Warning: project directory does not exist, skipping: %s\n", absPath)
+				} else {
+					fmt.Fprintf(os.Stderr, "Warning: cannot access project directory %q, skipping: %v\n", absPath, err)
+				}
+				continue
+			}
+			if !info.IsDir() {
+				fmt.Fprintf(os.Stderr, "Warning: project path is not a directory, skipping: %s\n", absPath)
+				continue
+			}
+
+			projectID := filepath.Base(absPath)
+			if err := registry.Register(projectID, absPath); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: skipping project %q: %v\n", absPath, err)
+				continue
+			}
+			if absPath == currentDir {
+				defaultID = projectID
+			}
+		}
+
+		if registry.Count() == 0 {
+			return fmt.Errorf("no valid projects to serve from --projects")
+		}
+		if defaultID != "" {
+			if err := registry.SetDefault(defaultID); err != nil {
+				return fmt.Errorf("setting default project %q: %w", defaultID, err)
+			}
+		}
+
+		entries := registry.List()
+		servedProjectIDs = make([]string, 0, len(entries))
+		for _, entry := range entries {
+			servedProjectIDs = append(servedProjectIDs, entry.ID)
+		}
+
+		srv = webserver.NewMulti(registry, opts)
+	} else if multi {
+		currentDir, err := currentDirAbs()
+		if err != nil {
+			return err
+		}
+
+		registry := webserver.NewProjectRegistry()
+		parentDir := filepath.Dir(currentDir)
+		count, err := registry.ScanDirectory(parentDir)
+		if err != nil {
+			return fmt.Errorf("scanning parent directory %q for projects: %w", parentDir, err)
+		}
+		if count == 0 {
+			return fmt.Errorf("no adaf projects found in parent directory %s", parentDir)
+		}
+
+		currentID := filepath.Base(currentDir)
+		if _, ok := registry.Get(currentID); ok {
+			if err := registry.SetDefault(currentID); err != nil {
+				return fmt.Errorf("setting default project %q: %w", currentID, err)
+			}
+		}
+
+		entries := registry.List()
+		servedProjectIDs = make([]string, 0, len(entries))
+		for _, entry := range entries {
+			servedProjectIDs = append(servedProjectIDs, entry.ID)
+		}
+
+		srv = webserver.NewMulti(registry, opts)
+	} else {
+		s, err := openStoreRequired()
+		if err != nil {
+			return err
+		}
+		srv = webserver.New(s, opts)
+	}
+
 	if err := srv.Start(); err != nil {
 		return fmt.Errorf("starting web server: %w", err)
 	}
 
 	fmt.Printf("Web server running at %s://%s\n", srv.Scheme(), srv.Addr())
+	if len(servedProjectIDs) > 0 {
+		label := "projects"
+		if len(servedProjectIDs) == 1 {
+			label = "project"
+		}
+		fmt.Printf("Serving %d %s: %s\n", len(servedProjectIDs), label, strings.Join(servedProjectIDs, ", "))
+	}
 	if authToken != "" {
 		fmt.Printf("Auth token required for API access.\n")
 	}
@@ -109,4 +225,16 @@ func generateToken() string {
 	b := make([]byte, 32)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func currentDirAbs() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("getting working directory: %w", err)
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolving working directory: %w", err)
+	}
+	return filepath.Clean(absDir), nil
 }
