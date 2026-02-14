@@ -10,6 +10,7 @@ import (
 // Wire message types sent over the Unix socket.
 const (
 	MsgMeta          = "meta"            // Session metadata (sent first on connect)
+	MsgSnapshot      = "snapshot"        // Current daemon state + bounded recent output
 	MsgStarted       = "started"         // Agent session started
 	MsgPrompt        = "prompt"          // Agent turn prompt payload
 	MsgEvent         = "event"           // Claude stream event
@@ -22,7 +23,7 @@ const (
 	MsgLoopStepEnd   = "loop_step_end"   // Loop step ended
 	MsgLoopDone      = "loop_done"       // Loop finished
 	MsgDone          = "done"            // Entire agent loop completed
-	MsgLive          = "live"            // Marker: replay complete, now streaming live
+	MsgLive          = "live"            // Marker: snapshot sent, now streaming live
 )
 
 // Client-to-daemon control messages.
@@ -45,6 +46,45 @@ type WireMeta struct {
 	ProjectName string `json:"project"`
 	LoopName    string `json:"loop_name,omitempty"`
 	LoopSteps   int    `json:"loop_steps,omitempty"`
+}
+
+// WireSnapshot captures current daemon state sent once on client connect.
+type WireSnapshot struct {
+	Loop    WireSnapshotLoop     `json:"loop,omitempty"`
+	Session *WireSnapshotSession `json:"session,omitempty"`
+	Spawns  []WireSpawnInfo      `json:"spawns,omitempty"`
+	Recent  []WireMsg            `json:"recent,omitempty"`
+}
+
+// WireSnapshotLoop is the current loop/step state for reconnects.
+type WireSnapshotLoop struct {
+	RunID     int    `json:"run_id,omitempty"`
+	RunHexID  string `json:"run_hex_id,omitempty"`
+	StepHexID string `json:"step_hex_id,omitempty"`
+	// Cycle/StepIndex are intentionally always present so zero-based values are
+	// preserved across reconnect snapshots.
+	Cycle      int    `json:"cycle"`
+	StepIndex  int    `json:"step_index"`
+	Profile    string `json:"profile,omitempty"`
+	TotalSteps int    `json:"total_steps,omitempty"`
+}
+
+// WireSnapshotSession is the current turn/session state for reconnects.
+// NOTE: keep fields value-only; cloneWireSnapshot relies on shallow copy safety.
+type WireSnapshotSession struct {
+	SessionID    int       `json:"session_id"`
+	TurnHexID    string    `json:"turn_hex_id,omitempty"`
+	Agent        string    `json:"agent,omitempty"`
+	Profile      string    `json:"profile,omitempty"`
+	Model        string    `json:"model,omitempty"`
+	InputTokens  int       `json:"input_tokens,omitempty"`
+	OutputTokens int       `json:"output_tokens,omitempty"`
+	CostUSD      float64   `json:"cost_usd,omitempty"`
+	NumTurns     int       `json:"num_turns,omitempty"`
+	Status       string    `json:"status,omitempty"`
+	Action       string    `json:"action,omitempty"`
+	StartedAt    time.Time `json:"started_at,omitempty"`
+	EndedAt      time.Time `json:"ended_at,omitempty"`
 }
 
 // WireStarted signals that a new agent session has begun.
@@ -79,12 +119,12 @@ type WireRaw struct {
 
 // WireFinished signals that a single agent session completed.
 type WireFinished struct {
-	SessionID     int           `json:"session_id"`
-	TurnHexID     string        `json:"turn_hex_id,omitempty"`
-	WaitForSpawns bool          `json:"wait_for_spawns,omitempty"`
-	ExitCode      int           `json:"exit_code"`
-	DurationNS    time.Duration `json:"duration_ns"`
-	Error         string        `json:"error,omitempty"`
+	SessionID     int    `json:"session_id"`
+	TurnHexID     string `json:"turn_hex_id,omitempty"`
+	WaitForSpawns bool   `json:"wait_for_spawns,omitempty"`
+	ExitCode      int    `json:"exit_code"`
+	DurationNS    int64  `json:"duration_ns"`
+	Error         string `json:"error,omitempty"`
 }
 
 // WireSpawnInfo describes a spawn entry.

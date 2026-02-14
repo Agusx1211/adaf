@@ -1,6 +1,8 @@
 package runtui
 
 import (
+	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -244,6 +246,128 @@ func TestWaitForSpawnsResumeSameTurn(t *testing.T) {
 	}
 	if !foundResumed {
 		t.Fatal("expected resume line to be rendered for same turn resume")
+	}
+}
+
+func TestAgentFinishedErrorTakesPrecedenceOverWaitForSpawns(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+	updated, _ := m.Update(AgentStartedMsg{SessionID: 42, TurnHexID: "turnhex"})
+	got := updated.(Model)
+
+	updated, _ = got.Update(AgentFinishedMsg{
+		SessionID:     42,
+		TurnHexID:     "turnhex",
+		WaitForSpawns: true,
+		Result: &agent.Result{
+			ExitCode: 1,
+			Duration: 2 * time.Second,
+		},
+		Err: errors.New("boom"),
+	})
+	got = updated.(Model)
+
+	s := got.sessions[42]
+	if s == nil {
+		t.Fatal("expected session #42")
+	}
+	if s.Status != "failed" || s.Action != "error" {
+		t.Fatalf("unexpected session state: status=%q action=%q", s.Status, s.Action)
+	}
+}
+
+func TestSessionSnapshotHydratesCurrentState(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+
+	startedAt := time.Now().Add(-15 * time.Second)
+	updated, _ := m.Update(SessionSnapshotMsg{
+		Loop: SessionLoopSnapshot{
+			RunID:      4,
+			RunHexID:   "runhex",
+			StepHexID:  "stephex",
+			Cycle:      2,
+			StepIndex:  1,
+			Profile:    "reviewer",
+			TotalSteps: 6,
+		},
+		Session: &SessionTurnSnapshot{
+			SessionID:    42,
+			TurnHexID:    "turnhex",
+			Agent:        "codex",
+			Profile:      "reviewer",
+			Model:        "gpt-5",
+			InputTokens:  250,
+			OutputTokens: 80,
+			CostUSD:      0.0123,
+			NumTurns:     4,
+			Status:       "running",
+			Action:       "responding",
+			StartedAt:    startedAt,
+		},
+		Spawns: []SpawnInfo{
+			{ID: 9, ParentTurnID: 42, Profile: "devstral2", Status: "running"},
+		},
+	})
+	got, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("updated model type = %T, want runtui.Model", updated)
+	}
+
+	if got.sessionID != 42 {
+		t.Fatalf("sessionID = %d, want 42", got.sessionID)
+	}
+	if got.loopCycle != 2 || got.loopStep != 1 || got.loopTotalSteps != 6 {
+		t.Fatalf("unexpected loop snapshot state: cycle=%d step=%d total=%d", got.loopCycle, got.loopStep, got.loopTotalSteps)
+	}
+	if got.loopStepProfile != "reviewer" {
+		t.Fatalf("loopStepProfile = %q, want %q", got.loopStepProfile, "reviewer")
+	}
+	if len(got.spawns) != 1 || got.spawns[0].ID != 9 {
+		t.Fatalf("unexpected spawns: %+v", got.spawns)
+	}
+
+	s := got.sessions[42]
+	if s == nil {
+		t.Fatal("expected session #42 in snapshot")
+	}
+	if s.Agent != "codex" || s.Profile != "reviewer" || s.Model != "gpt-5" {
+		t.Fatalf("unexpected session identity: %+v", s)
+	}
+	if got.modelName != "gpt-5" {
+		t.Fatalf("modelName = %q, want %q", got.modelName, "gpt-5")
+	}
+	if s.Status != "running" || s.Action != "responding" {
+		t.Fatalf("unexpected session status/action: %+v", s)
+	}
+	if s.StartedAt.IsZero() || !s.StartedAt.Equal(startedAt) {
+		t.Fatalf("started_at = %v, want %v", s.StartedAt, startedAt)
+	}
+	if got.inputTokens != 250 || got.outputTokens != 80 || got.numTurns != 4 {
+		t.Fatalf("unexpected model usage counters: in=%d out=%d turns=%d", got.inputTokens, got.outputTokens, got.numTurns)
+	}
+	if math.Abs(got.costUSD-0.0123) > 1e-9 {
+		t.Fatalf("costUSD = %.4f, want %.4f", got.costUSD, 0.0123)
+	}
+	if got.startTime.IsZero() || !got.startTime.Equal(startedAt) {
+		t.Fatalf("startTime = %v, want %v", got.startTime, startedAt)
+	}
+	if got.elapsed < 10*time.Second {
+		t.Fatalf("elapsed = %s, want >= 10s", got.elapsed)
+	}
+}
+
+func TestSessionLiveMsgMarksStreamLive(t *testing.T) {
+	m := NewModel("proj", nil, "codex", "", make(chan any, 1), nil)
+	m.SetSessionMode(7)
+	if m.live {
+		t.Fatal("stream should start in syncing state for session mode")
+	}
+	updated, _ := m.Update(SessionLiveMsg{})
+	got, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("updated model type = %T, want runtui.Model", updated)
+	}
+	if !got.live {
+		t.Fatal("stream live marker did not update model state")
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,8 +21,8 @@ var attachCmd = &cobra.Command{
 	Use:     "attach [loop-name|session-id]",
 	Aliases: []string{"reattach", "connect"},
 	Short:   "Attach to a running loop or session",
-	Long: `Reattach to a running adaf loop or session. The event history is replayed
-and then live events are streamed in real-time.
+	Long: `Reattach to a running adaf loop or session. The TUI loads history from the
+project store, then receives a daemon snapshot and live events in real-time.
 
 With no arguments, attaches to the only running session (if exactly one exists).
 With a loop name, attaches to the running session for that loop.
@@ -103,26 +104,49 @@ func runAttach(cmd *cobra.Command, args []string) error {
 
 	// Stream events from the daemon to the event channel.
 	go func() {
-		err := client.StreamEvents(eventCh, nil)
+		err := client.StreamEvents(eventCh, func() {
+			select {
+			case eventCh <- runtui.SessionLiveMsg{}:
+			default:
+			}
+		})
 		if err != nil {
 			// Connection error; eventCh is already closed by StreamEvents.
 			_ = err
 		}
 	}()
 
+	var plan *store.Plan
+	var projectStore *store.Store
+	if meta.ProjectDir != "" {
+		if st, err := store.New(meta.ProjectDir); err == nil {
+			projectStore = st
+			if cfg, err := session.LoadConfig(meta.ID); err == nil {
+				if planID := strings.TrimSpace(cfg.PlanID); planID != "" {
+					if p, err := st.GetPlan(planID); err == nil {
+						plan = p
+					}
+				}
+			}
+			if plan == nil {
+				if p, err := st.ActivePlan(); err == nil {
+					plan = p
+				}
+			}
+		}
+	}
+
 	// Create the TUI model.
 	runModel := runtui.NewModel(
 		meta.ProjectName,
-		nil, // no plan in attach mode
+		plan,
 		meta.AgentName,
 		"",
 		eventCh,
 		cancelFunc,
 	)
-	if meta.ProjectDir != "" {
-		if st, err := store.New(meta.ProjectDir); err == nil {
-			runModel.SetStore(st)
-		}
+	if projectStore != nil {
+		runModel.SetStore(projectStore)
 	}
 	runModel.SetSessionMode(meta.ID)
 	loopName := meta.LoopName

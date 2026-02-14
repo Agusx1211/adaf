@@ -141,6 +141,7 @@ type Model struct {
 	// Session mode: when non-zero, this model is attached to a session daemon
 	// and supports detach (Ctrl+D).
 	sessionModeID int
+	live          bool
 
 	// Command center state.
 	sessions      map[int]*sessionStatus
@@ -214,6 +215,7 @@ func NewModel(projectName string, plan *store.Plan, agentName, modelName string,
 		knownSpawns:              make(map[int]store.SpawnRecord),
 		knownSpawnMessages:       make(map[string]struct{}),
 		leftSection:              leftSectionAgents,
+		live:                     true,
 	}
 }
 
@@ -300,6 +302,7 @@ func (m *Model) SetLoopInfo(name string, totalSteps int) {
 // When in session mode, Ctrl+D detaches instead of scrolling.
 func (m *Model) SetSessionMode(sessionID int) {
 	m.sessionModeID = sessionID
+	m.live = false
 }
 
 // SessionMode returns the session ID if in session mode, or 0.
@@ -342,6 +345,72 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
+	case SessionSnapshotMsg:
+		if msg.Loop.TotalSteps > 0 {
+			m.loopTotalSteps = msg.Loop.TotalSteps
+		}
+		m.loopCycle = msg.Loop.Cycle
+		m.loopStep = msg.Loop.StepIndex
+		if msg.Loop.Profile != "" {
+			m.loopStepProfile = msg.Loop.Profile
+		}
+		if msg.Loop.RunHexID != "" {
+			m.loopRunHexID = msg.Loop.RunHexID
+		}
+		if msg.Loop.StepHexID != "" {
+			m.loopStepHexID = msg.Loop.StepHexID
+		}
+		if msg.Session != nil && msg.Session.SessionID > 0 {
+			m.sessionID = msg.Session.SessionID
+			s := m.ensureSession(msg.Session.SessionID)
+			if s != nil {
+				if msg.Session.Agent != "" {
+					s.Agent = msg.Session.Agent
+					m.agentName = msg.Session.Agent
+				}
+				if s.Agent == "" {
+					s.Agent = m.agentName
+				}
+				if msg.Session.Profile != "" {
+					s.Profile = msg.Session.Profile
+				}
+				if s.Profile == "" {
+					s.Profile = m.loopStepProfile
+				}
+				if msg.Session.Model != "" {
+					s.Model = msg.Session.Model
+					m.modelName = msg.Session.Model
+				}
+				m.inputTokens = msg.Session.InputTokens
+				m.outputTokens = msg.Session.OutputTokens
+				m.costUSD = msg.Session.CostUSD
+				m.numTurns = msg.Session.NumTurns
+				if msg.Session.Status != "" {
+					s.Status = msg.Session.Status
+				} else if s.Status == "" {
+					s.Status = "running"
+				}
+				if msg.Session.Action != "" {
+					s.Action = msg.Session.Action
+				} else if s.Action == "" {
+					s.Action = "monitoring"
+				}
+				s.StartedAt = msg.Session.StartedAt
+				s.EndedAt = msg.Session.EndedAt
+				s.LastUpdate = time.Now()
+				if !msg.Session.StartedAt.IsZero() {
+					m.startTime = msg.Session.StartedAt
+					m.elapsed = time.Since(msg.Session.StartedAt)
+				}
+			}
+		}
+		m.applySnapshotSpawnStatus(msg.Spawns)
+		return m, waitForEvent(m.eventCh)
+
+	case SessionLiveMsg:
+		m.live = true
+		return m, waitForEvent(m.eventCh)
+
 	case AgentEventMsg:
 		m.handleEvent(msg.Event)
 		return m, waitForEvent(m.eventCh)
@@ -355,52 +424,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForEvent(m.eventCh)
 
 	case SpawnStatusMsg:
-		m.spawns = msg.Spawns
-		now := time.Now()
-		nextSeen := make(map[int]time.Time, len(msg.Spawns))
-		nextStatus := make(map[int]string, len(msg.Spawns))
-		activeByParent := make(map[int]bool)
-		seenByParent := make(map[int]bool)
-		for _, sp := range msg.Spawns {
-			firstSeen, ok := m.spawnFirstSeen[sp.ID]
-			if !ok {
-				firstSeen = now
-			}
-			nextSeen[sp.ID] = firstSeen
-			nextStatus[sp.ID] = sp.Status
-			if sp.ParentTurnID > 0 {
-				seenByParent[sp.ParentTurnID] = true
-				if !isTerminalSpawnStatus(sp.Status) {
-					activeByParent[sp.ParentTurnID] = true
-				}
-			}
-			prev, hadPrev := m.spawnStatus[sp.ID]
-			if !hadPrev || prev != sp.Status {
-				scope := m.spawnScope(sp.ID)
-				m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf("[spawn #%d] %s -> %s", sp.ID, sp.Profile, sp.Status)))
-				m.addSimplifiedLine(scope, dimStyle.Render("spawn update"))
-				m.bumpStats(scope, func(st *detailStats) { st.Spawns++ })
-				if sp.Question != "" {
-					m.addScopedLine(scope, dimStyle.Render("  Q: "+truncate(sp.Question, 180)))
-				}
-			}
-		}
-		m.spawnFirstSeen = nextSeen
-		m.spawnStatus = nextStatus
-		for _, sid := range m.sessionOrder {
-			s := m.sessions[sid]
-			if s == nil || !isWaitingSessionStatus(s.Status) {
-				continue
-			}
-			if !seenByParent[sid] || activeByParent[sid] {
-				continue
-			}
-			s.Status = "completed"
-			if s.Action == "" || strings.Contains(strings.ToLower(s.Action), "wait") {
-				s.Action = "wait complete"
-			}
-			s.LastUpdate = now
-		}
+		m.applyLiveSpawnStatus(msg.Spawns)
 		return m, waitForEvent(m.eventCh)
 
 	case GuardrailViolationMsg:
@@ -494,6 +518,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if s != nil {
 				s.EndedAt = now
 				switch {
+				case msg.Err != nil:
+					s.Status = "failed"
+					s.Action = "error"
 				case msg.WaitForSpawns:
 					s.Status = "waiting_for_spawns"
 					s.Action = "waiting for spawns"
@@ -502,11 +529,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				default:
 					s.Status = "failed"
 				}
-				if !msg.WaitForSpawns {
+				if msg.Err == nil && !msg.WaitForSpawns {
 					s.Action = fmt.Sprintf("finished (exit=%d)", msg.Result.ExitCode)
 				}
 			}
-			if msg.WaitForSpawns {
+			if msg.Err != nil {
+				m.addScopedLine(scope, lipgloss.NewStyle().Foreground(theme.ColorRed).Render(
+					fmt.Sprintf("<<< %s #%d%s error: %v (exit=%d, %s)",
+						logEntity, logID, hexTag, msg.Err, msg.Result.ExitCode, msg.Result.Duration.Round(time.Second))))
+				m.addSimplifiedLine(scope, dimStyle.Render("turn failed"))
+			} else if msg.WaitForSpawns {
 				m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf("<<< %s #%d%s waiting for spawns (exit=%d, %s)",
 					logEntity, logID, hexTag, msg.Result.ExitCode, msg.Result.Duration.Round(time.Second))))
 				m.addSimplifiedLine(scope, dimStyle.Render("waiting for spawns"))
@@ -636,6 +668,70 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // Done returns whether the agent loop has finished.
 func (m Model) Done() bool {
 	return m.done
+}
+
+func (m *Model) applyLiveSpawnStatus(spawns []SpawnInfo) {
+	changes := m.updateSpawnStatus(spawns)
+	for _, sp := range changes {
+		scope := m.spawnScope(sp.ID)
+		m.addScopedLine(scope, dimStyle.Render(fmt.Sprintf("[spawn #%d] %s -> %s", sp.ID, sp.Profile, sp.Status)))
+		m.addSimplifiedLine(scope, dimStyle.Render("spawn update"))
+		m.bumpStats(scope, func(st *detailStats) { st.Spawns++ })
+		if sp.Question != "" {
+			m.addScopedLine(scope, dimStyle.Render("  Q: "+truncate(sp.Question, 180)))
+		}
+	}
+}
+
+func (m *Model) applySnapshotSpawnStatus(spawns []SpawnInfo) {
+	_ = m.updateSpawnStatus(spawns)
+}
+
+func (m *Model) updateSpawnStatus(spawns []SpawnInfo) []SpawnInfo {
+	m.spawns = spawns
+	now := time.Now()
+	nextSeen := make(map[int]time.Time, len(spawns))
+	nextStatus := make(map[int]string, len(spawns))
+	activeByParent := make(map[int]bool)
+	seenByParent := make(map[int]bool)
+	changes := make([]SpawnInfo, 0, len(spawns))
+
+	for _, sp := range spawns {
+		firstSeen, ok := m.spawnFirstSeen[sp.ID]
+		if !ok {
+			firstSeen = now
+		}
+		nextSeen[sp.ID] = firstSeen
+		nextStatus[sp.ID] = sp.Status
+		if sp.ParentTurnID > 0 {
+			seenByParent[sp.ParentTurnID] = true
+			if !isTerminalSpawnStatus(sp.Status) {
+				activeByParent[sp.ParentTurnID] = true
+			}
+		}
+		prev, hadPrev := m.spawnStatus[sp.ID]
+		if !hadPrev || prev != sp.Status {
+			changes = append(changes, sp)
+		}
+	}
+
+	m.spawnFirstSeen = nextSeen
+	m.spawnStatus = nextStatus
+	for _, sid := range m.sessionOrder {
+		s := m.sessions[sid]
+		if s == nil || !isWaitingSessionStatus(s.Status) {
+			continue
+		}
+		if !seenByParent[sid] || activeByParent[sid] {
+			continue
+		}
+		s.Status = "completed"
+		if s.Action == "" || strings.Contains(strings.ToLower(s.Action), "wait") {
+			s.Action = "wait complete"
+		}
+		s.LastUpdate = now
+	}
+	return changes
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -2286,6 +2382,13 @@ func (m Model) renderStatusBar() string {
 	}
 
 	parts = append(parts, statusValueStyle.Render("view="+m.leftSectionLabel()))
+	if m.sessionModeID > 0 {
+		if m.live {
+			parts = append(parts, statusValueStyle.Render("stream=live"))
+		} else {
+			parts = append(parts, statusValueStyle.Render("stream=syncing"))
+		}
+	}
 	if m.leftSection == leftSectionAgents {
 		parts = append(parts, statusValueStyle.Render("layer="+m.detailLayerLabel()))
 	}

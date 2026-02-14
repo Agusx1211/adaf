@@ -24,6 +24,7 @@ import (
 	"github.com/agusx1211/adaf/internal/orchestrator"
 	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/store"
+	"github.com/agusx1211/adaf/internal/stream"
 )
 
 // StartDaemon launches a new daemon process for the given session ID.
@@ -177,7 +178,7 @@ func RunDaemon(sessionID int) error {
 	}
 	_ = os.Setenv("ADAF_SESSION_ID", fmt.Sprintf("%d", sessionID))
 
-	// Open the events file for replay logging.
+	// Open the events file for diagnostics/forensics (`adaf log`).
 	eventsFile, err := os.OpenFile(EventsPath(sessionID), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return fmt.Errorf("opening events file: %w", err)
@@ -206,6 +207,12 @@ func RunDaemon(sessionID int) error {
 			ProjectName: cfg.ProjectName,
 			LoopName:    cfg.Loop.Name,
 			LoopSteps:   len(cfg.Loop.Steps),
+		},
+		snapshot: WireSnapshot{
+			Loop: WireSnapshotLoop{
+				Profile:    cfg.ProfileName,
+				TotalSteps: len(cfg.Loop.Steps),
+			},
 		},
 	}
 
@@ -236,6 +243,7 @@ func RunDaemon(sessionID int) error {
 	}
 
 	// Wait a bit for clients to read final events, then shut down.
+	_ = listener.Close() // stop accepting late reconnects during grace period
 	b.waitForClients(30 * time.Second)
 
 	return normalizeDaemonExit(loopErr)
@@ -245,12 +253,15 @@ func RunDaemon(sessionID int) error {
 type broadcaster struct {
 	mu               sync.Mutex
 	clients          []*clientConn
-	buffered         []bufferedEvent // bounded replay buffer
+	streamSeq        int64
 	eventsFile       *os.File
 	meta             WireMeta
 	done             bool
-	nextSeq          int64
-	maxReplayEvents  int
+	snapshot         WireSnapshot
+	snapshotRecentN  int
+	lastModel        string
+	lastLoopDone     *WireLoopDone
+	lastDone         *WireDone
 	eventsWriteError bool
 
 	controlMu      sync.RWMutex
@@ -261,20 +272,24 @@ type clientConn struct {
 	conn     net.Conn
 	writer   *bufio.Writer
 	sendCh   chan []byte
+	minSeq   int64
 	closeCh  chan struct{}
 	closeMu  sync.Once
 	writeErr func(error)
 }
 
-type bufferedEvent struct {
-	Seq  int64
-	Line []byte
+type snapshotUpdate struct {
+	model string
 }
 
 const (
-	defaultMaxReplayEvents = 4096
-	clientSendQueueSize    = 512
-	clientWriteTimeout     = 5 * time.Second
+	snapshotRecentEventLimit = 128
+	snapshotRecentByteLimit  = 512 * 1024
+	snapshotWireByteLimit    = 900 * 1024
+	clientSendQueueSize      = 512
+	clientWriteTimeout       = 5 * time.Second
+	wireMsgTypeOverhead      = len(`{"type":""}`)
+	wireMsgDataOverhead      = len(`,"data":`)
 )
 
 func (b *broadcaster) acceptLoop(listener net.Listener, cancelAgent context.CancelFunc) {
@@ -293,54 +308,81 @@ func (b *broadcaster) handleClient(conn net.Conn, cancelAgent context.CancelFunc
 		fmt.Fprintf(os.Stderr, "session %d: disconnecting slow client: %v\n", b.meta.SessionID, err)
 		b.removeClient(cc)
 	})
-	defer cc.close()
+	defer b.removeClient(cc)
 
 	// Send metadata.
-	metaLine, _ := EncodeMsg(MsgMeta, b.meta)
+	metaLine, err := EncodeMsg(MsgMeta, b.meta)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "session %d: encode meta failed: %v\n", b.meta.SessionID, err)
+		return
+	}
 	if err := cc.writeImmediate(metaLine); err != nil {
 		return
 	}
 
-	// Replay a stable snapshot then register for live events.
-	seq1 := b.currentSeq()
-	if err := b.replayRange(cc, 1, seq1); err != nil {
-		fmt.Fprintf(os.Stderr, "session %d: replay range 1..%d failed: %v\n", b.meta.SessionID, seq1, err)
-		return
-	}
-
-	seq2 := b.currentSeq()
-	if err := b.replayRange(cc, seq1+1, seq2); err != nil {
-		fmt.Fprintf(os.Stderr, "session %d: replay range %d..%d failed: %v\n", b.meta.SessionID, seq1+1, seq2, err)
-		return
-	}
-
 	b.mu.Lock()
-	seq3 := b.nextSeq
-	replay3, ok3 := b.bufferedRangeLocked(seq2+1, seq3)
+	snapshot := cloneWireSnapshot(b.snapshot)
+	loopDone := cloneLoopDone(b.lastLoopDone)
+	donePayload := cloneDone(b.lastDone)
+	done := b.done
+	// Only forward queued live events emitted after this snapshot boundary.
+	snapshotSeq := b.streamSeq
+	cc.minSeq = snapshotSeq + 1
+	// Register before snapshot write so concurrent broadcasts can queue behind
+	// the snapshot boundary. If the queue overflows before startWriter, the
+	// broadcaster drops this client and writeImmediate below will fail/return.
 	b.clients = append(b.clients, cc)
 	b.mu.Unlock()
 
-	if seq3 > seq2 {
-		if ok3 {
-			for _, line := range replay3 {
-				if err := cc.writeImmediate(line); err != nil {
-					b.removeClient(cc)
-					return
-				}
-			}
-		} else if err := b.replayFromFileRange(cc, seq2+1, seq3); err != nil {
-			fmt.Fprintf(os.Stderr, "session %d: replay range %d..%d failed: %v\n", b.meta.SessionID, seq2+1, seq3, err)
-			b.removeClient(cc)
-			return
-		}
-	}
-
-	// Send live marker after replay/catchup.
-	liveLine, _ := EncodeMsg(MsgLive, nil)
-	if err := cc.writeImmediate(liveLine); err != nil {
-		b.removeClient(cc)
+	snapshotLine, err := encodeBoundedSnapshot(snapshot)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "session %d: encode snapshot failed: %v\n", b.meta.SessionID, err)
 		return
 	}
+	if err := cc.writeImmediate(snapshotLine); err != nil {
+		return
+	}
+
+	// If the daemon already finished before this client connected, immediately
+	// deliver terminal messages so the client can exit cleanly.
+	if donePayload != nil || done {
+		if loopDone != nil {
+			line, err := EncodeMsg(MsgLoopDone, loopDone)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "session %d: encode loop_done failed: %v\n", b.meta.SessionID, err)
+				return
+			}
+			if err := cc.writeImmediate(line); err != nil {
+				return
+			}
+		}
+		payload := WireDone{}
+		if donePayload != nil {
+			payload = *donePayload
+		}
+		line, err := EncodeMsg(MsgDone, payload)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "session %d: encode done failed: %v\n", b.meta.SessionID, err)
+			return
+		}
+		if err := cc.writeImmediate(line); err != nil {
+			return
+		}
+		// Completed sessions do not need control handling; close cleanly after
+		// terminal delivery to avoid draining any queued live events.
+		return
+	}
+
+	// Send live marker after snapshot for active sessions.
+	liveLine, err := EncodeMsg(MsgLive, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "session %d: encode live failed: %v\n", b.meta.SessionID, err)
+		return
+	}
+	if err := cc.writeImmediate(liveLine); err != nil {
+		return
+	}
+
 	cc.startWriter()
 
 	// Read control messages from the client.
@@ -368,15 +410,15 @@ func (b *broadcaster) handleClient(conn net.Conn, cancelAgent context.CancelFunc
 		} else {
 			resp = b.runControl(*req)
 		}
-		respLine, _ := EncodeMsg(MsgControlResult, resp)
+		respLine, err := EncodeMsg(MsgControlResult, resp)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "session %d: encode control_result failed: %v\n", b.meta.SessionID, err)
+			continue
+		}
 		if !cc.enqueue(respLine) {
-			b.removeClient(cc)
 			return
 		}
 	}
-
-	// Client disconnected.
-	b.removeClient(cc)
 }
 
 func (b *broadcaster) setControlHandler(h func(WireControl) WireControlResult) {
@@ -412,148 +454,513 @@ func (b *broadcaster) removeClient(cc *clientConn) {
 	cc.close()
 }
 
-func (b *broadcaster) currentSeq() int64 {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.nextSeq
-}
-
-func (b *broadcaster) replayRange(cc *clientConn, fromSeq, toSeq int64) error {
-	if toSeq < fromSeq {
-		return nil
-	}
-
-	b.mu.Lock()
-	lines, ok := b.bufferedRangeLocked(fromSeq, toSeq)
-	b.mu.Unlock()
-	if ok {
-		for _, line := range lines {
-			if err := cc.writeImmediate(line); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-
-	return b.replayFromFileRange(cc, fromSeq, toSeq)
-}
-
-func (b *broadcaster) bufferedRangeLocked(fromSeq, toSeq int64) ([][]byte, bool) {
-	if toSeq < fromSeq {
-		return nil, true
-	}
-	if len(b.buffered) == 0 {
-		return nil, false
-	}
-
-	first := b.buffered[0].Seq
-	last := b.buffered[len(b.buffered)-1].Seq
-	if fromSeq < first || toSeq > last {
-		return nil, false
-	}
-
-	lines := make([][]byte, 0, toSeq-fromSeq+1)
-	next := fromSeq
-	for _, ev := range b.buffered {
-		if ev.Seq < fromSeq {
-			continue
-		}
-		if ev.Seq > toSeq {
-			break
-		}
-		if ev.Seq != next {
-			return nil, false
-		}
-		lines = append(lines, ev.Line)
-		next++
-	}
-	if next != toSeq+1 {
-		return nil, false
-	}
-	return lines, true
-}
-
-func (b *broadcaster) replayFromFileRange(cc *clientConn, fromSeq, toSeq int64) error {
-	if toSeq < fromSeq {
-		return nil
-	}
-	if b.eventsFile == nil {
-		return fmt.Errorf("events file is not configured")
-	}
-
-	path := b.eventsFile.Name()
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	reader := bufio.NewReader(f)
-	var seq int64
-	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 {
-			seq++
-			if seq >= fromSeq && seq <= toSeq {
-				if writeErr := cc.writeImmediate(line); writeErr != nil {
-					return writeErr
-				}
-			}
-			if seq >= toSeq {
-				return nil
-			}
-		}
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				if seq < toSeq {
-					return fmt.Errorf("events replay truncated at seq %d (wanted %d)", seq, toSeq)
-				}
-				return nil
-			}
-			return err
-		}
-	}
-}
-
-// broadcast sends a message to all connected clients and buffers it for replay.
+// broadcast sends a pre-encoded message to all connected clients and records a
+// compact reconnect snapshot (state + bounded recent output). This path is kept
+// for tests and compatibility.
 func (b *broadcaster) broadcast(line []byte) {
-	if b.maxReplayEvents <= 0 {
-		b.maxReplayEvents = defaultMaxReplayEvents
-	}
 	lineCopy := append([]byte(nil), line...)
+	msg, err := DecodeMsg(lineCopy)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "session %d: broadcast decode failed: %v\n", b.meta.SessionID, err)
+	}
+	b.broadcastPrepared(lineCopy, msg, nil, snapshotUpdate{})
+}
 
+// broadcastTyped sends a typed message to clients while updating snapshot state
+// without re-decoding the encoded line on the hot path.
+func (b *broadcaster) broadcastTyped(msgType string, payload any) {
+	b.broadcastTypedWithUpdate(msgType, payload, snapshotUpdate{})
+}
+
+func (b *broadcaster) broadcastTypedWithUpdate(msgType string, payload any, update snapshotUpdate) {
+	line, msg, err := encodeWireForBroadcast(msgType, payload)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "session %d: encode %s failed: %v\n", b.meta.SessionID, msgType, err)
+		return
+	}
+	b.broadcastPrepared(line, msg, payload, update)
+}
+
+func (b *broadcaster) broadcastPrepared(line []byte, msg *WireMsg, payload any, update snapshotUpdate) {
 	b.mu.Lock()
-	b.nextSeq++
-	b.buffered = append(b.buffered, bufferedEvent{
-		Seq:  b.nextSeq,
-		Line: lineCopy,
-	})
-	if excess := len(b.buffered) - b.maxReplayEvents; excess > 0 {
-		b.buffered = append([]bufferedEvent(nil), b.buffered[excess:]...)
+	seq := b.streamSeq + 1
+	b.streamSeq = seq
+	if update.model != "" {
+		b.lastModel = update.model
+		if b.snapshot.Session != nil {
+			b.snapshot.Session.Model = update.model
+		}
+	}
+	if msg != nil {
+		b.updateSnapshotLocked(msg, payload)
 	}
 
 	// Write to events file.
-	if _, err := b.eventsFile.Write(lineCopy); err != nil && !b.eventsWriteError {
+	if _, err := b.eventsFile.Write(line); err != nil && !b.eventsWriteError {
 		b.eventsWriteError = true
 		fmt.Fprintf(os.Stderr, "session %d: failed to append to events file: %v\n", b.meta.SessionID, err)
 	}
-
-	clients := make([]*clientConn, len(b.clients))
-	copy(clients, b.clients)
+	type queuedClient struct {
+		conn   *clientConn
+		minSeq int64
+	}
+	clients := make([]queuedClient, len(b.clients))
+	for i, cc := range b.clients {
+		clients[i] = queuedClient{conn: cc, minSeq: cc.minSeq}
+	}
 	b.mu.Unlock()
 
 	for _, cc := range clients {
-		if !cc.enqueue(lineCopy) {
+		if seq < cc.minSeq {
+			continue
+		}
+		// A copied client entry may race with concurrent removal/close. In that
+		// case enqueue may fail (or enqueue a message that will never be drained),
+		// which is acceptable for a disconnecting client.
+		if !cc.conn.enqueue(line) {
 			fmt.Fprintf(os.Stderr, "session %d: dropping slow client due to outbound backpressure\n", b.meta.SessionID)
-			b.removeClient(cc)
+			b.removeClient(cc.conn)
 		}
 	}
 }
 
-func (b *broadcaster) markDone() {
-	b.mu.Lock()
-	b.done = true
-	b.mu.Unlock()
+func (b *broadcaster) updateSnapshotLocked(msg *WireMsg, payload any) {
+	switch msg.Type {
+	case MsgStarted:
+		data, ok := decodeWireData[WireStarted](msg, payload)
+		if !ok || data.SessionID <= 0 {
+			return
+		}
+		now := time.Now().UTC()
+		action := "starting"
+		startedAt := now
+		resumed := false
+		model := b.lastModel
+		turnHexID := data.TurnHexID
+		inputTokens := 0
+		outputTokens := 0
+		costUSD := 0.0
+		numTurns := 0
+		if b.snapshot.Session != nil {
+			if b.snapshot.Session.Model != "" {
+				model = b.snapshot.Session.Model
+			}
+			if b.snapshot.Session.SessionID == data.SessionID {
+				if turnHexID == "" {
+					turnHexID = b.snapshot.Session.TurnHexID
+				}
+				inputTokens = b.snapshot.Session.InputTokens
+				outputTokens = b.snapshot.Session.OutputTokens
+				costUSD = b.snapshot.Session.CostUSD
+				numTurns = b.snapshot.Session.NumTurns
+			}
+			if b.snapshot.Session.SessionID == data.SessionID && b.snapshot.Session.Status == "waiting_for_spawns" {
+				action = "resumed"
+				resumed = true
+				if !b.snapshot.Session.StartedAt.IsZero() {
+					startedAt = b.snapshot.Session.StartedAt
+				}
+			}
+		}
+		b.snapshot.Session = &WireSnapshotSession{
+			SessionID:    data.SessionID,
+			TurnHexID:    turnHexID,
+			Agent:        b.meta.AgentName,
+			Profile:      b.snapshot.Loop.Profile,
+			Model:        model,
+			InputTokens:  inputTokens,
+			OutputTokens: outputTokens,
+			CostUSD:      costUSD,
+			NumTurns:     numTurns,
+			Status:       "running",
+			Action:       action,
+			StartedAt:    startedAt,
+		}
+		if !resumed {
+			b.clearSnapshotRecentLocked()
+		}
+
+	case MsgPrompt:
+		data, ok := decodeWireData[WirePrompt](msg, payload)
+		if !ok {
+			return
+		}
+		b.appendSnapshotRecentLocked(*msg)
+		if b.snapshot.Session != nil && data.SessionID > 0 && b.snapshot.Session.SessionID == data.SessionID {
+			b.snapshot.Session.TurnHexID = data.TurnHexID
+			b.snapshot.Session.Action = "prompt ready"
+		}
+
+	case MsgEvent:
+		data, ok := decodeWireData[WireEvent](msg, payload)
+		if !ok {
+			return
+		}
+		b.appendSnapshotRecentLocked(*msg)
+		if b.snapshot.Session != nil {
+			b.snapshot.Session.Action = "responding"
+		}
+		var ev stream.ClaudeEvent
+		if err := json.Unmarshal(data.Event, &ev); err != nil {
+			return
+		}
+		if ev.Model != "" {
+			b.lastModel = ev.Model
+			if b.snapshot.Session != nil {
+				b.snapshot.Session.Model = ev.Model
+			}
+		}
+		if ev.Type == "result" && b.snapshot.Session != nil {
+			b.snapshot.Session.Action = "turn complete"
+			if ev.TotalCostUSD > 0 {
+				b.snapshot.Session.CostUSD = ev.TotalCostUSD
+			}
+			if ev.NumTurns > 0 {
+				b.snapshot.Session.NumTurns = ev.NumTurns
+			}
+			if ev.Usage != nil {
+				b.snapshot.Session.InputTokens = ev.Usage.InputTokens
+				b.snapshot.Session.OutputTokens = ev.Usage.OutputTokens
+			}
+		}
+
+	case MsgRaw:
+		data, ok := decodeWireData[WireRaw](msg, payload)
+		if !ok {
+			return
+		}
+		b.appendSnapshotRecentLocked(*msg)
+		if data.SessionID > 0 && (b.snapshot.Session == nil || b.snapshot.Session.SessionID != data.SessionID) {
+			b.snapshot.Session = &WireSnapshotSession{
+				SessionID: data.SessionID,
+				Agent:     b.meta.AgentName,
+				Profile:   b.snapshot.Loop.Profile,
+				Model:     b.lastModel,
+				Status:    "running",
+				Action:    "responding",
+				StartedAt: time.Now().UTC(),
+			}
+		} else if data.SessionID > 0 && b.snapshot.Session != nil {
+			b.snapshot.Session.Action = "responding"
+		}
+
+	case MsgFinished:
+		data, ok := decodeWireData[WireFinished](msg, payload)
+		if !ok {
+			return
+		}
+		if b.snapshot.Session == nil || b.snapshot.Session.SessionID != data.SessionID {
+			if data.SessionID <= 0 {
+				return
+			}
+			b.snapshot.Session = &WireSnapshotSession{
+				SessionID: data.SessionID,
+				Agent:     b.meta.AgentName,
+				Profile:   b.snapshot.Loop.Profile,
+				Model:     b.lastModel,
+			}
+		}
+		if data.TurnHexID != "" {
+			b.snapshot.Session.TurnHexID = data.TurnHexID
+		}
+		b.snapshot.Session.EndedAt = time.Now().UTC()
+		switch {
+		case data.Error != "":
+			b.snapshot.Session.Status = "failed"
+			b.snapshot.Session.Action = "error"
+		case data.WaitForSpawns:
+			b.snapshot.Session.Status = "waiting_for_spawns"
+			b.snapshot.Session.Action = "waiting for spawns"
+		case data.ExitCode == 0:
+			b.snapshot.Session.Status = "completed"
+			b.snapshot.Session.Action = "finished"
+		default:
+			b.snapshot.Session.Status = "failed"
+			b.snapshot.Session.Action = "finished"
+		}
+
+	case MsgSpawn:
+		data, ok := decodeWireData[WireSpawn](msg, payload)
+		if !ok {
+			return
+		}
+		if len(data.Spawns) == 0 {
+			b.snapshot.Spawns = nil
+		} else {
+			spawns := make([]WireSpawnInfo, len(data.Spawns))
+			copy(spawns, data.Spawns)
+			b.snapshot.Spawns = spawns
+		}
+
+	case MsgLoopStepStart:
+		data, ok := decodeWireData[WireLoopStepStart](msg, payload)
+		if !ok {
+			return
+		}
+		totalSteps := b.snapshot.Loop.TotalSteps
+		if data.TotalSteps > 0 {
+			totalSteps = data.TotalSteps
+		}
+		b.snapshot.Loop = WireSnapshotLoop{
+			RunID:      data.RunID,
+			RunHexID:   data.RunHexID,
+			StepHexID:  data.StepHexID,
+			Cycle:      data.Cycle,
+			StepIndex:  data.StepIndex,
+			Profile:    data.Profile,
+			TotalSteps: totalSteps,
+		}
+		b.clearSnapshotRecentLocked()
+		if b.snapshot.Session != nil && b.snapshot.Session.Profile == "" {
+			b.snapshot.Session.Profile = data.Profile
+		}
+
+	case MsgLoopStepEnd:
+		data, ok := decodeWireData[WireLoopStepEnd](msg, payload)
+		if !ok {
+			return
+		}
+		b.snapshot.Loop.RunID = data.RunID
+		b.snapshot.Loop.RunHexID = data.RunHexID
+		b.snapshot.Loop.StepHexID = data.StepHexID
+		b.snapshot.Loop.Cycle = data.Cycle
+		b.snapshot.Loop.StepIndex = data.StepIndex
+		if data.Profile != "" {
+			b.snapshot.Loop.Profile = data.Profile
+		}
+		if data.TotalSteps > 0 {
+			b.snapshot.Loop.TotalSteps = data.TotalSteps
+		}
+
+	case MsgLoopDone:
+		data, ok := decodeWireData[WireLoopDone](msg, payload)
+		if !ok {
+			return
+		}
+		cp := data
+		b.lastLoopDone = &cp
+
+	case MsgDone:
+		data, ok := decodeWireData[WireDone](msg, payload)
+		if !ok {
+			// Done signal is authoritative even if payload is malformed.
+			data = WireDone{}
+		}
+		cp := data
+		b.lastDone = &cp
+		b.done = true
+	}
+}
+
+func (b *broadcaster) appendSnapshotRecentLocked(msg WireMsg) {
+	switch msg.Type {
+	case MsgPrompt, MsgEvent, MsgRaw:
+	default:
+		return
+	}
+
+	item := WireMsg{
+		Type: msg.Type,
+		Data: append(json.RawMessage(nil), msg.Data...),
+	}
+	b.snapshot.Recent = append(b.snapshot.Recent, item)
+	b.snapshotRecentN += wireMsgSize(item)
+	b.trimSnapshotRecentLocked()
+}
+
+func (b *broadcaster) trimSnapshotRecentLocked() {
+	recent := b.snapshot.Recent
+	if len(recent) == 0 {
+		b.snapshotRecentN = 0
+		return
+	}
+
+	drop := 0
+	remaining := b.snapshotRecentN
+	for i := 0; i < len(recent); i++ {
+		needsCountDrop := len(recent)-i > snapshotRecentEventLimit
+		needsByteDrop := remaining > snapshotRecentByteLimit
+		if !needsCountDrop && !needsByteDrop {
+			break
+		}
+		remaining -= wireMsgSize(recent[i])
+		if remaining < 0 {
+			remaining = 0
+		}
+		drop = i + 1
+	}
+	if drop == 0 {
+		return
+	}
+
+	trimmed := make([]WireMsg, len(recent)-drop)
+	copy(trimmed, recent[drop:])
+	b.snapshot.Recent = trimmed
+	b.snapshotRecentN = remaining
+}
+
+func (b *broadcaster) clearSnapshotRecentLocked() {
+	b.snapshot.Recent = nil
+	b.snapshotRecentN = 0
+}
+
+func decodeWireData[T any](msg *WireMsg, payload any) (T, bool) {
+	var zero T
+	if payload != nil {
+		switch v := payload.(type) {
+		case T:
+			return v, true
+		}
+	}
+	data, err := DecodeData[T](msg)
+	if err != nil || data == nil {
+		return zero, false
+	}
+	return *data, true
+}
+
+func wireMsgSize(msg WireMsg) int {
+	n := wireMsgTypeOverhead + len(msg.Type)
+	if len(msg.Data) > 0 {
+		n += wireMsgDataOverhead + len(msg.Data)
+	}
+	return n
+}
+
+func encodeWireForBroadcast(msgType string, payload any) ([]byte, *WireMsg, error) {
+	var data json.RawMessage
+	if payload != nil {
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return nil, nil, err
+		}
+		data = raw
+	}
+	msg := &WireMsg{
+		Type: msgType,
+		Data: data,
+	}
+	line, err := json.Marshal(msg)
+	if err != nil {
+		return nil, nil, err
+	}
+	return append(line, '\n'), msg, nil
+}
+
+func encodeBoundedSnapshot(snapshot WireSnapshot) ([]byte, error) {
+	snap := snapshot
+	if snapshot.Session != nil {
+		session := *snapshot.Session
+		snap.Session = &session
+	}
+
+	line, err := EncodeMsg(MsgSnapshot, snap)
+	if err != nil {
+		return nil, err
+	}
+	if len(line) <= snapshotWireByteLimit {
+		return line, nil
+	}
+
+	if len(snap.Recent) > 0 {
+		// Recent is capped to 128 entries, so a linear trim keeps logic simple and
+		// bounded while preserving as much tail output as possible.
+		for len(snap.Recent) > 0 {
+			snap.Recent = snap.Recent[1:]
+			line, err = EncodeMsg(MsgSnapshot, snap)
+			if err != nil {
+				return nil, err
+			}
+			if len(line) <= snapshotWireByteLimit {
+				return line, nil
+			}
+		}
+	}
+
+	if snap.Session != nil {
+		snap.Session.Action = truncateSnapshotField(snap.Session.Action, 256)
+		snap.Session.Model = truncateSnapshotField(snap.Session.Model, 128)
+		snap.Session.Profile = truncateSnapshotField(snap.Session.Profile, 128)
+		snap.Session.TurnHexID = truncateSnapshotField(snap.Session.TurnHexID, 64)
+		line, err = EncodeMsg(MsgSnapshot, snap)
+		if err != nil {
+			return nil, err
+		}
+		if len(line) <= snapshotWireByteLimit {
+			return line, nil
+		}
+	}
+
+	if len(snap.Spawns) > 0 {
+		snap.Spawns = nil
+		line, err = EncodeMsg(MsgSnapshot, snap)
+		if err != nil {
+			return nil, err
+		}
+		if len(line) <= snapshotWireByteLimit {
+			return line, nil
+		}
+	}
+
+	line, err = EncodeMsg(MsgSnapshot, snap)
+	if err != nil {
+		return nil, err
+	}
+	if len(line) > snapshotWireByteLimit {
+		return nil, fmt.Errorf("snapshot exceeds %d bytes even after trimming (%d)", snapshotWireByteLimit, len(line))
+	}
+	return line, nil
+}
+
+func truncateSnapshotField(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max])
+}
+
+func cloneWireSnapshot(src WireSnapshot) WireSnapshot {
+	dst := WireSnapshot{
+		Loop: src.Loop,
+	}
+	if src.Session != nil {
+		cp := *src.Session
+		dst.Session = &cp
+	}
+	if len(src.Spawns) > 0 {
+		dst.Spawns = make([]WireSpawnInfo, len(src.Spawns))
+		copy(dst.Spawns, src.Spawns)
+	}
+	if len(src.Recent) > 0 {
+		dst.Recent = make([]WireMsg, len(src.Recent))
+		for i, msg := range src.Recent {
+			dst.Recent[i] = WireMsg{
+				Type: msg.Type,
+				Data: append(json.RawMessage(nil), msg.Data...),
+			}
+		}
+	}
+	return dst
+}
+
+func cloneLoopDone(src *WireLoopDone) *WireLoopDone {
+	if src == nil {
+		return nil
+	}
+	cp := *src
+	return &cp
+}
+
+func cloneDone(src *WireDone) *WireDone {
+	if src == nil {
+		return nil
+	}
+	cp := *src
+	return &cp
 }
 
 func (b *broadcaster) waitForClients(timeout time.Duration) {
@@ -789,15 +1196,14 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 		for msg := range eventCh {
 			switch ev := msg.(type) {
 			case runtui.AgentStartedMsg:
-				line, _ := EncodeMsg(MsgStarted, WireStarted{
+				b.broadcastTyped(MsgStarted, WireStarted{
 					SessionID: ev.SessionID,
 					TurnHexID: ev.TurnHexID,
 					StepHexID: ev.StepHexID,
 					RunHexID:  ev.RunHexID,
 				})
-				b.broadcast(line)
 			case runtui.AgentPromptMsg:
-				line, _ := EncodeMsg(MsgPrompt, WirePrompt{
+				b.broadcastTyped(MsgPrompt, WirePrompt{
 					SessionID:      ev.SessionID,
 					TurnHexID:      ev.TurnHexID,
 					Prompt:         ev.Prompt,
@@ -805,29 +1211,27 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 					Truncated:      ev.Truncated,
 					OriginalLength: ev.OriginalLength,
 				})
-				b.broadcast(line)
 			case runtui.AgentFinishedMsg:
 				wf := WireFinished{SessionID: ev.SessionID, TurnHexID: ev.TurnHexID}
 				wf.WaitForSpawns = ev.WaitForSpawns
 				if ev.Result != nil {
 					wf.ExitCode = ev.Result.ExitCode
-					wf.DurationNS = ev.Result.Duration
+					wf.DurationNS = int64(ev.Result.Duration)
 				}
 				if ev.Err != nil {
 					wf.Error = ev.Err.Error()
 				}
-				line, _ := EncodeMsg(MsgFinished, wf)
-				b.broadcast(line)
+				b.broadcastTyped(MsgFinished, wf)
 			case runtui.AgentRawOutputMsg:
-				line, _ := EncodeMsg(MsgRaw, WireRaw{Data: ev.Data, SessionID: ev.SessionID})
-				b.broadcast(line)
+				b.broadcastTyped(MsgRaw, WireRaw{Data: ev.Data, SessionID: ev.SessionID})
 			case runtui.AgentEventMsg:
 				eventJSON, err := json.Marshal(ev.Event)
 				if err != nil {
 					continue
 				}
-				line, _ := EncodeMsg(MsgEvent, WireEvent{Event: eventJSON, Raw: ev.Raw})
-				b.broadcast(line)
+				b.broadcastTypedWithUpdate(MsgEvent, WireEvent{Event: eventJSON, Raw: ev.Raw}, snapshotUpdate{
+					model: ev.Event.Model,
+				})
 			case runtui.SpawnStatusMsg:
 				spawns := make([]WireSpawnInfo, len(ev.Spawns))
 				for i, sp := range ev.Spawns {
@@ -842,8 +1246,7 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 						Question:      sp.Question,
 					}
 				}
-				line, _ := EncodeMsg(MsgSpawn, WireSpawn{Spawns: spawns})
-				b.broadcast(line)
+				b.broadcastTyped(MsgSpawn, WireSpawn{Spawns: spawns})
 			case runtui.LoopStepStartMsg:
 				if ev.RunID > 0 {
 					loopRunID = ev.RunID
@@ -851,7 +1254,7 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 				if ev.RunHexID != "" {
 					loopRunHexID = ev.RunHexID
 				}
-				line, _ := EncodeMsg(MsgLoopStepStart, WireLoopStepStart{
+				b.broadcastTyped(MsgLoopStepStart, WireLoopStepStart{
 					RunID:      ev.RunID,
 					RunHexID:   ev.RunHexID,
 					StepHexID:  ev.StepHexID,
@@ -861,7 +1264,6 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 					Turns:      ev.Turns,
 					TotalSteps: totalSteps,
 				})
-				b.broadcast(line)
 			case runtui.LoopStepEndMsg:
 				if ev.RunID > 0 {
 					loopRunID = ev.RunID
@@ -869,7 +1271,7 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 				if ev.RunHexID != "" {
 					loopRunHexID = ev.RunHexID
 				}
-				line, _ := EncodeMsg(MsgLoopStepEnd, WireLoopStepEnd{
+				b.broadcastTyped(MsgLoopStepEnd, WireLoopStepEnd{
 					RunID:      ev.RunID,
 					RunHexID:   ev.RunHexID,
 					StepHexID:  ev.StepHexID,
@@ -878,7 +1280,6 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 					Profile:    ev.Profile,
 					TotalSteps: totalSteps,
 				})
-				b.broadcast(line)
 			}
 		}
 	}()
@@ -904,13 +1305,10 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 		Reason:   classifyLoopDoneReason(runErr),
 		Error:    donePayloadError(runErr),
 	}
-	line, _ := EncodeMsg(MsgLoopDone, loopDone)
-	b.broadcast(line)
+	b.broadcastTyped(MsgLoopDone, loopDone)
 
 	wd := WireDone{Error: donePayloadError(runErr)}
-	line, _ = EncodeMsg(MsgDone, wd)
-	b.broadcast(line)
-	b.markDone()
+	b.broadcastTyped(MsgDone, wd)
 
 	return runErr
 }

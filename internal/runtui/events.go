@@ -1,6 +1,8 @@
 package runtui
 
 import (
+	"time"
+
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/stream"
 )
@@ -33,6 +35,44 @@ type AgentPromptMsg struct {
 	IsResume       bool
 	Truncated      bool
 	OriginalLength int
+}
+
+// SessionSnapshotMsg carries daemon snapshot state sent on reconnect.
+type SessionSnapshotMsg struct {
+	Loop    SessionLoopSnapshot
+	Session *SessionTurnSnapshot
+	Spawns  []SpawnInfo
+}
+
+// SessionLiveMsg signals that snapshot replay is complete and the stream is live.
+type SessionLiveMsg struct{}
+
+// SessionLoopSnapshot captures current loop progress on reconnect.
+type SessionLoopSnapshot struct {
+	RunID      int
+	RunHexID   string
+	StepHexID  string
+	Cycle      int
+	StepIndex  int
+	Profile    string
+	TotalSteps int
+}
+
+// SessionTurnSnapshot captures current turn status on reconnect.
+type SessionTurnSnapshot struct {
+	SessionID    int
+	TurnHexID    string
+	Agent        string
+	Profile      string
+	Model        string
+	InputTokens  int
+	OutputTokens int
+	CostUSD      float64
+	NumTurns     int
+	Status       string
+	Action       string
+	StartedAt    time.Time
+	EndedAt      time.Time
 }
 
 // AgentFinishedMsg signals that a single agent session completed.
