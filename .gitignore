@@ -34,3 +34,6 @@ Thumbs.db
 .adaf-worktrees/
 
 reference-ui.jsx
+
+# Web UI build dependencies
+web/node_modules/

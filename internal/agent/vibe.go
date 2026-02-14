@@ -37,9 +37,9 @@ func (v *VibeAgent) Name() string {
 // after completing the response (equivalent to using the "auto-approve"
 // agent profile).
 //
-// We select output mode based on runtime:
-//   - EventSink mode: --output streaming for realtime NDJSON updates.
-//   - Standard mode: --output text for deterministic plain-text output.
+// We always use --output text because vibe's streaming mode outputs NDJSON
+// which requires a stream parser (not yet implemented). Text mode provides
+// plain-text output that works with runBufferAgent.
 //
 // Model selection is done via the VIBE_ACTIVE_MODEL environment variable
 // (set in cfg.Env) rather than a --model flag, because vibe uses
@@ -74,13 +74,10 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 			// (for example when /dev/tty is unavailable).
 			args = append(args, "-p", cfg.Prompt)
 		}
-		outputMode := "text"
-		if cfg.EventSink != nil {
-			outputMode = "streaming"
-		}
-		// Request explicit output mode rather than depending on defaults
-		// that may change across vibe releases.
-		args = append(args, "--output", outputMode)
+		// Always use text output mode. Vibe's streaming mode outputs NDJSON
+		// which requires a stream parser (not yet implemented). Text mode
+		// provides plain-text output that works with runBufferAgent.
+		args = append(args, "--output", "text")
 		recorder.RecordStdin(cfg.Prompt)
 	}
 

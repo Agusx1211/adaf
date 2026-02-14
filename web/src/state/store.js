@@ -1,0 +1,351 @@
+import { createContext, useContext, useReducer, useCallback } from 'react';
+import { arrayOrEmpty, normalizeStatus, numberOr, parseTimestamp, safeJSONString, stringifyToolPayload, cropText } from '../utils/format.js';
+
+var MAX_STREAM_EVENTS = 900;
+var MAX_ACTIVITY_EVENTS = 240;
+
+var initialState = {
+  projects: [],
+  currentProjectID: '',
+  authRequired: false,
+
+  sessions: [],
+  spawns: [],
+  messages: [],
+  streamEvents: [],
+  activity: [],
+  activityLast: null,
+  issues: [],
+  plans: [],
+  activePlan: null,
+  docs: [],
+  turns: [],
+  loopRun: null,
+  usage: null,
+  projectMeta: null,
+
+  selectedScope: null,
+  selectedIssue: null,
+  selectedPlan: null,
+  expandedNodes: {},
+  leftView: 'agents',
+  rightLayer: 'raw',
+  autoScroll: true,
+
+  wsConnected: false,
+  currentSessionSocketID: 0,
+  termWSConnected: false,
+
+  sessionMessageDraft: '',
+  activeLoopIDForMessages: 0,
+  viewLoaded: { issues: false, docs: false, plan: false, logs: false },
+};
+
+function reducer(state, action) {
+  switch (action.type) {
+    case 'SET':
+      return { ...state, ...action.payload };
+
+    case 'SET_PROJECTS':
+      return { ...state, projects: action.payload };
+
+    case 'SET_PROJECT_ID':
+      return { ...state, currentProjectID: action.payload };
+
+    case 'SET_CORE_DATA': {
+      var d = action.payload;
+      return { ...state, ...d };
+    }
+
+    case 'SET_LEFT_VIEW':
+      return { ...state, leftView: action.payload };
+
+    case 'SET_RIGHT_LAYER':
+      return { ...state, rightLayer: action.payload };
+
+    case 'SET_SELECTED_SCOPE':
+      return { ...state, selectedScope: action.payload };
+
+    case 'SET_SELECTED_ISSUE':
+      return { ...state, selectedIssue: action.payload };
+
+    case 'SET_SELECTED_PLAN':
+      return { ...state, selectedPlan: action.payload };
+
+    case 'TOGGLE_NODE': {
+      var nodeID = action.payload;
+      var next = { ...state.expandedNodes };
+      if (next[nodeID]) { delete next[nodeID]; } else { next[nodeID] = true; }
+      return { ...state, expandedNodes: next };
+    }
+
+    case 'EXPAND_NODES': {
+      var nodes = { ...state.expandedNodes };
+      action.payload.forEach(function (id) { nodes[id] = true; });
+      return { ...state, expandedNodes: nodes };
+    }
+
+    case 'TOGGLE_AUTO_SCROLL':
+      return { ...state, autoScroll: !state.autoScroll };
+
+    case 'ADD_STREAM_EVENT': {
+      var entry = action.payload;
+      var events = state.streamEvents;
+      var last = events[events.length - 1];
+      if (last && last.scope === entry.scope && last.type === entry.type && last.text === entry.text && last.tool === entry.tool) {
+        return state;
+      }
+      var nextEvents = events.concat([entry]);
+      if (nextEvents.length > MAX_STREAM_EVENTS) {
+        nextEvents = nextEvents.slice(nextEvents.length - MAX_STREAM_EVENTS);
+      }
+
+      var nextActivity = state.activity;
+      var nextActivityLast = state.activityLast;
+      var actEntry = buildActivityEntry(entry);
+      if (actEntry) {
+        if (!nextActivityLast || nextActivityLast.scope !== actEntry.scope || nextActivityLast.type !== actEntry.type || nextActivityLast.text !== actEntry.text) {
+          nextActivity = state.activity.concat([actEntry]);
+          if (nextActivity.length > MAX_ACTIVITY_EVENTS) {
+            nextActivity = nextActivity.slice(nextActivity.length - MAX_ACTIVITY_EVENTS);
+          }
+          nextActivityLast = actEntry;
+        }
+      }
+
+      return { ...state, streamEvents: nextEvents, activity: nextActivity, activityLast: nextActivityLast };
+    }
+
+    case 'MERGE_SPAWNS': {
+      return { ...state, spawns: action.payload };
+    }
+
+    case 'RESET_PROJECT_STATE':
+      return {
+        ...state,
+        sessions: [], spawns: [], messages: [], streamEvents: [], activity: [], activityLast: null,
+        issues: [], plans: [], activePlan: null, docs: [], turns: [], loopRun: null, usage: null,
+        selectedIssue: null, selectedPlan: null, selectedScope: null,
+        expandedNodes: {}, projectMeta: null, activeLoopIDForMessages: 0,
+        viewLoaded: { issues: false, docs: false, plan: false, logs: false },
+      };
+
+    default:
+      return state;
+  }
+}
+
+function buildActivityEntry(event) {
+  if (!event) return null;
+  var type = event.type || 'text';
+  if (type === 'thinking') return null;
+
+  var description = '';
+  if (type === 'tool_use') {
+    description = (event.tool || 'tool') + ' \u2192 ' + stringifyToolPayload(event.input || '');
+  } else if (type === 'tool_result') {
+    description = (event.tool || 'result') + ': ' + stringifyToolPayload(event.result || event.text || '');
+  } else {
+    description = String(event.text || '').trim();
+  }
+  if (!description) return null;
+
+  return {
+    id: event.id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 8)),
+    ts: Number.isFinite(Number(event.ts)) ? Number(event.ts) : Date.now(),
+    scope: event.scope || 'session-0',
+    type: type,
+    text: cropText(description, 200),
+  };
+}
+
+var AppContext = createContext(null);
+
+export function AppProvider({ children }) {
+  var [state, dispatch] = useReducer(reducer, initialState);
+  return (
+    <AppContext.Provider value={{ state, dispatch }}>
+      {children}
+    </AppContext.Provider>
+  );
+}
+
+export function useAppState() {
+  var ctx = useContext(AppContext);
+  if (!ctx) throw new Error('useAppState must be used within AppProvider');
+  return ctx.state;
+}
+
+export function useDispatch() {
+  var ctx = useContext(AppContext);
+  if (!ctx) throw new Error('useDispatch must be used within AppProvider');
+  return ctx.dispatch;
+}
+
+export function useApp() {
+  var ctx = useContext(AppContext);
+  if (!ctx) throw new Error('useApp must be used within AppProvider');
+  return ctx;
+}
+
+// Normalize functions ported from app.js
+
+export function normalizeSessions(rawSessions) {
+  return arrayOrEmpty(rawSessions).map(function (session) {
+    return {
+      id: Number(session && session.id) || 0,
+      profile: session && (session.profile_name || session.profile) ? String(session.profile_name || session.profile) : '',
+      agent: session && (session.agent_name || session.agent) ? String(session.agent_name || session.agent) : '',
+      model: session && session.model ? String(session.model) : '',
+      status: session && session.status ? String(session.status) : 'unknown',
+      action: session && session.action ? String(session.action) : '',
+      started_at: session && session.started_at ? session.started_at : '',
+      ended_at: session && session.ended_at ? session.ended_at : '',
+      loop_name: session && session.loop_name ? String(session.loop_name) : '',
+    };
+  }).filter(function (s) { return s.id > 0; }).sort(function (a, b) { return b.id - a.id; });
+}
+
+export function normalizeSpawns(rawSpawns) {
+  return arrayOrEmpty(rawSpawns).map(function (spawn) {
+    var parentTurn = numberOr(0, spawn && spawn.parent_turn_id, spawn && spawn.parent_session_id);
+    var childTurn = numberOr(0, spawn && spawn.child_turn_id, spawn && spawn.child_session_id);
+    var parentSpawn = numberOr(0, spawn && spawn.parent_spawn_id, spawn && spawn.parent_id);
+    return {
+      id: Number(spawn && spawn.id) || 0,
+      parent_turn_id: parentTurn,
+      parent_spawn_id: parentSpawn,
+      child_turn_id: childTurn,
+      profile: spawn && (spawn.profile || spawn.child_profile) ? String(spawn.profile || spawn.child_profile) : '',
+      role: spawn && (spawn.role || spawn.child_role) ? String(spawn.role || spawn.child_role) : '',
+      parent_profile: spawn && spawn.parent_profile ? String(spawn.parent_profile) : '',
+      status: spawn && spawn.status ? String(spawn.status) : 'unknown',
+      question: spawn && spawn.question ? String(spawn.question) : '',
+      task: spawn && (spawn.task || spawn.objective || spawn.description) ? String(spawn.task || spawn.objective || spawn.description) : '',
+      branch: spawn && spawn.branch ? String(spawn.branch) : '',
+      started_at: spawn && (spawn.started_at || spawn.created_at) ? (spawn.started_at || spawn.created_at) : '',
+      completed_at: spawn && spawn.completed_at ? spawn.completed_at : '',
+      summary: spawn && spawn.summary ? String(spawn.summary) : '',
+    };
+  }).filter(function (s) { return s.id > 0; }).sort(function (a, b) {
+    return parseTimestamp(b.started_at) - parseTimestamp(a.started_at);
+  });
+}
+
+export function normalizeIssues(rawIssues) {
+  return arrayOrEmpty(rawIssues).map(function (issue) {
+    return {
+      id: Number(issue && issue.id) || 0,
+      title: issue && issue.title ? String(issue.title) : '',
+      priority: issue && issue.priority ? String(issue.priority) : 'medium',
+      status: issue && issue.status ? String(issue.status) : 'open',
+      labels: arrayOrEmpty(issue && issue.labels),
+      description: issue && issue.description ? String(issue.description) : '',
+    };
+  }).filter(function (i) { return i.id > 0; }).sort(function (a, b) { return b.id - a.id; });
+}
+
+export function normalizeDocs(rawDocs) {
+  return arrayOrEmpty(rawDocs).map(function (doc) {
+    return {
+      id: doc && doc.id ? String(doc.id) : '',
+      title: doc && doc.title ? String(doc.title) : '',
+      content: doc && doc.content ? String(doc.content) : '',
+      plan_id: doc && doc.plan_id ? String(doc.plan_id) : '',
+    };
+  }).filter(function (d) { return !!d.id; });
+}
+
+export function normalizePlans(rawPlans) {
+  return arrayOrEmpty(rawPlans).map(normalizePlan).filter(function (p) { return !!p.id; });
+}
+
+export function normalizePlan(plan) {
+  if (!plan || typeof plan !== 'object') {
+    return { id: '', title: '', status: 'active', description: '', phases: [] };
+  }
+  return {
+    id: plan.id ? String(plan.id) : '',
+    title: plan.title ? String(plan.title) : (plan.id ? String(plan.id) : ''),
+    status: plan.status ? String(plan.status) : 'active',
+    description: plan.description ? String(plan.description) : '',
+    phases: arrayOrEmpty(plan.phases).map(function (phase) {
+      return {
+        id: phase && phase.id ? String(phase.id) : '',
+        title: phase && phase.title ? String(phase.title) : (phase && phase.id ? String(phase.id) : ''),
+        status: phase && phase.status ? String(phase.status) : 'not_started',
+        description: phase && phase.description ? String(phase.description) : '',
+        depends_on: arrayOrEmpty(phase && phase.depends_on),
+      };
+    }),
+  };
+}
+
+export function normalizeTurns(rawTurns) {
+  return arrayOrEmpty(rawTurns).map(function (turn) {
+    return {
+      id: Number(turn && turn.id) || 0,
+      hex_id: turn && turn.hex_id ? String(turn.hex_id) : '',
+      profile_name: turn && turn.profile_name ? String(turn.profile_name) : '',
+      agent: turn && turn.agent ? String(turn.agent) : '',
+      build_state: turn && turn.build_state ? String(turn.build_state) : 'unknown',
+      objective: turn && turn.objective ? String(turn.objective) : '',
+      what_was_built: turn && turn.what_was_built ? String(turn.what_was_built) : '',
+      agent_model: turn && turn.agent_model ? String(turn.agent_model) : '',
+      duration_secs: Number(turn && turn.duration_secs) || 0,
+    };
+  }).filter(function (t) { return t.id > 0; }).sort(function (a, b) { return b.id - a.id; });
+}
+
+export function normalizeLoopRun(run) {
+  return {
+    id: Number(run && run.id) || 0,
+    hex_id: run && run.hex_id ? String(run.hex_id) : '',
+    loop_name: run && run.loop_name ? String(run.loop_name) : 'loop',
+    status: run && run.status ? String(run.status) : 'unknown',
+    cycle: Number(run && run.cycle) || 0,
+    step_index: Number(run && run.step_index) || 0,
+    started_at: run && run.started_at ? run.started_at : '',
+    steps: arrayOrEmpty(run && run.steps).map(function (step) {
+      return { profile: step && step.profile ? String(step.profile) : '', role: step && step.role ? String(step.role) : '' };
+    }),
+  };
+}
+
+export function normalizeLoopMessages(rawMessages) {
+  return arrayOrEmpty(rawMessages).map(function (msg) {
+    return {
+      id: Number(msg && msg.id) || 0,
+      spawn_id: Number(msg && msg.spawn_id) || 0,
+      type: msg && msg.type ? String(msg.type) : 'message',
+      direction: msg && msg.direction ? String(msg.direction) : 'child_to_parent',
+      content: msg && msg.content ? String(msg.content) : '',
+      created_at: msg && msg.created_at ? msg.created_at : '',
+      step_index: msg && Number.isFinite(Number(msg.step_index)) ? Number(msg.step_index) : null,
+    };
+  }).filter(function (m) { return m.id > 0 || !!m.content; });
+}
+
+export function pickActiveLoopRun(runs) {
+  var list = arrayOrEmpty(runs).map(normalizeLoopRun);
+  if (!list.length) return null;
+  var running = list.filter(function (run) { return normalizeStatus(run.status) === 'running'; });
+  if (running.length) {
+    running.sort(function (a, b) { return parseTimestamp(b.started_at) - parseTimestamp(a.started_at); });
+    return running[0];
+  }
+  return null;
+}
+
+export function aggregateUsageFromProfileStats(stats) {
+  var list = arrayOrEmpty(stats);
+  if (!list.length) return null;
+  var usage = { input_tokens: 0, output_tokens: 0, cost_usd: 0, num_turns: 0 };
+  list.forEach(function (item) {
+    usage.input_tokens += Number(item && (item.total_input_tokens != null ? item.total_input_tokens : item.total_input_tok)) || 0;
+    usage.output_tokens += Number(item && (item.total_output_tokens != null ? item.total_output_tokens : item.total_output_tok)) || 0;
+    usage.cost_usd += Number(item && item.total_cost_usd) || 0;
+    usage.num_turns += Number(item && item.total_turns) || 0;
+  });
+  return usage;
+}
