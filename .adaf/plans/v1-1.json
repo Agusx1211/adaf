@@ -2,7 +2,7 @@
   "id": "v1-1",
   "title": "ADAF v1.1 - Web UI Overhaul, Interactive Control \u0026 Quality Polish",
   "description": "Transform the web UI from a read-only dashboard into a full project control surface comparable to the TUI. Add write APIs, rich session rendering, interactive agent control (send messages to running loops), multi-project support from a single web server instance, and address all open infrastructure issues (daemon transport, TUI dedup, CLI cleanup, test coverage).",
-  "status": "active",
+  "status": "done",
   "phases": [
     {
       "id": "p1-write-api",
@@ -104,5 +104,5 @@
     }
   ],
   "created": "2026-02-14T11:22:27.60226705Z",
-  "updated": "2026-02-14T15:15:34.940743985Z"
+  "updated": "2026-02-14T15:37:48.762370155Z"
 }
