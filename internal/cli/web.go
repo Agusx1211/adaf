@@ -96,25 +96,36 @@ var webListCmd = &cobra.Command{
 }
 
 func init() {
-	webCmd.Flags().IntP("port", "p", 8080, "Port to listen on")
-	webCmd.Flags().String("host", "127.0.0.1", "Host to bind to")
-	webCmd.Flags().Bool("expose", false, "Bind to 0.0.0.0 for LAN/remote access (enables TLS)")
-	webCmd.Flags().String("tls", "", "TLS mode: 'self-signed' or 'custom' (requires --cert and --key)")
-	webCmd.Flags().String("cert", "", "Path to TLS certificate file (for --tls=custom)")
-	webCmd.Flags().String("key", "", "Path to TLS key file (for --tls=custom)")
-	webCmd.Flags().String("auth-token", "", "Require Bearer token for API access")
-	webCmd.Flags().Float64("rate-limit", 0, "Max requests per second per IP (0 = unlimited)")
-	webCmd.Flags().StringSlice("projects", nil, "Comma-separated list of project directories to serve")
-	webCmd.Flags().Bool("multi", false, "Auto-discover projects in parent directory")
-	webCmd.Flags().Bool("registry", false, "Serve projects from ~/.adaf/web-projects.json")
-	webCmd.Flags().Bool("daemon", false, "Run web server in background")
-	webCmd.Flags().Bool("mdns", false, "Advertise server on local network via mDNS/Bonjour")
-	webCmd.Flags().Bool("open", false, "Open browser automatically")
+	addWebServerFlags(webCmd, "open", "Open browser automatically", false)
 	webCmd.AddCommand(webStopCmd, webStatusCmd, webRegisterCmd, webUnregisterCmd, webListCmd)
 	rootCmd.AddCommand(webCmd)
 }
 
 func runWeb(cmd *cobra.Command, args []string) error {
+	if os.Getenv(webDaemonChildEnv) != "1" && cmd.Flags().NFlag() == 0 {
+		return runWebAsDaemonStart(cmd, args, true)
+	}
+	return runWebServe(cmd, args)
+}
+
+func addWebServerFlags(cmd *cobra.Command, openFlagName, openFlagUsage string, daemonDefault bool) {
+	cmd.Flags().IntP("port", "p", 8080, "Port to listen on")
+	cmd.Flags().String("host", "127.0.0.1", "Host to bind to")
+	cmd.Flags().Bool("expose", false, "Bind to 0.0.0.0 for LAN/remote access (enables TLS)")
+	cmd.Flags().String("tls", "", "TLS mode: 'self-signed' or 'custom' (requires --cert and --key)")
+	cmd.Flags().String("cert", "", "Path to TLS certificate file (for --tls=custom)")
+	cmd.Flags().String("key", "", "Path to TLS key file (for --tls=custom)")
+	cmd.Flags().String("auth-token", "", "Require Bearer token for API access")
+	cmd.Flags().Float64("rate-limit", 0, "Max requests per second per IP (0 = unlimited)")
+	cmd.Flags().StringSlice("projects", nil, "Comma-separated list of project directories to serve")
+	cmd.Flags().Bool("multi", false, "Auto-discover projects in parent directory")
+	cmd.Flags().Bool("registry", false, "Serve projects from ~/.adaf/web-projects.json")
+	cmd.Flags().Bool("daemon", daemonDefault, "Run web server in background")
+	cmd.Flags().Bool("mdns", false, "Advertise server on local network via mDNS/Bonjour")
+	cmd.Flags().Bool(openFlagName, false, openFlagUsage)
+}
+
+func runWebServe(cmd *cobra.Command, args []string) error {
 	if session.IsAgentContext() {
 		return fmt.Errorf("web is not available inside an agent context")
 	}
@@ -167,7 +178,8 @@ func runWeb(cmd *cobra.Command, args []string) error {
 	}
 	if daemon && !daemonChild {
 		shouldInjectAuthToken := expose && !userProvidedAuthToken && strings.TrimSpace(authToken) != ""
-		return runWebDaemonParent(cmd, authToken, shouldInjectAuthToken, expose)
+		open, _ := cmd.Flags().GetBool("open")
+		return runWebDaemonParent(authToken, shouldInjectAuthToken, expose, open)
 	}
 	if daemonChild {
 		state, running, err := loadWebDaemonState(webPIDFilePath(), webStateFilePath(), isPIDAlive)
@@ -362,7 +374,7 @@ func generateToken() string {
 	return hex.EncodeToString(b)
 }
 
-func runWebDaemonParent(cmd *cobra.Command, authToken string, injectAuthToken bool, printQR bool) error {
+func runWebDaemonParent(authToken string, injectAuthToken bool, printQR bool, openInBrowser bool) error {
 	state, running, err := loadWebDaemonState(webPIDFilePath(), webStateFilePath(), isPIDAlive)
 	if err != nil {
 		return fmt.Errorf("checking existing web daemon: %w", err)
@@ -407,8 +419,7 @@ func runWebDaemonParent(cmd *cobra.Command, authToken string, injectAuthToken bo
 			fmt.Fprintf(os.Stderr, "Warning: failed to render QR code: %v\n", err)
 		}
 	}
-	open, _ := cmd.Flags().GetBool("open")
-	if open {
+	if openInBrowser {
 		if err := openBrowser(state.URL); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to open browser: %v\n", err)
 		}

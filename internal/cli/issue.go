@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -219,6 +220,41 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 	}
 	if !validPriorities[priority] {
 		return fmt.Errorf("invalid priority %q (valid: critical, high, medium, low)", priority)
+	}
+
+	if client := TryConnect(); client != nil {
+		projectID := projectIDFromPath(filepath.Dir(s.Root()))
+		request := map[string]interface{}{
+			"title":       title,
+			"description": description,
+			"priority":    priority,
+			"plan_id":     planID,
+			"status":      "open",
+			"labels":      labels,
+		}
+		if turnID > 0 {
+			request["turn_id"] = turnID
+		}
+		if err := client.CreateIssue(projectID, request); err == nil {
+			fmt.Println()
+			fmt.Printf("  %sIssue created via daemon.%s\n", styleBoldGreen, colorReset)
+			printField("Title", title)
+			printField("Priority", priority)
+			printField("Status", "open")
+			if planID != "" {
+				printField("Plan", planID)
+			} else {
+				printField("Plan", "shared")
+			}
+			if turnID > 0 {
+				printField("Turn", fmt.Sprintf("#%d", turnID))
+			}
+			if len(labels) > 0 {
+				printField("Labels", strings.Join(labels, ", "))
+			}
+			fmt.Println()
+			return nil
+		}
 	}
 
 	issue := &store.Issue{

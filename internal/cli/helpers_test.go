@@ -104,3 +104,68 @@ func TestResolveTextFlag_EmptyFileReturnsEmptyString(t *testing.T) {
 		t.Fatalf("resolveTextFlag() = %q, want empty string", got)
 	}
 }
+
+func TestOpenStoreWalksUpToProjectRoot(t *testing.T) {
+	projectDir := t.TempDir()
+	projectMetaDir := filepath.Join(projectDir, ".adaf")
+	if err := os.MkdirAll(projectMetaDir, 0o755); err != nil {
+		t.Fatalf("creating project meta dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectMetaDir, "project.json"), []byte(`{"name":"demo"}`), 0o644); err != nil {
+		t.Fatalf("writing project.json: %v", err)
+	}
+
+	nested := filepath.Join(projectDir, "a", "b", "c")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("creating nested directory: %v", err)
+	}
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getting cwd: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(origWD)
+	})
+
+	if err := os.Chdir(nested); err != nil {
+		t.Fatalf("changing cwd: %v", err)
+	}
+	t.Setenv("ADAF_PROJECT_DIR", "")
+
+	s, err := openStore()
+	if err != nil {
+		t.Fatalf("openStore() error = %v", err)
+	}
+
+	wantRoot := filepath.Join(projectDir, ".adaf")
+	if s.Root() != wantRoot {
+		t.Fatalf("openStore() root = %q, want %q", s.Root(), wantRoot)
+	}
+}
+
+func TestOpenStoreFallsBackToCurrentDirectory(t *testing.T) {
+	dir := t.TempDir()
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getting cwd: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(origWD)
+	})
+
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("changing cwd: %v", err)
+	}
+	t.Setenv("ADAF_PROJECT_DIR", "")
+
+	s, err := openStore()
+	if err != nil {
+		t.Fatalf("openStore() error = %v", err)
+	}
+
+	wantRoot := filepath.Join(dir, ".adaf")
+	if s.Root() != wantRoot {
+		t.Fatalf("openStore() root = %q, want %q", s.Root(), wantRoot)
+	}
+}

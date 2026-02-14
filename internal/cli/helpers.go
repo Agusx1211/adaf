@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -21,6 +22,20 @@ func openStore() (*store.Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("getting working directory: %w", err)
 	}
+
+	candidate := dir
+	for {
+		projectMetaPath := filepath.Join(candidate, ".adaf", "project.json")
+		if _, serr := os.Stat(projectMetaPath); serr == nil {
+			return store.New(candidate)
+		}
+		parent := filepath.Dir(candidate)
+		if parent == candidate {
+			break
+		}
+		candidate = parent
+	}
+
 	return store.New(dir)
 }
 
@@ -36,6 +51,7 @@ func openStoreRequired() (*store.Store, error) {
 	if err := s.EnsureDirs(); err != nil {
 		return nil, fmt.Errorf("ensuring project store dirs: %w", err)
 	}
+	go autoRegisterProject(filepath.Dir(s.Root()))
 	return s, nil
 }
 
