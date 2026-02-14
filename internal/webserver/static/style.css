@@ -1,0 +1,167 @@
+:root {
+  --bg: #1e1e2e;
+  --panel: #2a2b3d;
+  --panel-strong: #31344d;
+  --text: #cdd6f4;
+  --muted: #9399b2;
+  --accent: #89b4fa;
+  --success: #a6e3a1;
+  --error: #f38ba8;
+  --warn: #fab387;
+  --border: #45475a;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--text);
+  background: radial-gradient(circle at top right, #262a44 0%, var(--bg) 44%);
+  font: 14px/1.5 "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  border-bottom: 1px solid var(--border);
+  background: rgba(30, 30, 46, 0.95);
+  backdrop-filter: blur(4px);
+}
+#nav {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  padding: 0.8rem 1rem;
+  overflow-x: auto;
+}
+.logo {
+  margin-right: 0.6rem;
+  letter-spacing: 0.08em;
+  font: 700 1rem/1 "IBM Plex Mono", "SFMono-Regular", monospace;
+}
+#nav a {
+  padding: 0.45rem 0.7rem;
+  border-radius: 0.5rem;
+  white-space: nowrap;
+}
+#nav a.active {
+  color: var(--text);
+  background: var(--panel-strong);
+}
+#content {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+.grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+.span-12 { grid-column: span 12; }
+.span-8 { grid-column: span 8; }
+.span-6 { grid-column: span 6; }
+.span-4 { grid-column: span 4; }
+.card {
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: linear-gradient(160deg, var(--panel) 0%, #24263a 100%);
+}
+.card h2, .card h3 {
+  margin: 0 0 0.6rem;
+  font-size: 0.98rem;
+}
+.meta { color: var(--muted); font-size: 0.86rem; }
+.empty { color: var(--muted); font-style: italic; }
+.kv { display: flex; gap: 0.5rem; flex-wrap: wrap; font-size: 0.86rem; }
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.list li {
+  margin: 0;
+  padding: 0.55rem 0;
+  border-top: 1px solid #3b3d52;
+}
+.list li:first-child { border-top: 0; }
+.link-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.filters {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+button,
+.button {
+  cursor: pointer;
+  padding: 0.4rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  color: var(--text);
+  background: var(--panel-strong);
+  font: 500 0.84rem/1 "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+button:hover,
+.button:hover { border-color: var(--accent); }
+button.active { color: var(--accent); border-color: var(--accent); }
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(49, 52, 77, 0.5);
+  text-transform: lowercase;
+  font: 600 0.74rem/1 "IBM Plex Mono", "SFMono-Regular", monospace;
+}
+.dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.status-complete .dot,
+.status-done .dot,
+.status-resolved .dot,
+.status-running .dot { background: var(--success); }
+.status-in_progress .dot,
+.status-open .dot,
+.status-starting .dot,
+.status-active .dot { background: var(--accent); }
+.status-not_started .dot,
+.status-low .dot,
+.status-cancelled .dot,
+.status-dead .dot { background: var(--muted); }
+.status-blocked .dot,
+.status-error .dot,
+.status-critical .dot { background: var(--error); }
+.status-high .dot,
+.status-warn .dot { background: var(--warn); }
+.status-medium .dot { background: #f9e2af; }
+.terminal {
+  max-height: 48vh;
+  overflow: auto;
+  padding: 0.75rem;
+  border: 1px solid #3a3f5d;
+  border-radius: 0.65rem;
+  background: #11111b;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 12px/1.45 "IBM Plex Mono", "SFMono-Regular", monospace;
+}
+.error-card,
+.error-text { color: var(--error); }
+@media (max-width: 880px) {
+  #content { padding: 0.7rem; }
+  .span-8, .span-6, .span-4 { grid-column: span 12; }
+  .terminal { max-height: 38vh; }
+}

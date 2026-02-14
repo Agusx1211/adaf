@@ -210,3 +210,25 @@ func TestNotFound(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
 }
+
+func TestStaticFilesServed(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	rec := performRequest(t, srv, http.MethodGet, "/")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET / status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), "<html") {
+		t.Fatal("GET / did not return HTML")
+	}
+
+	rec = performRequest(t, srv, http.MethodGet, "/static/style.css")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /static/style.css status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	rec = performRequest(t, srv, http.MethodGet, "/static/app.js")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /static/app.js status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}

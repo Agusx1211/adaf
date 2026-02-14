@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ADAF</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <nav id="nav" aria-label="Primary">
+      <span class="logo">ADAF</span>
+      <a href="#" data-tab="dashboard" class="active" aria-current="page">Dashboard</a>
+      <a href="#" data-tab="sessions">Sessions</a>
+      <a href="#" data-tab="plans">Plans</a>
+      <a href="#" data-tab="issues">Issues</a>
+    </nav>
+  </header>
+
+  <main id="content" aria-live="polite" aria-busy="false"></main>
+
+  <template id="error-template">
+    <section class="card error-card">
+      <h2>Error</h2>
+      <p class="error-text"></p>
+    </section>
+  </template>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -2,6 +2,7 @@ package webserver
 
 import (
 	"context"
+	"embed"
 	"errors"
 	"fmt"
 	"net"
@@ -12,6 +13,9 @@ import (
 	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/store"
 )
+
+//go:embed static
+var staticFS embed.FS
 
 // Server hosts the HTTP API and WebSocket session stream bridge.
 type Server struct {
@@ -104,5 +108,24 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/{rest...}", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
+	})
+
+	staticHandler := http.FileServer(http.FS(staticFS))
+	mux.Handle("GET /static/", staticHandler)
+
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+
+		data, err := staticFS.ReadFile("static/index.html")
+		if err != nil {
+			http.Error(w, "failed to load index", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(data)
 	})
 }
