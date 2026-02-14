@@ -13,7 +13,6 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
-	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/debug"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
@@ -86,7 +85,7 @@ func runAsk(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve agent/profile/model.
-	prof, commandOverride, err := resolveAskProfile(cmd, s)
+	prof, commandOverride, err := resolveAskProfile(cmd)
 	if err != nil {
 		return err
 	}
@@ -222,72 +221,15 @@ func resolveAskPrompt(cmd *cobra.Command, args []string) (string, error) {
 }
 
 // resolveAskProfile resolves the agent profile from --profile, --agent/--model flags.
-func resolveAskProfile(cmd *cobra.Command, s *store.Store) (*config.Profile, string, error) {
-	profileName, _ := cmd.Flags().GetString("profile")
-	agentName, _ := cmd.Flags().GetString("agent")
-	modelFlag, _ := cmd.Flags().GetString("model")
+func resolveAskProfile(cmd *cobra.Command) (*config.Profile, string, error) {
 	customCmd, _ := cmd.Flags().GetString("command")
 	reasoningLevel, _ := cmd.Flags().GetString("reasoning-level")
-
-	modelFlag = strings.TrimSpace(modelFlag)
-	customCmd = strings.TrimSpace(customCmd)
-	reasoningLevel = strings.TrimSpace(reasoningLevel)
-	profileName = strings.TrimSpace(profileName)
-
-	globalCfg, err := config.Load()
-	if err != nil {
-		return nil, "", fmt.Errorf("loading global config: %w", err)
-	}
-
-	agentsCfg, err := agent.LoadAgentsConfig()
-	if err != nil {
-		return nil, "", fmt.Errorf("loading agent configuration: %w", err)
-	}
-
-	// If --profile is given, use that profile directly.
-	if profileName != "" {
-		prof := globalCfg.FindProfile(profileName)
-		if prof == nil {
-			return nil, "", fmt.Errorf("profile %q not found", profileName)
-		}
-		// Allow --model to override the profile's model.
-		if modelFlag != "" {
-			prof.Model = modelFlag
-		}
-		if reasoningLevel != "" {
-			prof.ReasoningLevel = reasoningLevel
-		}
-		cmdOverride := customCmd
-		if cmdOverride == "" {
-			if rec, ok := agentsCfg.Agents[prof.Agent]; ok && strings.TrimSpace(rec.Path) != "" {
-				cmdOverride = strings.TrimSpace(rec.Path)
-			}
-		}
-		return prof, cmdOverride, nil
-	}
-
-	// Build a profile from --agent/--model flags.
-	if _, ok := agent.Get(agentName); !ok {
-		return nil, "", fmt.Errorf("unknown agent %q (valid: %s)", agentName, strings.Join(agentNames(), ", "))
-	}
-
-	if rec, ok := agentsCfg.Agents[agentName]; ok && customCmd == "" && strings.TrimSpace(rec.Path) != "" {
-		customCmd = strings.TrimSpace(rec.Path)
-	}
-
-	modelOverride := agent.ResolveModelOverride(agentsCfg, globalCfg, agentName)
-	if modelFlag != "" {
-		modelOverride = modelFlag
-	}
-
-	prof := &config.Profile{
-		Name:           fmt.Sprintf("ask:%s", agentName),
-		Agent:          agentName,
-		Model:          modelOverride,
-		ReasoningLevel: reasoningLevel,
-	}
-
-	return prof, customCmd, nil
+	prof, _, cmdOverride, err := resolveProfile(cmd, ProfileResolveOpts{
+		Prefix:         "ask",
+		CustomCmd:      strings.TrimSpace(customCmd),
+		ReasoningLevel: strings.TrimSpace(reasoningLevel),
+	})
+	return prof, cmdOverride, err
 }
 
 // buildAskPrompt wraps the user prompt with project context.
