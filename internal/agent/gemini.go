@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os/exec"
 	"strings"
@@ -74,54 +73,9 @@ func (g *GeminiAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 		cmd.Stdin = stdinReader
 	}
 
-	// Use shared helpers for process group, environment, stderr, and metadata.
 	setupProcessGroup(cmd)
 	cmd.WaitDelay = 5 * time.Second
 	setupEnv(cmd, cfg.Env)
-	ss := setupStreamStderr(cmd, cfg, recorder)
-	recordMeta(recorder, "gemini", cmdName, args, cfg.WorkDir)
 
-	// Set up stdout pipe for streaming NDJSON parsing.
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("gemini agent: stdout pipe: %w", err)
-	}
-
-	start := time.Now()
-	if err := cmd.Start(); err != nil {
-		debug.LogKV("agent.gemini", "process start failed", "error", err)
-		return nil, fmt.Errorf("gemini agent: failed to start command: %w", err)
-	}
-	debug.LogKV("agent.gemini", "process started", "pid", cmd.Process.Pid)
-
-	// Parse the NDJSON stream using the Gemini parser.
-	events := stream.ParseGemini(ctx, stdoutPipe)
-
-	// Use shared stream loop helper for event processing and text accumulation.
-	text, agentSessionID := runStreamLoop(cfg, events, recorder, start, ss.W)
-
-	waitErr := cmd.Wait()
-	duration := time.Since(start)
-
-	// Use shared exit code extraction helper.
-	exitCode, err := extractExitCode(waitErr)
-	if err != nil {
-		debug.LogKV("agent.gemini", "cmd.Wait() error (not ExitError)", "error", err)
-		return nil, fmt.Errorf("gemini agent: failed to run command: %w", err)
-	}
-
-	debug.LogKV("agent.gemini", "process finished",
-		"exit_code", exitCode,
-		"duration", duration,
-		"output_len", len(text),
-		"agent_session_id", agentSessionID,
-	)
-
-	return &Result{
-		ExitCode:       exitCode,
-		Duration:       duration,
-		Output:         text,
-		Error:          ss.Buf.String(),
-		AgentSessionID: agentSessionID,
-	}, nil
+	return runStreamAgent(ctx, cmd, cfg, recorder, "gemini", cmdName, args, stream.ParseGemini)
 }

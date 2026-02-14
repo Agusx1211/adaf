@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"os/exec"
 	"strings"
 	"time"
@@ -90,73 +89,7 @@ func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Re
 	setupEnv(cmd, cfg.Env)
 	cmd.Env = withDefaultCodexRustLog(cmd.Env)
 
-	// Set up stdout pipe for streaming JSONL parsing.
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("codex agent: stdout pipe: %w", err)
-	}
-
-	ss := setupStreamStderr(cmd, cfg, recorder)
-	recordMeta(recorder, "codex", cmdName, args, cfg.WorkDir)
-
-	start := time.Now()
-	if err := cmd.Start(); err != nil {
-		debug.LogKV("agent.codex", "process start failed", "error", err)
-		return nil, fmt.Errorf("codex agent: failed to start command: %w", err)
-	}
-	debug.LogKV("agent.codex", "process started", "pid", cmd.Process.Pid)
-
-	events := stream.ParseCodex(ctx, stdoutPipe)
-	text, agentSessionID := runStreamLoop(cfg, events, recorder, start, ss.W)
-
-	waitErr := cmd.Wait()
-	duration := time.Since(start)
-
-	exitCode, err := extractExitCode(waitErr)
-	if err != nil {
-		debug.LogKV("agent.codex", "cmd.Wait() error (not ExitError)", "error", err)
-		return nil, fmt.Errorf("codex agent: failed to run command: %w", err)
-	}
-
-	debug.LogKV("agent.codex", "process finished",
-		"exit_code", exitCode,
-		"duration", duration,
-		"output_len", len(text),
-		"agent_session_id", agentSessionID,
-	)
-
-	return &Result{
-		ExitCode:       exitCode,
-		Duration:       duration,
-		Output:         text,
-		Error:          ss.Buf.String(),
-		AgentSessionID: agentSessionID,
-	}, nil
-}
-
-// hasFlag returns true if flag appears in args.
-func hasFlag(args []string, flag string) bool {
-	for _, a := range args {
-		if a == flag {
-			return true
-		}
-	}
-	return false
-}
-
-// withoutFlag returns a copy of args with exact matches to flag removed.
-func withoutFlag(args []string, flag string) []string {
-	if len(args) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(args))
-	for _, a := range args {
-		if a == flag {
-			continue
-		}
-		out = append(out, a)
-	}
-	return out
+	return runStreamAgent(ctx, cmd, cfg, recorder, "codex", cmdName, args, stream.ParseCodex)
 }
 
 // withDefaultCodexRustLog installs a default log filter unless RUST_LOG is
@@ -166,14 +99,4 @@ func withDefaultCodexRustLog(env []string) []string {
 		return env
 	}
 	return append(env, "RUST_LOG="+codexDefaultRustLog)
-}
-
-func hasEnvKey(env []string, key string) bool {
-	prefix := key + "="
-	for _, kv := range env {
-		if strings.HasPrefix(kv, prefix) {
-			return true
-		}
-	}
-	return false
 }

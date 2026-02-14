@@ -35,13 +35,6 @@ func Get(name string) (Agent, bool) {
 	return a, ok
 }
 
-// Register adds or replaces an agent in the global registry.
-func Register(name string, a Agent) {
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	registry[name] = a
-}
-
 // All returns a copy of the current registry.
 func All() map[string]Agent {
 	registryMu.RLock()

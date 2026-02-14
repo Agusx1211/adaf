@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"os/exec"
 	"strings"
 	"time"
@@ -73,54 +72,5 @@ func (c *ClaudeAgent) Run(ctx context.Context, cfg Config, recorder *recording.R
 	setupEnv(cmd, cfg.Env)
 	setupStdin(cmd, cfg.Prompt, recorder)
 
-	// Set up stdout pipe for streaming NDJSON parsing.
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("claude agent: stdout pipe: %w", err)
-	}
-
-	// Set up stderr capture.
-	ss := setupStreamStderr(cmd, cfg, recorder)
-
-	// Record metadata.
-	recordMeta(recorder, "claude", cmdName, args, cfg.WorkDir)
-
-	start := time.Now()
-	if err := cmd.Start(); err != nil {
-		debug.LogKV("agent.claude", "process start failed", "error", err)
-		return nil, fmt.Errorf("claude agent: failed to start command: %w", err)
-	}
-	debug.LogKV("agent.claude", "process started", "pid", cmd.Process.Pid)
-
-	// Parse the NDJSON stream.
-	events := stream.Parse(ctx, stdoutPipe)
-
-	// Run the stream loop (handles both TUI and legacy display modes).
-	text, agentSessionID := runStreamLoop(cfg, events, recorder, start, ss.W)
-
-	waitErr := cmd.Wait()
-	duration := time.Since(start)
-
-	// Extract exit code.
-	exitCode, err := extractExitCode(waitErr)
-	if err != nil {
-		debug.LogKV("agent.claude", "cmd.Wait() error (not ExitError)", "error", err)
-		return nil, fmt.Errorf("claude agent: failed to run command: %w", err)
-	}
-
-	debug.LogKV("agent.claude", "process finished",
-		"exit_code", exitCode,
-		"duration", duration,
-		"output_len", len(text),
-		"stderr_len", ss.Buf.Len(),
-		"agent_session_id", agentSessionID,
-	)
-
-	return &Result{
-		ExitCode:       exitCode,
-		Duration:       duration,
-		Output:         text,
-		Error:          ss.Buf.String(),
-		AgentSessionID: agentSessionID,
-	}, nil
+	return runStreamAgent(ctx, cmd, cfg, recorder, "claude", cmdName, args, stream.Parse)
 }

@@ -11,6 +11,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -127,6 +128,44 @@ func writerOrDefault(w, fallback io.Writer) io.Writer {
 	return fallback
 }
 
+// --- Argument and environment utilities ---
+
+// hasFlag returns true if flag appears in args.
+func hasFlag(args []string, flag string) bool {
+	for _, a := range args {
+		if a == flag {
+			return true
+		}
+	}
+	return false
+}
+
+// withoutFlag returns a copy of args with exact matches to flag removed.
+func withoutFlag(args []string, flag string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == flag {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+// hasEnvKey returns true if key is present as a KEY=... entry in env.
+func hasEnvKey(env []string, key string) bool {
+	prefix := key + "="
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // --- Buffer agent output capture ---
 
 // bufferOutput holds the in-memory buffers used by buffer-mode agents
@@ -166,6 +205,69 @@ func setupBufferOutput(cmd *exec.Cmd, cfg Config, recorder *recording.Recorder) 
 }
 
 // --- Stream agent helpers ---
+
+// StreamParser converts a stdout reader into a channel of parsed stream
+// events. Each stream agent has its own parser (stream.Parse,
+// stream.ParseCodex, stream.ParseGemini, stream.ParseOpencode).
+type StreamParser func(ctx context.Context, r io.Reader) <-chan stream.RawEvent
+
+// runStreamAgent executes a pre-configured cmd as a stream agent: pipes
+// stdout through the given parser, captures stderr, records metadata, and
+// returns a Result. The caller is responsible for building the command
+// (args, stdin, env, process group, WaitDelay) before calling this.
+func runStreamAgent(
+	ctx context.Context,
+	cmd *exec.Cmd,
+	cfg Config,
+	recorder *recording.Recorder,
+	agentName string,
+	cmdName string,
+	args []string,
+	parser StreamParser,
+) (*Result, error) {
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("%s agent: stdout pipe: %w", agentName, err)
+	}
+
+	ss := setupStreamStderr(cmd, cfg, recorder)
+	recordMeta(recorder, agentName, cmdName, args, cfg.WorkDir)
+
+	start := time.Now()
+	if err := cmd.Start(); err != nil {
+		debug.LogKV("agent."+agentName, "process start failed", "error", err)
+		return nil, fmt.Errorf("%s agent: failed to start command: %w", agentName, err)
+	}
+	debug.LogKV("agent."+agentName, "process started", "pid", cmd.Process.Pid)
+
+	events := parser(ctx, stdoutPipe)
+	text, agentSessionID := runStreamLoop(cfg, events, recorder, start, ss.W)
+
+	waitErr := cmd.Wait()
+	duration := time.Since(start)
+
+	exitCode, err := extractExitCode(waitErr)
+	if err != nil {
+		debug.LogKV("agent."+agentName, "cmd.Wait() error (not ExitError)", "error", err)
+		return nil, fmt.Errorf("%s agent: failed to run command: %w", agentName, err)
+	}
+
+	debug.LogKV("agent."+agentName, "process finished",
+		"exit_code", exitCode,
+		"duration", duration,
+		"output_len", len(text),
+		"stderr_len", ss.Buf.Len(),
+		"agent_session_id", agentSessionID,
+	)
+
+	return &Result{
+		ExitCode:       exitCode,
+		Duration:       duration,
+		Output:         text,
+		Error:          ss.Buf.String(),
+		AgentSessionID: agentSessionID,
+	}, nil
+}
 
 // streamStderr holds stderr capture state for stream-mode agents.
 // Stream agents pipe stdout through an NDJSON parser, so only stderr
