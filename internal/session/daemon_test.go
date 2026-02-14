@@ -830,6 +830,89 @@ func TestSnapshotRecentClearsOnLoopStepStart(t *testing.T) {
 	}
 }
 
+func TestSnapshotRecentPreservesPromptAfterStarted(t *testing.T) {
+	eventsPath := filepath.Join(t.TempDir(), "events.jsonl")
+	eventsFile, err := os.OpenFile(eventsPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		t.Fatalf("open events file: %v", err)
+	}
+	defer eventsFile.Close()
+
+	b := &broadcaster{
+		eventsFile: eventsFile,
+		meta:       WireMeta{SessionID: 86, AgentName: "claude"},
+	}
+	// Simulate: prompt emitted, then started (which clears recent).
+	b.broadcastTyped(MsgPrompt, WirePrompt{
+		SessionID: 5,
+		TurnHexID: "hex5",
+		Prompt:    "do the thing",
+	})
+	b.broadcastTyped(MsgStarted, WireStarted{
+		SessionID: 5,
+		TurnHexID: "hex5",
+	})
+	// Some raw output after started.
+	b.broadcastTyped(MsgRaw, WireRaw{SessionID: 5, Data: "output"})
+
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+
+	doneCh := make(chan struct{})
+	go func() {
+		b.handleClient(serverConn, func() {})
+		close(doneCh)
+	}()
+
+	sc := bufio.NewScanner(clientConn)
+	sc.Buffer(make([]byte, 1024*64), 1024*1024)
+	var snapshot *WireSnapshot
+	for sc.Scan() {
+		msg, err := DecodeMsg(sc.Bytes())
+		if err != nil {
+			t.Fatalf("DecodeMsg: %v", err)
+		}
+		if msg.Type != MsgSnapshot {
+			continue
+		}
+		data, err := DecodeData[WireSnapshot](msg)
+		if err != nil {
+			t.Fatalf("DecodeData[WireSnapshot]: %v", err)
+		}
+		snapshot = data
+		break
+	}
+	if err := sc.Err(); err != nil {
+		t.Fatalf("scanner error: %v", err)
+	}
+	_ = clientConn.Close()
+	select {
+	case <-doneCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handleClient did not exit")
+	}
+
+	if snapshot == nil {
+		t.Fatal("missing MsgSnapshot")
+	}
+	var promptCount int
+	for _, recent := range snapshot.Recent {
+		if recent.Type == MsgPrompt {
+			promptCount++
+			data, err := DecodeData[WirePrompt](&recent)
+			if err != nil {
+				t.Fatalf("DecodeData[WirePrompt]: %v", err)
+			}
+			if data.Prompt != "do the thing" {
+				t.Fatalf("prompt = %q, want %q", data.Prompt, "do the thing")
+			}
+		}
+	}
+	if promptCount != 1 {
+		t.Fatalf("prompt entries in snapshot recent = %d, want 1", promptCount)
+	}
+}
+
 func TestBroadcastSkipsClientQueueBeforeSnapshotBoundary(t *testing.T) {
 	eventsPath := filepath.Join(t.TempDir(), "events.jsonl")
 	eventsFile, err := os.OpenFile(eventsPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)

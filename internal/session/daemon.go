@@ -800,8 +800,22 @@ func (b *broadcaster) trimSnapshotRecentLocked() {
 }
 
 func (b *broadcaster) clearSnapshotRecentLocked() {
+	// Preserve the most recent prompt so reconnecting clients see the
+	// active turn's prompt in the detail view.
+	var lastPrompt *WireMsg
+	for i := len(b.snapshot.Recent) - 1; i >= 0; i-- {
+		if b.snapshot.Recent[i].Type == MsgPrompt {
+			cp := b.snapshot.Recent[i]
+			lastPrompt = &cp
+			break
+		}
+	}
 	b.snapshot.Recent = nil
 	b.snapshotRecentN = 0
+	if lastPrompt != nil {
+		b.snapshot.Recent = []WireMsg{*lastPrompt}
+		b.snapshotRecentN = wireMsgSize(*lastPrompt)
+	}
 }
 
 func decodeWireData[T any](msg *WireMsg, payload any) (T, bool) {
