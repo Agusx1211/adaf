@@ -107,19 +107,37 @@ func TestStateTransitions(t *testing.T) {
 		// Profile wizard forward navigation
 		{"profile name enter goes to agent", stateProfileName, "enter", func(m *AppModel) { m.profileWiz.NameInput = "test" }, stateProfileAgent},
 		{"profile agent enter goes to model", stateProfileAgent, "enter", func(m *AppModel) { m.profileWiz.Agents = []string{"claude"}; m.profileWiz.AgentSel = 0 }, stateProfileModel},
-		{"profile model enter goes to reasoning or intel", stateProfileModel, "enter", func(m *AppModel) { m.profileWiz.Agents = []string{"claude"}; m.profileWiz.AgentSel = 0; m.profileWiz.Models = []string{"sonnet"}; m.profileWiz.ModelSel = 0 }, stateProfileReasoning},
-		{"profile reasoning enter goes to intel", stateProfileReasoning, "enter", func(m *AppModel) { m.profileWiz.Agents = []string{"claude"}; m.profileWiz.AgentSel = 0; m.profileWiz.ReasoningLevels = []agentmeta.ReasoningLevel{{Name: "high"}}; m.profileWiz.ReasoningLevelSel = 0 }, stateProfileIntel},
+		{"profile model enter goes to reasoning or intel", stateProfileModel, "enter", func(m *AppModel) {
+			m.profileWiz.Agents = []string{"claude"}
+			m.profileWiz.AgentSel = 0
+			m.profileWiz.Models = []string{"sonnet"}
+			m.profileWiz.ModelSel = 0
+		}, stateProfileReasoning},
+		{"profile reasoning enter goes to intel", stateProfileReasoning, "enter", func(m *AppModel) {
+			m.profileWiz.Agents = []string{"claude"}
+			m.profileWiz.AgentSel = 0
+			m.profileWiz.ReasoningLevels = []agentmeta.ReasoningLevel{{Name: "high"}}
+			m.profileWiz.ReasoningLevelSel = 0
+		}, stateProfileIntel},
 		{"profile intel enter goes to desc", stateProfileIntel, "enter", nil, stateProfileDesc},
 		{"profile desc enter goes to max inst", stateProfileDesc, "enter", nil, stateProfileMaxInst},
 		{"profile max inst enter goes to speed", stateProfileMaxInst, "enter", nil, stateProfileSpeed},
-		{"profile speed enter returns to selector", stateProfileSpeed, "enter", func(m *AppModel) { m.profileWiz.Agents = []string{"claude"}; m.profileWiz.AgentSel = 0; m.profileWiz.NameInput = "test" }, stateSelector},
+		{"profile speed enter returns to selector", stateProfileSpeed, "enter", func(m *AppModel) {
+			m.profileWiz.Agents = []string{"claude"}
+			m.profileWiz.AgentSel = 0
+			m.profileWiz.NameInput = "test"
+		}, stateSelector},
 
 		// Profile wizard backward navigation
 		{"profile name esc returns to selector", stateProfileName, "esc", nil, stateSelector},
 		{"profile agent esc returns to name", stateProfileAgent, "esc", nil, stateProfileName},
 		{"profile model esc returns to agent", stateProfileModel, "esc", nil, stateProfileAgent},
 		{"profile reasoning esc returns to model", stateProfileReasoning, "esc", nil, stateProfileModel},
-		{"profile intel esc returns to reasoning", stateProfileIntel, "esc", func(m *AppModel) { m.profileWiz.Agents = []string{"claude"}; m.profileWiz.AgentSel = 0; m.profileWiz.ReasoningLevels = []agentmeta.ReasoningLevel{{Name: "high"}} }, stateProfileReasoning},
+		{"profile intel esc returns to reasoning", stateProfileIntel, "esc", func(m *AppModel) {
+			m.profileWiz.Agents = []string{"claude"}
+			m.profileWiz.AgentSel = 0
+			m.profileWiz.ReasoningLevels = []agentmeta.ReasoningLevel{{Name: "high"}}
+		}, stateProfileReasoning},
 		{"profile desc esc returns to intel", stateProfileDesc, "esc", nil, stateProfileIntel},
 		{"profile max inst esc returns to desc", stateProfileMaxInst, "esc", nil, stateProfileDesc},
 		{"profile speed esc returns to max inst", stateProfileSpeed, "esc", nil, stateProfileMaxInst},
@@ -145,11 +163,20 @@ func TestStateTransitions(t *testing.T) {
 		{"settings roles rules menu enters rules list", stateSettingsRolesRulesMenu, "enter", func(m *AppModel) { m.settings.RolesRulesSel = 1 }, stateSettingsRulesList},
 		{"settings roles list a goes to role name", stateSettingsRolesList, "a", nil, stateSettingsRoleName},
 		{"settings roles list enter goes to role edit", stateSettingsRolesList, "enter", func(m *AppModel) { m.globalCfg.Roles = []config.RoleDefinition{{Name: "r1"}}; m.settings.RolesSel = 0 }, stateSettingsRoleEdit},
-		{"settings role edit esc returns to roles list", stateSettingsRoleEdit, "esc", func(m *AppModel) { m.globalCfg.Roles = []config.RoleDefinition{{Name: "r1"}}; m.settings.EditRoleIdx = 0 }, stateSettingsRolesList},
+		{"settings role edit esc returns to roles list", stateSettingsRoleEdit, "esc", func(m *AppModel) {
+			m.globalCfg.Roles = []config.RoleDefinition{{Name: "r1"}}
+			m.settings.EditRoleIdx = 0
+		}, stateSettingsRolesList},
 		{"settings rules list a goes to rule id", stateSettingsRulesList, "a", nil, stateSettingsRuleID},
 		{"settings rule id enter goes to rule body", stateSettingsRuleID, "enter", func(m *AppModel) { m.settings.RuleIDInput = "new-rule"; m.settings.EditRuleIdx = -1 }, stateSettingsRuleBody},
-		{"settings rule body esc returns to rules list", stateSettingsRuleBody, "esc", func(m *AppModel) { m.settings.EditRuleIdx = 0; m.globalCfg.PromptRules = []config.PromptRule{{ID: "r1"}} }, stateSettingsRulesList},
-		{"settings rule body ctrl+s returns to rules list", stateSettingsRuleBody, "ctrl+s", func(m *AppModel) { m.settings.EditRuleIdx = 0; m.globalCfg.PromptRules = []config.PromptRule{{ID: "r1"}} }, stateSettingsRulesList},
+		{"settings rule body esc returns to rules list", stateSettingsRuleBody, "esc", func(m *AppModel) {
+			m.settings.EditRuleIdx = 0
+			m.globalCfg.PromptRules = []config.PromptRule{{ID: "r1"}}
+		}, stateSettingsRulesList},
+		{"settings rule body ctrl+s returns to rules list", stateSettingsRuleBody, "ctrl+s", func(m *AppModel) {
+			m.settings.EditRuleIdx = 0
+			m.globalCfg.PromptRules = []config.PromptRule{{ID: "r1"}}
+		}, stateSettingsRulesList},
 		{"plan menu esc returns to selector", statePlanMenu, "esc", nil, stateSelector},
 		{"plan menu c opens plan create id", statePlanMenu, "c", nil, statePlanCreateID},
 		{"plan create id enter goes to title", statePlanCreateID, "enter", func(m *AppModel) { m.planWiz.CreateIDInput = "test-plan" }, statePlanCreateTitle},
@@ -170,7 +197,7 @@ func TestStateTransitions(t *testing.T) {
 			if tt.setup != nil {
 				tt.setup(&m)
 			}
-			
+
 			var msg tea.Msg
 			if tt.key == "esc" {
 				msg = tea.KeyMsg{Type: tea.KeyEsc}
