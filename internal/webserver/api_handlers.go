@@ -284,7 +284,7 @@ func handleSpawnByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rec)
 }
 
-func handleSessionsP(_ *store.Store, w http.ResponseWriter, r *http.Request) {
+func handleSessionsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	sessions, err := session.ListSessions()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list sessions")
@@ -293,10 +293,28 @@ func handleSessionsP(_ *store.Store, w http.ResponseWriter, r *http.Request) {
 	if sessions == nil {
 		sessions = []session.SessionMeta{}
 	}
+
+	// Filter by project if projectID is present in the URL (project-scoped route)
+	if projectID := r.PathValue("projectID"); projectID != "" {
+		expectedProjectID := session.ProjectIDFromDir(projectDir(s))
+		filtered := make([]session.SessionMeta, 0)
+		for _, sess := range sessions {
+			// Match by ProjectID or derive it from ProjectDir for older sessions
+			if sess.ProjectID == expectedProjectID {
+				filtered = append(filtered, sess)
+			} else if sess.ProjectID == "" && sess.ProjectDir != "" {
+				if session.ProjectIDFromDir(sess.ProjectDir) == expectedProjectID {
+					filtered = append(filtered, sess)
+				}
+			}
+		}
+		sessions = filtered
+	}
+
 	writeJSON(w, http.StatusOK, sessions)
 }
 
-func handleSessionByIDP(_ *store.Store, w http.ResponseWriter, r *http.Request) {
+func handleSessionByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	sessionID, err := parsePathID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "session not found")
@@ -309,14 +327,38 @@ func handleSessionByIDP(_ *store.Store, w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	var found *session.SessionMeta
 	for i := range sessions {
 		if sessions[i].ID == sessionID {
-			writeJSON(w, http.StatusOK, sessions[i])
+			found = &sessions[i]
+			break
+		}
+	}
+
+	if found == nil {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	// If project-scoped, verify the session belongs to this project
+	if projectID := r.PathValue("projectID"); projectID != "" {
+		expectedProjectID := session.ProjectIDFromDir(projectDir(s))
+		match := false
+		if found.ProjectID == expectedProjectID {
+			match = true
+		} else if found.ProjectID == "" && found.ProjectDir != "" {
+			if session.ProjectIDFromDir(found.ProjectDir) == expectedProjectID {
+				match = true
+			}
+		}
+
+		if !match {
+			writeError(w, http.StatusNotFound, "session not found in this project")
 			return
 		}
 	}
 
-	writeError(w, http.StatusNotFound, "session not found")
+	writeJSON(w, http.StatusOK, *found)
 }
 
 func handleLoopStatsP(s *store.Store, w http.ResponseWriter, r *http.Request) {

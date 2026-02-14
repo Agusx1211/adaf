@@ -54,6 +54,43 @@ func TestAbortSessionStartupMarksMetadata(t *testing.T) {
 	}
 }
 
+func TestCreateSessionPopulatesProjectID(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	projectDir := t.TempDir()
+	sessionID, err := CreateSession(DaemonConfig{
+		ProjectDir:  projectDir,
+		ProjectName: "proj",
+		WorkDir:     t.TempDir(),
+		ProfileName: "p1",
+		AgentName:   "generic",
+		Loop: config.LoopDef{
+			Name: "test",
+			Steps: []config.LoopStep{
+				{Profile: "p1", Turns: 1},
+			},
+		},
+		Profiles: []config.Profile{{Name: "p1", Agent: "generic"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	meta, err := LoadMeta(sessionID)
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+
+	expectedID := ProjectIDFromDir(projectDir)
+	if meta.ProjectID != expectedID {
+		t.Fatalf("ProjectID = %q, want %q", meta.ProjectID, expectedID)
+	}
+	if len(meta.ProjectID) != 16 {
+		t.Fatalf("ProjectID length = %d, want 16", len(meta.ProjectID))
+	}
+}
+
 func TestSendCancelControlUsesWebSocket(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

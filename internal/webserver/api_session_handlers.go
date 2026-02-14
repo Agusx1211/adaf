@@ -320,7 +320,7 @@ func (srv *Server) handleStopSession(w http.ResponseWriter, r *http.Request) {
 	handleStopSessionP(srv.store, w, r)
 }
 
-func handleStopSessionP(_ *store.Store, w http.ResponseWriter, r *http.Request) {
+func handleStopSessionP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	sessionID, err := parsePathID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "session not found")
@@ -331,6 +331,24 @@ func handleStopSessionP(_ *store.Store, w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
+	}
+
+	// If project-scoped, verify the session belongs to this project
+	if projectID := r.PathValue("projectID"); projectID != "" {
+		expectedProjectID := session.ProjectIDFromDir(projectDir(s))
+		match := false
+		if meta.ProjectID == expectedProjectID {
+			match = true
+		} else if meta.ProjectID == "" && meta.ProjectDir != "" {
+			if session.ProjectIDFromDir(meta.ProjectDir) == expectedProjectID {
+				match = true
+			}
+		}
+
+		if !match {
+			writeError(w, http.StatusNotFound, "session not found in this project")
+			return
+		}
 	}
 
 	if !session.IsActiveStatus(meta.Status) {
@@ -377,9 +395,28 @@ func handleSessionMessageP(s *store.Store, w http.ResponseWriter, r *http.Reques
 	}
 
 	// Check if session exists (though we mainly need the active loop run)
-	if _, err := session.LoadMeta(sessionID); err != nil {
+	meta, err := session.LoadMeta(sessionID)
+	if err != nil {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
+	}
+
+	// If project-scoped, verify the session belongs to this project
+	if projectID := r.PathValue("projectID"); projectID != "" {
+		expectedProjectID := session.ProjectIDFromDir(projectDir(s))
+		match := false
+		if meta.ProjectID == expectedProjectID {
+			match = true
+		} else if meta.ProjectID == "" && meta.ProjectDir != "" {
+			if session.ProjectIDFromDir(meta.ProjectDir) == expectedProjectID {
+				match = true
+			}
+		}
+
+		if !match {
+			writeError(w, http.StatusNotFound, "session not found in this project")
+			return
+		}
 	}
 
 	run, err := s.ActiveLoopRun()

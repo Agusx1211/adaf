@@ -2,6 +2,8 @@ package session
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -38,6 +40,7 @@ type SessionMeta struct {
 	LoopSteps   int       `json:"loop_steps,omitempty"`
 	ProjectDir  string    `json:"project_dir"`
 	ProjectName string    `json:"project_name"`
+	ProjectID   string    `json:"project_id,omitempty"`
 	PID         int       `json:"pid"`
 	Status      string    `json:"status"` // one of StatusStarting/StatusRunning/StatusDone/StatusCancelled/StatusError/StatusDead
 	StartedAt   time.Time `json:"started_at"`
@@ -132,6 +135,16 @@ func nextID() int {
 	return maxID + 1
 }
 
+// ProjectIDFromDir derives a stable project identifier from a project directory.
+func ProjectIDFromDir(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		abs = dir
+	}
+	h := sha256.Sum256([]byte(abs))
+	return hex.EncodeToString(h[:8]) // 16-char hex ID
+}
+
 // CreateSession allocates a new session ID, writes the DaemonConfig and initial
 // SessionMeta to disk, and returns the session ID.
 func CreateSession(dcfg DaemonConfig) (int, error) {
@@ -174,6 +187,7 @@ func CreateSession(dcfg DaemonConfig) (int, error) {
 		LoopSteps:   len(dcfg.Loop.Steps),
 		ProjectDir:  dcfg.ProjectDir,
 		ProjectName: dcfg.ProjectName,
+		ProjectID:   ProjectIDFromDir(dcfg.ProjectDir),
 		Status:      StatusStarting,
 		StartedAt:   time.Now().UTC(),
 	}

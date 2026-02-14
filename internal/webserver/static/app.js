@@ -109,13 +109,18 @@
       state.projects = projects;
       state.multiProject = projects.length > 1;
 
-      if (state.multiProject) {
+      var savedID = '';
+      try {
+        savedID = localStorage.getItem('adaf_project_id') || '';
+      } catch (_) {}
+
+      if (savedID && findProjectByID(savedID)) {
+        state.currentProjectID = savedID;
+      } else {
         var defaultProject = projects.find(function (project) {
           return !!(project && project.is_default);
         }) || projects[0] || null;
         state.currentProjectID = defaultProject && defaultProject.id ? String(defaultProject.id) : '';
-      } else {
-        state.currentProjectID = '';
       }
     } catch (err) {
       if (!(err && err.authRequired)) {
@@ -132,7 +137,7 @@
   function updateProjectSelect() {
     if (!projectSelect) return;
 
-    if (!state.multiProject) {
+    if (state.projects.length === 0) {
       projectSelect.innerHTML = '';
       projectSelect.style.display = 'none';
       return;
@@ -158,7 +163,7 @@
   }
 
   function currentProject() {
-    if (state.multiProject && state.currentProjectID) {
+    if (state.currentProjectID) {
       return findProjectByID(state.currentProjectID);
     }
     return state.projects.find(function (project) {
@@ -196,8 +201,6 @@
   }
 
   function switchProject(projectID, refreshTab) {
-    if (!state.multiProject) return;
-
     var nextID = String(projectID || '');
     if (!findProjectByID(nextID)) return;
 
@@ -209,6 +212,9 @@
     closeModal();
     resetProjectScopedState();
     state.currentProjectID = nextID;
+    try {
+      localStorage.setItem('adaf_project_id', nextID);
+    } catch (_) {}
     updateProjectSelect();
     updateDocumentTitle();
 
@@ -218,7 +224,7 @@
   }
 
   function apiBase() {
-    if (state.multiProject && state.currentProjectID) {
+    if (state.currentProjectID) {
       return '/api/projects/' + encodeURIComponent(state.currentProjectID);
     }
     return '/api';
