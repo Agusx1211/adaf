@@ -69,6 +69,7 @@
     reconnectTimer: null,
     currentSessionSocketID: 0,
     activeLoopIDForMessages: 0,
+    sessionMessageDraft: '',
     viewLoaded: {
       issues: false,
       docs: false,
@@ -124,6 +125,7 @@
   function bindGlobalEvents() {
     content.addEventListener('click', onContentClick);
     content.addEventListener('change', onContentChange);
+    content.addEventListener('input', onContentInput);
     content.addEventListener('submit', onContentSubmit);
 
     modalRoot.addEventListener('click', onModalClick);
@@ -227,6 +229,21 @@
       return;
     }
 
+    if (action === 'open-new-session-modal') {
+      openNewSessionModal().catch(function (err) {
+        if (err && err.authRequired) return;
+        showToast('Failed to load session options: ' + errorMessage(err), 'error');
+      });
+      return;
+    }
+
+    if (action === 'stop-session') {
+      var stopSessionID = parseInt(actionNode.getAttribute('data-session-id') || '', 10);
+      if (Number.isNaN(stopSessionID) || stopSessionID <= 0) return;
+      stopSessionByID(stopSessionID);
+      return;
+    }
+
     if (action === 'disconnect-auth') {
       clearAuthToken();
       closeModal();
@@ -245,6 +262,15 @@
     }
   }
 
+  function onContentInput(event) {
+    var node = event.target;
+    if (!node) return;
+
+    if (node.getAttribute('data-input') === 'session-message') {
+      state.sessionMessageDraft = String(node.value || '');
+    }
+  }
+
   function onContentSubmit(event) {
     var form = event.target.closest('form[data-form]');
     if (!form) return;
@@ -254,6 +280,14 @@
     var formName = form.getAttribute('data-form');
     if (formName === 'auth-inline') {
       submitAuthForm(form);
+      return;
+    }
+
+    if (formName === 'session-message') {
+      submitSessionMessageForm(form).catch(function (err) {
+        if (err && err.authRequired) return;
+        showToast('Failed to send message: ' + errorMessage(err), 'error');
+      });
     }
   }
 
@@ -274,6 +308,14 @@
       clearAuthToken();
       closeModal();
       renderApp();
+      return;
+    }
+
+    if (action === 'set-new-session-mode') {
+      event.preventDefault();
+      var form = actionNode.closest('form[data-modal-submit="new-session"]');
+      if (!form) return;
+      setNewSessionModeInForm(form, actionNode.getAttribute('data-mode') || 'ask');
     }
   }
 
@@ -286,6 +328,14 @@
     var submit = form.getAttribute('data-modal-submit');
     if (submit === 'auth') {
       submitAuthForm(form);
+      return;
+    }
+
+    if (submit === 'new-session') {
+      submitNewSessionForm(form).catch(function (err) {
+        if (err && err.authRequired) return;
+        showToast('Failed to start session: ' + errorMessage(err), 'error');
+      });
     }
   }
 
@@ -306,6 +356,243 @@
         if (err && err.authRequired) return;
         showToast('Failed to authenticate: ' + errorMessage(err), 'error');
       });
+  }
+
+  async function openNewSessionModal() {
+    var results = await Promise.all([
+      apiCall('/api/config/profiles', 'GET', null, { allow404: true }),
+      apiCall('/api/config/loops', 'GET', null, { allow404: true })
+    ]);
+
+    var profiles = arrayOrEmpty(results[0]).map(function (profile) {
+      return {
+        name: profile && profile.name ? String(profile.name) : '',
+        agent: profile && profile.agent ? String(profile.agent) : '',
+        model: profile && profile.model ? String(profile.model) : ''
+      };
+    }).filter(function (profile) {
+      return !!profile.name;
+    }).sort(function (a, b) {
+      return a.name.localeCompare(b.name);
+    });
+
+    var loops = arrayOrEmpty(results[1]).map(function (loop) {
+      return {
+        name: loop && loop.name ? String(loop.name) : '',
+        steps: arrayOrEmpty(loop && loop.steps)
+      };
+    }).filter(function (loop) {
+      return !!loop.name;
+    }).sort(function (a, b) {
+      return a.name.localeCompare(b.name);
+    });
+
+    openModal('New Session', renderNewSessionModalBody(profiles, loops));
+  }
+
+  function renderNewSessionModalBody(profiles, loops) {
+    var profileOptions = renderProfileOptions(profiles, 'Select profile');
+    var loopOptions = renderLoopOptions(loops, 'Select loop');
+
+    return '' +
+      '<form class="new-session-form" data-modal-submit="new-session" data-mode="ask">' +
+        '<input type="hidden" name="mode" value="ask">' +
+        '<div class="session-mode-switch" role="tablist" aria-label="Session mode">' +
+          '<button type="button" class="session-mode-btn active" data-action="set-new-session-mode" data-mode="ask">Ask</button>' +
+          '<button type="button" class="session-mode-btn" data-action="set-new-session-mode" data-mode="pm">PM</button>' +
+          '<button type="button" class="session-mode-btn" data-action="set-new-session-mode" data-mode="loop">Loop</button>' +
+        '</div>' +
+
+        '<section class="new-session-panel" data-mode-panel="ask">' +
+          '<div class="form-grid">' +
+            '<div class="form-field form-span-2"><label>Profile</label><select name="ask_profile">' + profileOptions + '</select></div>' +
+            '<div class="form-field form-span-2"><label>Prompt</label><textarea name="ask_prompt" placeholder="Describe what the agent should do"></textarea></div>' +
+            '<div class="form-field form-span-2"><label>Plan ID (optional)</label><input type="text" name="ask_plan_id" placeholder="plan-id"></div>' +
+          '</div>' +
+        '</section>' +
+
+        '<section class="new-session-panel" data-mode-panel="pm">' +
+          '<div class="form-grid">' +
+            '<div class="form-field form-span-2"><label>Profile</label><select name="pm_profile">' + profileOptions + '</select></div>' +
+            '<div class="form-field form-span-2"><label>Plan ID (optional)</label><input type="text" name="pm_plan_id" placeholder="plan-id"></div>' +
+          '</div>' +
+        '</section>' +
+
+        '<section class="new-session-panel" data-mode-panel="loop">' +
+          '<div class="form-grid">' +
+            '<div class="form-field form-span-2"><label>Loop Definition</label><select name="loop_name">' + loopOptions + '</select></div>' +
+            '<div class="form-field form-span-2"><label>Plan ID (optional)</label><input type="text" name="loop_plan_id" placeholder="plan-id"></div>' +
+          '</div>' +
+        '</section>' +
+
+        '<div class="form-actions">' +
+          '<button type="button" data-action="close-modal">Cancel</button>' +
+          '<button type="submit" class="primary">Start Session</button>' +
+        '</div>' +
+      '</form>';
+  }
+
+  function renderProfileOptions(profiles, placeholder) {
+    var list = arrayOrEmpty(profiles);
+    if (!list.length) {
+      return '<option value="">' + escapeHTML(placeholder || 'No profiles configured') + '</option>';
+    }
+
+    var options = '<option value="">' + escapeHTML(placeholder || 'Select profile') + '</option>';
+    options += list.map(function (profile) {
+      var label = profile.name;
+      var meta = [];
+      if (profile.agent) meta.push(profile.agent);
+      if (profile.model) meta.push(profile.model);
+      if (meta.length) label += ' (' + meta.join(' · ') + ')';
+      return '<option value="' + escapeHTML(profile.name) + '">' + escapeHTML(label) + '</option>';
+    }).join('');
+
+    return options;
+  }
+
+  function renderLoopOptions(loops, placeholder) {
+    var list = arrayOrEmpty(loops);
+    if (!list.length) {
+      return '<option value="">' + escapeHTML(placeholder || 'No loops configured') + '</option>';
+    }
+
+    var options = '<option value="">' + escapeHTML(placeholder || 'Select loop') + '</option>';
+    options += list.map(function (loop) {
+      var stepCount = arrayOrEmpty(loop.steps).length;
+      var label = loop.name + (stepCount ? (' (' + stepCount + ' steps)') : '');
+      return '<option value="' + escapeHTML(loop.name) + '">' + escapeHTML(label) + '</option>';
+    }).join('');
+
+    return options;
+  }
+
+  function setNewSessionModeInForm(form, mode) {
+    if (!form) return;
+
+    var nextMode = String(mode || 'ask').toLowerCase();
+    if (nextMode !== 'ask' && nextMode !== 'pm' && nextMode !== 'loop') {
+      nextMode = 'ask';
+    }
+
+    form.setAttribute('data-mode', nextMode);
+
+    var hidden = form.querySelector('input[name="mode"]');
+    if (hidden) hidden.value = nextMode;
+
+    var buttons = form.querySelectorAll('[data-action="set-new-session-mode"]');
+    for (var i = 0; i < buttons.length; i += 1) {
+      var btn = buttons[i];
+      var buttonMode = btn.getAttribute('data-mode') || 'ask';
+      btn.classList.toggle('active', buttonMode === nextMode);
+    }
+  }
+
+  async function submitNewSessionForm(form) {
+    if (!form) return;
+
+    var mode = readString(form, 'mode');
+    if (mode !== 'ask' && mode !== 'pm' && mode !== 'loop') mode = 'ask';
+
+    var endpoint = '';
+    var payload = {};
+
+    if (mode === 'ask') {
+      var askProfile = readString(form, 'ask_profile');
+      var askPrompt = readString(form, 'ask_prompt');
+      var askPlanID = readString(form, 'ask_plan_id');
+
+      if (!askProfile || !askPrompt) {
+        showToast('Ask mode requires profile and prompt.', 'error');
+        return;
+      }
+
+      endpoint = apiBase() + '/sessions/ask';
+      payload = { profile: askProfile, prompt: askPrompt };
+      if (askPlanID) payload.plan_id = askPlanID;
+    } else if (mode === 'pm') {
+      var pmProfile = readString(form, 'pm_profile');
+      var pmPlanID = readString(form, 'pm_plan_id');
+
+      if (!pmProfile) {
+        showToast('PM mode requires a profile.', 'error');
+        return;
+      }
+
+      endpoint = apiBase() + '/sessions/pm';
+      payload = { profile: pmProfile };
+      if (pmPlanID) payload.plan_id = pmPlanID;
+    } else {
+      var loopName = readString(form, 'loop_name');
+      var loopPlanID = readString(form, 'loop_plan_id');
+
+      if (!loopName) {
+        showToast('Loop mode requires a loop definition.', 'error');
+        return;
+      }
+
+      endpoint = apiBase() + '/sessions/loop';
+      payload = {
+        loop_name: loopName,
+        loop: loopName
+      };
+      if (loopPlanID) payload.plan_id = loopPlanID;
+    }
+
+    var response = null;
+    if (mode === 'pm') {
+      try {
+        response = await apiCall(endpoint, 'POST', payload);
+      } catch (err) {
+        if (/message are required/i.test(errorMessage(err))) {
+          var fallbackPayload = Object.assign({}, payload, {
+            message: 'Start PM session.'
+          });
+          response = await apiCall(endpoint, 'POST', fallbackPayload);
+        } else {
+          throw err;
+        }
+      }
+    } else {
+      response = await apiCall(endpoint, 'POST', payload);
+    }
+
+    var sessionID = Number(response && response.id);
+    if (Number.isFinite(sessionID) && sessionID > 0) {
+      state.selectedScope = 'session-' + sessionID;
+      state.sessionMessageDraft = '';
+    }
+
+    closeModal();
+    showToast('Session started.', 'success');
+    await refreshCoreData(false);
+  }
+
+  async function stopSessionByID(sessionID) {
+    var session = state.sessions.find(function (item) {
+      return item.id === sessionID;
+    }) || null;
+    if (!session) {
+      showToast('Session not found.', 'error');
+      return;
+    }
+
+    if (!STATUS_RUNNING[normalizeStatus(session.status)]) {
+      showToast('Session is not running.', 'error');
+      return;
+    }
+
+    var shouldStop = window.confirm('Stop session #' + sessionID + '?');
+    if (!shouldStop) return;
+
+    try {
+      await apiCall(apiBase() + '/sessions/' + encodeURIComponent(String(sessionID)) + '/stop', 'POST', {});
+      showToast('Stop signal sent for session #' + sessionID + '.', 'success');
+      await refreshCoreData(false);
+    } catch (err) {
+      if (err && err.authRequired) return;
+      showToast('Failed to stop session: ' + errorMessage(err), 'error');
+    }
   }
 
   async function initializeProjects() {
@@ -1714,9 +2001,21 @@
               '</button>';
           }).join('') +
         '</div>' +
+        renderLeftViewHeader() +
         '<div class="left-content">' + contentHTML + '</div>' +
         renderLeftFooter() +
       '</aside>';
+  }
+
+  function renderLeftViewHeader() {
+    if (state.leftView !== 'agents') return '';
+
+    return '' +
+      '<div class="left-view-header">' +
+        '<span class="left-view-title">Sessions</span>' +
+        '<span class="left-view-meta mono">' + state.sessions.length + ' turns · ' + state.spawns.length + ' spawns</span>' +
+        '<button class="left-view-action primary" data-action="open-new-session-modal">New Session</button>' +
+      '</div>';
   }
 
   function renderLeftFooter() {
@@ -1790,6 +2089,9 @@
       var rootSpawns = rootsBySession[session.id] || [];
       var expanded = state.expandedNodes.has(sessionNodeID);
       var status = normalizeStatus(session.status);
+      var stopControl = STATUS_RUNNING[status]
+        ? '<button class="session-stop-btn" data-action="stop-session" data-session-id="' + session.id + '" title="Stop session">■</button>'
+        : '';
 
       var childrenHTML = '';
       if (expanded) {
@@ -1818,6 +2120,7 @@
                 (session.action ? (' · <span style="color:#a6adc8">' + escapeHTML(session.action) + '</span>') : '') +
               '</div>' +
             '</div>' +
+            stopControl +
             (rootSpawns.length ? '<span class="count-chip spawn-chip">' + icon('fork', '') + rootSpawns.length + '</span>' : '') +
           '</div>' +
           childrenHTML +
@@ -2016,6 +2319,7 @@
       '<section class="right-panel">' +
         renderRightTabBar() +
         '<div class="right-content">' + renderRightLayerContent() + '</div>' +
+        renderSessionMessageBar() +
         renderStatusBar() +
       '</section>';
   }
@@ -2171,6 +2475,92 @@
             '</div>';
         }).join('') +
       '</div>';
+  }
+
+  function selectedRunningSession() {
+    if (!state.selectedScope || state.selectedScope.indexOf('session-') !== 0) return null;
+
+    var sessionID = parseInt(state.selectedScope.slice(8), 10);
+    if (Number.isNaN(sessionID) || sessionID <= 0) return null;
+
+    var session = state.sessions.find(function (item) {
+      return item.id === sessionID;
+    }) || null;
+    if (!session) return null;
+
+    if (!STATUS_RUNNING[normalizeStatus(session.status)]) return null;
+    return session;
+  }
+
+  function resolveSessionMessageTarget() {
+    var runningSession = selectedRunningSession();
+    if (!runningSession) return null;
+
+    var loopID = Number(state.loopRun && state.loopRun.id);
+    var loopStatus = normalizeStatus(state.loopRun && state.loopRun.status);
+    if (loopID > 0 && STATUS_RUNNING[loopStatus] && !!runningSession.loop_name) {
+      return {
+        kind: 'loop',
+        id: loopID,
+        sessionID: runningSession.id
+      };
+    }
+
+    return {
+      kind: 'session',
+      id: runningSession.id,
+      sessionID: runningSession.id
+    };
+  }
+
+  function renderSessionMessageBar() {
+    var target = resolveSessionMessageTarget();
+    if (!target) return '';
+
+    var targetLabel = target.kind === 'loop'
+      ? ('loop #' + target.id + ' (session #' + target.sessionID + ')')
+      : ('session #' + target.id);
+
+    return '' +
+      '<form class="session-message-bar" data-form="session-message">' +
+        '<span class="session-message-target mono">' + escapeHTML(targetLabel) + '</span>' +
+        '<input type="text" name="session_message" data-input="session-message" value="' + escapeHTML(state.sessionMessageDraft) + '" placeholder="Send message to running session" autocomplete="off">' +
+        '<button type="submit" class="session-message-send">Send</button>' +
+      '</form>';
+  }
+
+  async function submitSessionMessageForm(form) {
+    var target = resolveSessionMessageTarget();
+    if (!target) {
+      showToast('Select a running session to send a message.', 'error');
+      return;
+    }
+
+    var message = readString(form, 'session_message');
+    if (!message) {
+      showToast('Message is required.', 'error');
+      return;
+    }
+
+    var path = '';
+    if (target.kind === 'loop') {
+      path = apiBase() + '/loops/' + encodeURIComponent(String(target.id)) + '/message';
+    } else {
+      path = apiBase() + '/sessions/' + encodeURIComponent(String(target.id)) + '/message';
+    }
+
+    await apiCall(path, 'POST', {
+      message: message,
+      content: message
+    });
+
+    state.sessionMessageDraft = '';
+
+    if (target.kind === 'loop' && target.id > 0) {
+      await refreshLoopMessages(target.id);
+    }
+
+    renderApp();
   }
 
   function renderStatusBar() {
