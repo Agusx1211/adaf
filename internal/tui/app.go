@@ -2,9 +2,14 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -137,6 +142,9 @@ type AppModel struct {
 	sessionClient *session.Client
 	sessionID     int
 
+	// Web server status.
+	webServerURL string
+
 	// Shared Bubbles editors for text-entry states.
 	textInput    textinput.Model
 	textInputKey string
@@ -165,6 +173,7 @@ func NewApp(s *store.Store) AppModel {
 		viewScroll:    map[appState]int{},
 		viewPaneFocus: map[appState]bool{},
 	}
+	m.checkWebDaemon()
 	m.loadProjectData()
 	m.rebuildProfiles()
 	return m
@@ -245,6 +254,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case selectorRefreshMsg:
+		m.checkWebDaemon()
 		if m.state == stateSelector {
 			m.loadProjectData()
 		}
@@ -473,6 +483,8 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.loadProjectData()
 			}
 			return m, nil
+		case "w":
+			return m.handleWebHotkey()
 		}
 	}
 	return m, nil
@@ -1106,6 +1118,9 @@ func (m AppModel) renderHeader() string {
 	if id := activePlanID(m.project, m.plan); id != "" {
 		title += " [" + id + "]"
 	}
+	if m.webServerURL != "" {
+		title += " [web]"
+	}
 	title += " "
 	return lipgloss.NewStyle().
 		Bold(true).
@@ -1144,6 +1159,7 @@ func (m AppModel) renderStatusBar() string {
 		add("e", "edit")
 		add("d", "delete")
 		add("s", "sessions")
+		add("w", "web")
 		add("S", "settings")
 		if msg := strings.TrimSpace(m.selector.Msg); msg != "" {
 			maxW := m.width / 3
@@ -1323,4 +1339,74 @@ func activePlanID(project *store.ProjectConfig, plan *store.Plan) string {
 		return strings.TrimSpace(project.ActivePlanID)
 	}
 	return ""
+}
+
+func (m *AppModel) checkWebDaemon() {
+	path := filepath.Join(config.Dir(), "web.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		m.webServerURL = ""
+		return
+	}
+
+	var info struct {
+		PID int    `json:"pid"`
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(data, &info); err != nil {
+		m.webServerURL = ""
+		return
+	}
+
+	// Check if PID is alive.
+	proc, err := os.FindProcess(info.PID)
+	if err != nil {
+		m.webServerURL = ""
+		return
+	}
+
+	// On Unix, Signal(0) checks if the process exists.
+	// On Windows, FindProcess already did the work.
+	if runtime.GOOS != "windows" {
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			m.webServerURL = ""
+			return
+		}
+	}
+
+	m.webServerURL = info.URL
+}
+
+func (m AppModel) handleWebHotkey() (tea.Model, tea.Cmd) {
+	m.checkWebDaemon()
+	if m.webServerURL != "" {
+		if err := openBrowser(m.webServerURL); err != nil {
+			m.selector.Msg = "Open browser failed: " + err.Error()
+		} else {
+			m.selector.Msg = "Opened web UI"
+		}
+		return m, nil
+	}
+
+	// Start web daemon.
+	cmd := exec.Command("adaf", "web", "--daemon", "--open")
+	if err := cmd.Start(); err != nil {
+		m.selector.Msg = "Start web failed: " + err.Error()
+	} else {
+		m.selector.Msg = "Starting web server..."
+	}
+	return m, nil
+}
+
+func openBrowser(url string) error {
+	switch runtime.GOOS {
+	case "linux":
+		return exec.Command("xdg-open", url).Start()
+	case "darwin":
+		return exec.Command("open", url).Start()
+	case "windows":
+		return exec.Command("cmd", "/c", "start", url).Start()
+	default:
+		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
+	}
 }
