@@ -11,10 +11,7 @@
   <header class="app-header">
     <nav id="nav" aria-label="Primary">
       <span class="logo">ADAF</span>
-      <span class="conn-status" id="conn-status" aria-live="polite">
-        <span class="conn-dot offline" id="conn-dot"></span>
-        <span id="conn-label">Offline</span>
-      </span>
+      <select id="project-select" class="project-select" title="Switch project" style="display:none"></select>
       <a href="#" data-tab="dashboard" class="active" aria-current="page">Dashboard</a>
       <a href="#" data-tab="sessions">Sessions</a>
       <a href="#" data-tab="plans">Plans</a>
@@ -22,6 +19,10 @@
       <a href="#" data-tab="docs">Docs</a>
       <a href="#" data-tab="config">Config</a>
       <a href="#" data-tab="terminal">Terminal</a>
+      <span class="conn-status" id="conn-status" aria-live="polite">
+        <span class="conn-dot offline" id="conn-dot"></span>
+        <span id="conn-label">Offline</span>
+      </span>
     </nav>
   </header>
 

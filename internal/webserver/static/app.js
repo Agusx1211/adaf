@@ -14,9 +14,26 @@
   var ISSUE_PRIORITIES = ['critical', 'high', 'medium', 'low'];
   var PLAN_PHASE_STATUSES = ['not_started', 'in_progress', 'complete', 'blocked'];
 
+  function createEmptyCache() {
+    return {
+      plans: [],
+      planDetail: null,
+      issues: [],
+      docs: [],
+      profiles: [],
+      loops: [],
+      roles: [],
+      rules: [],
+      pushover: {}
+    };
+  }
+
   var state = {
     tab: '',
     authToken: '',
+    projects: [],
+    currentProjectID: '',
+    multiProject: false,
     dashboardTimer: null,
     selectedSessionID: null,
     selectedPlanID: '',
@@ -36,17 +53,7 @@
     loadingCount: 0,
     modal: null,
     sessionStreams: {},
-    cache: {
-      plans: [],
-      planDetail: null,
-      issues: [],
-      docs: [],
-      profiles: [],
-      loops: [],
-      roles: [],
-      rules: [],
-      pushover: {}
-    }
+    cache: createEmptyCache()
   };
 
   var nav = document.getElementById('nav');
@@ -56,6 +63,7 @@
   var loadingNode = document.getElementById('global-loading');
   var connDot = document.getElementById('conn-dot');
   var connLabel = document.getElementById('conn-label');
+  var projectSelect = document.getElementById('project-select');
 
   function init() {
     if (!nav || !content || !modalRoot) return;
@@ -69,6 +77,12 @@
       event.preventDefault();
       switchTab(link.getAttribute('data-tab'));
     });
+
+    if (projectSelect) {
+      projectSelect.addEventListener('change', function () {
+        switchProject(projectSelect.value || '', true);
+      });
+    }
 
     content.addEventListener('click', onContentClick);
     content.addEventListener('submit', onContentSubmit);
@@ -84,7 +98,130 @@
       }
     });
 
-    switchTab('dashboard');
+    initializeProjects().finally(function () {
+      switchTab('dashboard');
+    });
+  }
+
+  async function initializeProjects() {
+    try {
+      var projects = arrayOrEmpty(await apiCall('/api/projects', 'GET', null, { allow404: true }));
+      state.projects = projects;
+      state.multiProject = projects.length > 1;
+
+      if (state.multiProject) {
+        var defaultProject = projects.find(function (project) {
+          return !!(project && project.is_default);
+        }) || projects[0] || null;
+        state.currentProjectID = defaultProject && defaultProject.id ? String(defaultProject.id) : '';
+      } else {
+        state.currentProjectID = '';
+      }
+    } catch (err) {
+      if (!(err && err.authRequired)) {
+        state.projects = [];
+        state.multiProject = false;
+        state.currentProjectID = '';
+      }
+    }
+
+    updateProjectSelect();
+    updateDocumentTitle();
+  }
+
+  function updateProjectSelect() {
+    if (!projectSelect) return;
+
+    if (!state.multiProject) {
+      projectSelect.innerHTML = '';
+      projectSelect.style.display = 'none';
+      return;
+    }
+
+    projectSelect.innerHTML = state.projects.map(function (project) {
+      var id = project && project.id ? String(project.id) : '';
+      var name = project && project.name ? project.name : id || 'Unnamed Project';
+      var label = project && project.is_default ? (name + ' (default)') : name;
+      return '<option value="' + escapeHTML(id) + '">' + escapeHTML(label) + '</option>';
+    }).join('');
+
+    projectSelect.value = state.currentProjectID;
+    projectSelect.style.display = '';
+  }
+
+  function findProjectByID(projectID) {
+    var id = String(projectID || '');
+    if (!id) return null;
+    return state.projects.find(function (project) {
+      return project && String(project.id || '') === id;
+    }) || null;
+  }
+
+  function currentProject() {
+    if (state.multiProject && state.currentProjectID) {
+      return findProjectByID(state.currentProjectID);
+    }
+    return state.projects.find(function (project) {
+      return !!(project && project.is_default);
+    }) || state.projects[0] || null;
+  }
+
+  function currentProjectName() {
+    var project = currentProject();
+    if (!project) return '';
+    return project.name || project.id || '';
+  }
+
+  function updateDocumentTitle(preferredName) {
+    var name = preferredName || currentProjectName();
+    document.title = name ? ('ADAF - ' + name) : 'ADAF';
+  }
+
+  function resetProjectScopedState() {
+    if (state.dashboardTimer) {
+      clearInterval(state.dashboardTimer);
+      state.dashboardTimer = null;
+    }
+
+    disconnectSessionSocket();
+    state.selectedSessionID = null;
+    state.selectedPlanID = '';
+    state.selectedIssueID = null;
+    state.selectedDocID = '';
+    state.docsPlanFilter = 'all';
+    state.issueStatusFilter = 'all';
+    state.issuePriorityFilter = 'all';
+    state.sessionStreams = {};
+    state.cache = createEmptyCache();
+  }
+
+  function switchProject(projectID, refreshTab) {
+    if (!state.multiProject) return;
+
+    var nextID = String(projectID || '');
+    if (!findProjectByID(nextID)) return;
+
+    if (nextID === state.currentProjectID && !refreshTab) {
+      updateProjectSelect();
+      return;
+    }
+
+    closeModal();
+    resetProjectScopedState();
+    state.currentProjectID = nextID;
+    updateProjectSelect();
+    updateDocumentTitle();
+
+    if (refreshTab && state.tab) {
+      renderCurrentTab();
+    }
+  }
+
+  function apiBase() {
+    if (state.multiProject && state.currentProjectID) {
+      return '/api/projects/' + encodeURIComponent(state.currentProjectID);
+    }
+    return '/api';
   }
 
   function loadAuthToken() {
@@ -180,6 +317,12 @@
     if (action === 'go-tab') {
       var targetTab = actionNode.getAttribute('data-tab') || 'dashboard';
       switchTab(targetTab);
+      return;
+    }
+
+    if (action === 'switch-project') {
+      var targetProjectID = actionNode.getAttribute('data-project-id') || '';
+      switchProject(targetProjectID, true);
       return;
     }
 
@@ -533,13 +676,29 @@
     renderLoading('dashboard');
 
     try {
-      var results = await Promise.all([
-        apiCall('/api/project', 'GET', null, { allow404: true }),
-        apiCall('/api/plans', 'GET'),
-        apiCall('/api/issues?status=open', 'GET'),
-        apiCall('/api/sessions', 'GET'),
-        apiCall('/api/docs', 'GET')
-      ]);
+      var results;
+      var globalDashboard = null;
+
+      if (state.multiProject) {
+        var multiResults = await Promise.all([
+          apiCall('/api/projects/dashboard', 'GET'),
+          apiCall(apiBase() + '/project', 'GET', null, { allow404: true }),
+          apiCall(apiBase() + '/plans', 'GET'),
+          apiCall(apiBase() + '/issues?status=open', 'GET'),
+          apiCall(apiBase() + '/sessions', 'GET'),
+          apiCall(apiBase() + '/docs', 'GET')
+        ]);
+        globalDashboard = multiResults[0];
+        results = multiResults.slice(1);
+      } else {
+        results = await Promise.all([
+          apiCall(apiBase() + '/project', 'GET', null, { allow404: true }),
+          apiCall(apiBase() + '/plans', 'GET'),
+          apiCall(apiBase() + '/issues?status=open', 'GET'),
+          apiCall(apiBase() + '/sessions', 'GET'),
+          apiCall(apiBase() + '/docs', 'GET')
+        ]);
+      }
 
       if (state.tab !== tab) return;
 
@@ -551,45 +710,31 @@
 
       state.cache.plans = plans;
 
-      var activePlan = findActivePlan(project, plans);
-      var summary = summarizePlanPhases(activePlan);
+      var titleName = currentProjectName() || project.name || '';
+      updateDocumentTitle(titleName);
 
-      content.innerHTML = '' +
-        '<section class="grid">' +
-          '<article class="card span-6">' +
-            '<h2>Project</h2>' +
-            '<p><strong>' + escapeHTML(project.name || 'Uninitialized') + '</strong></p>' +
-            '<p class="meta">Repo: ' + escapeHTML(project.repo_path || 'N/A') + '</p>' +
-            '<p class="meta">Active plan: ' + escapeHTML(activePlan ? activePlan.id : 'none') + '</p>' +
-            '<div class="button-row"><button data-action="go-tab" data-tab="sessions">Open Sessions</button><button data-action="go-tab" data-tab="config">Open Config</button></div>' +
-          '</article>' +
-          '<article class="card span-6">' +
-            '<h2>Plan Snapshot</h2>' +
-            '<div class="filters">' +
-              createPill('complete', summary.complete) +
-              createPill('in_progress', summary.in_progress) +
-              createPill('not_started', summary.not_started) +
-              createPill('blocked', summary.blocked) +
-            '</div>' +
-            '<p class="meta">Total phases: ' + summary.total + '</p>' +
-            '<div class="button-row"><button data-action="go-tab" data-tab="plans">Manage Plans</button></div>' +
-          '</article>' +
-          '<article class="card span-4">' +
-            '<h2>Open Issues (' + openIssues.length + ')</h2>' +
-            renderDashboardIssues(openIssues.slice(0, 6)) +
-            '<div class="button-row"><button data-action="go-tab" data-tab="issues">View All Issues</button></div>' +
-          '</article>' +
-          '<article class="card span-4">' +
-            '<h2>Recent Sessions</h2>' +
-            renderDashboardSessions(sessions.slice(0, 6)) +
-            '<div class="button-row"><button data-action="go-tab" data-tab="sessions">Control Sessions</button></div>' +
-          '</article>' +
-          '<article class="card span-4">' +
-            '<h2>Docs (' + docs.length + ')</h2>' +
-            renderDashboardDocs(docs.slice(0, 6)) +
-            '<div class="button-row"><button data-action="go-tab" data-tab="docs">Manage Docs</button></div>' +
-          '</article>' +
-        '</section>';
+      if (state.multiProject) {
+        var globalProjects = arrayOrEmpty(globalDashboard && globalDashboard.projects);
+        content.innerHTML = '' +
+          '<section class="grid">' +
+            '<article class="card span-12">' +
+              '<div class="card-title-row"><h2>Global Overview</h2><span class="meta">All registered projects</span></div>' +
+              renderGlobalDashboardOverview(globalProjects) +
+            '</article>' +
+          '</section>' +
+          '<section class="grid">' +
+            '<article class="card span-12">' +
+              '<h2>Current Project: ' + escapeHTML(titleName || 'Selected Project') + '</h2>' +
+              '<p class="meta">Project-scoped details for the active selection.</p>' +
+            '</article>' +
+            renderProjectDashboardCards(project, plans, openIssues, sessions, docs) +
+          '</section>';
+      } else {
+        content.innerHTML = '' +
+          '<section class="grid">' +
+            renderProjectDashboardCards(project, plans, openIssues, sessions, docs) +
+          '</section>';
+      }
 
       if (!state.dashboardTimer && state.tab === 'dashboard') {
         state.dashboardTimer = setInterval(function () {
@@ -600,6 +745,106 @@
       if (err && err.authRequired) return;
       renderError('Failed to load dashboard: ' + errorMessage(err));
     }
+  }
+
+  function renderProjectDashboardCards(project, plans, openIssues, sessions, docs) {
+    var activePlan = findActivePlan(project, plans);
+    var summary = summarizePlanPhases(activePlan);
+    var name = project && project.name ? project.name : (currentProjectName() || 'Uninitialized');
+    var repoPath = project && (project.repo_path || project.path) ? (project.repo_path || project.path) : 'N/A';
+
+    return '' +
+      '<article class="card span-6">' +
+        '<h2>Project</h2>' +
+        '<p><strong>' + escapeHTML(name) + '</strong></p>' +
+        '<p class="meta">Repo: ' + escapeHTML(repoPath) + '</p>' +
+        '<p class="meta">Active plan: ' + escapeHTML(activePlan ? activePlan.id : 'none') + '</p>' +
+        '<div class="button-row"><button data-action="go-tab" data-tab="sessions">Open Sessions</button><button data-action="go-tab" data-tab="config">Open Config</button></div>' +
+      '</article>' +
+      '<article class="card span-6">' +
+        '<h2>Plan Snapshot</h2>' +
+        '<div class="filters">' +
+          createPill('complete', summary.complete) +
+          createPill('in_progress', summary.in_progress) +
+          createPill('not_started', summary.not_started) +
+          createPill('blocked', summary.blocked) +
+        '</div>' +
+        '<p class="meta">Total phases: ' + summary.total + '</p>' +
+        '<div class="button-row"><button data-action="go-tab" data-tab="plans">Manage Plans</button></div>' +
+      '</article>' +
+      '<article class="card span-4">' +
+        '<h2>Open Issues (' + openIssues.length + ')</h2>' +
+        renderDashboardIssues(openIssues.slice(0, 6)) +
+        '<div class="button-row"><button data-action="go-tab" data-tab="issues">View All Issues</button></div>' +
+      '</article>' +
+      '<article class="card span-4">' +
+        '<h2>Recent Sessions</h2>' +
+        renderDashboardSessions(sessions.slice(0, 6)) +
+        '<div class="button-row"><button data-action="go-tab" data-tab="sessions">Control Sessions</button></div>' +
+      '</article>' +
+      '<article class="card span-4">' +
+        '<h2>Docs (' + docs.length + ')</h2>' +
+        renderDashboardDocs(docs.slice(0, 6)) +
+        '<div class="button-row"><button data-action="go-tab" data-tab="docs">Manage Docs</button></div>' +
+      '</article>';
+  }
+
+  function renderGlobalDashboardOverview(projects) {
+    var list = arrayOrEmpty(projects);
+    if (!list.length) return '<p class="empty">No project summary data available.</p>';
+
+    var totals = summarizeGlobalProjects(list);
+
+    return '' +
+      '<div class="session-metrics">' +
+        metricCard('Projects', formatNumber(totals.projects)) +
+        metricCard('Open Issues', formatNumber(totals.openIssues)) +
+        metricCard('Plans', formatNumber(totals.plans)) +
+        metricCard('Turns', formatNumber(totals.turns)) +
+      '</div>' +
+      '<div class="project-cards">' +
+        list.map(function (project) {
+          var id = project && project.id ? String(project.id) : '';
+          var name = project && project.name ? project.name : id || 'Unnamed Project';
+          var active = id && id === state.currentProjectID;
+          var badges = '';
+          if (project && project.is_default) badges += createPill('active', 'default');
+          if (active) badges += createPill('running', 'current');
+
+          return '' +
+            '<button type="button" class="project-card' + (active ? ' active' : '') + '" data-action="switch-project" data-project-id="' + escapeHTML(id) + '">' +
+              '<div class="card-title-row">' +
+                '<h3>' + escapeHTML(name) + '</h3>' +
+                '<div class="filters">' + badges + '</div>' +
+              '</div>' +
+              '<p class="meta mono">' + escapeHTML((project && project.path) || 'unknown path') + '</p>' +
+              '<div class="project-card-stats">' +
+                '<span><strong>' + formatNumber(project && project.open_issue_count) + '</strong> open issues</span>' +
+                '<span><strong>' + formatNumber(project && project.plan_count) + '</strong> plans</span>' +
+                '<span><strong>' + formatNumber(project && project.turn_count) + '</strong> turns</span>' +
+              '</div>' +
+              '<p class="meta">Active plan: ' + escapeHTML((project && project.active_plan_id) || 'none') + '</p>' +
+            '</button>';
+        }).join('') +
+      '</div>';
+  }
+
+  function summarizeGlobalProjects(projects) {
+    var totals = {
+      projects: 0,
+      openIssues: 0,
+      plans: 0,
+      turns: 0
+    };
+
+    arrayOrEmpty(projects).forEach(function (project) {
+      totals.projects += 1;
+      totals.openIssues += Number(project && project.open_issue_count) || 0;
+      totals.plans += Number(project && project.plan_count) || 0;
+      totals.turns += Number(project && project.turn_count) || 0;
+    });
+
+    return totals;
   }
 
   function renderDashboardIssues(issues) {
@@ -618,10 +863,14 @@
   function renderDashboardSessions(sessions) {
     if (!sessions.length) return '<p class="empty">No sessions found.</p>';
     return '<ul class="list">' + sessions.map(function (session) {
+      var projectMeta = '';
+      if (state.multiProject) {
+        projectMeta = ' · ' + escapeHTML(session.project_name || 'Unknown project');
+      }
       return '' +
         '<li>' +
           '<div class="list-item">' +
-            '<div class="list-item-main"><strong>#' + session.id + ' · ' + escapeHTML(session.profile_name || session.agent_name || 'session') + '</strong><span class="meta">' + escapeHTML(formatRelativeTime(session.started_at)) + '</span></div>' +
+            '<div class="list-item-main"><strong>#' + session.id + ' · ' + escapeHTML(session.profile_name || session.agent_name || 'session') + '</strong><span class="meta">' + escapeHTML(formatRelativeTime(session.started_at)) + projectMeta + '</span></div>' +
             '<div class="list-item-actions">' + createPill(session.status || 'unknown', session.status || 'unknown') + '<button data-action="open-session-tab" data-session-id="' + session.id + '">Open</button></div>' +
           '</div>' +
         '</li>';
@@ -646,10 +895,10 @@
 
     try {
       var results = await Promise.all([
-        apiCall('/api/sessions', 'GET'),
+        apiCall(apiBase() + '/sessions', 'GET'),
         apiCall('/api/config/profiles', 'GET'),
         apiCall('/api/config/loops', 'GET'),
-        apiCall('/api/plans', 'GET')
+        apiCall(apiBase() + '/plans', 'GET')
       ]);
 
       if (state.tab !== tab) return;
@@ -700,7 +949,12 @@
     return '<ul class="list">' + sessions.map(function (session) {
       var active = !!SESSION_ACTIVE[normalizeStatus(session.status)];
       var selected = session.id === state.selectedSessionID;
+      var projectMeta = '';
       var messageForm = '';
+
+      if (state.multiProject) {
+        projectMeta = ' · ' + escapeHTML(session.project_name || 'Unknown project');
+      }
 
       if (active) {
         messageForm = '' +
@@ -716,7 +970,7 @@
           '<div class="list-item">' +
             '<div class="list-item-main">' +
               '<strong>#' + session.id + ' · ' + escapeHTML(session.profile_name || session.agent_name || 'session') + '</strong>' +
-              '<span class="meta">' + escapeHTML(formatRelativeTime(session.started_at)) + '</span>' +
+              '<span class="meta">' + escapeHTML(formatRelativeTime(session.started_at)) + projectMeta + '</span>' +
               '<div class="filters">' + createPill(session.status || 'unknown', session.status || 'unknown') + '</div>' +
             '</div>' +
             '<div class="list-item-actions">' +
@@ -779,7 +1033,7 @@
     }
 
     try {
-      await apiCall('/api/sessions/' + encodeURIComponent(String(sessionID)) + '/message', 'POST', {
+      await apiCall(apiBase() + '/sessions/' + encodeURIComponent(String(sessionID)) + '/message', 'POST', {
         content: contentText
       });
       form.reset();
@@ -799,7 +1053,7 @@
     if (!window.confirm('Stop session #' + sessionID + '?')) return;
 
     try {
-      await apiCall('/api/sessions/' + encodeURIComponent(String(sessionID)) + '/stop', 'POST');
+      await apiCall(apiBase() + '/sessions/' + encodeURIComponent(String(sessionID)) + '/stop', 'POST');
       showToast('Stop signal sent to session #' + sessionID + '.', 'success');
       addSessionEntry(sessionID, {
         kind: 'system',
@@ -1419,7 +1673,7 @@
     renderLoading('plans');
 
     try {
-      var plans = arrayOrEmpty(await apiCall('/api/plans', 'GET'));
+      var plans = arrayOrEmpty(await apiCall(apiBase() + '/plans', 'GET'));
       if (state.tab !== tab) return;
 
       state.cache.plans = plans;
@@ -1429,7 +1683,7 @@
 
       var detail = null;
       if (state.selectedPlanID) {
-        detail = await apiCall('/api/plans/' + encodeURIComponent(state.selectedPlanID), 'GET', null, { allow404: true });
+        detail = await apiCall(apiBase() + '/plans/' + encodeURIComponent(state.selectedPlanID), 'GET', null, { allow404: true });
       }
       if (state.tab !== tab) return;
 
@@ -1508,7 +1762,7 @@
 
   async function activatePlan(planID) {
     try {
-      await apiCall('/api/plans/' + encodeURIComponent(planID) + '/activate', 'POST');
+      await apiCall(apiBase() + '/plans/' + encodeURIComponent(planID) + '/activate', 'POST');
       showToast('Plan ' + planID + ' activated.', 'success');
       renderPlans();
     } catch (err) {
@@ -1520,7 +1774,7 @@
     if (!window.confirm('Delete plan "' + planID + '"?')) return;
 
     try {
-      await apiCall('/api/plans/' + encodeURIComponent(planID), 'DELETE');
+      await apiCall(apiBase() + '/plans/' + encodeURIComponent(planID), 'DELETE');
       showToast('Plan deleted: ' + planID, 'success');
       if (state.selectedPlanID === planID) state.selectedPlanID = '';
       renderPlans();
@@ -1534,14 +1788,14 @@
     renderLoading('issues');
 
     try {
-      var issuePath = '/api/issues';
+      var issuePath = apiBase() + '/issues';
       if (state.issueStatusFilter !== 'all') {
         issuePath += '?status=' + encodeURIComponent(state.issueStatusFilter);
       }
 
       var results = await Promise.all([
         apiCall(issuePath, 'GET'),
-        apiCall('/api/plans', 'GET')
+        apiCall(apiBase() + '/plans', 'GET')
       ]);
 
       if (state.tab !== tab) return;
@@ -1646,7 +1900,7 @@
     if (!window.confirm('Delete issue #' + issueID + '?')) return;
 
     try {
-      await apiCall('/api/issues/' + encodeURIComponent(String(issueID)), 'DELETE');
+      await apiCall(apiBase() + '/issues/' + encodeURIComponent(String(issueID)), 'DELETE');
       showToast('Issue deleted: #' + issueID, 'success');
       if (state.selectedIssueID === issueID) state.selectedIssueID = null;
       renderIssues();
@@ -1660,14 +1914,14 @@
     renderLoading('docs');
 
     try {
-      var docsPath = '/api/docs';
+      var docsPath = apiBase() + '/docs';
       if (state.docsPlanFilter !== 'all') {
         docsPath += '?plan=' + encodeURIComponent(state.docsPlanFilter);
       }
 
       var results = await Promise.all([
         apiCall(docsPath, 'GET'),
-        apiCall('/api/plans', 'GET')
+        apiCall(apiBase() + '/plans', 'GET')
       ]);
 
       if (state.tab !== tab) return;
@@ -1748,7 +2002,7 @@
     if (!window.confirm('Delete doc "' + docID + '"?')) return;
 
     try {
-      await apiCall('/api/docs/' + encodeURIComponent(docID), 'DELETE');
+      await apiCall(apiBase() + '/docs/' + encodeURIComponent(docID), 'DELETE');
       showToast('Doc deleted: ' + docID, 'success');
       if (state.selectedDocID === docID) state.selectedDocID = '';
       renderDocs();
@@ -2139,25 +2393,25 @@
       return;
     }
 
-    var path = '/api/sessions/ask';
+    var path = apiBase() + '/sessions/ask';
     var payload = {};
 
     if (sessionType === 'ask') {
-      path = '/api/sessions/ask';
+      path = apiBase() + '/sessions/ask';
       payload = {
         profile: profile,
         prompt: prompt,
         model: model || ''
       };
     } else if (sessionType === 'pm') {
-      path = '/api/sessions/pm';
+      path = apiBase() + '/sessions/pm';
       payload = {
         profile: profile,
         prompt: prompt,
         model: model || ''
       };
     } else {
-      path = '/api/sessions/loop';
+      path = apiBase() + '/sessions/loop';
       payload = {
         loop: loop,
         prompt: prompt
@@ -2215,7 +2469,7 @@
     }
 
     try {
-      await apiCall('/api/issues', 'POST', payload);
+      await apiCall(apiBase() + '/issues', 'POST', payload);
       closeModal();
       showToast('Issue created.', 'success');
       renderIssues();
@@ -2231,7 +2485,7 @@
     var payload = issuePayloadFromForm(form);
 
     try {
-      await apiCall('/api/issues/' + encodeURIComponent(String(issueID)), 'PUT', payload);
+      await apiCall(apiBase() + '/issues/' + encodeURIComponent(String(issueID)), 'PUT', payload);
       closeModal();
       showToast('Issue updated.', 'success');
       renderIssues();
@@ -2282,7 +2536,7 @@
     }
 
     try {
-      await apiCall('/api/plans', 'POST', payload);
+      await apiCall(apiBase() + '/plans', 'POST', payload);
       closeModal();
       state.selectedPlanID = payload.id;
       showToast('Plan created.', 'success');
@@ -2302,7 +2556,7 @@
     };
 
     try {
-      await apiCall('/api/plans/' + encodeURIComponent(planID), 'PUT', payload);
+      await apiCall(apiBase() + '/plans/' + encodeURIComponent(planID), 'PUT', payload);
       closeModal();
       showToast('Plan updated.', 'success');
       renderPlans();
@@ -2357,7 +2611,7 @@
     }
 
     try {
-      await apiCall('/api/plans/' + encodeURIComponent(planID) + '/phases/' + encodeURIComponent(phaseID), 'PUT', payload);
+      await apiCall(apiBase() + '/plans/' + encodeURIComponent(planID) + '/phases/' + encodeURIComponent(phaseID), 'PUT', payload);
       closeModal();
       showToast('Phase updated.', 'success');
       renderPlans();
@@ -2393,7 +2647,7 @@
     existingPhases.push(nextPhase);
 
     try {
-      await apiCall('/api/plans/' + encodeURIComponent(planID), 'PUT', {
+      await apiCall(apiBase() + '/plans/' + encodeURIComponent(planID), 'PUT', {
         phases: existingPhases
       });
       closeModal();
@@ -2434,7 +2688,7 @@
     }
 
     try {
-      var created = await apiCall('/api/docs', 'POST', payload);
+      var created = await apiCall(apiBase() + '/docs', 'POST', payload);
       closeModal();
       if (created && created.id) state.selectedDocID = created.id;
       showToast('Doc created.', 'success');
@@ -2455,7 +2709,7 @@
     };
 
     try {
-      await apiCall('/api/docs/' + encodeURIComponent(docID), 'PUT', payload);
+      await apiCall(apiBase() + '/docs/' + encodeURIComponent(docID), 'PUT', payload);
       closeModal();
       showToast('Doc updated.', 'success');
       renderDocs();
