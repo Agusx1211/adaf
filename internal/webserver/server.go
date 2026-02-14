@@ -184,8 +184,42 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/turns/{id}", srv.handleTurnByID)
 	mux.HandleFunc("GET /api/spawns", srv.handleSpawns)
 	mux.HandleFunc("GET /api/spawns/{id}", srv.handleSpawnByID)
+
+	// Session control
+	mux.HandleFunc("POST /api/sessions/ask", srv.handleStartAskSession)
+	mux.HandleFunc("POST /api/sessions/loop", srv.handleStartLoopSession)
+	mux.HandleFunc("POST /api/sessions/{id}/stop", srv.handleStopSession)
+	mux.HandleFunc("POST /api/sessions/{id}/message", srv.handleSessionMessage)
+
 	mux.HandleFunc("GET /api/sessions", srv.handleSessions)
 	mux.HandleFunc("GET /api/sessions/{id}", srv.handleSessionByID)
+
+	// Loop runs
+	mux.HandleFunc("GET /api/loops", srv.handleLoopRuns)
+	mux.HandleFunc("GET /api/loops/{id}", srv.handleLoopRunByID)
+	mux.HandleFunc("GET /api/loops/{id}/messages", srv.handleLoopMessages)
+	mux.HandleFunc("POST /api/loops/{id}/stop", srv.handleStopLoopRun)
+	mux.HandleFunc("POST /api/loops/{id}/message", srv.handleLoopRunMessage)
+
+	// Config
+	mux.HandleFunc("GET /api/config", srv.handleConfig)
+	mux.HandleFunc("GET /api/config/profiles", srv.handleListProfiles)
+	mux.HandleFunc("POST /api/config/profiles", srv.handleCreateProfile)
+	mux.HandleFunc("PUT /api/config/profiles/{name}", srv.handleUpdateProfile)
+	mux.HandleFunc("DELETE /api/config/profiles/{name}", srv.handleDeleteProfile)
+	mux.HandleFunc("GET /api/config/loops", srv.handleListLoopDefs)
+	mux.HandleFunc("POST /api/config/loops", srv.handleCreateLoopDef)
+	mux.HandleFunc("PUT /api/config/loops/{name}", srv.handleUpdateLoopDef)
+	mux.HandleFunc("DELETE /api/config/loops/{name}", srv.handleDeleteLoopDef)
+	mux.HandleFunc("GET /api/config/roles", srv.handleListRoles)
+	mux.HandleFunc("POST /api/config/roles", srv.handleCreateRole)
+	mux.HandleFunc("DELETE /api/config/roles/{name}", srv.handleDeleteRole)
+	mux.HandleFunc("GET /api/config/rules", srv.handleListRules)
+	mux.HandleFunc("POST /api/config/rules", srv.handleCreateRule)
+	mux.HandleFunc("DELETE /api/config/rules/{id}", srv.handleDeleteRule)
+	mux.HandleFunc("GET /api/config/pushover", srv.handleGetPushover)
+	mux.HandleFunc("PUT /api/config/pushover", srv.handleUpdatePushover)
+
 	mux.HandleFunc("GET /api/stats/loops", srv.handleLoopStats)
 	mux.HandleFunc("GET /api/stats/profiles", srv.handleProfileStats)
 
