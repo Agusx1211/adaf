@@ -39,7 +39,6 @@ type detailStats struct {
 	ToolCalls         int
 	AssistantMessages int
 	Spawns            int
-	Notes             int
 	LoopMessages      int
 	SpawnMessages     int
 	Issues            int
@@ -50,7 +49,6 @@ func (s *detailStats) add(other detailStats) {
 	s.ToolCalls += other.ToolCalls
 	s.AssistantMessages += other.AssistantMessages
 	s.Spawns += other.Spawns
-	s.Notes += other.Notes
 	s.LoopMessages += other.LoopMessages
 	s.SpawnMessages += other.SpawnMessages
 	s.Issues += other.Issues
@@ -357,11 +355,10 @@ func (m Model) simplifiedDetailLines() []string {
 	stats := m.scopeStatsForDisplay()
 	lines := []string{
 		dimStyle.Render(fmt.Sprintf(
-			"tools=%d messages=%d spawns=%d notes=%d loop_msgs=%d spawn_msgs=%d issues=%d docs=%d",
+			"tools=%d messages=%d spawns=%d loop_msgs=%d spawn_msgs=%d issues=%d docs=%d",
 			stats.ToolCalls,
 			stats.AssistantMessages,
 			stats.Spawns,
-			stats.Notes,
 			stats.LoopMessages,
 			stats.SpawnMessages,
 			stats.Issues,
@@ -489,7 +486,7 @@ func (m Model) finalMessageDetailLines() []string {
 func (m Model) activityDetailLines() []string {
 	entries := m.filteredScopedEntries(m.activityLines)
 	if len(entries) == 0 {
-		return []string{dimStyle.Render("No message/note/issue/doc activity yet.")}
+		return []string{dimStyle.Render("No message/issue/doc activity yet.")}
 	}
 	return entries
 }
@@ -508,7 +505,6 @@ func (m *Model) refreshStoreActivity() {
 
 	m.trackIssueActivity()
 	m.trackDocActivity()
-	m.trackNoteActivity()
 	m.trackLoopMessageActivity()
 	m.trackSpawnActivity()
 }
@@ -519,9 +515,6 @@ func (m *Model) ensureActivityMaps() {
 	}
 	if m.knownDocs == nil {
 		m.knownDocs = make(map[string]store.Doc)
-	}
-	if m.knownNotes == nil {
-		m.knownNotes = make(map[int]struct{})
 	}
 	if m.knownLoopMessages == nil {
 		m.knownLoopMessages = make(map[string]struct{})
@@ -540,11 +533,6 @@ func (m *Model) seedActivityBaseline() {
 	}
 	for _, doc := range m.docs {
 		m.knownDocs[doc.ID] = doc
-	}
-	if notes, err := m.projectStore.ListNotes(); err == nil {
-		for _, note := range notes {
-			m.knownNotes[note.ID] = struct{}{}
-		}
 	}
 	if m.activeLoop != nil && m.activeLoop.ID > 0 {
 		m.activityLoopRunID = m.activeLoop.ID
@@ -619,29 +607,6 @@ func (m *Model) trackDocActivity() {
 		}
 	}
 	m.knownDocs = current
-}
-
-func (m *Model) trackNoteActivity() {
-	notes, err := m.projectStore.ListNotes()
-	if err != nil {
-		return
-	}
-	current := make(map[int]struct{}, len(notes))
-	for _, note := range notes {
-		current[note.ID] = struct{}{}
-		if _, seen := m.knownNotes[note.ID]; seen {
-			continue
-		}
-		scope := m.sessionScope(note.TurnID)
-		author := strings.TrimSpace(note.Author)
-		if author == "" {
-			author = "supervisor"
-		}
-		m.addActivityLine(scope, dimStyle.Render(fmt.Sprintf("[note] %s: %s", author, truncate(compactWhitespace(note.Note), 180))))
-		m.addSimplifiedLine(scope, dimStyle.Render("supervisor note received"))
-		m.bumpStats(scope, func(st *detailStats) { st.Notes++ })
-	}
-	m.knownNotes = current
 }
 
 func (m *Model) trackLoopMessageActivity() {

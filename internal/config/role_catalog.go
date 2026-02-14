@@ -50,7 +50,7 @@ const (
 	roleIdentityLeadDeveloper = "You are a LEAD DEVELOPER agent. Deliver high-quality code and coordinate implementation when delegation is available.\n\n" +
 		"You are responsible for architecture coherence, technical quality, and delivery pacing."
 	roleIdentityDeveloper  = "You are a DEVELOPER agent. Focus on implementation quality, test coverage, and clean execution of the assigned scope."
-	roleIdentitySupervisor = "You are a SUPERVISOR agent. You review progress and provide guidance via notes. You do NOT write code."
+	roleIdentitySupervisor = "You are a SUPERVISOR agent. You review progress and provide guidance via spawn messaging. You do NOT write code."
 	roleIdentityUIDesigner = "You are a UI DESIGNER role. Focus on user experience, interaction flows, visual hierarchy, responsive behavior, and accessibility.\n\n" +
 		"Produce implementation-ready UI direction with explicit component states and edge cases."
 	roleIdentityQA = "You are a QA role. Focus on verification, test design, regressions, failure modes, and release confidence.\n\n" +
@@ -125,8 +125,9 @@ var defaultPromptRules = []PromptRule{
 	{
 		ID: RuleSupervisorCmds,
 		Body: "## Supervisor Commands\n\n" +
-			"- `adaf note add [--session <N>] --note \"guidance text\"` — Send a note to a running agent session\n" +
-			"- `adaf note list [--session <N>]` — List supervisor notes",
+			"- `adaf spawn-status [--spawn-id <N>]` — Check child progress\n" +
+			"- `adaf spawn-message --spawn-id <N> \"guidance text\"` — Send guidance to a child\n" +
+			"- `adaf spawn-message --spawn-id <N> --interrupt \"new priority\"` — Interrupt and redirect a running child",
 	},
 }
 

@@ -24,15 +24,15 @@
 
 ---
 
-**adaf** is a meta-orchestrator for AI coding agents. It manages plans, issues, docs, session logs, architectural decisions, and deep session recordings **outside** the target repository, so multiple AI agents can collaborate on a codebase via structured relay handoffs.
+**adaf** is a meta-orchestrator for AI coding agents. It manages plans, issues, docs, session logs, and deep session recordings **outside** the target repository, so multiple AI agents can collaborate on a codebase via structured relay handoffs.
 
-Think of it as project management infrastructure purpose-built for AI agents -- plans with phases, an issue tracker, session logs for handoffs, architectural decision records, sub-agent spawning with worktree isolation, looping workflows, detachable sessions, and full I/O recording. All stored in `.adaf/`, never cluttering your repo.
+Think of it as project management infrastructure purpose-built for AI agents -- plans with phases, an issue tracker, session logs for handoffs, sub-agent spawning with worktree isolation, looping workflows, detachable sessions, and full I/O recording. All stored in `.adaf/`, never cluttering your repo.
 
 ## Why adaf?
 
 When you run AI coding agents (Claude, Codex, Gemini, etc.) on a project, each session starts from scratch. There's no shared memory of what was tried, what decisions were made, or what the current plan is. **adaf solves this:**
 
-- **Shared project state** -- Plans, issues, decisions, and session logs persist across agent sessions
+- **Shared project state** -- Plans, issues, docs, and session logs persist across agent sessions
 - **Relay handoffs** -- Each agent logs what it did, so the next agent picks up where it left off
 - **Multi-agent orchestration** -- Loops chain agent profiles together; spawns delegate subtasks to child agents in isolated worktrees
 - **Full recording** -- Every agent interaction (stdin/stdout/stderr) is captured for analysis
@@ -122,9 +122,6 @@ adaf
 | `adaf doc list` | `ls` | List project documents |
 | `adaf doc create` | `new` | Create a document (from file or inline) |
 | `adaf doc show <id>` | `get` | Display a document |
-| `adaf decision list` | `ls` | List architectural decisions |
-| `adaf decision create` | `new`, `record` | Record a new decision (ADR) |
-| `adaf decision show <id>` | `get` | Show decision details |
 
 ### Configuration
 
@@ -165,8 +162,6 @@ adaf
 | `adaf spawn-reply <answer>` | Reply to a child agent's question |
 | `adaf spawn-message <msg>` | Send an async message to a child agent |
 | `adaf spawn-read-messages` | Read unread messages from parent |
-| `adaf note add` | Add a supervisor note to a session |
-| `adaf note list` | List supervisor notes |
 
 ### Analysis
 
@@ -176,14 +171,14 @@ adaf
 | `adaf stats profile <name>` | Detailed stats for a profile |
 | `adaf stats loop <name>` | Detailed stats for a loop |
 | `adaf stats migrate` | Retroactively compute stats from recordings |
-| `adaf doctor profile <name>` | Export profile history as markdown for LLM analysis |
-| `adaf doctor loop <name>` | Export loop history as markdown for LLM analysis |
+| `adaf stats profile <name> --format markdown` | Export profile history as markdown for LLM analysis |
+| `adaf stats loop <name> --format markdown` | Export loop history as markdown for LLM analysis |
 ### Utilities
 
 | Command | Aliases | Description |
 |---------|---------|-------------|
-| `adaf worktree list` | `wt ls` | List active adaf-managed worktrees |
-| `adaf worktree cleanup` | `wt clean` | Remove all adaf worktrees (crash recovery) |
+| `adaf cleanup --list` | | List active adaf-managed worktrees |
+| `adaf cleanup --max-age 0` | | Remove all adaf worktrees (crash recovery) |
 
 ## How It Works
 
@@ -194,18 +189,18 @@ adaf stores all orchestration state in a `.adaf/` directory at the root of your 
 ```
 .adaf/
   project.json        # Project metadata (name, repo path, agent config)
-  plan.json           # Plan with phases, statuses, dependencies
+  plans/              # Plans (one JSON file per plan)
   issues/             # Issue tracker (one JSON file per issue)
-  logs/               # Session logs (one JSON per session)
-  decisions/          # Architectural decision records (ADRs)
+  turns/              # Session logs (one JSON per turn)
   docs/               # Project documents
   records/            # Deep session recordings (stdin/stdout/stderr)
   stats/              # Profile and loop statistics
   spawns/             # Sub-agent orchestration state
+  messages/           # Parent/child spawn message channels
   loopruns/           # Loop execution state
 ```
 
-This keeps orchestration state **separate from your codebase**. The `.adaf/.gitignore` is configured to keep ephemeral data (recordings, logs, agents cache) out of version control, while plans, issues, decisions, and documents can be committed.
+This keeps orchestration state **separate from your codebase**. The `.adaf/.gitignore` is configured to keep ephemeral data (recordings, logs, agents cache) out of version control, while plans, issues, and documents can be committed.
 
 ### Agent Prompt Building
 
@@ -213,7 +208,6 @@ When you run `adaf run`, adaf automatically builds a context-rich prompt from th
 - Current plan with phase statuses
 - Open issues
 - Latest session log (what the previous agent did)
-- Recent architectural decisions
 - Available agent tools and commands
 
 This gives each agent a full picture of the project without manual copy-pasting.
@@ -413,14 +407,8 @@ adaf issue update 3 --status resolved
 adaf log create --agent claude \
   --objective "Fix auth module" \
   --built "JWT implementation with refresh tokens" \
+  --decisions "Kept RS256 + refresh flow for consistency with existing services" \
   --next "Add rate limiting to auth endpoints"
-
-# Record decisions
-adaf decision create \
-  --title "Use JWT for auth" \
-  --context "Need stateless authentication" \
-  --decision "Adopt JWT with RS256 signing" \
-  --rationale "Scales horizontally without session store"
 
 # Orchestrate
 adaf spawn --profile builder --role developer --task "Write tests for auth.go"

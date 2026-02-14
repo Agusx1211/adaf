@@ -13,6 +13,8 @@ import (
 	"github.com/agusx1211/adaf/internal/store"
 )
 
+var statsFormat string
+
 func init() {
 	statsCmd := &cobra.Command{
 		Use:   "stats",
@@ -40,11 +42,21 @@ func init() {
 		RunE:  runStatsMigrate,
 	}
 
+	statsCmd.PersistentFlags().StringVar(&statsFormat, "format", "table",
+		"output format: table or markdown")
+
 	statsCmd.AddCommand(statsProfileCmd, statsLoopCmd, statsMigrateCmd)
 	rootCmd.AddCommand(statsCmd)
 }
 
 func runStatsOverview(cmd *cobra.Command, args []string) error {
+	if isMarkdownFormat(statsFormat) {
+		return fmt.Errorf("markdown output is only supported for 'stats profile' and 'stats loop'")
+	}
+	if !isTableFormat(statsFormat) {
+		return fmt.Errorf("unsupported stats format %q (use table or markdown)", statsFormat)
+	}
+
 	s, err := openStoreRequired()
 	if err != nil {
 		return err
@@ -106,6 +118,13 @@ func runStatsProfile(cmd *cobra.Command, args []string) error {
 	}
 
 	name := args[0]
+	if isMarkdownFormat(statsFormat) {
+		return runStatsProfileMarkdown(s, name)
+	}
+	if !isTableFormat(statsFormat) {
+		return fmt.Errorf("unsupported stats format %q (use table or markdown)", statsFormat)
+	}
+
 	ps, err := s.GetProfileStats(name)
 	if err != nil {
 		return err
@@ -167,6 +186,13 @@ func runStatsLoop(cmd *cobra.Command, args []string) error {
 	}
 
 	name := args[0]
+	if isMarkdownFormat(statsFormat) {
+		return runStatsLoopMarkdown(s, name)
+	}
+	if !isTableFormat(statsFormat) {
+		return fmt.Errorf("unsupported stats format %q (use table or markdown)", statsFormat)
+	}
+
 	ls, err := s.GetLoopStats(name)
 	if err != nil {
 		return err
@@ -209,6 +235,296 @@ func runStatsLoop(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func isMarkdownFormat(format string) bool {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "md", "markdown":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTableFormat(format string) bool {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "", "table", "text":
+		return true
+	default:
+		return false
+	}
+}
+
+func runStatsProfileMarkdown(s *store.Store, name string) error {
+	globalCfg, _ := config.Load()
+	if globalCfg == nil {
+		return fmt.Errorf("global config not found")
+	}
+
+	prof := globalCfg.FindProfile(name)
+	if prof == nil {
+		return fmt.Errorf("profile %q not found", name)
+	}
+
+	ps, err := s.GetProfileStats(name)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("# Profile Report: %s\n\n", name)
+
+	fmt.Println("## Configuration")
+	fmt.Printf("- Agent: %s\n", prof.Agent)
+	if prof.Model != "" {
+		fmt.Printf("- Model: %s\n", prof.Model)
+	}
+	if prof.Intelligence > 0 {
+		fmt.Printf("- Intelligence: %d/10\n", prof.Intelligence)
+	}
+	if prof.Description != "" {
+		fmt.Printf("- Description: %s\n", prof.Description)
+	}
+	if prof.ReasoningLevel != "" {
+		fmt.Printf("- Reasoning Level: %s\n", prof.ReasoningLevel)
+	}
+	if prof.Speed != "" {
+		fmt.Printf("- Speed: %s\n", prof.Speed)
+	}
+	fmt.Println()
+
+	if ps.TotalRuns > 0 {
+		fmt.Println("## Aggregate Statistics")
+		fmt.Printf("- Total Runs: %d (%d success, %d failure)\n", ps.TotalRuns, ps.SuccessCount, ps.FailureCount)
+		fmt.Printf("- Total Cost: $%.2f\n", ps.TotalCostUSD)
+		fmt.Printf("- Total Tokens: %s input, %s output\n", formatTokens(ps.TotalInputTok), formatTokens(ps.TotalOutputTok))
+		fmt.Printf("- Total Duration: %s\n", formatDuration(ps.TotalDuration))
+		fmt.Printf("- Average Cost/Run: $%.2f\n", ps.TotalCostUSD/float64(ps.TotalRuns))
+		successRate := float64(ps.SuccessCount) / float64(ps.TotalRuns) * 100
+		fmt.Printf("- Success Rate: %.0f%%\n", successRate)
+		fmt.Println()
+	} else {
+		fmt.Println("## Aggregate Statistics")
+		fmt.Println("- No runs recorded yet.")
+		fmt.Println()
+	}
+
+	if len(ps.ToolCalls) > 0 {
+		fmt.Println("## Tool Usage Patterns")
+		type toolCount struct {
+			name  string
+			count int
+		}
+		var sorted []toolCount
+		for toolName, count := range ps.ToolCalls {
+			sorted = append(sorted, toolCount{name: toolName, count: count})
+		}
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i].count > sorted[j].count })
+		for _, tc := range sorted {
+			fmt.Printf("- %s: %d calls\n", tc.name, tc.count)
+		}
+		fmt.Println()
+	}
+
+	turns, _ := s.ListTurns()
+	profileTurns := filterTurnsByProfile(turns, name, prof.Agent)
+	if len(profileTurns) > 0 {
+		fmt.Println("## Turn History")
+		fmt.Println()
+
+		start := 0
+		if len(profileTurns) > 20 {
+			start = len(profileTurns) - 20
+		}
+
+		for _, turn := range profileTurns[start:] {
+			metrics, _ := stats.ExtractFromRecording(s, turn.ID)
+
+			outcome := "unknown"
+			if turn.BuildState == "success" {
+				outcome = "success"
+			} else if turn.BuildState != "" {
+				outcome = turn.BuildState
+			}
+
+			fmt.Printf("### Turn #%d (%s, %s, %s)\n",
+				turn.ID,
+				turn.Date.Format("2006-01-02"),
+				formatDuration(turn.DurationSecs),
+				outcome)
+
+			if turn.Objective != "" {
+				obj := turn.Objective
+				if len(obj) > 200 {
+					obj = obj[:200] + "..."
+				}
+				fmt.Printf("Objective: %s\n", obj)
+			}
+			if turn.WhatWasBuilt != "" {
+				fmt.Printf("Outcome: %s\n", turn.WhatWasBuilt)
+			}
+
+			if metrics != nil {
+				fmt.Printf("Cost: $%.4f, Tokens: %s in / %s out\n",
+					metrics.TotalCostUSD,
+					formatTokens(metrics.InputTokens),
+					formatTokens(metrics.OutputTokens))
+
+				if len(metrics.ToolCalls) > 0 {
+					var parts []string
+					for tool, count := range metrics.ToolCalls {
+						parts = append(parts, fmt.Sprintf("%s(%d)", tool, count))
+					}
+					fmt.Printf("Tools: %s\n", strings.Join(parts, ", "))
+				}
+			}
+
+			if turn.CommitHash != "" {
+				fmt.Printf("Git commit: %s\n", turn.CommitHash)
+			}
+			if turn.KnownIssues != "" {
+				fmt.Printf("Issues: %s\n", turn.KnownIssues)
+			}
+			fmt.Println()
+		}
+	}
+
+	spawns, _ := s.ListSpawns()
+	if len(spawns) > 0 {
+		childCounts := make(map[string]int)
+		parentCounts := make(map[string]int)
+		for _, sp := range spawns {
+			if sp.ParentProfile == name {
+				childCounts[sp.ChildProfile]++
+			}
+			if sp.ChildProfile == name {
+				parentCounts[sp.ParentProfile]++
+			}
+		}
+
+		if len(childCounts) > 0 || len(parentCounts) > 0 {
+			fmt.Println("## Spawn Relationships")
+			for child, count := range childCounts {
+				fmt.Printf("- Spawned %s %d times\n", child, count)
+			}
+			for parent, count := range parentCounts {
+				fmt.Printf("- Was spawned by %s %d times\n", parent, count)
+			}
+			fmt.Println()
+		}
+	}
+
+	return nil
+}
+
+func runStatsLoopMarkdown(s *store.Store, name string) error {
+	globalCfg, _ := config.Load()
+	if globalCfg == nil {
+		return fmt.Errorf("global config not found")
+	}
+
+	loopDef := globalCfg.FindLoop(name)
+	if loopDef == nil {
+		return fmt.Errorf("loop %q not found", name)
+	}
+
+	ls, err := s.GetLoopStats(name)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("# Loop Report: %s\n\n", name)
+
+	fmt.Println("## Configuration")
+	fmt.Printf("- Steps: %d\n", len(loopDef.Steps))
+	for i, step := range loopDef.Steps {
+		turns := step.Turns
+		if turns == 0 {
+			turns = 1
+		}
+		fmt.Printf("  %d. %s (turns: %d", i+1, step.Profile, turns)
+		if step.CanStop {
+			fmt.Print(", can_stop")
+		}
+		if step.CanMessage {
+			fmt.Print(", can_message")
+		}
+		fmt.Println(")")
+		if step.Instructions != "" {
+			fmt.Printf("     Instructions: %s\n", step.Instructions)
+		}
+	}
+	fmt.Println()
+
+	if ls.TotalRuns > 0 {
+		fmt.Println("## Aggregate Statistics")
+		fmt.Printf("- Total Runs: %d\n", ls.TotalRuns)
+		fmt.Printf("- Total Cycles: %d\n", ls.TotalCycles)
+		fmt.Printf("- Total Cost: $%.2f\n", ls.TotalCostUSD)
+		fmt.Printf("- Total Duration: %s\n", formatDuration(ls.TotalDuration))
+		fmt.Printf("- Average Cost/Run: $%.2f\n", ls.TotalCostUSD/float64(ls.TotalRuns))
+		fmt.Printf("- Average Cycles/Run: %.1f\n", float64(ls.TotalCycles)/float64(ls.TotalRuns))
+		fmt.Println()
+	} else {
+		fmt.Println("## Aggregate Statistics")
+		fmt.Println("- No runs recorded yet.")
+		fmt.Println()
+	}
+
+	if len(ls.StepStats) > 0 {
+		fmt.Println("## Per-Step Breakdown")
+		for profile, count := range ls.StepStats {
+			fmt.Printf("- %s: %d total runs\n", profile, count)
+		}
+		fmt.Println()
+	}
+
+	if len(ls.TurnIDs) > 0 {
+		fmt.Println("## Turn History")
+		recent := ls.TurnIDs
+		if len(recent) > 20 {
+			recent = recent[len(recent)-20:]
+		}
+		for _, tid := range recent {
+			turn, err := s.GetTurn(tid)
+			if err != nil {
+				continue
+			}
+			metrics, _ := stats.ExtractFromRecording(s, tid)
+
+			outcome := "unknown"
+			if turn.BuildState == "success" {
+				outcome = "success"
+			} else if turn.BuildState != "" {
+				outcome = turn.BuildState
+			}
+
+			fmt.Printf("- Turn #%d (%s, %s, %s)",
+				tid,
+				turn.Date.Format("2006-01-02"),
+				formatDuration(turn.DurationSecs),
+				outcome)
+
+			if metrics != nil && metrics.TotalCostUSD > 0 {
+				fmt.Printf(" cost=$%.4f", metrics.TotalCostUSD)
+			}
+			fmt.Println()
+		}
+		fmt.Println()
+	}
+
+	return nil
+}
+
+func filterTurnsByProfile(turns []store.Turn, profileName, agentName string) []store.Turn {
+	var result []store.Turn
+	for _, t := range turns {
+		if t.ProfileName == profileName {
+			result = append(result, t)
+		} else if t.ProfileName == "" && t.Agent == agentName {
+			result = append(result, t)
+		}
+	}
+	return result
 }
 
 func runStatsMigrate(cmd *cobra.Command, args []string) error {

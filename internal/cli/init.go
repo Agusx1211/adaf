@@ -18,7 +18,7 @@ var initCmd = &cobra.Command{
 	Short:   "Initialize a new adaf project",
 	Long: `Initialize a new adaf project in the current directory (or specified directory).
 Creates the .adaf/ directory structure with project.json, issue tracker,
-turn logs, documents, decisions, and recording storage.
+turn logs, documents, and recording storage.
 
 Also scans PATH for installed AI agent tools (claude, codex, vibe, etc.)
 and caches the results for future runs.
@@ -76,6 +76,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 		name = filepath.Base(absRepo)
 	}
 
+	// Ensure .adaf-worktrees/ is in the repo-level .gitignore.
+	repoGitignore := filepath.Join(absRepo, ".gitignore")
+	ensureGitignoreEntry(repoGitignore, ".adaf-worktrees/")
+
 	// Check if already initialized
 	s, err := store.New(absRepo)
 	if err != nil {
@@ -83,7 +87,30 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	if s.Exists() {
-		return fmt.Errorf("adaf project already exists at %s", absRepo)
+		created, err := s.Repair()
+		if err != nil {
+			return fmt.Errorf("repairing existing project: %w", err)
+		}
+
+		fmt.Println()
+		fmt.Printf("  %sadaf project already exists%s\n", styleBoldCyan, colorReset)
+		printField("Location", filepath.Join(absRepo, store.AdafDir))
+		if len(created) == 0 {
+			fmt.Printf("  %sNo repairs needed.%s\n\n", styleBoldGreen, colorReset)
+			return nil
+		}
+
+		fmt.Printf("  %sRecreated %d missing director", styleBoldGreen, len(created))
+		if len(created) == 1 {
+			fmt.Printf("y%s\n", colorReset)
+		} else {
+			fmt.Printf("ies%s\n", colorReset)
+		}
+		for _, dir := range created {
+			fmt.Printf("    %s\n", dir)
+		}
+		fmt.Println()
+		return nil
 	}
 
 	projCfg := store.ProjectConfig{
@@ -109,13 +136,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 !/docs/
 !/issues/
 !/plans/
-!/decisions/
-!/decissions/
 `
 
-	// Ensure .adaf-worktrees/ is in the repo-level .gitignore.
-	repoGitignore := filepath.Join(absRepo, ".gitignore")
-	ensureGitignoreEntry(repoGitignore, ".adaf-worktrees/")
 	if err := os.WriteFile(gitignorePath, []byte(gitignoreContent), 0644); err != nil {
 		return fmt.Errorf("writing .adaf/.gitignore: %w", err)
 	}
@@ -137,10 +159,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  %sCreated:%s\n", colorDim, colorReset)
 	fmt.Printf("    %s/.adaf/project.json\n", absRepo)
 	fmt.Printf("    %s/.adaf/plans/\n", absRepo)
-	fmt.Printf("    %s/.adaf/logs/\n", absRepo)
+	fmt.Printf("    %s/.adaf/turns/\n", absRepo)
 	fmt.Printf("    %s/.adaf/issues/\n", absRepo)
 	fmt.Printf("    %s/.adaf/docs/\n", absRepo)
-	fmt.Printf("    %s/.adaf/decisions/\n", absRepo)
 	fmt.Printf("    %s/.adaf/recordings/\n", absRepo)
 	if agentsCfg != nil {
 		detected := 0

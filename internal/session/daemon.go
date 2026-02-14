@@ -86,7 +86,7 @@ func buildDaemonStartupError(sessionID int, base string, waitErr error) error {
 		message += fmt.Sprintf(": %v", waitErr)
 	}
 	message += fmt.Sprintf(" (daemon log: %s)", logPath)
-	message += "; try 'adaf repair' to restore missing project metadata directories"
+	message += "; try 'adaf init' to repair missing project metadata directories"
 	return errors.New(message)
 }
 

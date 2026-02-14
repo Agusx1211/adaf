@@ -305,10 +305,9 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				PlanID:       cfg.PlanID,
 				LoopRunHexID: run.HexID,
 				StepHexID:    stepHexID,
-				PromptFunc: func(turnID int, supervisorNotes []store.SupervisorNote) string {
+				PromptFunc: func(turnID int) string {
 					opts := promptOpts
 					opts.CurrentTurnID = turnID
-					opts.SupervisorNotes = supervisorNotes
 					built, err := promptpkg.Build(opts)
 					if err != nil {
 						return basePrompt

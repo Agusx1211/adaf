@@ -30,9 +30,7 @@ var requiredProjectSubdirs = []string{
 	"plans",
 	"docs",
 	"issues",
-	"decisions",
 	"spawns",
-	"notes",
 	"messages",
 	"loopruns",
 	"stats",
@@ -583,53 +581,6 @@ func (s *Store) UpdateDoc(doc *Doc) error {
 	return s.writeJSON(filepath.Join(s.root, "docs", doc.ID+".json"), doc)
 }
 
-// Decisions
-
-func (s *Store) ListDecisions() ([]Decision, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	dir := filepath.Join(s.root, "decisions")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var decisions []Decision
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		var dec Decision
-		if err := s.readJSON(filepath.Join(dir, e.Name()), &dec); err != nil {
-			continue
-		}
-		decisions = append(decisions, dec)
-	}
-	sort.Slice(decisions, func(i, j int) bool { return decisions[i].ID < decisions[j].ID })
-	return decisions, nil
-}
-
-func (s *Store) CreateDecision(dec *Decision) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	dec.ID = s.nextID(filepath.Join(s.root, "decisions"))
-	dec.Date = time.Now().UTC()
-	return s.writeJSON(filepath.Join(s.root, "decisions", fmt.Sprintf("%d.json", dec.ID)), dec)
-}
-
-func (s *Store) GetDecision(id int) (*Decision, error) {
-	var dec Decision
-	if err := s.readJSON(filepath.Join(s.root, "decisions", fmt.Sprintf("%d.json", id)), &dec); err != nil {
-		return nil, err
-	}
-	return &dec, nil
-}
-
 // Records
 
 func (s *Store) SaveRecording(rec *TurnRecording) error {
@@ -841,64 +792,6 @@ func (s *Store) SpawnsByParent(parentTurnID int) ([]SpawnRecord, error) {
 	for _, r := range all {
 		if r.ParentTurnID == parentTurnID {
 			filtered = append(filtered, r)
-		}
-	}
-	return filtered, nil
-}
-
-// --- Supervisor Notes ---
-
-// ListNotes returns all supervisor notes.
-func (s *Store) ListNotes() ([]SupervisorNote, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	dir := filepath.Join(s.root, "notes")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var notes []SupervisorNote
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		var note SupervisorNote
-		if err := s.readJSONLocked(filepath.Join(dir, e.Name()), &note); err != nil {
-			continue
-		}
-		notes = append(notes, note)
-	}
-	sort.Slice(notes, func(i, j int) bool { return notes[i].ID < notes[j].ID })
-	return notes, nil
-}
-
-// CreateNote persists a new supervisor note with an auto-assigned ID.
-func (s *Store) CreateNote(note *SupervisorNote) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	dir := filepath.Join(s.root, "notes")
-	os.MkdirAll(dir, 0755)
-	note.ID = s.nextID(dir)
-	note.CreatedAt = time.Now().UTC()
-	return s.writeJSONLocked(filepath.Join(dir, fmt.Sprintf("%d.json", note.ID)), note)
-}
-
-// NotesByTurn returns notes targeting a given turn.
-func (s *Store) NotesByTurn(turnID int) ([]SupervisorNote, error) {
-	all, err := s.ListNotes()
-	if err != nil {
-		return nil, err
-	}
-	var filtered []SupervisorNote
-	for _, n := range all {
-		if n.TurnID == turnID {
-			filtered = append(filtered, n)
 		}
 	}
 	return filtered, nil

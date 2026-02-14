@@ -70,8 +70,8 @@ type Loop struct {
 	OnEnd func(turnID int, turnHexID string, result *agent.Result)
 
 	// PromptFunc, if set, is called before each turn to dynamically refresh the
-	// prompt (e.g. to inject supervisor notes). If nil, Config.Prompt is used.
-	PromptFunc func(turnID int, supervisorNotes []store.SupervisorNote) string
+	// prompt. If nil, Config.Prompt is used.
+	PromptFunc func(turnID int) string
 
 	// OnWait is called when the agent signals a wait-for-spawns.
 	// It should block until spawns complete and return results.
@@ -260,21 +260,17 @@ func (l *Loop) Run(ctx context.Context) error {
 		if isResume {
 			// When resuming, the agent already has the full system prompt
 			// and conversation context from the previous turn. Send only
-			// new information (wait results, interrupt messages, supervisor
-			// notes) as a continuation message — NOT the full system prompt.
+			// new information (wait results and interrupt messages)
+			// as a continuation message — NOT the full system prompt.
 			cfg.ResumeSessionID = l.lastAgentSessionID
 			l.lastAgentSessionID = "" // consume after use
-			cfg.Prompt = buildResumePrompt(l.lastWaitResults, l.moreSpawnsPending, l.lastInterruptMsg, l.loadSupervisorNotes(turnID))
+			cfg.Prompt = buildResumePrompt(l.lastWaitResults, l.moreSpawnsPending, l.lastInterruptMsg)
 			l.lastWaitResults = nil
 			l.moreSpawnsPending = false
 			l.lastInterruptMsg = ""
 		} else {
-			var supervisorNotes []store.SupervisorNote
-			if l.PromptFunc != nil && l.Store != nil {
-				supervisorNotes = l.loadSupervisorNotes(turnID)
-			}
 			if l.PromptFunc != nil {
-				cfg.Prompt = l.PromptFunc(turnID, supervisorNotes)
+				cfg.Prompt = l.PromptFunc(turnID)
 			}
 
 			// Inject interrupt message from a previous guardrail violation.
@@ -583,19 +579,6 @@ func (l *Loop) drainInterrupt() string {
 	}
 }
 
-// loadSupervisorNotes loads supervisor notes for the given turn ID.
-func (l *Loop) loadSupervisorNotes(turnID int) []store.SupervisorNote {
-	if l.Store == nil {
-		return nil
-	}
-	notes, err := l.Store.NotesByTurn(turnID)
-	if err != nil {
-		fmt.Printf("warning: failed to load supervisor notes for turn %d: %v\n", turnID, err)
-		return nil
-	}
-	return notes
-}
-
 func (l *Loop) ensureSeenSpawnIDs(turnID int) map[int]struct{} {
 	if l.seenSpawnTurnID != turnID || l.seenSpawnIDs == nil {
 		l.seenSpawnTurnID = turnID
@@ -607,7 +590,7 @@ func (l *Loop) ensureSeenSpawnIDs(turnID int) map[int]struct{} {
 // buildResumePrompt constructs a minimal continuation prompt for a resumed
 // agent session. Unlike a fresh turn, the agent already has the full system
 // prompt and conversation history — we only send new information.
-func buildResumePrompt(waitResults []WaitResult, moreSpawnsPending bool, interruptMsg string, supervisorNotes []store.SupervisorNote) string {
+func buildResumePrompt(waitResults []WaitResult, moreSpawnsPending bool, interruptMsg string) string {
 	var b strings.Builder
 
 	b.WriteString("Continue from where you left off.\n\n")
@@ -626,14 +609,6 @@ func buildResumePrompt(waitResults []WaitResult, moreSpawnsPending bool, interru
 		if moreSpawnsPending {
 			b.WriteString("**Other spawns are still running.** Call `adaf wait-for-spawns` again when you need more results.\n\n")
 		}
-	}
-
-	if len(supervisorNotes) > 0 {
-		b.WriteString("## Supervisor Notes\n\n")
-		for _, note := range supervisorNotes {
-			fmt.Fprintf(&b, "- [%s] %s: %s\n", note.CreatedAt.Format("15:04:05"), note.Author, note.Note)
-		}
-		b.WriteString("\n")
 	}
 
 	return b.String()

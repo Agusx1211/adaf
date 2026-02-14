@@ -13,7 +13,7 @@ var statusCmd = &cobra.Command{
 	Aliases: []string{"info", "state", "st"},
 	Short:   "Show comprehensive project status",
 	Long: `Display a comprehensive summary of the project including plans, issues,
-turn history, architectural decisions, and documents.`,
+turn history, and documents.`,
 	RunE: runStatus,
 }
 
@@ -213,20 +213,6 @@ func runStatusFull(s *store.Store) error {
 		}
 		if latest.CommitHash != "" {
 			printField("Last Commit", latest.CommitHash)
-		}
-	}
-
-	decisions, _ := s.ListDecisions()
-	if len(decisions) > 0 {
-		printHeader("Decisions")
-		fmt.Printf("  %d architectural decision(s) recorded.\n", len(decisions))
-		start := 0
-		if len(decisions) > 3 {
-			start = len(decisions) - 3
-		}
-		for _, d := range decisions[start:] {
-			fmt.Printf("  %s#%d%s %s %s(%s)%s\n",
-				colorBold, d.ID, colorReset, d.Title, colorDim, d.Date.Format("2006-01-02"), colorReset)
 		}
 	}
 

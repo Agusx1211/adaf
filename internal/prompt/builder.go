@@ -56,9 +56,6 @@ type BuildOpts struct {
 	// CurrentTurnID, when >0, enables live runtime spawn context in prompts.
 	CurrentTurnID int
 
-	// SupervisorNotes are injected into the prompt.
-	SupervisorNotes []store.SupervisorNote
-
 	// Messages from parent agent (for child prompts).
 	Messages []store.SpawnMessage
 
@@ -286,15 +283,6 @@ func Build(opts BuildOpts) (string, error) {
 			}
 			b.WriteString("\n")
 		}
-	}
-
-	// Supervisor notes.
-	if len(opts.SupervisorNotes) > 0 {
-		b.WriteString("## Supervisor Notes\n\n")
-		for _, note := range opts.SupervisorNotes {
-			fmt.Fprintf(&b, "- [%s] %s: %s\n", note.CreatedAt.Format("15:04:05"), note.Author, note.Note)
-		}
-		b.WriteString("\n")
 	}
 
 	// Messages from parent.

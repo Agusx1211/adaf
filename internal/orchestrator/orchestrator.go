@@ -718,26 +718,25 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 				currentTurnCancel = cancel
 				turnCancelMu.Unlock()
 			},
-			PromptFunc: func(turnID int, supervisorNotes []store.SupervisorNote) string {
+			PromptFunc: func(turnID int) string {
 				msgs, _ := o.store.UnreadMessages(rec.ID, "parent_to_child")
 				for _, m := range msgs {
 					o.store.MarkMessageRead(m.SpawnID, m.ID)
 				}
 				newPrompt, _ := promptpkg.Build(promptpkg.BuildOpts{
-					Store:           o.store,
-					Project:         projCfg,
-					Profile:         childProf,
-					Role:            req.ChildRole,
-					GlobalCfg:       o.globalCfg,
-					PlanID:          parentPlanID,
-					Task:            req.Task,
-					ReadOnly:        req.ReadOnly,
-					ParentTurnID:    req.ParentTurnID,
-					CurrentTurnID:   turnID,
-					Delegation:      req.ChildDelegation,
-					SupervisorNotes: supervisorNotes,
-					Messages:        msgs,
-					IssueIDs:        req.IssueIDs,
+					Store:         o.store,
+					Project:       projCfg,
+					Profile:       childProf,
+					Role:          req.ChildRole,
+					GlobalCfg:     o.globalCfg,
+					PlanID:        parentPlanID,
+					Task:          req.Task,
+					ReadOnly:      req.ReadOnly,
+					ParentTurnID:  req.ParentTurnID,
+					CurrentTurnID: turnID,
+					Delegation:    req.ChildDelegation,
+					Messages:      msgs,
+					IssueIDs:      req.IssueIDs,
 				})
 				return newPrompt
 			},

@@ -46,8 +46,6 @@ var commandAudienceByPath = map[string]commandAudience{
 	"config agents":   commandAudienceUserOnly,
 	"config pushover": commandAudienceUserOnly,
 	"cleanup":         commandAudienceUserOnly,
-	"repair":          commandAudienceUserOnly,
-	"doctor":          commandAudienceUserOnly,
 	"stats":           commandAudienceUserOnly,
 	"loop list":       commandAudienceUserOnly,
 	"loop start":      commandAudienceUserOnly,

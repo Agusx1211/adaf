@@ -145,30 +145,18 @@ func (a *waitSeenTrackingStubAgent) Run(ctx context.Context, cfg agent.Config, r
 	}, nil
 }
 
-func TestLoopPromptFuncReceivesSupervisorNotesByTurn(t *testing.T) {
+func TestLoopPromptFuncReceivesTurnID(t *testing.T) {
 	tests := []struct {
-		name           string
-		maxTurns       int
-		notes          []store.SupervisorNote
-		wantNoteCounts []int
+		name     string
+		maxTurns int
 	}{
 		{
-			name:     "single turn note delivery",
+			name:     "single turn",
 			maxTurns: 1,
-			notes: []store.SupervisorNote{
-				{TurnID: 1, Author: "sup", Note: "first"},
-			},
-			wantNoteCounts: []int{1},
 		},
 		{
-			name:     "multi turn receives only matching turn notes",
+			name:     "multi turn",
 			maxTurns: 2,
-			notes: []store.SupervisorNote{
-				{TurnID: 1, Author: "sup", Note: "for one"},
-				{TurnID: 2, Author: "sup", Note: "for two"},
-				{TurnID: 99, Author: "sup", Note: "other"},
-			},
-			wantNoteCounts: []int{1, 1},
 		},
 	}
 
@@ -183,19 +171,8 @@ func TestLoopPromptFuncReceivesSupervisorNotesByTurn(t *testing.T) {
 				t.Fatalf("store.Init() error = %v", err)
 			}
 
-			for _, n := range tt.notes {
-				note := n
-				if err := s.CreateNote(&note); err != nil {
-					t.Fatalf("CreateNote() error = %v", err)
-				}
-			}
-
 			a := &stubAgent{}
-			type promptCall struct {
-				turnID int
-				notes  []store.SupervisorNote
-			}
-			var calls []promptCall
+			var calls []int
 
 			l := &Loop{
 				Store: s,
@@ -204,11 +181,9 @@ func TestLoopPromptFuncReceivesSupervisorNotesByTurn(t *testing.T) {
 					Prompt:   "base",
 					MaxTurns: tt.maxTurns,
 				},
-				PromptFunc: func(turnID int, supervisorNotes []store.SupervisorNote) string {
-					notes := make([]store.SupervisorNote, len(supervisorNotes))
-					copy(notes, supervisorNotes)
-					calls = append(calls, promptCall{turnID: turnID, notes: notes})
-					return fmt.Sprintf("turn=%d notes=%d", turnID, len(supervisorNotes))
+				PromptFunc: func(turnID int) string {
+					calls = append(calls, turnID)
+					return fmt.Sprintf("turn=%d", turnID)
 				},
 			}
 
@@ -225,16 +200,8 @@ func TestLoopPromptFuncReceivesSupervisorNotesByTurn(t *testing.T) {
 
 			for i := 0; i < tt.maxTurns; i++ {
 				wantTurnID := i + 1
-				if calls[i].turnID != wantTurnID {
-					t.Fatalf("call[%d] turn id = %d, want %d", i, calls[i].turnID, wantTurnID)
-				}
-				if len(calls[i].notes) != tt.wantNoteCounts[i] {
-					t.Fatalf("call[%d] notes = %d, want %d", i, len(calls[i].notes), tt.wantNoteCounts[i])
-				}
-				for _, note := range calls[i].notes {
-					if note.TurnID != wantTurnID {
-						t.Fatalf("call[%d] note turn id = %d, want %d", i, note.TurnID, wantTurnID)
-					}
+				if calls[i] != wantTurnID {
+					t.Fatalf("call[%d] turn id = %d, want %d", i, calls[i], wantTurnID)
 				}
 
 				if got := a.runs[i].Env["ADAF_AGENT"]; got != "1" {
@@ -243,7 +210,7 @@ func TestLoopPromptFuncReceivesSupervisorNotesByTurn(t *testing.T) {
 				if got := a.runs[i].Env["ADAF_TURN_ID"]; got != fmt.Sprintf("%d", wantTurnID) {
 					t.Fatalf("run[%d] ADAF_TURN_ID = %q, want %d", i, got, wantTurnID)
 				}
-				wantPrompt := fmt.Sprintf("turn=%d notes=%d", wantTurnID, tt.wantNoteCounts[i])
+				wantPrompt := fmt.Sprintf("turn=%d", wantTurnID)
 				if got := a.runs[i].Prompt; got != wantPrompt {
 					t.Fatalf("run[%d] prompt = %q, want %q", i, got, wantPrompt)
 				}

@@ -1,6 +1,8 @@
 package store
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -24,6 +26,24 @@ func TestInit(t *testing.T) {
 	}
 }
 
+func TestInitDoesNotCreateRetiredDirectories(t *testing.T) {
+	dir := t.TempDir()
+	s, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Init(ProjectConfig{Name: "myapp", RepoPath: dir}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, retired := range []string{"decisions", "notes"} {
+		path := filepath.Join(s.Root(), retired)
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected retired dir %q to be absent", path)
+		}
+	}
+}
+
 func TestIssues(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := New(dir)
@@ -40,25 +60,6 @@ func TestIssues(t *testing.T) {
 	issues, _ := s.ListIssues()
 	if len(issues) != 1 {
 		t.Errorf("expected 1 issue, got %d", len(issues))
-	}
-}
-
-func TestDecisions(t *testing.T) {
-	dir := t.TempDir()
-	s, _ := New(dir)
-	s.Init(ProjectConfig{Name: "test", RepoPath: "/tmp"})
-
-	d := &Decision{Title: "use postgres", Decision: "pg", Rationale: "mature"}
-	if err := s.CreateDecision(d); err != nil {
-		t.Fatal(err)
-	}
-	if d.ID == 0 {
-		t.Error("expected non-zero ID")
-	}
-
-	decisions, _ := s.ListDecisions()
-	if len(decisions) != 1 {
-		t.Errorf("expected 1 decision, got %d", len(decisions))
 	}
 }
 
@@ -177,23 +178,6 @@ func TestIssueLifecycle(t *testing.T) {
 	}
 }
 
-func TestDecisionLifecycle(t *testing.T) {
-	dir := t.TempDir()
-	s, _ := New(dir)
-	s.Init(ProjectConfig{Name: "test", RepoPath: "/tmp"})
-
-	d := &Decision{Title: "test", Decision: "yes", Rationale: "why not"}
-	s.CreateDecision(d)
-
-	got, err := s.GetDecision(d.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Title != "test" {
-		t.Errorf("title = %q, want %q", got.Title, "test")
-	}
-}
-
 func TestSpawnOperations(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := New(dir)
@@ -244,38 +228,6 @@ func TestSpawnOperations(t *testing.T) {
 	byParent, _ := s.SpawnsByParent(1)
 	if len(byParent) != 1 {
 		t.Errorf("expected 1 spawn by parent, got %d", len(byParent))
-	}
-}
-
-func TestSupervisorNotes(t *testing.T) {
-	dir := t.TempDir()
-	s, _ := New(dir)
-	s.Init(ProjectConfig{Name: "test", RepoPath: "/tmp"})
-
-	note1 := &SupervisorNote{TurnID: 1, Author: "supervisor", Note: "build is green"}
-	if err := s.CreateNote(note1); err != nil {
-		t.Fatal(err)
-	}
-	note2 := &SupervisorNote{TurnID: 1, Author: "supervisor", Note: "check integration tests"}
-	if err := s.CreateNote(note2); err != nil {
-		t.Fatal(err)
-	}
-	note3 := &SupervisorNote{TurnID: 2, Author: "supervisor", Note: "different turn"}
-	if err := s.CreateNote(note3); err != nil {
-		t.Fatal(err)
-	}
-
-	notes, err := s.NotesByTurn(1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(notes) != 2 {
-		t.Errorf("expected 2 notes for turn 1, got %d", len(notes))
-	}
-
-	notes2, _ := s.NotesByTurn(2)
-	if len(notes2) != 1 {
-		t.Errorf("expected 1 note for turn 2, got %d", len(notes2))
 	}
 }
 

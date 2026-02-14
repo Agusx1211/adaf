@@ -39,12 +39,3 @@ type SpawnMessage struct {
 	ReadAt    time.Time `json:"read_at,omitempty"`
 	Interrupt bool      `json:"interrupt,omitempty"` // interrupt child's current turn
 }
-
-// SupervisorNote is a message from a supervisor to a running turn.
-type SupervisorNote struct {
-	ID        int       `json:"id"`
-	TurnID    int       `json:"session_id"` // JSON key kept for compat
-	Author    string    `json:"author"`
-	Note      string    `json:"note"`
-	CreatedAt time.Time `json:"created_at"`
-}

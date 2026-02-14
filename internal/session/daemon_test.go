@@ -125,8 +125,8 @@ func TestBuildDaemonStartupErrorIncludesLogSummary(t *testing.T) {
 	if strings.Contains(msg, "\x1b[31m") {
 		t.Fatalf("error contains ANSI escapes: %q", msg)
 	}
-	if !strings.Contains(msg, "adaf repair") {
-		t.Fatalf("error missing repair hint: %q", msg)
+	if !strings.Contains(msg, "adaf init") {
+		t.Fatalf("error missing init hint: %q", msg)
 	}
 	if !strings.Contains(msg, logPath) {
 		t.Fatalf("error missing daemon log path: %q", msg)

@@ -13,7 +13,6 @@
 //	  adaf issue create --title "..." ...  - Create an issue
 //	  adaf log latest                      - Read the latest session log
 //	  adaf log create --objective "..."    - Write your session log
-//	  adaf decision list                   - List architectural decisions
 //	  adaf doc show <id>                   - Read a project document
 package protocol
 
@@ -61,12 +60,8 @@ adaf log create --agent <your-name> \
 - Always include build state: does ` + "`go build`" + ` succeed? Do tests pass? Which ones fail?
 - Next steps should be specific enough for a new agent to start working immediately
 - Known issues should reference specific files/lines where TODOs or problems exist
-- If you made architectural decisions, also record them with ` + "`adaf decision create`" + ` and mention them in your --decisions field
+- Capture important architectural choices in your ` + "`--decisions`" + ` field
 - Use ` + "`adaf log search --query \"keyword\"`" + ` to find relevant prior session context when needed
-
-### Decisions
-- ` + "`adaf decision list`" + ` — Review past architectural decisions
-- ` + "`adaf decision create --title \"...\" --context \"...\" --decision \"...\" --rationale \"...\"`" + ` — Record a new decision
 
 ### Documents
 - ` + "`adaf doc list`" + ` — List project documents
@@ -94,22 +89,13 @@ Use ` + "`--read-only`" + ` scouts for any information gathering (repo structure
 - ` + "`adaf spawn-message --spawn-id N \"guidance\"`" + ` — Send async message to running child
 - ` + "`adaf spawn-message --spawn-id N --interrupt \"new instructions\"`" + ` — Redirect a running child
 
-### Supervisor Notes
-- ` + "`adaf note add --session N --note \"guidance text\"`" + ` — Send a note to a running session
-- ` + "`adaf note list [--session N]`" + ` — List supervisor notes
-
-### Worktree Management
-- ` + "`adaf worktree list`" + ` — List active adaf-managed worktrees
-- ` + "`adaf worktree cleanup`" + ` — Remove all adaf-managed worktrees (crash recovery)
-
 ## Session Protocol
 
 1. **Orient**: Run ` + "`adaf status`" + ` and ` + "`adaf log latest`" + ` to understand current state. If you need more history, use ` + "`adaf log list`" + ` and ` + "`adaf log show <id>`" + ` or ` + "`adaf log search --query \"...\"`" + `
 2. **Decide**: Pick the highest-impact work based on the plan, open issues, and the previous session's next steps
 3. **Work**: Build, test, integrate. Run tests frequently. Ensure ` + "`go build`" + ` passes before moving on
-4. **Record decisions**: If you made architectural choices, run ` + "`adaf decision create --title \"...\" --context \"...\" --decision \"...\" --rationale \"...\"`" + `
-5. **Log**: Write a detailed session log with ` + "`adaf log create`" + ` — include ALL fields, especially --build-state, --next, and --issues
-6. **Commit**: Commit your code changes
+4. **Log**: Write a detailed session log with ` + "`adaf log create`" + ` — include ALL fields, especially --build-state, --next, and --issues
+5. **Commit**: Commit your code changes
 `
 }
 

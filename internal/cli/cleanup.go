@@ -13,6 +13,7 @@ import (
 )
 
 var cleanupMaxAge time.Duration
+var cleanupList bool
 
 var cleanupCmd = &cobra.Command{
 	Use:     "cleanup",
@@ -30,6 +31,8 @@ Use --max-age=0 to remove ALL adaf-managed worktrees regardless of age.`,
 func init() {
 	cleanupCmd.Flags().DurationVar(&cleanupMaxAge, "max-age", 24*time.Hour,
 		"remove worktrees older than this duration (0 = remove all)")
+	cleanupCmd.Flags().BoolVar(&cleanupList, "list", false,
+		"list active adaf-managed worktrees and exit")
 	rootCmd.AddCommand(cleanupCmd)
 }
 
@@ -49,6 +52,24 @@ func runCleanup(cmd *cobra.Command, args []string) error {
 
 	mgr := worktree.NewManager(repoRoot)
 	ctx := context.Background()
+
+	if cleanupList {
+		active, err := mgr.ListActive(ctx)
+		if err != nil {
+			return err
+		}
+		if len(active) == 0 {
+			fmt.Println("No active adaf worktrees.")
+			return nil
+		}
+		printHeader("Active Worktrees")
+		for _, wt := range active {
+			printField("Path", wt.Path)
+			printField("Branch", wt.Branch)
+			fmt.Println()
+		}
+		return nil
+	}
 
 	if cleanupMaxAge == 0 {
 		// Remove everything.

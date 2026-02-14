@@ -175,7 +175,6 @@ type Model struct {
 	activityLoopRunID     int
 	knownIssues           map[int]store.Issue
 	knownDocs             map[string]store.Doc
-	knownNotes            map[int]struct{}
 	knownLoopMessages     map[string]struct{}
 	knownSpawns           map[int]store.SpawnRecord
 	knownSpawnMessages    map[string]struct{}
@@ -210,7 +209,6 @@ func NewModel(projectName string, plan *store.Plan, agentName, modelName string,
 		finalizedTurnHexByScope:  make(map[string]string),
 		knownIssues:              make(map[int]store.Issue),
 		knownDocs:                make(map[string]store.Doc),
-		knownNotes:               make(map[int]struct{}),
 		knownLoopMessages:        make(map[string]struct{}),
 		knownSpawns:              make(map[int]store.SpawnRecord),
 		knownSpawnMessages:       make(map[string]struct{}),

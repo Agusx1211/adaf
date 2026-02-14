@@ -76,17 +76,6 @@ type Turn struct {
 	DurationSecs int       `json:"duration_secs,omitempty"`
 }
 
-type Decision struct {
-	ID           int       `json:"id"`
-	Title        string    `json:"title"`
-	Context      string    `json:"context"`
-	Decision     string    `json:"decision"`
-	Alternatives string    `json:"alternatives,omitempty"`
-	Rationale    string    `json:"rationale"`
-	TurnID       int       `json:"session_id,omitempty"` // which turn made this decision
-	Date         time.Time `json:"date"`
-}
-
 // TurnRecording captures the raw I/O of a single agent turn.
 type TurnRecording struct {
 	TurnID    int              `json:"session_id"` // keep JSON key for backward compat
