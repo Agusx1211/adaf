@@ -212,16 +212,45 @@ func (m *Model) recordAssistantText(scope, text string) {
 	if compact == "" {
 		return
 	}
+	if m.assistantMessagesByScope == nil {
+		m.assistantMessagesByScope = make(map[string][]string)
+	}
 	chunks := m.assistantMessagesByScope[scope]
-	if n := len(chunks); n == 0 || chunks[n-1] != compact {
+
+	// Check against the compacted version of the last chunk to avoid duplication
+	// when a streaming message is finalized with a full-content event.
+	lastCompacted := ""
+	if len(chunks) > 0 {
+		lastCompacted = strings.TrimSpace(compactWhitespace(chunks[len(chunks)-1]))
+	}
+
+	if len(chunks) == 0 || lastCompacted != compact {
 		m.assistantMessagesByScope[scope] = append(chunks, compact)
+		m.bumpStats(scope, func(st *detailStats) { st.AssistantMessages++ })
+		m.addSimplifiedLine(scope, dimStyle.Render("assistant message"))
 	}
 	m.lastMessageByScope[scope] = compact
 	if turnHexID, closed := m.finalizedTurnHexByScope[scope]; closed {
 		m.updateFinalMessageSnapshot(scope, turnHexID)
 	}
-	m.bumpStats(scope, func(st *detailStats) { st.AssistantMessages++ })
-	m.addSimplifiedLine(scope, dimStyle.Render("assistant message"))
+}
+
+func (m *Model) recordAssistantDelta(scope, text string) {
+	if text == "" {
+		return
+	}
+	if m.assistantMessagesByScope == nil {
+		m.assistantMessagesByScope = make(map[string][]string)
+	}
+	chunks := m.assistantMessagesByScope[scope]
+	if len(chunks) == 0 {
+		m.assistantMessagesByScope[scope] = []string{text}
+		m.bumpStats(scope, func(st *detailStats) { st.AssistantMessages++ })
+		m.addSimplifiedLine(scope, dimStyle.Render("assistant message"))
+	} else {
+		m.assistantMessagesByScope[scope][len(chunks)-1] += text
+	}
+	m.lastMessageByScope[scope] = m.assistantMessagesByScope[scope][len(m.assistantMessagesByScope[scope])-1]
 }
 
 func (m *Model) latestAssistantMessage(scope string) string {

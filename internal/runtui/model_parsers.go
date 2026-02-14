@@ -345,6 +345,8 @@ func (m *Model) renderGeminiStreamLine(scope, line, eventType string) bool {
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			return false
 		}
+		m.flushStream()
+		m.currentBlockType = ""
 		m.addScopedLine(scope, initLabelStyle.Render(fmt.Sprintf("[init] model=%s", ev.Model)))
 		m.addSimplifiedLine(scope, dimStyle.Render("initialized"))
 		return true
@@ -362,11 +364,30 @@ func (m *Model) renderGeminiStreamLine(scope, line, eventType string) bool {
 			// Skip user messages.
 			return true
 		}
+
+		if ev.Delta {
+			if m.currentBlockType != "text" {
+				m.flushStream()
+				m.currentBlockType = "text"
+				m.addScopedLine(scope, textLabelStyle.Render("[text]"))
+			}
+			m.appendDelta(ev.Content)
+			m.recordAssistantDelta(scope, ev.Content)
+			return true
+		}
+
+		// Final message or non-streaming message.
+		isNewBlock := m.currentBlockType != "text"
+		m.flushStream()
+		m.currentBlockType = ""
+
 		if strings.TrimSpace(ev.Content) == "" {
 			return true
 		}
-		m.addScopedLine(scope, textLabelStyle.Render("[text]"))
-		m.addScopedLine(scope, "  "+textStyle.Render(truncate(ev.Content, 500)))
+		if isNewBlock {
+			m.addScopedLine(scope, textLabelStyle.Render("[text]"))
+			m.addScopedLine(scope, "  "+textStyle.Render(truncate(ev.Content, 500)))
+		}
 		m.recordAssistantText(scope, ev.Content)
 		return true
 
@@ -377,6 +398,8 @@ func (m *Model) renderGeminiStreamLine(scope, line, eventType string) bool {
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			return false
 		}
+		m.flushStream()
+		m.currentBlockType = ""
 		name := ev.ToolName
 		if name == "" {
 			name = "tool"
@@ -386,12 +409,16 @@ func (m *Model) renderGeminiStreamLine(scope, line, eventType string) bool {
 		return true
 
 	case "tool_result":
+		m.flushStream()
+		m.currentBlockType = ""
 		m.markAssistantBoundary(scope)
 		// Skip rendering tool results in detail raw text; they still define
 		// the boundary for what counts as the final assistant message.
 		return true
 
 	case "result":
+		m.flushStream()
+		m.currentBlockType = ""
 		var ev struct {
 			Stats *struct {
 				InputTokens  int     `json:"input_tokens"`

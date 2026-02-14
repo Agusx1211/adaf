@@ -1373,6 +1373,38 @@ func TestStderrDeduplication(t *testing.T) {
 	}
 }
 
+func TestGeminiCoalescing(t *testing.T) {
+	m := NewModel("proj", nil, "gemini", "", make(chan any, 1), nil)
+	scope := "session:1"
+
+	// 1. Send first delta
+	m.renderStreamEventLine(scope, `{"type":"message","role":"assistant","content":"Hello", "delta": true}`)
+	// 2. Send second delta
+	m.renderStreamEventLine(scope, `{"type":"message","role":"assistant","content":" world", "delta": true}`)
+	// 3. Send final message
+	m.renderStreamEventLine(scope, `{"type":"message","role":"assistant","content":"Hello world", "delta": false}`)
+
+	// Check assistantMessagesByScope
+	chunks := m.assistantMessagesByScope[scope]
+	if len(chunks) != 1 {
+		t.Fatalf("expected 1 chunk, got %d: %v", len(chunks), chunks)
+	}
+	if chunks[0] != "Hello world" {
+		t.Fatalf("expected 'Hello world', got %q", chunks[0])
+	}
+
+	// Check simplified lines
+	simplifiedCount := 0
+	for _, l := range m.simplifiedLines {
+		if strings.Contains(ansi.Strip(l.text), "assistant message") {
+			simplifiedCount++
+		}
+	}
+	if simplifiedCount != 1 {
+		t.Fatalf("expected 1 simplified 'assistant message' line, got %d", simplifiedCount)
+	}
+}
+
 func stripStyledLines(lines []string) []string {
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
