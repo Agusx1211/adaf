@@ -1,0 +1,14 @@
+{
+  "id": 43,
+  "title": "tui: ask.go and pm.go wizard flows are ~60% structurally identical",
+  "description": "## Summary\n\ntui/ask.go (434 lines) and tui/pm.go (388 lines) are structurally ~60% identical. There are 9 nearly-identical function pairs:\n\n- initAskWizard / initPMWizard\n- clampAskProfileSelection / clampPMProfileSelection\n- adjustAskProfileSelection / adjustPMProfileSelection\n- askSelectedProfile / pmSelectedProfile\n- askConfigNextField / pmConfigNextField\n- updateAskPrompt / updatePMPrompt\n- viewAskPrompt / viewPMPrompt\n- updateAskConfig / updatePMConfig\n- viewAskConfig / viewPMConfig\n\nThe only real differences are: ask has count/chain config fields, PM does not. Otherwise the wizard flow (prompt input -\u003e config screen -\u003e start session) is identical. This means any bug fix or UX improvement to the wizard must be applied in two places, risking divergence.\n\n## Suggested fix\n\nExtract a generic wizard component (e.g. internal/tui/wizard.go) parameterized by a config struct that defines which fields to show. Both ask.go and pm.go instantiate the shared wizard with their specific field definitions. The 820 combined lines should reduce to ~350 + two small wrappers.\n\n## Files involved\n\n- internal/tui/ask.go\n- internal/tui/pm.go",
+  "status": "open",
+  "priority": "medium",
+  "labels": [
+    "cleanup",
+    "tui",
+    "duplication"
+  ],
+  "created": "2026-02-14T10:23:05.958533972Z",
+  "updated": "2026-02-14T10:23:05.958533972Z"
+}

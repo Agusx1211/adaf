@@ -1,0 +1,14 @@
+{
+  "id": 42,
+  "title": "cli: resolveAskProfile and resolvePMProfile are ~80% duplicated",
+  "description": "## Summary\n\nresolveAskProfile() (ask.go:225-291) and resolvePMProfile() (pm.go:172-227) are ~80% identical. Both follow the same flow: get flags, load config, lookup profile or build from agent/model, resolve command path. The only differences are that ask.go handles --command and --reasoning-level flags.\n\nAdditionally, config.Load() is called twice in the PM path: once in resolvePMProfile() and again in buildPMPrompt(). The result should be passed through rather than re-loaded.\n\nresolveAskProfile also takes s *store.Store as a named parameter but never uses it.\n\n## Suggested fix\n\nExtract a shared resolveProfile() function (or a ProfileResolver struct) in a common file (e.g. internal/cli/resolve_profile.go) that takes an options struct for the variant-specific flags. Both ask.go and pm.go call the shared function. Pass the loaded config through to buildPMPrompt instead of loading it again.\n\n## Files involved\n\n- internal/cli/ask.go: resolveAskProfile()\n- internal/cli/pm.go: resolvePMProfile(), buildPMPrompt()",
+  "status": "open",
+  "priority": "medium",
+  "labels": [
+    "cleanup",
+    "cli",
+    "duplication"
+  ],
+  "created": "2026-02-14T10:23:04.745798952Z",
+  "updated": "2026-02-14T10:23:04.745798952Z"
+}
