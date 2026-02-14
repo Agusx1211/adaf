@@ -1,0 +1,14 @@
+{
+  "id": 37,
+  "title": "issue create: Add --description-file flag (LLM shell-quoting footgun)",
+  "description": "LLM agents consistently fail to create issues with rich descriptions because of shell quoting conflicts.\n\n## Problem\n\nWhen an LLM agent (running inside adaf loop) tries to create an issue via bash, it constructs commands like:\n\n    adaf issue create --title \"...\" --description \"$(cat \u003c\u003c 'EOF'\n    ## Problem\n    `internal/tui/app.go` has 87 fields...\n    EOF\n    )\"\n\nThis reliably breaks because the description content contains backticks, double quotes, single quotes, parentheses, and other shell metacharacters. Bash tries to interpret backticks as legacy command substitution inside the double-quoted string before the heredoc is even fully read, producing:\n\n    /bin/bash: eval: line 45: unexpected EOF while looking for matching `\"'\n\nThis is a consistent footgun: every LLM that tries to create issues with markdown-formatted descriptions (which is the natural thing to do) hits this wall. The agent in the screenshot tried parallel issue creation, the first failed on quoting, and the remaining siblings were aborted.\n\n## Root cause\n\n--description only accepts its value as a CLI flag string. There is no way to pass the description via stdin or a file, so the entire content must survive shell quoting in a single bash command invocation. Markdown content (with backticks, brackets, quotes) makes this nearly impossible for LLMs to get right consistently.\n\n## Suggested solutions (pick one or more)\n\n1. **--description-file \u003cpath\u003e flag** - Let the agent write the description to a temp file first, then reference it. This completely sidesteps shell quoting. Easiest win.\n\n2. **--description - (stdin)** - Read description from stdin when the value is \"-\". Lets agents pipe content in without shell quoting issues.\n\n3. **Both** - Support --description-file for file input and --description - for stdin. Most flexible.\n\nThe same footgun likely applies to other commands that accept long-form text (plan create, doc create, etc). Consider a consistent --*-file pattern across all of them.\n\n## Repro\n\nRun an adaf loop and ask the agent to create an issue with a description containing backticks and quotes. It will fail on the bash quoting every time.",
+  "status": "open",
+  "priority": "medium",
+  "labels": [
+    "refactor",
+    "cli",
+    "agent-ux"
+  ],
+  "created": "2026-02-14T07:54:22.069800701Z",
+  "updated": "2026-02-14T07:54:22.069800701Z"
+}

@@ -1,0 +1,15 @@
+{
+  "id": 35,
+  "title": "tui: Fix environment-dependent test TestShowSessionsMultipleOpensPicker",
+  "description": "TestShowSessionsMultipleOpensPicker (app_detach_test.go:192) fails in agent-context environments because showSessions() exits early (app.go:786) based on env vars checked by IsAgentContext() (session.go:345). Fix: clear ADAF_TURN_ID, ADAF_SESSION_ID, and ADAF_AGENT with t.Setenv before calling showSessions().",
+  "status": "open",
+  "priority": "low",
+  "labels": [
+    "bug",
+    "tui",
+    "testing"
+  ],
+  "session_id": 8,
+  "created": "2026-02-14T07:52:57.981626342Z",
+  "updated": "2026-02-14T07:52:57.981626342Z"
+}

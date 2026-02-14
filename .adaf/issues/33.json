@@ -1,0 +1,9 @@
+{
+  "id": 33,
+  "title": "No non-interactive CLI command to stop running sessions by ID",
+  "description": "## Summary\nThere is currently no non-interactive CLI command to stop/terminate running sessions by ID.\n\n## Current CLI Surface (as of 2026-02-14)\n- `adaf sessions` lists sessions and offers `logs` / `output` subcommands.\n- `adaf attach` can connect to a running session.\n- Stop is currently documented only as an interactive key path while attached:\n  - `Ctrl+C` in attach UI stops and detaches.\n\nObserved from help output:\n- `adaf sessions --help`\n- `adaf sessions output --help`\n- `adaf sessions logs --help`\n- `adaf attach --help`\n\n## Problem\nThis creates an operational gap:\n- Cannot stop a runaway/hung session from scripts or automation.\n- Cannot stop by session ID without entering interactive attach.\n- Harder to manage remote/headless environments where interactive attach is inconvenient.\n\n## Expected Behavior\nProvide explicit stop/terminate control from CLI, for example:\n- `adaf sessions stop \u003csession-id\u003e`\n- Optional batch forms: `--all`, `--agent \u003cname\u003e`, `--loop \u003cname\u003e`\n- Optional safety controls: `--force`, confirmation prompts for multi-stop.\n\n## Suggested Acceptance Criteria\n- Stop command targets a running session by ID without interactive attach.\n- Returns clear exit code and status text (stopped, already finished, not found, permission denied, etc.).\n- Emits auditable event/log entry for stop requests.\n- Works consistently for parent loop sessions and spawned sessions.\n\n## Impact\n- Improves operability and automation.\n- Reduces need for manual attach-only intervention in production-style usage.",
+  "status": "open",
+  "priority": "medium",
+  "created": "2026-02-14T07:52:57.890088864Z",
+  "updated": "2026-02-14T07:52:57.890088864Z"
+}

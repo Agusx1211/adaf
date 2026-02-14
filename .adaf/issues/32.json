@@ -1,0 +1,14 @@
+{
+  "id": 32,
+  "title": "tui: Fix role-edit flow losing context when entering rule editor",
+  "description": "From role edit (settings_roles_rules.go:598), editing a rule body jumps to stateSettingsRuleBody (line 665), but save/esc returns to rules list (lines 1003, 1010) instead of role edit. Need to track returnState for rule ID/body editors so they return to the originating screen.",
+  "status": "open",
+  "priority": "low",
+  "labels": [
+    "bug",
+    "tui"
+  ],
+  "session_id": 8,
+  "created": "2026-02-14T07:52:53.775740748Z",
+  "updated": "2026-02-14T07:52:53.775740748Z"
+}

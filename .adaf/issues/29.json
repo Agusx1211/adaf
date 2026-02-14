@@ -1,0 +1,14 @@
+{
+  "id": 29,
+  "title": "cli: Split oversized command files and extract shared helpers",
+  "description": "Three CLI files exceed 700 lines: stats_cmd.go (773), spawn.go (769), plan.go (740). Split per-subcommand. Extract formatTimeAgo/formatDuration from stats_cmd.go to helpers.go. Normalize minor error handling inconsistencies. Issue 26 cleanup was effective - this is incremental polish. Relates to phase p4-agent-cleanup.",
+  "status": "open",
+  "priority": "medium",
+  "labels": [
+    "refactor",
+    "cli"
+  ],
+  "session_id": 8,
+  "created": "2026-02-14T07:52:38.963220048Z",
+  "updated": "2026-02-14T07:52:38.963220048Z"
+}
