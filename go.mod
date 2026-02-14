@@ -11,7 +11,6 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/mattn/go-isatty v0.0.20
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/net v0.50.0
 )
 
 require (
