@@ -1,118 +1,324 @@
 (function () {
   'use strict';
 
-  var REFRESH_MS = 10000;
-  var MAX_EVENT_ENTRIES = 300;
-  var MAX_OUTPUT_CHARS = 120000;
-
-  var SESSION_ACTIVE = {
+  var POLL_MS = 5000;
+  var MAX_STREAM_EVENTS = 900;
+  var MAX_ACTIVITY_EVENTS = 240;
+  var STATUS_RUNNING = {
     starting: true,
-    running: true
+    running: true,
+    active: true,
+    in_progress: true
   };
 
-  var ISSUE_STATUSES = ['open', 'in_progress', 'resolved', 'wontfix'];
-  var ISSUE_PRIORITIES = ['critical', 'high', 'medium', 'low'];
-  var PLAN_PHASE_STATUSES = ['not_started', 'in_progress', 'complete', 'blocked'];
-
-  function createEmptyCache() {
-    return {
-      plans: [],
-      planDetail: null,
-      issues: [],
-      docs: [],
-      profiles: [],
-      loops: [],
-      roles: [],
-      rules: [],
-      pushover: {}
-    };
-  }
+  var LEFT_VIEWS = ['agents', 'issues', 'docs', 'plan', 'logs'];
+  var RIGHT_LAYERS = ['raw', 'activity', 'messages'];
+  var SCOPE_COLOR_PALETTE = [
+    '#89b4fa', '#94e2d5', '#cba6f7', '#fab387', '#a6e3a1', '#b4befe', '#89dceb', '#f2cdcd', '#74c7ec'
+  ];
 
   var state = {
-    tab: '',
+    // Auth
     authToken: '',
+
+    // Multi-project
     projects: [],
     currentProjectID: '',
-    multiProject: false,
-    dashboardTimer: null,
-    selectedSessionID: null,
-    selectedPlanID: '',
-    selectedIssueID: null,
-    selectedDocID: '',
-    issueStatusFilter: 'all',
-    issuePriorityFilter: 'all',
-    docsPlanFilter: 'all',
-    configSection: 'profiles',
+
+    // Layout state
+    leftView: 'agents',
+    rightLayer: 'raw',
+    selectedScope: null,
+    autoScroll: true,
+
+    // Data
+    sessions: [],
+    spawns: [],
+    messages: [],
+    streamEvents: [],
+    issues: [],
+    plans: [],
+    activePlan: null,
+    docs: [],
+    turns: [],
+    loopRun: null,
+    usage: null,
+
+    // Selection
+    selectedIssue: null,
+    selectedPlan: null,
+
+    // Tree state
+    expandedNodes: new Set(),
+
+    // WebSocket
     ws: null,
     wsConnected: false,
-    wsSessionID: null,
+
+    // Terminal
     term: null,
-    termFit: null,
     termWS: null,
+
+    // Internal UI/runtime
     termWSConnected: false,
+    currentPanel: 'left',
     loadingCount: 0,
     modal: null,
-    sessionStreams: {},
-    cache: createEmptyCache()
+    projectMeta: null,
+    pollTimer: null,
+    reconnectTimer: null,
+    currentSessionSocketID: 0,
+    activeLoopIDForMessages: 0,
+    viewLoaded: {
+      issues: false,
+      docs: false,
+      plan: false,
+      logs: false
+    }
   };
 
-  var nav = document.getElementById('nav');
   var content = document.getElementById('content');
   var modalRoot = document.getElementById('modal-root');
   var toastRoot = document.getElementById('toast-root');
   var loadingNode = document.getElementById('global-loading');
-  var connDot = document.getElementById('conn-dot');
-  var connLabel = document.getElementById('conn-label');
-  var projectSelect = document.getElementById('project-select');
+
+  var ICON_PATHS = {
+    bot: 'M12 3a3 3 0 013 3v1h1a2 2 0 012 2v6a2 2 0 01-2 2h-1v1a3 3 0 11-6 0v-1H8a2 2 0 01-2-2V9a2 2 0 012-2h1V6a3 3 0 013-3zm-2 9a1 1 0 100 2 1 1 0 000-2zm4 0a1 1 0 100 2 1 1 0 000-2z',
+    alert: 'M12 3l9 16H3l9-16zm0 5a1 1 0 00-1 1v4a1 1 0 102 0V9a1 1 0 00-1-1zm0 8a1.2 1.2 0 100 2.4 1.2 1.2 0 000-2.4z',
+    file: 'M7 3h7l4 4v14H7a2 2 0 01-2-2V5a2 2 0 012-2zm7 1.5V8h3.5',
+    list: 'M8 6h10M8 12h10M8 18h10M4 6h.01M4 12h.01M4 18h.01',
+    scroll: 'M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2zm2 4h6M9 11h6M9 14h4',
+    terminal: 'M4 5h16v14H4zM7 9l3 3-3 3M12 15h5',
+    activity: 'M3 12h4l3 7 4-14 3 7h4',
+    message: 'M4 5h16v10H8l-4 4V5z',
+    eye: 'M2 12s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6zm10-3a3 3 0 100 6 3 3 0 000-6z',
+    swap: 'M4 7h11l-2-2m2 2-2 2M20 17H9l2-2m-2 2 2 2',
+    refresh: 'M20 12a8 8 0 10-2.34 5.66M20 12V7m0 5h-5',
+    fork: 'M6 3a2 2 0 104 0 2 2 0 00-4 0zm8 0a2 2 0 104 0 2 2 0 00-4 0zM6 21a2 2 0 104 0 2 2 0 00-4 0zm2-16v6a4 4 0 004 4h4M16 5v10',
+    branch: 'M6 3v8a4 4 0 004 4h8M6 3a2 2 0 114 0 2 2 0 01-4 0zm10 0a2 2 0 114 0 2 2 0 01-4 0zm0 18a2 2 0 114 0 2 2 0 01-4 0z',
+    chevronDown: 'M6 9l6 6 6-6',
+    chevronRight: 'M9 6l6 6-6 6'
+  };
 
   function init() {
-    if (!nav || !content || !modalRoot) return;
+    if (!content || !modalRoot || !toastRoot) return;
 
     loadAuthToken();
-    updateConnectionStatus();
+    bindGlobalEvents();
+    renderApp();
 
-    nav.addEventListener('click', function (event) {
-      var link = event.target.closest('a[data-tab]');
-      if (!link) return;
-      event.preventDefault();
-      switchTab(link.getAttribute('data-tab'));
-    });
-
-    if (projectSelect) {
-      projectSelect.addEventListener('change', function () {
-        switchProject(projectSelect.value || '', true);
+    initializeProjects()
+      .then(function () {
+        return refreshCoreData(true);
+      })
+      .then(function () {
+        startPolling();
+      })
+      .catch(function (err) {
+        if (err && err.authRequired) return;
+        showToast('Failed to initialize: ' + errorMessage(err), 'error');
+        renderApp();
       });
-    }
+  }
 
+  function bindGlobalEvents() {
     content.addEventListener('click', onContentClick);
-    content.addEventListener('submit', onContentSubmit);
     content.addEventListener('change', onContentChange);
+    content.addEventListener('submit', onContentSubmit);
 
     modalRoot.addEventListener('click', onModalClick);
     modalRoot.addEventListener('submit', onModalSubmit);
-    modalRoot.addEventListener('change', onModalChange);
 
-    document.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape' && state.modal) {
-        closeModal();
+    document.addEventListener('keydown', onDocumentKeydown);
+  }
+
+  function onDocumentKeydown(event) {
+    if (event.key === 'Escape' && state.modal) {
+      closeModal();
+      return;
+    }
+
+    if (isTypingTarget(event.target)) return;
+
+    if (/^[1-5]$/.test(event.key)) {
+      var idx = parseInt(event.key, 10) - 1;
+      if (idx >= 0 && idx < LEFT_VIEWS.length) {
+        event.preventDefault();
+        setLeftView(LEFT_VIEWS[idx]);
       }
-    });
+    }
+  }
 
-    initializeProjects().finally(function () {
-      switchTab('dashboard');
-    });
+  function onContentClick(event) {
+    var actionNode = event.target.closest('[data-action]');
+    if (!actionNode) return;
+
+    var action = actionNode.getAttribute('data-action');
+    if (!action) return;
+
+    event.preventDefault();
+
+    if (action === 'set-left-view') {
+      setLeftView(actionNode.getAttribute('data-view') || 'agents');
+      return;
+    }
+
+    if (action === 'set-right-layer') {
+      setRightLayer(actionNode.getAttribute('data-layer') || 'raw');
+      return;
+    }
+
+    if (action === 'set-scope') {
+      setSelectedScope(actionNode.getAttribute('data-scope') || null);
+      return;
+    }
+
+    if (action === 'toggle-node') {
+      toggleNode(actionNode.getAttribute('data-node') || '');
+      return;
+    }
+
+    if (action === 'toggle-auto-scroll') {
+      state.autoScroll = !state.autoScroll;
+      renderApp();
+      return;
+    }
+
+    if (action === 'toggle-mobile-panel') {
+      state.currentPanel = state.currentPanel === 'left' ? 'right' : 'left';
+      renderApp();
+      return;
+    }
+
+    if (action === 'select-issue') {
+      var issueID = parseInt(actionNode.getAttribute('data-issue-id') || '', 10);
+      if (!Number.isNaN(issueID)) {
+        state.selectedIssue = issueID;
+        renderApp();
+      }
+      return;
+    }
+
+    if (action === 'select-plan') {
+      var planID = actionNode.getAttribute('data-plan-id') || '';
+      if (!planID) return;
+      state.selectedPlan = planID;
+      fetchSelectedPlanDetail(planID).then(function () {
+        renderApp();
+      }).catch(function (err) {
+        showToast('Failed to load plan: ' + errorMessage(err), 'error');
+        renderApp();
+      });
+      return;
+    }
+
+    if (action === 'clear-scope') {
+      state.selectedScope = null;
+      ensureSessionSocket();
+      renderApp();
+      return;
+    }
+
+    if (action === 'refresh-core') {
+      refreshCoreData(false).catch(function (err) {
+        if (err && err.authRequired) return;
+        showToast('Refresh failed: ' + errorMessage(err), 'error');
+      });
+      return;
+    }
+
+    if (action === 'disconnect-auth') {
+      clearAuthToken();
+      closeModal();
+      renderApp();
+      return;
+    }
+  }
+
+  function onContentChange(event) {
+    var node = event.target;
+    if (!node) return;
+
+    if (node.id === 'project-select' || node.getAttribute('data-change') === 'project-select') {
+      switchProject(node.value || '', true);
+      return;
+    }
+  }
+
+  function onContentSubmit(event) {
+    var form = event.target.closest('form[data-form]');
+    if (!form) return;
+
+    event.preventDefault();
+
+    var formName = form.getAttribute('data-form');
+    if (formName === 'auth-inline') {
+      submitAuthForm(form);
+    }
+  }
+
+  function onModalClick(event) {
+    var actionNode = event.target.closest('[data-action]');
+    if (!actionNode) return;
+    var action = actionNode.getAttribute('data-action');
+    if (!action) return;
+
+    if (action === 'close-modal') {
+      event.preventDefault();
+      closeModal();
+      return;
+    }
+
+    if (action === 'disconnect-auth') {
+      event.preventDefault();
+      clearAuthToken();
+      closeModal();
+      renderApp();
+    }
+  }
+
+  function onModalSubmit(event) {
+    var form = event.target.closest('form[data-modal-submit]');
+    if (!form) return;
+
+    event.preventDefault();
+
+    var submit = form.getAttribute('data-modal-submit');
+    if (submit === 'auth') {
+      submitAuthForm(form);
+    }
+  }
+
+  function submitAuthForm(form) {
+    var token = readString(form, 'auth_token');
+    if (!token) {
+      showToast('Token is required.', 'error');
+      return;
+    }
+
+    saveAuthToken(token);
+    closeModal();
+    refreshCoreData(true)
+      .then(function () {
+        startPolling();
+      })
+      .catch(function (err) {
+        if (err && err.authRequired) return;
+        showToast('Failed to authenticate: ' + errorMessage(err), 'error');
+      });
   }
 
   async function initializeProjects() {
     try {
       var projects = arrayOrEmpty(await apiCall('/api/projects', 'GET', null, { allow404: true }));
       state.projects = projects;
-      state.multiProject = projects.length > 1;
 
       var savedID = '';
       try {
         savedID = localStorage.getItem('adaf_project_id') || '';
-      } catch (_) {}
+      } catch (_) {
+        savedID = '';
+      }
 
       if (savedID && findProjectByID(savedID)) {
         state.currentProjectID = savedID;
@@ -125,40 +331,20 @@
     } catch (err) {
       if (!(err && err.authRequired)) {
         state.projects = [];
-        state.multiProject = false;
         state.currentProjectID = '';
       }
+      throw err;
+    } finally {
+      updateDocumentTitle();
+      renderApp();
     }
-
-    updateProjectSelect();
-    updateDocumentTitle();
-  }
-
-  function updateProjectSelect() {
-    if (!projectSelect) return;
-
-    if (state.projects.length === 0) {
-      projectSelect.innerHTML = '';
-      projectSelect.style.display = 'none';
-      return;
-    }
-
-    projectSelect.innerHTML = state.projects.map(function (project) {
-      var id = project && project.id ? String(project.id) : '';
-      var name = project && project.name ? project.name : id || 'Unnamed Project';
-      var label = project && project.is_default ? (name + ' (default)') : name;
-      return '<option value="' + escapeHTML(id) + '">' + escapeHTML(label) + '</option>';
-    }).join('');
-
-    projectSelect.value = state.currentProjectID;
-    projectSelect.style.display = '';
   }
 
   function findProjectByID(projectID) {
-    var id = String(projectID || '');
-    if (!id) return null;
+    var target = String(projectID || '');
+    if (!target) return null;
     return state.projects.find(function (project) {
-      return project && String(project.id || '') === id;
+      return project && String(project.id || '') === target;
     }) || null;
   }
 
@@ -173,54 +359,15 @@
 
   function currentProjectName() {
     var project = currentProject();
-    if (!project) return '';
-    return project.name || project.id || '';
+    if (project && project.name) return project.name;
+    if (state.projectMeta && state.projectMeta.name) return state.projectMeta.name;
+    if (project && project.id) return String(project.id);
+    return 'project';
   }
 
-  function updateDocumentTitle(preferredName) {
-    var name = preferredName || currentProjectName();
+  function updateDocumentTitle() {
+    var name = currentProjectName();
     document.title = name ? ('ADAF - ' + name) : 'ADAF';
-  }
-
-  function resetProjectScopedState() {
-    if (state.dashboardTimer) {
-      clearInterval(state.dashboardTimer);
-      state.dashboardTimer = null;
-    }
-
-    disconnectSessionSocket();
-    state.selectedSessionID = null;
-    state.selectedPlanID = '';
-    state.selectedIssueID = null;
-    state.selectedDocID = '';
-    state.docsPlanFilter = 'all';
-    state.issueStatusFilter = 'all';
-    state.issuePriorityFilter = 'all';
-    state.sessionStreams = {};
-    state.cache = createEmptyCache();
-  }
-
-  function switchProject(projectID, refreshTab) {
-    var nextID = String(projectID || '');
-    if (!findProjectByID(nextID)) return;
-
-    if (nextID === state.currentProjectID && !refreshTab) {
-      updateProjectSelect();
-      return;
-    }
-
-    closeModal();
-    resetProjectScopedState();
-    state.currentProjectID = nextID;
-    try {
-      localStorage.setItem('adaf_project_id', nextID);
-    } catch (_) {}
-    updateProjectSelect();
-    updateDocumentTitle();
-
-    if (refreshTab && state.tab) {
-      renderCurrentTab();
-    }
   }
 
   function apiBase() {
@@ -230,16 +377,2201 @@
     return '/api';
   }
 
-  function loadAuthToken() {
-    var hash = window.location.hash || '';
-    if (hash.indexOf('#token=') === 0) {
-      state.authToken = hash.slice(7);
-      window.location.hash = '';
+  function resetProjectScopedState() {
+    stopPolling();
+    disconnectSessionSocket();
+    disconnectTerminal();
+
+    state.sessions = [];
+    state.spawns = [];
+    state.messages = [];
+    state.streamEvents = [];
+    state.issues = [];
+    state.plans = [];
+    state.activePlan = null;
+    state.docs = [];
+    state.turns = [];
+    state.loopRun = null;
+    state.usage = null;
+
+    state.selectedIssue = null;
+    state.selectedPlan = null;
+    state.selectedScope = null;
+    state.expandedNodes = new Set();
+    state.projectMeta = null;
+    state.activeLoopIDForMessages = 0;
+
+    state.viewLoaded = {
+      issues: false,
+      docs: false,
+      plan: false,
+      logs: false
+    };
+  }
+
+  function switchProject(projectID, refresh) {
+    var nextID = String(projectID || '');
+    if (nextID && !findProjectByID(nextID)) return;
+
+    if (nextID === state.currentProjectID && !refresh) return;
+
+    resetProjectScopedState();
+    state.currentProjectID = nextID;
+    try {
+      localStorage.setItem('adaf_project_id', nextID);
+    } catch (_) {}
+
+    updateDocumentTitle();
+    renderApp();
+
+    refreshCoreData(true)
+      .then(function () {
+        startPolling();
+      })
+      .catch(function (err) {
+        if (err && err.authRequired) return;
+        showToast('Failed to switch project: ' + errorMessage(err), 'error');
+      });
+  }
+
+  function setLeftView(view) {
+    if (LEFT_VIEWS.indexOf(view) < 0) return;
+    state.leftView = view;
+
+    if (window.innerWidth <= 768) {
+      state.currentPanel = 'left';
+    }
+
+    ensureViewData(view)
+      .then(function () {
+        renderApp();
+      })
+      .catch(function (err) {
+        if (err && err.authRequired) return;
+        showToast('Failed to load ' + view + ': ' + errorMessage(err), 'error');
+      });
+
+    renderApp();
+  }
+
+  function setRightLayer(layer) {
+    if (RIGHT_LAYERS.indexOf(layer) < 0) return;
+    state.rightLayer = layer;
+
+    if (window.innerWidth <= 768) {
+      state.currentPanel = 'right';
+    }
+
+    renderApp();
+  }
+
+  function setSelectedScope(scope) {
+    state.selectedScope = scope || null;
+    expandScopeParents(scope);
+    ensureSessionSocket();
+    renderApp();
+  }
+
+  function toggleNode(nodeID) {
+    if (!nodeID) return;
+    if (state.expandedNodes.has(nodeID)) {
+      state.expandedNodes.delete(nodeID);
+    } else {
+      state.expandedNodes.add(nodeID);
+    }
+    renderApp();
+  }
+
+  function expandScopeParents(scope) {
+    if (!scope) return;
+    if (scope.indexOf('session-') === 0) {
+      state.expandedNodes.add(scope);
+      return;
+    }
+
+    if (scope.indexOf('spawn-') === 0) {
+      var spawnID = parseInt(scope.slice(6), 10);
+      if (Number.isNaN(spawnID)) return;
+
+      var byID = spawnMapByID();
+      var current = byID[spawnID] || null;
+      while (current) {
+        state.expandedNodes.add('spawn-' + current.id);
+        if (current.parent_spawn_id > 0) {
+          current = byID[current.parent_spawn_id] || null;
+          continue;
+        }
+        if (current.parent_turn_id > 0) {
+          state.expandedNodes.add('session-' + current.parent_turn_id);
+        }
+        break;
+      }
+    }
+  }
+
+  function ensureTreeDefaults() {
+    if (state.expandedNodes.size > 0) return;
+
+    state.sessions.forEach(function (session) {
+      state.expandedNodes.add('session-' + session.id);
+    });
+
+    state.spawns.forEach(function (spawn) {
+      if (spawn.status === 'running' || spawn.status === 'awaiting_input') {
+        state.expandedNodes.add('spawn-' + spawn.id);
+      }
+    });
+  }
+
+  async function refreshCoreData(initial) {
+    var priorLoopID = state.loopRun && state.loopRun.id ? state.loopRun.id : 0;
+
+    var results = await Promise.all([
+      apiCall(apiBase() + '/project', 'GET', null, { allow404: true }),
+      apiCall(apiBase() + '/sessions', 'GET', null, { allow404: true }),
+      apiCall(apiBase() + '/spawns', 'GET', null, { allow404: true }),
+      apiCall(apiBase() + '/loops', 'GET', null, { allow404: true }),
+      apiCall(apiBase() + '/stats/profiles', 'GET', null, { allow404: true })
+    ]);
+
+    state.projectMeta = results[0] || null;
+    updateDocumentTitle();
+
+    state.sessions = normalizeSessions(results[1]);
+    mergeSpawns(results[2], 'poll');
+
+    var loopRuns = arrayOrEmpty(results[3]);
+    state.loopRun = pickActiveLoopRun(loopRuns);
+
+    var usageFromStats = aggregateUsageFromProfileStats(results[4]);
+    if (usageFromStats) {
+      state.usage = usageFromStats;
+    } else if (!state.usage) {
+      state.usage = {
+        input_tokens: 0,
+        output_tokens: 0,
+        cost_usd: 0,
+        num_turns: state.turns.length || 0
+      };
+    }
+
+    ensureTreeDefaults();
+    ensureDefaultScope();
+
+    var currentLoopID = state.loopRun && state.loopRun.id ? state.loopRun.id : 0;
+    if (currentLoopID !== priorLoopID || initial) {
+      await refreshLoopMessages(currentLoopID);
+    }
+
+    if (state.leftView === 'agents') {
+      ensureSessionSocket();
+    } else {
+      // keep socket in sync with selected scope for live right-panel data
+      ensureSessionSocket();
+    }
+
+    await ensureViewData(state.leftView);
+    renderApp();
+  }
+
+  function startPolling() {
+    stopPolling();
+    state.pollTimer = setInterval(function () {
+      refreshCoreData(false).catch(function (err) {
+        if (err && err.authRequired) return;
+        showToast('Refresh error: ' + errorMessage(err), 'error');
+      });
+    }, POLL_MS);
+  }
+
+  function stopPolling() {
+    if (state.pollTimer) {
+      clearInterval(state.pollTimer);
+      state.pollTimer = null;
+    }
+  }
+
+  async function ensureViewData(view) {
+    if (view === 'issues') {
+      if (state.viewLoaded.issues) return;
+      await fetchIssues();
+      state.viewLoaded.issues = true;
+      return;
+    }
+
+    if (view === 'docs') {
+      if (state.viewLoaded.docs) return;
+      await fetchDocs();
+      state.viewLoaded.docs = true;
+      return;
+    }
+
+    if (view === 'plan') {
+      if (state.viewLoaded.plan) return;
+      await fetchPlans();
+      state.viewLoaded.plan = true;
+      return;
+    }
+
+    if (view === 'logs') {
+      if (state.viewLoaded.logs) return;
+      await fetchTurns();
+      state.viewLoaded.logs = true;
+      return;
+    }
+  }
+
+  async function fetchIssues() {
+    state.issues = normalizeIssues(await apiCall(apiBase() + '/issues', 'GET', null, { allow404: true }));
+    if (state.selectedIssue == null && state.issues.length) {
+      state.selectedIssue = state.issues[0].id;
+    }
+  }
+
+  async function fetchDocs() {
+    state.docs = normalizeDocs(await apiCall(apiBase() + '/docs', 'GET', null, { allow404: true }));
+  }
+
+  async function fetchTurns() {
+    state.turns = normalizeTurns(await apiCall(apiBase() + '/turns', 'GET', null, { allow404: true }));
+    updateUsageTurnCountFromTurns();
+  }
+
+  async function fetchPlans() {
+    state.plans = normalizePlans(await apiCall(apiBase() + '/plans', 'GET', null, { allow404: true }));
+
+    var preferredPlanID = state.selectedPlan || activePlanIDFromProject() || '';
+    if (!preferredPlanID && state.plans.length) {
+      var active = state.plans.find(function (plan) {
+        return normalizeStatus(plan.status) === 'active';
+      });
+      preferredPlanID = active ? active.id : state.plans[0].id;
+    }
+
+    if (preferredPlanID) {
+      state.selectedPlan = preferredPlanID;
+      await fetchSelectedPlanDetail(preferredPlanID);
+    } else {
+      state.activePlan = null;
+      state.selectedPlan = null;
+    }
+  }
+
+  async function fetchSelectedPlanDetail(planID) {
+    if (!planID) {
+      state.activePlan = null;
+      return;
+    }
+
+    var detail = await apiCall(apiBase() + '/plans/' + encodeURIComponent(planID), 'GET', null, { allow404: true });
+    if (detail) {
+      state.activePlan = normalizePlan(detail);
+      return;
+    }
+
+    state.activePlan = null;
+  }
+
+  function activePlanIDFromProject() {
+    if (state.projectMeta && state.projectMeta.active_plan_id) {
+      return String(state.projectMeta.active_plan_id);
+    }
+    return '';
+  }
+
+  async function refreshLoopMessages(loopID) {
+    state.activeLoopIDForMessages = loopID || 0;
+    if (!loopID) {
+      state.messages = [];
+      return;
+    }
+
+    var list = arrayOrEmpty(await apiCall(apiBase() + '/loops/' + encodeURIComponent(String(loopID)) + '/messages', 'GET', null, { allow404: true }));
+    state.messages = normalizeLoopMessages(list);
+  }
+
+  function ensureDefaultScope() {
+    if (state.selectedScope && scopeExists(state.selectedScope)) {
+      return;
+    }
+
+    var runningSession = state.sessions.find(function (session) {
+      return !!STATUS_RUNNING[normalizeStatus(session.status)];
+    }) || null;
+
+    if (runningSession) {
+      state.selectedScope = 'session-' + runningSession.id;
+      return;
+    }
+
+    if (state.sessions.length) {
+      state.selectedScope = 'session-' + state.sessions[0].id;
+      return;
+    }
+
+    if (state.spawns.length) {
+      state.selectedScope = 'spawn-' + state.spawns[0].id;
+      return;
+    }
+
+    state.selectedScope = null;
+  }
+
+  function scopeExists(scope) {
+    if (!scope) return false;
+    if (scope.indexOf('session-') === 0) {
+      var sessionID = parseInt(scope.slice(8), 10);
+      if (Number.isNaN(sessionID)) return false;
+      return !!state.sessions.find(function (session) { return session.id === sessionID; });
+    }
+    if (scope.indexOf('spawn-') === 0) {
+      var spawnID = parseInt(scope.slice(6), 10);
+      if (Number.isNaN(spawnID)) return false;
+      return !!state.spawns.find(function (spawn) { return spawn.id === spawnID; });
+    }
+    return false;
+  }
+
+  function resolveSessionIDForScope(scope) {
+    var selected = scope || state.selectedScope;
+    if (selected && selected.indexOf('session-') === 0) {
+      var sessionID = parseInt(selected.slice(8), 10);
+      if (!Number.isNaN(sessionID)) return sessionID;
+    }
+
+    if (selected && selected.indexOf('spawn-') === 0) {
+      var spawnID = parseInt(selected.slice(6), 10);
+      if (!Number.isNaN(spawnID)) {
+        var spawn = state.spawns.find(function (item) {
+          return item.id === spawnID;
+        }) || null;
+        if (spawn) {
+          if (spawn.parent_turn_id > 0) return spawn.parent_turn_id;
+          if (spawn.child_turn_id > 0) return spawn.child_turn_id;
+        }
+      }
+    }
+
+    var running = state.sessions.find(function (session) {
+      return !!STATUS_RUNNING[normalizeStatus(session.status)];
+    }) || null;
+    if (running) return running.id;
+
+    if (state.sessions.length) return state.sessions[0].id;
+    return 0;
+  }
+
+  function ensureSessionSocket() {
+    var targetSessionID = resolveSessionIDForScope(state.selectedScope);
+    if (!targetSessionID) {
+      disconnectSessionSocket();
+      return;
+    }
+
+    if (
+      state.ws &&
+      state.currentSessionSocketID === targetSessionID &&
+      (state.ws.readyState === WebSocket.OPEN || state.ws.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
+
+    connectSessionSocket(targetSessionID);
+  }
+
+  function connectSessionSocket(sessionID) {
+    if (!sessionID) return;
+
+    disconnectSessionSocket();
+    state.currentSessionSocketID = sessionID;
+
+    try {
+      state.ws = new WebSocket(buildWSURL('/ws/sessions/' + encodeURIComponent(String(sessionID))));
+    } catch (err) {
+      state.ws = null;
+      state.wsConnected = false;
+      renderApp();
+      return;
+    }
+
+    state.ws.addEventListener('open', function () {
+      state.wsConnected = true;
+      addStreamEvent({
+        scope: 'session-' + sessionID,
+        type: 'text',
+        text: 'Connected to live session stream.'
+      });
+      renderApp();
+    });
+
+    state.ws.addEventListener('message', function (event) {
+      var payload;
       try {
-        localStorage.setItem('adaf_token', state.authToken);
+        payload = JSON.parse(event.data);
+      } catch (_) {
+        addStreamEvent({
+          scope: 'session-' + sessionID,
+          type: 'text',
+          text: String(event.data || '')
+        });
+        renderApp();
+        return;
+      }
+
+      ingestSessionEnvelope(sessionID, payload, false);
+      renderApp();
+    });
+
+    state.ws.addEventListener('error', function () {
+      state.wsConnected = false;
+      renderApp();
+    });
+
+    state.ws.addEventListener('close', function () {
+      var closedSessionID = state.currentSessionSocketID;
+      state.wsConnected = false;
+      state.ws = null;
+
+      addStreamEvent({
+        scope: 'session-' + sessionID,
+        type: 'text',
+        text: 'Session stream disconnected.'
+      });
+
+      if (state.reconnectTimer) {
+        clearTimeout(state.reconnectTimer);
+      }
+      state.reconnectTimer = setTimeout(function () {
+        if (resolveSessionIDForScope(state.selectedScope) === closedSessionID) {
+          ensureSessionSocket();
+        }
+      }, 1800);
+
+      renderApp();
+    });
+  }
+
+  function disconnectSessionSocket() {
+    if (state.reconnectTimer) {
+      clearTimeout(state.reconnectTimer);
+      state.reconnectTimer = null;
+    }
+
+    if (state.ws) {
+      try {
+        state.ws.close();
       } catch (_) {
         // Best effort.
       }
+    }
+
+    state.ws = null;
+    state.wsConnected = false;
+    state.currentSessionSocketID = 0;
+  }
+
+  function ingestSessionEnvelope(sessionID, envelope, replay) {
+    if (!envelope || typeof envelope !== 'object') return;
+
+    var type = envelope.type || 'event';
+    var data = envelope.data;
+
+    if (type === 'snapshot') {
+      applySessionSnapshot(sessionID, data, replay);
+      return;
+    }
+
+    if (type === 'event') {
+      var wireEvent = data && data.event ? data.event : data;
+      handleAgentStreamEvent(sessionID, wireEvent);
+      return;
+    }
+
+    if (type === 'raw') {
+      var rawText = rawPayloadText(data);
+      addStreamEvent({
+        scope: 'session-' + sessionID,
+        type: 'text',
+        text: cropText(rawText)
+      });
+      return;
+    }
+
+    if (type === 'started') {
+      addActivityFromEvent({
+        scope: 'session-' + sessionID,
+        ts: Date.now(),
+        type: 'started',
+        text: 'Agent turn started.'
+      });
+      return;
+    }
+
+    if (type === 'prompt') {
+      addStreamEvent({
+        scope: 'session-' + sessionID,
+        type: 'thinking',
+        text: data && data.prompt ? String(data.prompt) : 'Prompt emitted.'
+      });
+      return;
+    }
+
+    if (type === 'finished') {
+      mergeUsageFromSessionSnapshot(data || {});
+      addStreamEvent({
+        scope: 'session-' + sessionID,
+        type: data && data.error ? 'tool_result' : 'text',
+        text: 'Session finished with exit code ' + String((data && data.exit_code) || 0) + (data && data.error ? (' · ' + data.error) : '')
+      });
+      return;
+    }
+
+    if (type === 'done') {
+      addStreamEvent({
+        scope: 'session-' + sessionID,
+        type: 'text',
+        text: 'Session completed.' + (data && data.error ? ' ' + data.error : '')
+      });
+      return;
+    }
+
+    if (type === 'spawn') {
+      mergeSpawns(data && data.spawns ? data.spawns : [], 'ws');
+      return;
+    }
+
+    if (type === 'loop_step_start' || type === 'loop_step_end') {
+      applyLoopWireUpdate(type, data || {});
+      var actionText = type === 'loop_step_start'
+        ? loopStepText(data, true)
+        : loopStepText(data, false);
+      addStreamEvent({
+        scope: 'session-' + sessionID,
+        type: 'text',
+        text: actionText
+      });
+      addActivityFromEvent({
+        scope: 'session-' + sessionID,
+        ts: Date.now(),
+        type: type,
+        text: actionText
+      });
+      return;
+    }
+
+    if (type === 'loop_done') {
+      applyLoopDone(data || {});
+      addStreamEvent({
+        scope: 'session-' + sessionID,
+        type: 'text',
+        text: 'Loop finished' + (data && data.reason ? ': ' + data.reason : '.')
+      });
+      addActivityFromEvent({
+        scope: 'session-' + sessionID,
+        ts: Date.now(),
+        type: 'loop_done',
+        text: 'Loop finished' + (data && data.reason ? ': ' + data.reason : '.')
+      });
+      return;
+    }
+
+    if (type === 'error') {
+      addStreamEvent({
+        scope: 'session-' + sessionID,
+        type: 'tool_result',
+        text: 'Error: ' + (data && data.error ? data.error : safeJSONString(data))
+      });
+      return;
+    }
+
+    addStreamEvent({
+      scope: 'session-' + sessionID,
+      type: 'text',
+      text: '[' + type + '] ' + safeJSONString(data)
+    });
+  }
+
+  function applySessionSnapshot(sessionID, snapshot, replay) {
+    var data = asObject(snapshot);
+    if (!data) return;
+
+    if (data.session && typeof data.session === 'object') {
+      mergeSessionSnapshot(sessionID, data.session);
+      mergeUsageFromSessionSnapshot(data.session);
+    }
+
+    if (data.loop && typeof data.loop === 'object') {
+      applyLoopWireUpdate('snapshot', data.loop);
+    }
+
+    if (Array.isArray(data.spawns)) {
+      mergeSpawns(data.spawns, 'snapshot');
+    }
+
+    if (Array.isArray(data.recent)) {
+      data.recent.forEach(function (recentMessage) {
+        if (!recentMessage || recentMessage.type === 'snapshot') return;
+        ingestSessionEnvelope(sessionID, recentMessage, true);
+      });
+    }
+
+    if (!replay) {
+      addStreamEvent({
+        scope: 'session-' + sessionID,
+        type: 'text',
+        text: 'Snapshot received.'
+      });
+    }
+  }
+
+  function mergeSessionSnapshot(sessionID, sessionData) {
+    if (!sessionData) return;
+
+    var existing = state.sessions.find(function (session) {
+      return session.id === sessionID;
+    }) || null;
+
+    if (existing) {
+      existing.profile = sessionData.profile || existing.profile;
+      existing.agent = sessionData.agent || existing.agent;
+      existing.model = sessionData.model || existing.model;
+      existing.status = sessionData.status || existing.status;
+      existing.action = sessionData.action || existing.action;
+      existing.started_at = sessionData.started_at || existing.started_at;
+      existing.ended_at = sessionData.ended_at || existing.ended_at;
+    } else {
+      state.sessions.unshift({
+        id: sessionID,
+        profile: sessionData.profile || '',
+        agent: sessionData.agent || '',
+        model: sessionData.model || '',
+        status: sessionData.status || 'running',
+        action: sessionData.action || '',
+        started_at: sessionData.started_at || '',
+        ended_at: sessionData.ended_at || '',
+        loop_name: ''
+      });
+    }
+  }
+
+  function mergeUsageFromSessionSnapshot(sessionData) {
+    if (!sessionData || typeof sessionData !== 'object') return;
+
+    if (!state.usage) {
+      state.usage = {
+        input_tokens: 0,
+        output_tokens: 0,
+        cost_usd: 0,
+        num_turns: 0
+      };
+    }
+
+    var input = Number(sessionData.input_tokens);
+    var output = Number(sessionData.output_tokens);
+    var cost = Number(sessionData.cost_usd);
+    var turns = Number(sessionData.num_turns);
+
+    if (Number.isFinite(input)) state.usage.input_tokens = Math.max(state.usage.input_tokens || 0, input);
+    if (Number.isFinite(output)) state.usage.output_tokens = Math.max(state.usage.output_tokens || 0, output);
+    if (Number.isFinite(cost)) state.usage.cost_usd = Math.max(state.usage.cost_usd || 0, cost);
+    if (Number.isFinite(turns)) state.usage.num_turns = Math.max(state.usage.num_turns || 0, turns);
+  }
+
+  function handleAgentStreamEvent(sessionID, rawEvent) {
+    var event = asObject(rawEvent);
+    if (!event || typeof event !== 'object') {
+      addStreamEvent({
+        scope: 'session-' + sessionID,
+        type: 'text',
+        text: safeJSONString(rawEvent)
+      });
+      return;
+    }
+
+    if (event.type === 'assistant') {
+      var blocks = extractContentBlocks(event);
+      if (!blocks.length) {
+        addStreamEvent({
+          scope: 'session-' + sessionID,
+          type: 'text',
+          text: '[assistant event]'
+        });
+        return;
+      }
+
+      blocks.forEach(function (block) {
+        ingestAssistantBlock(sessionID, block);
+      });
+      return;
+    }
+
+    if (event.type === 'user') {
+      var userBlocks = extractContentBlocks(event);
+      userBlocks.forEach(function (block) {
+        if (!block || typeof block !== 'object') return;
+        if (block.type === 'tool_result') {
+          addStreamEvent({
+            scope: 'session-' + sessionID,
+            type: 'tool_result',
+            tool: block.name || 'tool_result',
+            result: stringifyToolPayload(block.content || block.output || block.text || safeJSONString(block))
+          });
+        }
+      });
+      return;
+    }
+
+    if (event.type === 'content_block_delta') {
+      var delta = event.delta && (event.delta.text || event.delta.partial_json);
+      if (delta) {
+        addStreamEvent({
+          scope: 'session-' + sessionID,
+          type: 'text',
+          text: String(delta)
+        });
+      }
+      return;
+    }
+
+    if (event.type === 'result') {
+      mergeUsageFromResultEvent(event);
+
+      var resultParts = [];
+      if (event.subtype) resultParts.push(String(event.subtype));
+      if (state.usage && state.usage.input_tokens > 0) resultParts.push('in=' + formatNumber(state.usage.input_tokens));
+      if (state.usage && state.usage.output_tokens > 0) resultParts.push('out=' + formatNumber(state.usage.output_tokens));
+      if (state.usage && state.usage.cost_usd > 0) resultParts.push('cost=$' + Number(state.usage.cost_usd).toFixed(4));
+
+      addStreamEvent({
+        scope: 'session-' + sessionID,
+        type: 'tool_result',
+        text: resultParts.length ? resultParts.join(' · ') : 'Result received.'
+      });
+      return;
+    }
+
+    addStreamEvent({
+      scope: 'session-' + sessionID,
+      type: 'text',
+      text: '[' + (event.type || 'event') + '] ' + safeJSONString(event)
+    });
+  }
+
+  function ingestAssistantBlock(sessionID, block) {
+    if (!block || typeof block !== 'object') return;
+
+    if (block.type === 'text' && block.text) {
+      addStreamEvent({
+        scope: 'session-' + sessionID,
+        type: 'text',
+        text: String(block.text)
+      });
+      return;
+    }
+
+    if (block.type === 'thinking' && block.text) {
+      addStreamEvent({
+        scope: 'session-' + sessionID,
+        type: 'thinking',
+        text: String(block.text)
+      });
+      return;
+    }
+
+    if (block.type === 'tool_use') {
+      addStreamEvent({
+        scope: 'session-' + sessionID,
+        type: 'tool_use',
+        tool: block.name || 'tool',
+        input: stringifyToolPayload(block.input || {})
+      });
+      addActivityFromEvent({
+        scope: 'session-' + sessionID,
+        ts: Date.now(),
+        type: 'tool_use',
+        tool: block.name || 'tool',
+        text: stringifyToolPayload(block.input || {})
+      });
+      return;
+    }
+
+    if (block.type === 'tool_result') {
+      addStreamEvent({
+        scope: 'session-' + sessionID,
+        type: 'tool_result',
+        tool: block.name || 'tool_result',
+        result: stringifyToolPayload(block.content || block.output || block.text || '')
+      });
+      return;
+    }
+
+    addStreamEvent({
+      scope: 'session-' + sessionID,
+      type: 'text',
+      text: safeJSONString(block)
+    });
+  }
+
+  function mergeUsageFromResultEvent(event) {
+    if (!event || typeof event !== 'object') return;
+
+    if (!state.usage) {
+      state.usage = {
+        input_tokens: 0,
+        output_tokens: 0,
+        cost_usd: 0,
+        num_turns: 0
+      };
+    }
+
+    var usage = event.usage && typeof event.usage === 'object' ? event.usage : {};
+
+    var input = numberOr(state.usage.input_tokens, event.input_tokens, usage.input_tokens);
+    var output = numberOr(state.usage.output_tokens, event.output_tokens, usage.output_tokens);
+    var turns = numberOr(state.usage.num_turns, event.num_turns, usage.num_turns);
+    var cost = numberOr(state.usage.cost_usd, event.total_cost_usd, event.cost_usd, usage.total_cost_usd, usage.cost_usd);
+
+    if (Number.isFinite(input)) state.usage.input_tokens = input;
+    if (Number.isFinite(output)) state.usage.output_tokens = output;
+    if (Number.isFinite(turns)) state.usage.num_turns = turns;
+    if (Number.isFinite(cost)) state.usage.cost_usd = cost;
+  }
+
+  function mergeSpawns(rawSpawns, source) {
+    var nextSpawns = normalizeSpawns(rawSpawns);
+    var previousByID = {};
+    var seenIDs = {};
+
+    state.spawns.forEach(function (spawn) {
+      previousByID[spawn.id] = spawn;
+    });
+
+    if (!nextSpawns.length) {
+      if (source === 'poll' && state.spawns.length === 0) return;
+      state.spawns = nextSpawns;
+      return;
+    }
+
+    var mergedUpdates = nextSpawns.map(function (spawn) {
+      seenIDs[spawn.id] = true;
+      return mergeSpawnRecord(previousByID[spawn.id], spawn);
+    });
+
+    if (source === 'poll') {
+      state.spawns = mergedUpdates;
+    } else {
+      var retained = state.spawns.filter(function (spawn) {
+        return !seenIDs[spawn.id];
+      });
+      state.spawns = mergedUpdates.concat(retained).sort(sortByStartTimeDesc);
+    }
+
+    mergedUpdates.forEach(function (spawn) {
+      var prev = previousByID[spawn.id] || null;
+      if (!prev) {
+        addStreamEvent({
+          scope: 'spawn-' + spawn.id,
+          type: 'text',
+          text: 'Spawn started: ' + (spawn.task || 'new task')
+        });
+        addActivityFromEvent({
+          scope: 'spawn-' + spawn.id,
+          ts: parseTimestamp(spawn.started_at),
+          type: 'spawn_started',
+          text: 'Spawn started: ' + (spawn.task || 'new task')
+        });
+        return;
+      }
+
+      if (normalizeStatus(prev.status) !== normalizeStatus(spawn.status)) {
+        addStreamEvent({
+          scope: 'spawn-' + spawn.id,
+          type: 'text',
+          text: 'Status: ' + (prev.status || 'unknown') + ' -> ' + (spawn.status || 'unknown')
+        });
+        addActivityFromEvent({
+          scope: 'spawn-' + spawn.id,
+          ts: Date.now(),
+          type: 'spawn_status',
+          text: 'Status changed to ' + (spawn.status || 'unknown')
+        });
+      }
+
+      if (!prev.question && spawn.question && normalizeStatus(spawn.status) === 'awaiting_input') {
+        addStreamEvent({
+          scope: 'spawn-' + spawn.id,
+          type: 'text',
+          text: 'Awaiting input: ' + spawn.question
+        });
+      }
+    });
+  }
+
+  function mergeSpawnRecord(previous, next) {
+    if (!previous) return next;
+    if (!next) return previous;
+
+    return {
+      id: next.id || previous.id,
+      parent_turn_id: next.parent_turn_id || previous.parent_turn_id,
+      parent_spawn_id: next.parent_spawn_id || previous.parent_spawn_id,
+      child_turn_id: next.child_turn_id || previous.child_turn_id,
+      profile: next.profile || previous.profile,
+      role: next.role || previous.role,
+      parent_profile: next.parent_profile || previous.parent_profile,
+      status: next.status || previous.status,
+      question: next.question || previous.question,
+      task: next.task || previous.task,
+      branch: next.branch || previous.branch,
+      started_at: next.started_at || previous.started_at,
+      completed_at: next.completed_at || previous.completed_at,
+      summary: next.summary || previous.summary
+    };
+  }
+
+  function pickActiveLoopRun(runs) {
+    var list = arrayOrEmpty(runs).map(normalizeLoopRun);
+    if (!list.length) return null;
+
+    var running = list.filter(function (run) {
+      return normalizeStatus(run.status) === 'running';
+    });
+
+    if (running.length) {
+      running.sort(function (a, b) {
+        return parseTimestamp(b.started_at) - parseTimestamp(a.started_at);
+      });
+      return running[0];
+    }
+
+    return null;
+  }
+
+  function applyLoopWireUpdate(type, data) {
+    if (!data || typeof data !== 'object') return;
+
+    var runID = Number(data.run_id || 0);
+    if (!state.loopRun && runID > 0) {
+      state.loopRun = {
+        id: runID,
+        hex_id: data.run_hex_id || '',
+        loop_name: data.loop_name || 'loop',
+        status: 'running',
+        cycle: Number(data.cycle || 0),
+        step_index: Number(data.step_index || 0),
+        steps: [],
+        started_at: ''
+      };
+    }
+
+    if (!state.loopRun) return;
+    if (runID > 0 && state.loopRun.id > 0 && state.loopRun.id !== runID) return;
+
+    if (runID > 0) state.loopRun.id = runID;
+    if (data.run_hex_id) state.loopRun.hex_id = data.run_hex_id;
+    if (data.profile && (!state.loopRun.steps || !state.loopRun.steps.length)) {
+      state.loopRun.steps = [{ profile: data.profile }];
+    }
+
+    if (Number.isFinite(Number(data.cycle))) state.loopRun.cycle = Number(data.cycle);
+    if (Number.isFinite(Number(data.step_index))) state.loopRun.step_index = Number(data.step_index);
+    if (Number.isFinite(Number(data.total_steps)) && Number(data.total_steps) > 0) {
+      var total = Number(data.total_steps);
+      if (!Array.isArray(state.loopRun.steps)) state.loopRun.steps = [];
+      if (state.loopRun.steps.length < total) {
+        while (state.loopRun.steps.length < total) {
+          state.loopRun.steps.push({ profile: '' });
+        }
+      }
+    }
+
+    if (type === 'loop_step_start') {
+      state.loopRun.status = 'running';
+    }
+  }
+
+  function applyLoopDone(data) {
+    if (!state.loopRun) return;
+
+    if (data && typeof data === 'object') {
+      if (data.run_id && state.loopRun.id && Number(data.run_id) !== Number(state.loopRun.id)) {
+        return;
+      }
+      state.loopRun.status = data.reason || data.error ? (data.reason || 'completed') : 'completed';
+    } else {
+      state.loopRun.status = 'completed';
+    }
+  }
+
+  function loopStepText(data, started) {
+    var cycle = Number(data && data.cycle);
+    var step = Number(data && data.step_index);
+    var total = Number(data && data.total_steps);
+    var profile = data && data.profile ? String(data.profile) : '';
+
+    var cycleText = Number.isFinite(cycle) ? String(cycle + 1) : '?';
+    var stepText = Number.isFinite(step) ? String(step + 1) : '?';
+    var totalText = Number.isFinite(total) && total > 0 ? String(total) : '?';
+
+    return (started ? 'Starting' : 'Finished') + ' cycle ' + cycleText + ' step ' + stepText + '/' + totalText + (profile ? (' · ' + profile) : '');
+  }
+
+  function addStreamEvent(entry) {
+    if (!entry) return;
+
+    var normalized = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      ts: Number.isFinite(Number(entry.ts)) ? Number(entry.ts) : Date.now(),
+      scope: entry.scope || (state.currentSessionSocketID ? ('session-' + state.currentSessionSocketID) : 'session-0'),
+      type: entry.type || 'text',
+      text: entry.text != null ? String(entry.text) : '',
+      tool: entry.tool || '',
+      input: entry.input || '',
+      result: entry.result || ''
+    };
+
+    var last = state.streamEvents[state.streamEvents.length - 1];
+    if (
+      last &&
+      last.scope === normalized.scope &&
+      last.type === normalized.type &&
+      last.text === normalized.text &&
+      last.tool === normalized.tool
+    ) {
+      return;
+    }
+
+    state.streamEvents.push(normalized);
+    if (state.streamEvents.length > MAX_STREAM_EVENTS) {
+      state.streamEvents = state.streamEvents.slice(state.streamEvents.length - MAX_STREAM_EVENTS);
+    }
+
+    addActivityFromEvent(normalized);
+  }
+
+  function addActivityFromEvent(event) {
+    if (!event) return;
+
+    var type = event.type || 'text';
+    if (type === 'thinking') return;
+
+    var description = '';
+    if (type === 'tool_use') {
+      description = (event.tool || 'tool') + ' → ' + stringifyToolPayload(event.input || '');
+    } else if (type === 'tool_result') {
+      description = (event.tool || 'result') + ': ' + stringifyToolPayload(event.result || event.text || '');
+    } else {
+      description = String(event.text || '').trim();
+    }
+
+    if (!description) return;
+
+    var activity = {
+      id: event.id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 8)),
+      ts: Number.isFinite(Number(event.ts)) ? Number(event.ts) : Date.now(),
+      scope: event.scope || 'session-0',
+      type: type,
+      text: cropText(description, 200)
+    };
+
+    var last = state._activityLast;
+    if (last && last.scope === activity.scope && last.type === activity.type && last.text === activity.text) {
+      return;
+    }
+
+    state._activityLast = activity;
+
+    if (!Array.isArray(state._activity)) state._activity = [];
+    state._activity.push(activity);
+    if (state._activity.length > MAX_ACTIVITY_EVENTS) {
+      state._activity = state._activity.slice(state._activity.length - MAX_ACTIVITY_EVENTS);
+    }
+  }
+
+  function filteredStreamEvents() {
+    var events = state.streamEvents;
+    var scope = state.selectedScope;
+    if (!scope) return events;
+
+    if (scope.indexOf('session-') === 0) {
+      var sessionID = parseInt(scope.slice(8), 10);
+      if (Number.isNaN(sessionID)) return events;
+      return events.filter(function (event) {
+        if (event.scope === scope) return true;
+        if (event.scope.indexOf('spawn-') === 0) {
+          var spawnID = parseInt(event.scope.slice(6), 10);
+          if (Number.isNaN(spawnID)) return false;
+          var spawn = state.spawns.find(function (item) { return item.id === spawnID; }) || null;
+          if (!spawn) return false;
+          return spawn.parent_turn_id === sessionID || spawn.child_turn_id === sessionID;
+        }
+        return false;
+      });
+    }
+
+    if (scope.indexOf('spawn-') === 0) {
+      return events.filter(function (event) {
+        return event.scope === scope;
+      });
+    }
+
+    return events;
+  }
+
+  function communicationMessages() {
+    var list = state.messages.slice();
+
+    var seenAsk = {};
+    list.forEach(function (msg) {
+      if (msg.type === 'ask' && msg.spawn_id) {
+        seenAsk[msg.spawn_id] = true;
+      }
+    });
+
+    state.spawns.forEach(function (spawn) {
+      if (normalizeStatus(spawn.status) === 'awaiting_input' && spawn.question && !seenAsk[spawn.id]) {
+        list.push({
+          id: 'ask-' + spawn.id,
+          spawn_id: spawn.id,
+          type: 'ask',
+          direction: 'child_to_parent',
+          content: spawn.question,
+          created_at: spawn.started_at || new Date().toISOString(),
+          step_index: null
+        });
+      }
+
+      if (spawn.summary && normalizeStatus(spawn.status) === 'completed') {
+        list.push({
+          id: 'reply-' + spawn.id,
+          spawn_id: spawn.id,
+          type: 'reply',
+          direction: 'child_to_parent',
+          content: spawn.summary,
+          created_at: spawn.completed_at || spawn.started_at || new Date().toISOString(),
+          step_index: null
+        });
+      }
+    });
+
+    list.sort(function (a, b) {
+      return parseTimestamp(b.created_at) - parseTimestamp(a.created_at);
+    });
+
+    return list;
+  }
+
+  function spawnMapByID() {
+    var map = {};
+    state.spawns.forEach(function (spawn) {
+      map[spawn.id] = spawn;
+    });
+    return map;
+  }
+
+  function renderApp() {
+    if (!content) return;
+
+    var rootClasses = 'app-root';
+    if (state.currentPanel === 'right') {
+      rootClasses += ' mobile-right';
+    } else {
+      rootClasses += ' mobile-left';
+    }
+
+    content.innerHTML = '' +
+      '<div class="' + rootClasses + '">' +
+        renderHeaderBar() +
+        renderLoopBar() +
+        '<div class="main-shell">' +
+          renderLeftPanel() +
+          renderRightPanel() +
+        '</div>' +
+      '</div>';
+
+    applyPostRenderEffects();
+    renderModal();
+  }
+
+  function renderHeaderBar() {
+    var projectName = escapeHTML(currentProjectName());
+    var usage = state.usage || {
+      input_tokens: 0,
+      output_tokens: 0,
+      cost_usd: 0,
+      num_turns: state.turns.length || 0
+    };
+
+    var usageTurns = Number(usage.num_turns) || 0;
+    if (!usageTurns && state.turns.length) usageTurns = state.turns.length;
+
+    var loopIndicator = '';
+    if (state.loopRun && normalizeStatus(state.loopRun.status) === 'running') {
+      loopIndicator = '' +
+        '<span class="header-sep"></span>' +
+        '<span class="loop-indicator">' + icon('refresh', 'spin') + escapeHTML(state.loopRun.loop_name || ('loop-' + state.loopRun.id)) + '</span>';
+    }
+
+    var projectPicker = '';
+    if (state.projects.length > 1) {
+      projectPicker = '' +
+        '<select id="project-select" class="project-select" data-change="project-select" title="Switch project">' +
+          state.projects.map(function (project) {
+            var id = project && project.id ? String(project.id) : '';
+            var label = project && project.name ? project.name : id || 'Unnamed project';
+            if (project && project.is_default) label += ' (default)';
+            return '<option value="' + escapeHTML(id) + '"' + (id === state.currentProjectID ? ' selected' : '') + '>' + escapeHTML(label) + '</option>';
+          }).join('') +
+        '</select>';
+    }
+
+    var wsOnline = !!(state.wsConnected || state.termWSConnected);
+
+    return '' +
+      '<div class="header-bar">' +
+        '<span class="brand">adaf</span>' +
+        '<span class="header-sep"></span>' +
+        '<div class="project-block">' +
+          '<span class="project-name">' + projectName + '</span>' +
+          projectPicker +
+        '</div>' +
+        loopIndicator +
+        '<span class="header-spacer"></span>' +
+        '<span class="usage-stats mono">' +
+          '<span>in=' + formatNumber(usage.input_tokens || 0) + '</span>' +
+          '<span>out=' + formatNumber(usage.output_tokens || 0) + '</span>' +
+          '<span class="cost">$' + Number(usage.cost_usd || 0).toFixed(4) + '</span>' +
+          '<span>turns=' + formatNumber(usageTurns) + '</span>' +
+        '</span>' +
+        '<span class="ws-pill' + (wsOnline ? ' online' : '') + '"><span class="ws-pill-dot"></span>' + (wsOnline ? 'live' : 'offline') + '</span>' +
+        '<button class="mobile-panel-toggle" data-action="toggle-mobile-panel">panel: ' + escapeHTML(state.currentPanel) + '</button>' +
+      '</div>';
+  }
+
+  function renderLoopBar() {
+    if (!state.loopRun) return '';
+    if (normalizeStatus(state.loopRun.status) !== 'running') return '';
+
+    var steps = arrayOrEmpty(state.loopRun.steps);
+    var stepIndex = Number(state.loopRun.step_index) || 0;
+    var cycle = Number(state.loopRun.cycle) || 0;
+
+    var pills = steps.map(function (step, idx) {
+      var cls = 'loop-pill';
+      var marker = '○';
+      if (idx < stepIndex) {
+        cls += ' done';
+        marker = '✓';
+      } else if (idx === stepIndex) {
+        cls += ' current';
+        marker = '▶';
+      }
+
+      return '' +
+        '<span class="' + cls + '">' +
+          '<span class="marker">' + marker + '</span>' +
+          '<span>' + escapeHTML(step.profile || ('step-' + (idx + 1))) + '</span>' +
+        '</span>';
+    }).join('');
+
+    return '' +
+      '<div class="loop-bar">' +
+        '<span class="loop-bar-title">' + icon('refresh', 'spin') + 'Loop: ' + escapeHTML(state.loopRun.loop_name || ('loop-' + state.loopRun.id)) + '</span>' +
+        renderStatusBadge(state.loopRun.status) +
+        '<span class="loop-bar-meta mono">cycle ' + (cycle + 1) + ' · step ' + (stepIndex + 1) + '/' + (steps.length || '?') + '</span>' +
+        '<span class="loop-pill-row">' + pills + '</span>' +
+        '<span class="loop-hex">[' + escapeHTML(state.loopRun.hex_id || String(state.loopRun.id || '')) + ']</span>' +
+      '</div>';
+  }
+
+  function renderLeftPanel() {
+    var tabs = [
+      { id: 'agents', label: 'Agents', icon: 'bot', count: state.sessions.length + state.spawns.length },
+      { id: 'issues', label: 'Issues', icon: 'alert', count: state.issues.length },
+      { id: 'docs', label: 'Docs', icon: 'file', count: state.docs.length },
+      { id: 'plan', label: 'Plan', icon: 'list', count: state.activePlan && state.activePlan.phases ? state.activePlan.phases.length : state.plans.length },
+      { id: 'logs', label: 'Logs', icon: 'scroll', count: state.turns.length }
+    ];
+
+    var contentHTML = '';
+    if (state.leftView === 'agents') contentHTML = renderAgentsView();
+    if (state.leftView === 'issues') contentHTML = renderIssuesView();
+    if (state.leftView === 'docs') contentHTML = renderDocsView();
+    if (state.leftView === 'plan') contentHTML = renderPlanView();
+    if (state.leftView === 'logs') contentHTML = renderLogsView();
+
+    return '' +
+      '<aside class="left-panel">' +
+        '<div class="panel-tabs">' +
+          tabs.map(function (tab, idx) {
+            var active = tab.id === state.leftView;
+            return '' +
+              '<button class="view-tab' + (active ? ' active' : '') + '" data-action="set-left-view" data-view="' + tab.id + '">' +
+                '<span class="tab-shortcut">' + (idx + 1) + '</span>' +
+                icon(tab.icon, '') +
+                '<span>' + escapeHTML(tab.label) + '</span>' +
+                '<span class="tab-count">' + formatNumber(tab.count) + '</span>' +
+              '</button>';
+          }).join('') +
+        '</div>' +
+        '<div class="left-content">' + contentHTML + '</div>' +
+        renderLeftFooter() +
+      '</aside>';
+  }
+
+  function renderLeftFooter() {
+    var label = 'none';
+    var elapsed = '--';
+
+    if (state.selectedScope && state.selectedScope.indexOf('session-') === 0) {
+      var sessionID = parseInt(state.selectedScope.slice(8), 10);
+      var session = state.sessions.find(function (item) { return item.id === sessionID; }) || null;
+      if (session) {
+        label = session.agent || session.profile || ('session-' + session.id);
+        elapsed = formatElapsed(session.started_at, session.ended_at);
+      }
+    } else if (state.selectedScope && state.selectedScope.indexOf('spawn-') === 0) {
+      var spawnID = parseInt(state.selectedScope.slice(6), 10);
+      var spawn = state.spawns.find(function (item) { return item.id === spawnID; }) || null;
+      if (spawn) {
+        label = spawn.profile || ('spawn-' + spawn.id);
+        elapsed = formatElapsed(spawn.started_at, spawn.completed_at);
+      }
+    }
+
+    return '' +
+      '<div class="left-footer">' +
+        '<span>Agent: <span class="value">' + escapeHTML(label) + '</span></span>' +
+        '<span>Elapsed: <span class="value">' + escapeHTML(elapsed) + '</span></span>' +
+      '</div>';
+  }
+
+  function renderAgentsView() {
+    if (!state.sessions.length && !state.spawns.length) {
+      return '<div class="empty-state">No sessions or spawns yet.</div>';
+    }
+
+    var childrenByParent = {};
+    var rootsBySession = {};
+    var spawnsByID = spawnMapByID();
+
+    state.spawns.forEach(function (spawn) {
+      if (spawn.parent_spawn_id > 0) {
+        if (!childrenByParent[spawn.parent_spawn_id]) childrenByParent[spawn.parent_spawn_id] = [];
+        childrenByParent[spawn.parent_spawn_id].push(spawn);
+      } else {
+        var sessionKey = spawn.parent_turn_id || 0;
+        if (!rootsBySession[sessionKey]) rootsBySession[sessionKey] = [];
+        rootsBySession[sessionKey].push(spawn);
+      }
+    });
+
+    Object.keys(childrenByParent).forEach(function (key) {
+      childrenByParent[key].sort(sortByStartTimeDesc);
+    });
+    Object.keys(rootsBySession).forEach(function (key) {
+      rootsBySession[key].sort(sortByStartTimeDesc);
+    });
+
+    var msgCounts = {};
+    communicationMessages().forEach(function (msg) {
+      if (msg.spawn_id > 0) {
+        msgCounts[msg.spawn_id] = (msgCounts[msg.spawn_id] || 0) + 1;
+      }
+    });
+
+    var sessions = state.sessions.slice().sort(function (a, b) {
+      return b.id - a.id;
+    });
+
+    var html = sessions.map(function (session) {
+      var sessionNodeID = 'session-' + session.id;
+      var selected = state.selectedScope === sessionNodeID;
+      var rootSpawns = rootsBySession[session.id] || [];
+      var expanded = state.expandedNodes.has(sessionNodeID);
+      var status = normalizeStatus(session.status);
+
+      var childrenHTML = '';
+      if (expanded) {
+        childrenHTML = rootSpawns.map(function (spawn) {
+          return renderSpawnNode(spawn, 1, childrenByParent, msgCounts, spawnsByID);
+        }).join('');
+      }
+
+      return '' +
+        '<div class="scope-group">' +
+          '<div class="scope-row session' + (selected ? ' selected' : '') + '" data-action="set-scope" data-scope="' + sessionNodeID + '">' +
+            '<button class="expand-toggle" data-action="toggle-node" data-node="' + sessionNodeID + '">' +
+              (rootSpawns.length ? icon(expanded ? 'chevronDown' : 'chevronRight', '') : '<span style="display:inline-block;width:12px"></span>') +
+            '</button>' +
+            '<span class="scope-dot' + (status === 'running' ? ' live' : '') + '" style="background:' + statusColor(session.status) + '"></span>' +
+            '<div class="scope-main">' +
+              '<div class="scope-head">' +
+                '<span class="scope-id">turn #' + session.id + '</span>' +
+                '<span class="scope-profile">' + escapeHTML(session.profile || 'unknown') + '</span>' +
+                '<span class="scope-role">(' + escapeHTML(session.agent || 'agent') + ')</span>' +
+                renderStatusBadge(session.status) +
+              '</div>' +
+              '<div class="scope-meta mono">' +
+                escapeHTML(session.model || 'model n/a') + ' · ' +
+                escapeHTML(formatElapsed(session.started_at, session.ended_at)) +
+                (session.action ? (' · <span style="color:#a6adc8">' + escapeHTML(session.action) + '</span>') : '') +
+              '</div>' +
+            '</div>' +
+            (rootSpawns.length ? '<span class="count-chip spawn-chip">' + icon('fork', '') + rootSpawns.length + '</span>' : '') +
+          '</div>' +
+          childrenHTML +
+        '</div>';
+    }).join('');
+
+    var orphanSpawns = state.spawns.filter(function (spawn) {
+      return (!spawn.parent_turn_id || !state.sessions.find(function (session) { return session.id === spawn.parent_turn_id; })) && spawn.parent_spawn_id <= 0;
+    });
+
+    if (orphanSpawns.length) {
+      html += '<div class="scope-group">' +
+        '<div class="scope-meta" style="padding:6px 10px">Detached spawns</div>' +
+        orphanSpawns.map(function (spawn) {
+          return renderSpawnNode(spawn, 1, childrenByParent, msgCounts, spawnsByID);
+        }).join('') +
+      '</div>';
+    }
+
+    return html;
+  }
+
+  function renderSpawnNode(spawn, depth, childrenByParent, msgCounts, spawnsByID) {
+    var nodeID = 'spawn-' + spawn.id;
+    var selected = state.selectedScope === nodeID;
+    var children = childrenByParent[spawn.id] || [];
+    var expanded = state.expandedNodes.has(nodeID);
+    var status = normalizeStatus(spawn.status);
+    var msgCount = msgCounts[spawn.id] || 0;
+    var hasPendingQuestion = status === 'awaiting_input' && !!spawn.question;
+
+    var childrenHTML = '';
+    if (expanded) {
+      childrenHTML = children.map(function (child) {
+        return renderSpawnNode(child, depth + 1, childrenByParent, msgCounts, spawnsByID);
+      }).join('');
+    }
+
+    var connector = '';
+    if (depth > 0) connector = '<span class="scope-connector">└</span>';
+
+    return '' +
+      '<div class="scope-tree-indent" style="--depth:' + ((depth - 1) * 18) + 'px">' +
+        '<div class="scope-row spawn' + (selected ? ' selected' : '') + '" data-action="set-scope" data-scope="' + nodeID + '">' +
+          connector +
+          '<button class="expand-toggle" data-action="toggle-node" data-node="' + nodeID + '">' +
+            (children.length ? icon(expanded ? 'chevronDown' : 'chevronRight', '') : '<span style="display:inline-block;width:12px"></span>') +
+          '</button>' +
+          '<span class="scope-dot' + (status === 'running' ? ' live' : '') + '" style="background:' + statusColor(spawn.status) + '"></span>' +
+          '<div class="scope-main">' +
+            '<div class="scope-head">' +
+              '<span class="scope-id">#' + spawn.id + '</span>' +
+              '<span class="scope-profile">' + escapeHTML(spawn.profile || 'spawn') + '</span>' +
+              (spawn.role ? '<span class="scope-role">as ' + escapeHTML(spawn.role) + '</span>' : '') +
+              renderStatusBadge(spawn.status) +
+              '<span class="scope-role mono">' + escapeHTML(formatElapsed(spawn.started_at, spawn.completed_at)) + '</span>' +
+              (msgCount ? '<span class="count-chip">' + icon('message', '') + msgCount + '</span>' : '') +
+            '</div>' +
+            (spawn.task ? '<div class="scope-task">' + escapeHTML(spawn.task) + '</div>' : '') +
+            (spawn.branch ? '<div class="scope-extra mono">' + icon('branch', '') + ' ' + escapeHTML(spawn.branch) + '</div>' : '') +
+            (hasPendingQuestion ? '<div class="pending-question"><strong>AWAITING RESPONSE</strong>' + escapeHTML(spawn.question) + '</div>' : '') +
+          '</div>' +
+        '</div>' +
+        childrenHTML +
+      '</div>';
+  }
+
+  function renderIssuesView() {
+    if (!state.issues.length) {
+      return '<div class="empty-state">No issues found.</div>';
+    }
+
+    return state.issues.map(function (issue) {
+      var selected = state.selectedIssue === issue.id;
+      return '' +
+        '<div class="list-item-card' + (selected ? ' selected' : '') + '" data-action="select-issue" data-issue-id="' + issue.id + '">' +
+          '<div class="list-title-row">' +
+            '<span class="list-id">#' + issue.id + '</span>' +
+            '<span class="list-title">' + escapeHTML(issue.title || 'Untitled issue') + '</span>' +
+          '</div>' +
+          '<div class="meta-row">' +
+            renderStatusBadge(issue.priority) +
+            renderStatusBadge(issue.status) +
+            arrayOrEmpty(issue.labels).map(function (label) {
+              return '<span class="small-badge label">' + escapeHTML(label) + '</span>';
+            }).join('') +
+          '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  function renderPlanView() {
+    var plan = state.activePlan;
+    if (!plan) {
+      if (!state.plans.length) {
+        return '<div class="empty-state">No plans loaded.</div>';
+      }
+
+      return '' +
+        '<div class="empty-state">Select a plan.</div>' +
+        state.plans.map(function (item) {
+          var selected = state.selectedPlan === item.id;
+          return '<div class="list-item-card' + (selected ? ' selected' : '') + '" data-action="select-plan" data-plan-id="' + escapeHTML(item.id) + '">' +
+            '<div class="list-title-row"><span class="list-id mono">' + escapeHTML(item.id) + '</span><span class="list-title">' + escapeHTML(item.title || item.id) + '</span>' + renderStatusBadge(item.status || 'active') + '</div>' +
+          '</div>';
+        }).join('');
+    }
+
+    var phases = arrayOrEmpty(plan.phases);
+    var completeCount = phases.filter(function (phase) {
+      return normalizeStatus(phase.status) === 'complete';
+    }).length;
+    var percent = phases.length ? Math.round((completeCount / phases.length) * 100) : 0;
+
+    var planSelector = '';
+    if (state.plans.length > 1) {
+      planSelector = state.plans.map(function (item) {
+        var selected = state.selectedPlan === item.id;
+        return '<div class="list-item-card' + (selected ? ' selected' : '') + '" data-action="select-plan" data-plan-id="' + escapeHTML(item.id) + '">' +
+          '<div class="list-title-row"><span class="list-id mono">' + escapeHTML(item.id) + '</span><span class="list-title">' + escapeHTML(item.title || item.id) + '</span></div>' +
+        '</div>';
+      }).join('');
+    }
+
+    return '' +
+      '<div class="plan-overview">' +
+        '<div class="plan-title">' + escapeHTML(plan.title || plan.id || 'Plan') + '</div>' +
+        '<div class="progress-track"><div class="progress-fill" style="width:' + percent + '%"></div></div>' +
+        '<div class="progress-meta">' + percent + '% complete</div>' +
+      '</div>' +
+      planSelector +
+      phases.map(function (phase) {
+        var status = normalizeStatus(phase.status || 'not_started');
+        var marker = '○';
+        if (status === 'complete') marker = '✓';
+        else if (status === 'in_progress') marker = '◉';
+        else if (status === 'blocked') marker = '✗';
+
+        return '' +
+          '<div class="phase-card" style="border-left-color:' + statusColor(status) + '">' +
+            '<div class="phase-head">' +
+              '<span class="phase-marker" style="color:' + statusColor(status) + '">' + marker + '</span>' +
+              '<span class="phase-title">' + escapeHTML(phase.title || phase.id || 'Phase') + '</span>' +
+              renderStatusBadge(phase.status || 'not_started') +
+            '</div>' +
+            (phase.description ? '<div class="phase-desc">' + escapeHTML(phase.description) + '</div>' : '') +
+            (arrayOrEmpty(phase.depends_on).length ? '<div class="phase-deps mono">depends on: ' + escapeHTML(phase.depends_on.join(', ')) + '</div>' : '') +
+          '</div>';
+      }).join('');
+  }
+
+  function renderLogsView() {
+    if (!state.turns.length) {
+      return '<div class="empty-state">No turns recorded yet.</div>';
+    }
+
+    return state.turns.map(function (turn) {
+      var status = normalizeStatus(turn.build_state || 'unknown');
+      var border = status === 'passing' ? '#a6e3a1' : '#f38ba8';
+
+      return '' +
+        '<div class="turn-card" style="border-left-color:' + border + '">' +
+          '<div class="turn-head">' +
+            '<span class="turn-id">#' + escapeHTML(String(turn.id)) + ' [' + escapeHTML(turn.hex_id || '-') + ']</span>' +
+            '<span class="turn-profile">' + escapeHTML(turn.profile_name || '-') + '</span>' +
+            '<span class="turn-agent">(' + escapeHTML(turn.agent || '-') + ')</span>' +
+            renderStatusBadge(turn.build_state || 'unknown') +
+          '</div>' +
+          '<div class="turn-objective">' + escapeHTML(turn.objective || 'No objective') + '</div>' +
+          '<div class="turn-built">' + escapeHTML(turn.what_was_built || '') + '</div>' +
+          '<div class="turn-meta">' + escapeHTML(turn.agent_model || 'model n/a') + ' · ' + escapeHTML(String(turn.duration_secs || 0)) + 's</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  function renderDocsView() {
+    if (!state.docs.length) {
+      return '<div class="empty-state">No docs available.</div>';
+    }
+
+    return state.docs.map(function (doc) {
+      return '' +
+        '<div class="list-item-card doc-card">' +
+          '<div class="list-title-row">' +
+            icon('file', '') +
+            '<span class="list-title">' + escapeHTML(doc.title || doc.id || 'Document') + '</span>' +
+            '<span class="list-id mono">' + escapeHTML(doc.id || '') + '</span>' +
+          '</div>' +
+          '<div class="list-preview">' + escapeHTML(cropText((doc.content || '').replace(/\s+/g, ' ').trim(), 160)) + '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  function renderRightPanel() {
+    return '' +
+      '<section class="right-panel">' +
+        renderRightTabBar() +
+        '<div class="right-content">' + renderRightLayerContent() + '</div>' +
+        renderStatusBar() +
+      '</section>';
+  }
+
+  function renderRightTabBar() {
+    var layers = [
+      { id: 'raw', label: 'Raw', icon: 'terminal' },
+      { id: 'activity', label: 'Activity', icon: 'activity' },
+      { id: 'messages', label: 'Messages', icon: 'message' }
+    ];
+
+    var scopeLabel = state.selectedScope || 'all';
+
+    return '' +
+      '<div class="layer-tabs">' +
+        layers.map(function (layer) {
+          var active = state.rightLayer === layer.id;
+          return '' +
+            '<button class="layer-tab' + (active ? ' active' : '') + '" data-action="set-right-layer" data-layer="' + layer.id + '">' +
+              icon(layer.icon, '') +
+              '<span>' + escapeHTML(layer.label) + '</span>' +
+            '</button>';
+        }).join('') +
+        '<span class="layer-tools">' +
+          '<span class="scope-pill">' + icon('eye', '') + 'scope: <b>' + escapeHTML(scopeLabel) + '</b>' +
+            (state.selectedScope ? '<button class="scope-pill-clear" data-action="clear-scope" title="Clear scope">×</button>' : '') +
+          '</span>' +
+          '<button class="toggle-chip' + (state.autoScroll ? ' active' : '') + '" data-action="toggle-auto-scroll">' + icon('swap', '') + 'auto-scroll ' + (state.autoScroll ? 'on' : 'off') + '</button>' +
+        '</span>' +
+      '</div>';
+  }
+
+  function renderRightLayerContent() {
+    if (state.rightLayer === 'raw') return renderRawLayer();
+    if (state.rightLayer === 'activity') return renderActivityLayer();
+    if (state.rightLayer === 'messages') return renderMessagesLayer();
+    return '<div class="empty-state">Unknown layer</div>';
+  }
+
+  function renderRawLayer() {
+    var events = filteredStreamEvents();
+    if (!events.length) {
+      return '<div class="empty-state">' + (state.selectedScope ? 'No events for this scope.' : 'Waiting for stream events...') + '</div>';
+    }
+
+    return '' +
+      '<div class="raw-feed" id="raw-feed">' +
+        events.map(function (entry) {
+          var kind = normalizeStatus(entry.type || 'text');
+          var scopeColorValue = scopeColor(entry.scope);
+          var typeMeta = typeDisplayMeta(entry.type);
+          var rowClass = 'raw-row raw-' + kind;
+
+          var body = '';
+          if (kind === 'tool_use') {
+            body = '<span class="tool-name">' + escapeHTML(entry.tool || 'tool') + '</span> → <span class="tool-input">' + escapeHTML(stringifyToolPayload(entry.input || '')) + '</span>';
+          } else if (kind === 'tool_result') {
+            if (entry.tool) {
+              body = '<span class="tool-name">' + escapeHTML(entry.tool) + ':</span> ' + escapeHTML(stringifyToolPayload(entry.result || entry.text || ''));
+            } else {
+              body = escapeHTML(stringifyToolPayload(entry.result || entry.text || ''));
+            }
+          } else {
+            body = escapeHTML(entry.text || '');
+          }
+
+          return '' +
+            '<div class="' + rowClass + '">' +
+              '<span class="raw-scope">' +
+                '<span class="raw-scope-dot" style="background:' + scopeColorValue + '"></span>' +
+                '<span class="raw-scope-label" style="color:' + scopeColorValue + '">' + escapeHTML(scopeShortLabel(entry.scope)) + '</span>' +
+              '</span>' +
+              '<span class="raw-type" style="color:' + typeMeta.color + '">' + escapeHTML(typeMeta.label) + '</span>' +
+              '<span class="raw-text">' + body + '</span>' +
+            '</div>';
+        }).join('') +
+      '</div>';
+  }
+
+  function renderActivityLayer() {
+    var source = Array.isArray(state._activity) ? state._activity.slice().reverse() : [];
+    var entries = source.slice(0, 80);
+
+    if (!entries.length) {
+      return '<div class="empty-state">No activity yet.</div>';
+    }
+
+    return '' +
+      '<div class="activity-feed">' +
+        entries.map(function (entry, idx) {
+          var display = activityDisplay(entry);
+          return '' +
+            '<div class="activity-entry" style="animation-delay:' + (idx * 0.03) + 's">' +
+              '<div class="activity-rail">' +
+                '<span class="activity-icon" style="color:' + display.color + ';border-color:' + withAlpha(display.color, 0.35) + ';background:' + withAlpha(display.color, 0.16) + '">' + display.icon + '</span>' +
+                (idx < entries.length - 1 ? '<span class="activity-line"></span>' : '') +
+              '</div>' +
+              '<div class="activity-body">' +
+                '<div class="activity-head"><span class="activity-scope">' + escapeHTML(scopeShortLabel(entry.scope)) + '</span><span class="activity-time">' + escapeHTML(formatRelativeTime(entry.ts)) + '</span></div>' +
+                '<div class="activity-desc">' + escapeHTML(entry.text || '') + '</div>' +
+              '</div>' +
+            '</div>';
+        }).join('') +
+      '</div>';
+  }
+
+  function renderMessagesLayer() {
+    var messages = communicationMessages();
+    if (!messages.length) {
+      return '<div class="empty-state">No agent communication yet.</div>';
+    }
+
+    var selectedScope = state.selectedScope;
+    if (selectedScope && selectedScope.indexOf('spawn-') === 0) {
+      var targetSpawn = parseInt(selectedScope.slice(6), 10);
+      if (!Number.isNaN(targetSpawn)) {
+        messages = messages.filter(function (msg) { return Number(msg.spawn_id) === targetSpawn; });
+      }
+    }
+
+    if (selectedScope && selectedScope.indexOf('session-') === 0) {
+      var targetSession = parseInt(selectedScope.slice(8), 10);
+      if (!Number.isNaN(targetSession)) {
+        messages = messages.filter(function (msg) {
+          if (!msg.spawn_id) return true;
+          var spawn = state.spawns.find(function (item) { return item.id === Number(msg.spawn_id); }) || null;
+          if (!spawn) return false;
+          return spawn.parent_turn_id === targetSession || spawn.child_turn_id === targetSession;
+        });
+      }
+    }
+
+    if (!messages.length) {
+      return '<div class="empty-state">No messages for this scope.</div>';
+    }
+
+    return '' +
+      '<div class="messages-feed">' +
+        messages.map(function (msg) {
+          var type = normalizeStatus(msg.type || 'message');
+          if (type !== 'ask' && type !== 'reply') type = 'message';
+          var direction = normalizeStatus(msg.direction) === 'parent_to_child' ? '↓' : '↑';
+          var spawnLabel = msg.spawn_id ? ('spawn #' + msg.spawn_id) : (msg.step_index != null ? ('step ' + msg.step_index) : 'loop');
+
+          return '' +
+            '<div class="message-card ' + type + '">' +
+              '<div class="message-head">' +
+                '<span class="message-type ' + type + '">' + escapeHTML(type) + '</span>' +
+                '<span class="message-meta">' + direction + ' ' + escapeHTML(spawnLabel) + '</span>' +
+                '<span class="message-time">' + escapeHTML(formatRelativeTime(msg.created_at)) + '</span>' +
+              '</div>' +
+              '<div class="message-content">' + escapeHTML(msg.content || '') + '</div>' +
+            '</div>';
+        }).join('') +
+      '</div>';
+  }
+
+  function renderStatusBar() {
+    var running = state.spawns.filter(function (spawn) {
+      return normalizeStatus(spawn.status) === 'running';
+    }).length;
+
+    var awaiting = state.spawns.filter(function (spawn) {
+      return normalizeStatus(spawn.status) === 'awaiting_input';
+    }).length;
+
+    var done = state.spawns.filter(function (spawn) {
+      var status = normalizeStatus(spawn.status);
+      return status === 'completed' || status === 'merged';
+    }).length;
+
+    var messages = communicationMessages();
+
+    return '' +
+      '<div class="status-bar">' +
+        '<span><span style="color:#6c7086">view=</span><span class="status-key">' + escapeHTML(state.leftView) + '</span></span>' +
+        '<span><span style="color:#6c7086">layer=</span><span class="status-key">' + escapeHTML(state.rightLayer) + '</span></span>' +
+        '<span><span style="color:#6c7086">detail=</span><span class="status-value">' + escapeHTML(state.selectedScope || 'all') + '</span></span>' +
+        '<span class="status-spacer"></span>' +
+        '<span><span style="color:#6c7086">spawns: </span><span style="color:#f9e2af">' + running + ' running</span> · <span style="color:#89b4fa">' + awaiting + ' awaiting</span> · <span style="color:#a6e3a1">' + done + ' done</span></span>' +
+        '<span>' + messages.length + ' messages</span>' +
+      '</div>';
+  }
+
+  function applyPostRenderEffects() {
+    if (state.rightLayer !== 'raw') return;
+    var feed = document.getElementById('raw-feed');
+    if (!feed) return;
+
+    if (state.autoScroll) {
+      feed.scrollTop = feed.scrollHeight;
+    }
+  }
+
+  function renderStatusBadge(status) {
+    var normalized = normalizeStatus(status || 'unknown');
+    var color = statusColor(normalized);
+
+    return '' +
+      '<span class="status-badge" style="--status-color:' + color + ';--status-bg:' + withAlpha(color, 0.14) + ';--status-border:' + withAlpha(color, 0.28) + '">' +
+        '<span class="marker">' + statusIcon(normalized) + '</span>' +
+        '<span>' + escapeHTML(normalized) + '</span>' +
+      '</span>';
+  }
+
+  function statusColor(status) {
+    var key = normalizeStatus(status);
+    var map = {
+      running: '#f9e2af',
+      starting: '#f9e2af',
+      awaiting_input: '#89b4fa',
+      completed: '#a6e3a1',
+      complete: '#a6e3a1',
+      merged: '#a6e3a1',
+      passing: '#a6e3a1',
+      resolved: '#a6e3a1',
+      done: '#a6e3a1',
+      failed: '#f38ba8',
+      failing: '#f38ba8',
+      canceled: '#f38ba8',
+      cancelled: '#f38ba8',
+      rejected: '#f38ba8',
+      blocked: '#f38ba8',
+      stopped: '#6c7086',
+      not_started: '#6c7086',
+      open: '#f9e2af',
+      in_progress: '#f9e2af',
+      critical: '#f38ba8',
+      high: '#fab387',
+      medium: '#f9e2af',
+      low: '#6c7086',
+      active: '#89b4fa'
+    };
+    return map[key] || '#a6adc8';
+  }
+
+  function statusIcon(status) {
+    var key = normalizeStatus(status);
+    var map = {
+      running: '◉',
+      starting: '◉',
+      awaiting_input: '◎',
+      completed: '✓',
+      complete: '✓',
+      merged: '⊕',
+      passing: '✓',
+      failed: '✗',
+      failing: '✗',
+      canceled: '⊘',
+      cancelled: '⊘',
+      rejected: '⊗',
+      blocked: '✗',
+      stopped: '■',
+      resolved: '✓',
+      in_progress: '◉',
+      open: '◉'
+    };
+    return map[key] || '○';
+  }
+
+  function typeDisplayMeta(type) {
+    var normalized = normalizeStatus(type || 'text');
+    if (normalized === 'thinking') return { label: 'thinking', color: '#9399b2' };
+    if (normalized === 'tool_use') return { label: 'tool', color: '#f9e2af' };
+    if (normalized === 'tool_result') return { label: 'result', color: '#a6e3a1' };
+    if (normalized === 'text') return { label: 'text', color: '#cdd6f4' };
+    return { label: normalized, color: '#a6adc8' };
+  }
+
+  function scopeColor(scope) {
+    var key = String(scope || 'session-0');
+    var parsed = key.match(/(session|spawn)-(\d+)/);
+    if (!parsed) return '#7f849c';
+    var idx = parseInt(parsed[2], 10);
+    if (Number.isNaN(idx)) return '#7f849c';
+    return SCOPE_COLOR_PALETTE[idx % SCOPE_COLOR_PALETTE.length];
+  }
+
+  function scopeShortLabel(scope) {
+    var value = String(scope || 'session-0');
+    if (value.indexOf('session-') === 0) return 's' + value.slice(8);
+    if (value.indexOf('spawn-') === 0) return 'sp' + value.slice(6);
+    return value;
+  }
+
+  function activityDisplay(entry) {
+    var type = normalizeStatus(entry.type || 'text');
+
+    if (type === 'tool_use') return { icon: '⚙', color: '#f9e2af' };
+    if (type === 'tool_result') return { icon: '✓', color: '#a6e3a1' };
+    if (type === 'spawn_started') return { icon: '⇢', color: '#cba6f7' };
+    if (type === 'spawn_status') return { icon: '◉', color: '#89dceb' };
+    if (type === 'loop_step_start') return { icon: '▶', color: '#89b4fa' };
+    if (type === 'loop_step_end') return { icon: '■', color: '#fab387' };
+    if (type === 'loop_done') return { icon: '✓', color: '#a6e3a1' };
+    if (type === 'started') return { icon: '▶', color: '#89b4fa' };
+
+    return { icon: '•', color: '#b4befe' };
+  }
+
+  function icon(name, extraClass) {
+    var path = ICON_PATHS[name] || ICON_PATHS.bot;
+    var className = 'icon' + (extraClass ? ' ' + extraClass : '');
+    return '<svg class="' + className + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + path + '"></path></svg>';
+  }
+
+  function normalizeSessions(rawSessions) {
+    return arrayOrEmpty(rawSessions).map(function (session) {
+      return {
+        id: Number(session && session.id) || 0,
+        profile: session && (session.profile_name || session.profile) ? String(session.profile_name || session.profile) : '',
+        agent: session && (session.agent_name || session.agent) ? String(session.agent_name || session.agent) : '',
+        model: session && session.model ? String(session.model) : '',
+        status: session && session.status ? String(session.status) : 'unknown',
+        action: session && session.action ? String(session.action) : '',
+        started_at: session && session.started_at ? session.started_at : '',
+        ended_at: session && session.ended_at ? session.ended_at : '',
+        loop_name: session && session.loop_name ? String(session.loop_name) : ''
+      };
+    }).filter(function (session) {
+      return session.id > 0;
+    }).sort(function (a, b) {
+      return b.id - a.id;
+    });
+  }
+
+  function normalizeSpawns(rawSpawns) {
+    return arrayOrEmpty(rawSpawns).map(function (spawn) {
+      var parentTurn = numberOr(0, spawn && spawn.parent_turn_id, spawn && spawn.parent_session_id);
+      var childTurn = numberOr(0, spawn && spawn.child_turn_id, spawn && spawn.child_session_id);
+      var parentSpawn = numberOr(0, spawn && spawn.parent_spawn_id, spawn && spawn.parent_id);
+      var id = Number(spawn && spawn.id) || 0;
+
+      return {
+        id: id,
+        parent_turn_id: parentTurn,
+        parent_spawn_id: parentSpawn,
+        child_turn_id: childTurn,
+        profile: spawn && (spawn.profile || spawn.child_profile) ? String(spawn.profile || spawn.child_profile) : '',
+        role: spawn && (spawn.role || spawn.child_role) ? String(spawn.role || spawn.child_role) : '',
+        parent_profile: spawn && spawn.parent_profile ? String(spawn.parent_profile) : '',
+        status: spawn && spawn.status ? String(spawn.status) : 'unknown',
+        question: spawn && spawn.question ? String(spawn.question) : '',
+        task: spawn && (spawn.task || spawn.objective || spawn.description) ? String(spawn.task || spawn.objective || spawn.description) : '',
+        branch: spawn && spawn.branch ? String(spawn.branch) : '',
+        started_at: spawn && (spawn.started_at || spawn.created_at) ? (spawn.started_at || spawn.created_at) : '',
+        completed_at: spawn && spawn.completed_at ? spawn.completed_at : '',
+        summary: spawn && spawn.summary ? String(spawn.summary) : ''
+      };
+    }).filter(function (spawn) {
+      return spawn.id > 0;
+    }).sort(sortByStartTimeDesc);
+  }
+
+  function normalizeLoopRun(run) {
+    return {
+      id: Number(run && run.id) || 0,
+      hex_id: run && run.hex_id ? String(run.hex_id) : '',
+      loop_name: run && run.loop_name ? String(run.loop_name) : 'loop',
+      status: run && run.status ? String(run.status) : 'unknown',
+      cycle: Number(run && run.cycle) || 0,
+      step_index: Number(run && run.step_index) || 0,
+      started_at: run && run.started_at ? run.started_at : '',
+      steps: arrayOrEmpty(run && run.steps).map(function (step) {
+        return {
+          profile: step && step.profile ? String(step.profile) : '',
+          role: step && step.role ? String(step.role) : ''
+        };
+      })
+    };
+  }
+
+  function normalizeIssues(rawIssues) {
+    return arrayOrEmpty(rawIssues).map(function (issue) {
+      return {
+        id: Number(issue && issue.id) || 0,
+        title: issue && issue.title ? String(issue.title) : '',
+        priority: issue && issue.priority ? String(issue.priority) : 'medium',
+        status: issue && issue.status ? String(issue.status) : 'open',
+        labels: arrayOrEmpty(issue && issue.labels),
+        description: issue && issue.description ? String(issue.description) : ''
+      };
+    }).filter(function (issue) {
+      return issue.id > 0;
+    }).sort(function (a, b) {
+      return b.id - a.id;
+    });
+  }
+
+  function normalizeDocs(rawDocs) {
+    return arrayOrEmpty(rawDocs).map(function (doc) {
+      return {
+        id: doc && doc.id ? String(doc.id) : '',
+        title: doc && doc.title ? String(doc.title) : '',
+        content: doc && doc.content ? String(doc.content) : '',
+        plan_id: doc && doc.plan_id ? String(doc.plan_id) : ''
+      };
+    }).filter(function (doc) {
+      return !!doc.id;
+    });
+  }
+
+  function normalizePlans(rawPlans) {
+    return arrayOrEmpty(rawPlans).map(normalizePlan).filter(function (plan) {
+      return !!plan.id;
+    });
+  }
+
+  function normalizePlan(plan) {
+    if (!plan || typeof plan !== 'object') {
+      return {
+        id: '',
+        title: '',
+        status: 'active',
+        description: '',
+        phases: []
+      };
+    }
+
+    return {
+      id: plan.id ? String(plan.id) : '',
+      title: plan.title ? String(plan.title) : (plan.id ? String(plan.id) : ''),
+      status: plan.status ? String(plan.status) : 'active',
+      description: plan.description ? String(plan.description) : '',
+      phases: arrayOrEmpty(plan.phases).map(function (phase) {
+        return {
+          id: phase && phase.id ? String(phase.id) : '',
+          title: phase && phase.title ? String(phase.title) : (phase && phase.id ? String(phase.id) : ''),
+          status: phase && phase.status ? String(phase.status) : 'not_started',
+          description: phase && phase.description ? String(phase.description) : '',
+          depends_on: arrayOrEmpty(phase && phase.depends_on)
+        };
+      })
+    };
+  }
+
+  function normalizeTurns(rawTurns) {
+    return arrayOrEmpty(rawTurns).map(function (turn) {
+      return {
+        id: Number(turn && turn.id) || 0,
+        hex_id: turn && turn.hex_id ? String(turn.hex_id) : '',
+        profile_name: turn && turn.profile_name ? String(turn.profile_name) : '',
+        agent: turn && turn.agent ? String(turn.agent) : '',
+        build_state: turn && turn.build_state ? String(turn.build_state) : 'unknown',
+        objective: turn && turn.objective ? String(turn.objective) : '',
+        what_was_built: turn && turn.what_was_built ? String(turn.what_was_built) : '',
+        agent_model: turn && turn.agent_model ? String(turn.agent_model) : '',
+        duration_secs: Number(turn && turn.duration_secs) || 0
+      };
+    }).filter(function (turn) {
+      return turn.id > 0;
+    }).sort(function (a, b) {
+      return b.id - a.id;
+    });
+  }
+
+  function normalizeLoopMessages(rawMessages) {
+    return arrayOrEmpty(rawMessages).map(function (msg) {
+      return {
+        id: Number(msg && msg.id) || 0,
+        spawn_id: Number(msg && msg.spawn_id) || 0,
+        type: msg && msg.type ? String(msg.type) : 'message',
+        direction: msg && msg.direction ? String(msg.direction) : 'child_to_parent',
+        content: msg && msg.content ? String(msg.content) : '',
+        created_at: msg && msg.created_at ? msg.created_at : '',
+        step_index: msg && Number.isFinite(Number(msg.step_index)) ? Number(msg.step_index) : null
+      };
+    }).filter(function (msg) {
+      return msg.id > 0 || !!msg.content;
+    });
+  }
+
+  function aggregateUsageFromProfileStats(stats) {
+    var list = arrayOrEmpty(stats);
+    if (!list.length) return null;
+
+    var usage = {
+      input_tokens: 0,
+      output_tokens: 0,
+      cost_usd: 0,
+      num_turns: 0
+    };
+
+    list.forEach(function (item) {
+      usage.input_tokens += Number(item && (item.total_input_tokens != null ? item.total_input_tokens : item.total_input_tok)) || 0;
+      usage.output_tokens += Number(item && (item.total_output_tokens != null ? item.total_output_tokens : item.total_output_tok)) || 0;
+      usage.cost_usd += Number(item && item.total_cost_usd) || 0;
+      usage.num_turns += Number(item && item.total_turns) || 0;
+    });
+
+    return usage;
+  }
+
+  function updateUsageTurnCountFromTurns() {
+    if (!state.usage) {
+      state.usage = {
+        input_tokens: 0,
+        output_tokens: 0,
+        cost_usd: 0,
+        num_turns: state.turns.length
+      };
+      return;
+    }
+
+    if (!state.usage.num_turns || state.usage.num_turns < state.turns.length) {
+      state.usage.num_turns = state.turns.length;
+    }
+  }
+
+  function sortByStartTimeDesc(a, b) {
+    return parseTimestamp(b && b.started_at) - parseTimestamp(a && a.started_at);
+  }
+
+  function connectTerminalSocket() {
+    disconnectTerminal();
+
+    try {
+      state.termWS = new WebSocket(buildWSURL('/ws/terminal'));
+    } catch (_) {
+      state.termWS = null;
+      state.termWSConnected = false;
+      return;
+    }
+
+    state.termWS.addEventListener('open', function () {
+      state.termWSConnected = true;
+      renderApp();
+    });
+
+    state.termWS.addEventListener('close', function () {
+      state.termWSConnected = false;
+      state.termWS = null;
+      renderApp();
+    });
+
+    state.termWS.addEventListener('error', function () {
+      state.termWSConnected = false;
+      renderApp();
+    });
+  }
+
+  function disconnectTerminal() {
+    if (state.termWS) {
+      try {
+        state.termWS.close();
+      } catch (_) {}
+      state.termWS = null;
+    }
+    state.termWSConnected = false;
+  }
+
+  function loadAuthToken() {
+    var hash = window.location.hash || '';
+    if (hash.indexOf('#token=') === 0) {
+      saveAuthToken(hash.slice(7));
+      window.location.hash = '';
       return;
     }
 
@@ -250,2929 +2582,41 @@
     }
   }
 
-  function updateConnectionStatus() {
-    if (!connDot || !connLabel) return;
-    var online = !!(state.wsConnected || state.termWSConnected);
-    connDot.classList.toggle('online', online);
-    connDot.classList.toggle('offline', !online);
-    connLabel.textContent = online ? 'Online' : 'Offline';
-  }
-
-  function switchTab(tab) {
-    if (!tab || tab === state.tab) {
-      renderCurrentTab();
-      return;
-    }
-
-    cleanupTabResources(tab);
-    state.tab = tab;
-    updateNav();
-    renderCurrentTab();
-  }
-
-  function cleanupTabResources(nextTab) {
-    if (state.dashboardTimer) {
-      clearInterval(state.dashboardTimer);
-      state.dashboardTimer = null;
-    }
-
-    if (nextTab !== 'sessions') {
-      disconnectSessionSocket();
-      state.selectedSessionID = null;
-    }
-
-    if (nextTab !== 'terminal') {
-      disconnectTerminal();
-    }
-
-    if (nextTab !== 'plans') {
-      state.selectedPlanID = '';
-      state.cache.planDetail = null;
-    }
-
-    if (nextTab !== 'issues') {
-      state.selectedIssueID = null;
-    }
-
-    if (nextTab !== 'docs') {
-      state.selectedDocID = '';
-    }
-  }
-
-  function updateNav() {
-    nav.querySelectorAll('a[data-tab]').forEach(function (link) {
-      var active = link.getAttribute('data-tab') === state.tab;
-      link.classList.toggle('active', active);
-      if (active) {
-        link.setAttribute('aria-current', 'page');
-      } else {
-        link.removeAttribute('aria-current');
-      }
-    });
-  }
-
-  function onContentClick(event) {
-    var actionNode = event.target.closest('[data-action]');
-    if (!actionNode) return;
-
-    var action = actionNode.getAttribute('data-action');
-    if (!action) return;
-
-    event.preventDefault();
-
-    if (action === 'go-tab') {
-      var targetTab = actionNode.getAttribute('data-tab') || 'dashboard';
-      switchTab(targetTab);
-      return;
-    }
-
-    if (action === 'switch-project') {
-      var targetProjectID = actionNode.getAttribute('data-project-id') || '';
-      switchProject(targetProjectID, true);
-      return;
-    }
-
-    if (action === 'open-session-tab') {
-      var jumpSession = parseInt(actionNode.getAttribute('data-session-id') || '', 10);
-      if (!Number.isNaN(jumpSession)) state.selectedSessionID = jumpSession;
-      switchTab('sessions');
-      return;
-    }
-
-    if (action === 'open-plan-tab') {
-      state.selectedPlanID = actionNode.getAttribute('data-plan-id') || '';
-      switchTab('plans');
-      return;
-    }
-
-    if (action === 'open-issue-tab') {
-      var jumpIssue = parseInt(actionNode.getAttribute('data-issue-id') || '', 10);
-      if (!Number.isNaN(jumpIssue)) state.selectedIssueID = jumpIssue;
-      switchTab('issues');
-      return;
-    }
-
-    if (action === 'open-doc-tab') {
-      state.selectedDocID = actionNode.getAttribute('data-doc-id') || '';
-      switchTab('docs');
-      return;
-    }
-
-    if (action === 'select-session') {
-      var sessionID = parseInt(actionNode.getAttribute('data-session-id') || '', 10);
-      if (!Number.isNaN(sessionID)) {
-        state.selectedSessionID = sessionID;
-        renderSessions();
-      }
-      return;
-    }
-
-    if (action === 'reconnect-session') {
-      if (state.selectedSessionID) connectSessionSocket(state.selectedSessionID, true);
-      return;
-    }
-
-    if (action === 'open-session-start') {
-      openStartSessionModal();
-      return;
-    }
-
-    if (action === 'stop-session') {
-      var stopID = parseInt(actionNode.getAttribute('data-session-id') || '', 10);
-      if (!Number.isNaN(stopID)) stopSession(stopID);
-      return;
-    }
-
-    if (action === 'select-plan') {
-      state.selectedPlanID = actionNode.getAttribute('data-plan-id') || '';
-      renderPlans();
-      return;
-    }
-
-    if (action === 'open-create-plan') {
-      openPlanModal('create', null);
-      return;
-    }
-
-    if (action === 'open-edit-plan') {
-      openPlanModal('edit', state.cache.planDetail);
-      return;
-    }
-
-    if (action === 'activate-plan') {
-      if (state.selectedPlanID) activatePlan(state.selectedPlanID);
-      return;
-    }
-
-    if (action === 'delete-plan') {
-      if (state.selectedPlanID) deletePlan(state.selectedPlanID);
-      return;
-    }
-
-    if (action === 'open-create-phase') {
-      openPhaseModal('create', state.cache.planDetail, null);
-      return;
-    }
-
-    if (action === 'open-edit-phase') {
-      var phaseID = actionNode.getAttribute('data-phase-id') || '';
-      if (!state.cache.planDetail || !phaseID) return;
-      var phase = findPhase(state.cache.planDetail, phaseID);
-      if (!phase) return;
-      openPhaseModal('edit', state.cache.planDetail, phase);
-      return;
-    }
-
-    if (action === 'select-issue') {
-      var issueID = parseInt(actionNode.getAttribute('data-issue-id') || '', 10);
-      if (!Number.isNaN(issueID)) {
-        state.selectedIssueID = issueID;
-        renderIssues();
-      }
-      return;
-    }
-
-    if (action === 'open-create-issue') {
-      openIssueModal('create', null);
-      return;
-    }
-
-    if (action === 'open-edit-issue') {
-      var editIssueID = parseInt(actionNode.getAttribute('data-issue-id') || '', 10);
-      if (!Number.isNaN(editIssueID)) {
-        var editIssue = state.cache.issues.find(function (it) { return it.id === editIssueID; }) || null;
-        openIssueModal('edit', editIssue);
-      }
-      return;
-    }
-
-    if (action === 'delete-issue') {
-      var deleteIssueID = parseInt(actionNode.getAttribute('data-issue-id') || '', 10);
-      if (!Number.isNaN(deleteIssueID)) {
-        deleteIssue(deleteIssueID);
-      }
-      return;
-    }
-
-    if (action === 'select-doc') {
-      state.selectedDocID = actionNode.getAttribute('data-doc-id') || '';
-      renderDocs();
-      return;
-    }
-
-    if (action === 'open-create-doc') {
-      openDocModal('create', null);
-      return;
-    }
-
-    if (action === 'open-edit-doc') {
-      var editDocID = actionNode.getAttribute('data-doc-id') || '';
-      if (!editDocID) return;
-      var editDoc = state.cache.docs.find(function (doc) { return doc.id === editDocID; }) || null;
-      openDocModal('edit', editDoc);
-      return;
-    }
-
-    if (action === 'delete-doc') {
-      var deleteDocID = actionNode.getAttribute('data-doc-id') || '';
-      if (deleteDocID) deleteDoc(deleteDocID);
-      return;
-    }
-
-    if (action === 'set-config-section') {
-      state.configSection = actionNode.getAttribute('data-section') || 'profiles';
-      renderConfig();
-      return;
-    }
-
-    if (action === 'open-create-profile') {
-      openProfileModal('create', null);
-      return;
-    }
-
-    if (action === 'open-edit-profile') {
-      var profName = actionNode.getAttribute('data-profile-name') || '';
-      var profile = state.cache.profiles.find(function (it) { return it.name === profName; }) || null;
-      openProfileModal('edit', profile);
-      return;
-    }
-
-    if (action === 'delete-profile') {
-      deleteProfile(actionNode.getAttribute('data-profile-name') || '');
-      return;
-    }
-
-    if (action === 'open-create-loop') {
-      openLoopModal('create', null);
-      return;
-    }
-
-    if (action === 'open-edit-loop') {
-      var loopName = actionNode.getAttribute('data-loop-name') || '';
-      var loop = state.cache.loops.find(function (it) { return it.name === loopName; }) || null;
-      openLoopModal('edit', loop);
-      return;
-    }
-
-    if (action === 'delete-loop') {
-      deleteLoop(actionNode.getAttribute('data-loop-name') || '');
-      return;
-    }
-
-    if (action === 'open-create-role') {
-      openRoleModal();
-      return;
-    }
-
-    if (action === 'delete-role') {
-      deleteRole(actionNode.getAttribute('data-role-name') || '');
-      return;
-    }
-
-    if (action === 'open-create-rule') {
-      openRuleModal();
-      return;
-    }
-
-    if (action === 'delete-rule') {
-      deleteRule(actionNode.getAttribute('data-rule-id') || '');
-      return;
-    }
-  }
-
-  function onContentSubmit(event) {
-    var form = event.target.closest('form[data-form]');
-    if (!form) return;
-
-    event.preventDefault();
-
-    var name = form.getAttribute('data-form');
-    if (!name) return;
-
-    if (name === 'auth') {
-      var token = readString(form, 'auth_token');
-      state.authToken = token;
-      try {
-        localStorage.setItem('adaf_token', token);
-      } catch (_) {
-        // Best effort.
-      }
-      renderCurrentTab();
-      return;
-    }
-
-    if (name === 'send-session-message') {
-      submitSessionMessage(form);
-      return;
-    }
-
-    if (name === 'save-pushover') {
-      savePushover(form);
-      return;
-    }
-  }
-
-  function onContentChange(event) {
-    var node = event.target;
-    if (!node) return;
-
-    var change = node.getAttribute('data-change');
-    if (!change) return;
-
-    if (change === 'issue-status-filter') {
-      state.issueStatusFilter = node.value || 'all';
-      renderIssues();
-      return;
-    }
-
-    if (change === 'issue-priority-filter') {
-      state.issuePriorityFilter = node.value || 'all';
-      renderIssues();
-      return;
-    }
-
-    if (change === 'docs-plan-filter') {
-      state.docsPlanFilter = node.value || 'all';
-      renderDocs();
-      return;
-    }
-  }
-
-  function onModalClick(event) {
-    var actionNode = event.target.closest('[data-action]');
-    if (!actionNode) return;
-    var action = actionNode.getAttribute('data-action');
-
-    if (action === 'close-modal') {
-      event.preventDefault();
-      closeModal();
-      return;
-    }
-
-    if (action === 'add-loop-step') {
-      event.preventDefault();
-      addLoopStepCard(null);
-      return;
-    }
-
-    if (action === 'remove-loop-step') {
-      event.preventDefault();
-      removeLoopStepCard(actionNode);
-      return;
-    }
-  }
-
-  function onModalSubmit(event) {
-    var form = event.target.closest('form[data-modal-submit]');
-    if (!form) return;
-
-    event.preventDefault();
-
-    var submit = form.getAttribute('data-modal-submit');
-    if (!submit) return;
-
-    if (submit === 'start-session') return submitStartSession(form);
-    if (submit === 'issue-create') return submitIssueCreate(form);
-    if (submit === 'issue-edit') return submitIssueEdit(form);
-    if (submit === 'plan-create') return submitPlanCreate(form);
-    if (submit === 'plan-edit') return submitPlanEdit(form);
-    if (submit === 'phase-create') return submitPhaseCreate(form);
-    if (submit === 'phase-edit') return submitPhaseEdit(form);
-    if (submit === 'doc-create') return submitDocCreate(form);
-    if (submit === 'doc-edit') return submitDocEdit(form);
-    if (submit === 'profile-create') return submitProfileCreate(form);
-    if (submit === 'profile-edit') return submitProfileEdit(form);
-    if (submit === 'loop-create') return submitLoopCreate(form);
-    if (submit === 'loop-edit') return submitLoopEdit(form);
-    if (submit === 'role-create') return submitRoleCreate(form);
-    if (submit === 'rule-create') return submitRuleCreate(form);
-  }
-
-  function onModalChange(event) {
-    var node = event.target;
-    if (!node) return;
-
-    if (node.name === 'session_type') {
-      var sessionForm = node.closest('form[data-modal-submit="start-session"]');
-      if (sessionForm) updateStartSessionFormVisibility(sessionForm);
-    }
-  }
-
-  function renderCurrentTab() {
-    if (!state.tab) return;
-    if (state.tab === 'dashboard') return renderDashboard();
-    if (state.tab === 'sessions') return renderSessions();
-    if (state.tab === 'plans') return renderPlans();
-    if (state.tab === 'issues') return renderIssues();
-    if (state.tab === 'docs') return renderDocs();
-    if (state.tab === 'config') return renderConfig();
-    if (state.tab === 'terminal') return renderTerminal();
-  }
-
-  function renderLoading(label) {
-    content.innerHTML = '<section class="card"><p class="meta"><span class="spinner"></span> Loading ' + escapeHTML(label) + '...</p></section>';
-  }
-
-  function renderError(message) {
-    content.innerHTML = '<section class="card error-card"><h2>Error</h2><p class="error-text">' + escapeHTML(message || 'Unknown error') + '</p></section>';
-  }
-
-  async function renderDashboard() {
-    var tab = state.tab;
-    renderLoading('dashboard');
-
+  function saveAuthToken(token) {
+    state.authToken = String(token || '').trim();
     try {
-      var results;
-      var globalDashboard = null;
-
-      if (state.multiProject) {
-        var multiResults = await Promise.all([
-          apiCall('/api/projects/dashboard', 'GET'),
-          apiCall(apiBase() + '/project', 'GET', null, { allow404: true }),
-          apiCall(apiBase() + '/plans', 'GET'),
-          apiCall(apiBase() + '/issues?status=open', 'GET'),
-          apiCall(apiBase() + '/sessions', 'GET'),
-          apiCall(apiBase() + '/docs', 'GET')
-        ]);
-        globalDashboard = multiResults[0];
-        results = multiResults.slice(1);
-      } else {
-        results = await Promise.all([
-          apiCall(apiBase() + '/project', 'GET', null, { allow404: true }),
-          apiCall(apiBase() + '/plans', 'GET'),
-          apiCall(apiBase() + '/issues?status=open', 'GET'),
-          apiCall(apiBase() + '/sessions', 'GET'),
-          apiCall(apiBase() + '/docs', 'GET')
-        ]);
-      }
-
-      if (state.tab !== tab) return;
-
-      var project = results[0] || {};
-      var plans = arrayOrEmpty(results[1]);
-      var openIssues = arrayOrEmpty(results[2]);
-      var sessions = arrayOrEmpty(results[3]);
-      var docs = arrayOrEmpty(results[4]);
-
-      state.cache.plans = plans;
-
-      var titleName = currentProjectName() || project.name || '';
-      updateDocumentTitle(titleName);
-
-      if (state.multiProject) {
-        var globalProjects = arrayOrEmpty(globalDashboard && globalDashboard.projects);
-        content.innerHTML = '' +
-          '<section class="grid">' +
-            '<article class="card span-12">' +
-              '<div class="card-title-row"><h2>Global Overview</h2><span class="meta">All registered projects</span></div>' +
-              renderGlobalDashboardOverview(globalProjects) +
-            '</article>' +
-          '</section>' +
-          '<section class="grid">' +
-            '<article class="card span-12">' +
-              '<h2>Current Project: ' + escapeHTML(titleName || 'Selected Project') + '</h2>' +
-              '<p class="meta">Project-scoped details for the active selection.</p>' +
-            '</article>' +
-            renderProjectDashboardCards(project, plans, openIssues, sessions, docs) +
-          '</section>';
-      } else {
-        content.innerHTML = '' +
-          '<section class="grid">' +
-            renderProjectDashboardCards(project, plans, openIssues, sessions, docs) +
-          '</section>';
-      }
-
-      if (!state.dashboardTimer && state.tab === 'dashboard') {
-        state.dashboardTimer = setInterval(function () {
-          if (state.tab === 'dashboard') renderDashboard();
-        }, REFRESH_MS);
-      }
-    } catch (err) {
-      if (err && err.authRequired) return;
-      renderError('Failed to load dashboard: ' + errorMessage(err));
-    }
+      localStorage.setItem('adaf_token', state.authToken);
+    } catch (_) {}
   }
 
-  function renderProjectDashboardCards(project, plans, openIssues, sessions, docs) {
-    var activePlan = findActivePlan(project, plans);
-    var summary = summarizePlanPhases(activePlan);
-    var name = project && project.name ? project.name : (currentProjectName() || 'Uninitialized');
-    var repoPath = project && (project.repo_path || project.path) ? (project.repo_path || project.path) : 'N/A';
-
-    return '' +
-      '<article class="card span-6">' +
-        '<h2>Project</h2>' +
-        '<p><strong>' + escapeHTML(name) + '</strong></p>' +
-        '<p class="meta">Repo: ' + escapeHTML(repoPath) + '</p>' +
-        '<p class="meta">Active plan: ' + escapeHTML(activePlan ? activePlan.id : 'none') + '</p>' +
-        '<div class="button-row"><button data-action="go-tab" data-tab="sessions">Open Sessions</button><button data-action="go-tab" data-tab="config">Open Config</button></div>' +
-      '</article>' +
-      '<article class="card span-6">' +
-        '<h2>Plan Snapshot</h2>' +
-        '<div class="filters">' +
-          createPill('complete', summary.complete) +
-          createPill('in_progress', summary.in_progress) +
-          createPill('not_started', summary.not_started) +
-          createPill('blocked', summary.blocked) +
-        '</div>' +
-        '<p class="meta">Total phases: ' + summary.total + '</p>' +
-        '<div class="button-row"><button data-action="go-tab" data-tab="plans">Manage Plans</button></div>' +
-      '</article>' +
-      '<article class="card span-4">' +
-        '<h2>Open Issues (' + openIssues.length + ')</h2>' +
-        renderDashboardIssues(openIssues.slice(0, 6)) +
-        '<div class="button-row"><button data-action="go-tab" data-tab="issues">View All Issues</button></div>' +
-      '</article>' +
-      '<article class="card span-4">' +
-        '<h2>Recent Sessions</h2>' +
-        renderDashboardSessions(sessions.slice(0, 6)) +
-        '<div class="button-row"><button data-action="go-tab" data-tab="sessions">Control Sessions</button></div>' +
-      '</article>' +
-      '<article class="card span-4">' +
-        '<h2>Docs (' + docs.length + ')</h2>' +
-        renderDashboardDocs(docs.slice(0, 6)) +
-        '<div class="button-row"><button data-action="go-tab" data-tab="docs">Manage Docs</button></div>' +
-      '</article>';
-  }
-
-  function renderGlobalDashboardOverview(projects) {
-    var list = arrayOrEmpty(projects);
-    if (!list.length) return '<p class="empty">No project summary data available.</p>';
-
-    var totals = summarizeGlobalProjects(list);
-
-    return '' +
-      '<div class="session-metrics">' +
-        metricCard('Projects', formatNumber(totals.projects)) +
-        metricCard('Open Issues', formatNumber(totals.openIssues)) +
-        metricCard('Plans', formatNumber(totals.plans)) +
-        metricCard('Turns', formatNumber(totals.turns)) +
-      '</div>' +
-      '<div class="project-cards">' +
-        list.map(function (project) {
-          var id = project && project.id ? String(project.id) : '';
-          var name = project && project.name ? project.name : id || 'Unnamed Project';
-          var active = id && id === state.currentProjectID;
-          var badges = '';
-          if (project && project.is_default) badges += createPill('active', 'default');
-          if (active) badges += createPill('running', 'current');
-
-          return '' +
-            '<button type="button" class="project-card' + (active ? ' active' : '') + '" data-action="switch-project" data-project-id="' + escapeHTML(id) + '">' +
-              '<div class="card-title-row">' +
-                '<h3>' + escapeHTML(name) + '</h3>' +
-                '<div class="filters">' + badges + '</div>' +
-              '</div>' +
-              '<p class="meta mono">' + escapeHTML((project && project.path) || 'unknown path') + '</p>' +
-              '<div class="project-card-stats">' +
-                '<span><strong>' + formatNumber(project && project.open_issue_count) + '</strong> open issues</span>' +
-                '<span><strong>' + formatNumber(project && project.plan_count) + '</strong> plans</span>' +
-                '<span><strong>' + formatNumber(project && project.turn_count) + '</strong> turns</span>' +
-              '</div>' +
-              '<p class="meta">Active plan: ' + escapeHTML((project && project.active_plan_id) || 'none') + '</p>' +
-            '</button>';
-        }).join('') +
-      '</div>';
-  }
-
-  function summarizeGlobalProjects(projects) {
-    var totals = {
-      projects: 0,
-      openIssues: 0,
-      plans: 0,
-      turns: 0
-    };
-
-    arrayOrEmpty(projects).forEach(function (project) {
-      totals.projects += 1;
-      totals.openIssues += Number(project && project.open_issue_count) || 0;
-      totals.plans += Number(project && project.plan_count) || 0;
-      totals.turns += Number(project && project.turn_count) || 0;
-    });
-
-    return totals;
-  }
-
-  function renderDashboardIssues(issues) {
-    if (!issues.length) return '<p class="empty">No open issues.</p>';
-    return '<ul class="list">' + issues.map(function (issue) {
-      return '' +
-        '<li>' +
-          '<div class="list-item">' +
-            '<div class="list-item-main"><strong>#' + issue.id + ' ' + escapeHTML(issue.title || 'Untitled') + '</strong><span class="meta">' + escapeHTML(issue.plan_id || 'no plan') + '</span></div>' +
-            '<div class="list-item-actions"><button data-action="open-issue-tab" data-issue-id="' + issue.id + '">Open</button></div>' +
-          '</div>' +
-        '</li>';
-    }).join('') + '</ul>';
-  }
-
-  function renderDashboardSessions(sessions) {
-    if (!sessions.length) return '<p class="empty">No sessions found.</p>';
-    return '<ul class="list">' + sessions.map(function (session) {
-      var projectMeta = '';
-      if (state.multiProject) {
-        projectMeta = ' · ' + escapeHTML(session.project_name || 'Unknown project');
-      }
-      return '' +
-        '<li>' +
-          '<div class="list-item">' +
-            '<div class="list-item-main"><strong>#' + session.id + ' · ' + escapeHTML(session.profile_name || session.agent_name || 'session') + '</strong><span class="meta">' + escapeHTML(formatRelativeTime(session.started_at)) + projectMeta + '</span></div>' +
-            '<div class="list-item-actions">' + createPill(session.status || 'unknown', session.status || 'unknown') + '<button data-action="open-session-tab" data-session-id="' + session.id + '">Open</button></div>' +
-          '</div>' +
-        '</li>';
-    }).join('') + '</ul>';
-  }
-
-  function renderDashboardDocs(docs) {
-    if (!docs.length) return '<p class="empty">No docs created yet.</p>';
-    return '<ul class="list">' + docs.map(function (doc) {
-      return '' +
-        '<li>' +
-          '<div class="list-item">' +
-            '<div class="list-item-main"><strong>' + escapeHTML(doc.title || doc.id) + '</strong><span class="meta">' + escapeHTML(doc.plan_id || 'shared') + '</span></div>' +
-            '<div class="list-item-actions"><button data-action="open-doc-tab" data-doc-id="' + escapeHTML(doc.id) + '">Open</button></div>' +
-          '</div>' +
-        '</li>';
-    }).join('') + '</ul>';
-  }
-  async function renderSessions() {
-    var tab = state.tab;
-    renderLoading('sessions');
-
+  function clearAuthToken() {
+    state.authToken = '';
     try {
-      var results = await Promise.all([
-        apiCall(apiBase() + '/sessions', 'GET'),
-        apiCall('/api/config/profiles', 'GET'),
-        apiCall('/api/config/loops', 'GET'),
-        apiCall(apiBase() + '/plans', 'GET')
-      ]);
-
-      if (state.tab !== tab) return;
-
-      var sessions = arrayOrEmpty(results[0]);
-      var profiles = arrayOrEmpty(results[1]);
-      var loops = arrayOrEmpty(results[2]);
-      var plans = arrayOrEmpty(results[3]);
-
-      state.cache.profiles = profiles;
-      state.cache.loops = loops;
-      state.cache.plans = plans;
-
-      if (!state.selectedSessionID && sessions.length > 0) {
-        state.selectedSessionID = sessions[0].id;
-      }
-
-      var selected = sessions.find(function (session) {
-        return session.id === state.selectedSessionID;
-      }) || null;
-
-      content.innerHTML = '' +
-        '<section class="grid">' +
-          '<article class="card span-4">' +
-            '<div class="card-title-row"><h2>Sessions</h2><button data-action="open-session-start">Start New Session</button></div>' +
-            renderSessionList(sessions) +
-          '</article>' +
-          '<article class="card span-8">' +
-            renderSessionDetail(selected) +
-          '</article>' +
-        '</section>';
-
-      if (selected) {
-        connectSessionSocket(selected.id, false);
-        refreshSessionPanels(selected.id);
-      } else {
-        disconnectSessionSocket();
-      }
-    } catch (err) {
-      if (err && err.authRequired) return;
-      renderError('Failed to load sessions: ' + errorMessage(err));
-    }
-  }
-
-  function renderSessionList(sessions) {
-    if (!sessions.length) return '<p class="empty">No sessions found.</p>';
-
-    return '<ul class="list">' + sessions.map(function (session) {
-      var active = !!SESSION_ACTIVE[normalizeStatus(session.status)];
-      var selected = session.id === state.selectedSessionID;
-      var projectMeta = '';
-      var messageForm = '';
-
-      if (state.multiProject) {
-        projectMeta = ' · ' + escapeHTML(session.project_name || 'Unknown project');
-      }
-
-      if (active) {
-        messageForm = '' +
-          '<form class="inline-form" data-form="send-session-message">' +
-            '<input type="hidden" name="session_id" value="' + session.id + '">' +
-            '<input type="text" name="content" placeholder="Send message" autocomplete="off" required>' +
-            '<button type="submit">Send</button>' +
-          '</form>';
-      }
-
-      return '' +
-        '<li>' +
-          '<div class="list-item">' +
-            '<div class="list-item-main">' +
-              '<strong>#' + session.id + ' · ' + escapeHTML(session.profile_name || session.agent_name || 'session') + '</strong>' +
-              '<span class="meta">' + escapeHTML(formatRelativeTime(session.started_at)) + projectMeta + '</span>' +
-              '<div class="filters">' + createPill(session.status || 'unknown', session.status || 'unknown') + '</div>' +
-            '</div>' +
-            '<div class="list-item-actions">' +
-              '<button data-action="select-session" data-session-id="' + session.id + '" class="' + (selected ? 'active' : '') + '">View</button>' +
-              (active ? '<button data-action="stop-session" data-session-id="' + session.id + '" class="danger">Stop</button>' : '') +
-            '</div>' +
-          '</div>' +
-          messageForm +
-        '</li>';
-    }).join('') + '</ul>';
-  }
-
-  function renderSessionDetail(session) {
-    if (!session) {
-      return '<h2>Session Detail</h2><p class="empty">Select a session to inspect live events.</p>';
-    }
-
-    var active = !!SESSION_ACTIVE[normalizeStatus(session.status)];
-
-    return '' +
-      '<div class="card-title-row">' +
-        '<h2>Session #' + session.id + '</h2>' +
-        '<div class="button-row">' +
-          '<button data-action="reconnect-session">Reconnect Stream</button>' +
-          (active ? '<button data-action="stop-session" data-session-id="' + session.id + '" class="danger">Stop Session</button>' : '') +
-        '</div>' +
-      '</div>' +
-      '<p class="meta">' + escapeHTML(session.project_name || 'Unknown project') + ' · ' + escapeHTML(session.agent_name || 'Unknown agent') + '</p>' +
-      '<div class="filters">' + createPill(session.status || 'unknown', session.status || 'unknown') + '</div>' +
-      '<div id="session-metrics" class="session-metrics"></div>' +
-      '<div id="session-loop-progress"></div>' +
-      '<div id="session-spawns"></div>' +
-      '<section class="session-events">' +
-        '<h3>Event Stream</h3>' +
-        '<div id="session-events-feed" class="events-feed"></div>' +
-      '</section>' +
-      renderSessionMessageForm(session, active);
-  }
-
-  function renderSessionMessageForm(session, active) {
-    if (!active) {
-      return '<p class="meta">Session is not running. Messaging is disabled.</p>';
-    }
-
-    return '' +
-      '<form class="inline-form" data-form="send-session-message">' +
-        '<input type="hidden" name="session_id" value="' + session.id + '">' +
-        '<input type="text" name="content" placeholder="Message running session" autocomplete="off" required>' +
-        '<button type="submit" class="success">Send Message</button>' +
-      '</form>';
-  }
-
-  async function submitSessionMessage(form) {
-    var sessionID = parseInt(readString(form, 'session_id'), 10);
-    var contentText = readString(form, 'content');
-
-    if (Number.isNaN(sessionID) || !contentText) {
-      showToast('Session message needs a target and content.', 'error');
-      return;
-    }
-
-    try {
-      await apiCall(apiBase() + '/sessions/' + encodeURIComponent(String(sessionID)) + '/message', 'POST', {
-        content: contentText
-      });
-      form.reset();
-      showToast('Message sent to session #' + sessionID + '.', 'success');
-      addSessionEntry(sessionID, {
-        kind: 'system',
-        label: 'message',
-        text: 'Message sent: ' + contentText
-      });
-      refreshSessionPanels(sessionID);
-    } catch (err) {
-      showToast('Failed to send message: ' + errorMessage(err), 'error');
-    }
-  }
-
-  async function stopSession(sessionID) {
-    if (!window.confirm('Stop session #' + sessionID + '?')) return;
-
-    try {
-      await apiCall(apiBase() + '/sessions/' + encodeURIComponent(String(sessionID)) + '/stop', 'POST');
-      showToast('Stop signal sent to session #' + sessionID + '.', 'success');
-      addSessionEntry(sessionID, {
-        kind: 'system',
-        label: 'control',
-        text: 'Stop requested.'
-      });
-      renderSessions();
-    } catch (err) {
-      showToast('Failed to stop session: ' + errorMessage(err), 'error');
-    }
-  }
-
-  function ensureSessionStream(sessionID) {
-    if (!state.sessionStreams[sessionID]) {
-      state.sessionStreams[sessionID] = {
-        entries: [],
-        metrics: {
-          inputTokens: 0,
-          outputTokens: 0,
-          costUSD: 0,
-          turns: 0,
-          exitCode: null
-        },
-        spawns: [],
-        loop: {
-          cycle: 0,
-          stepIndex: 0,
-          totalSteps: 0,
-          profile: ''
-        },
-        lastToolEntryIndex: -1
-      };
-    }
-    return state.sessionStreams[sessionID];
-  }
-
-  function addSessionEntry(sessionID, entry) {
-    var stream = ensureSessionStream(sessionID);
-    var next = {
-      kind: entry.kind || 'system',
-      label: entry.label || entry.kind || 'event',
-      text: entry.text || '',
-      data: entry.data || null,
-      name: entry.name || '',
-      input: entry.input,
-      output: entry.output,
-      ts: Date.now(),
-      isDelta: !!entry.isDelta
-    };
-
-    stream.entries.push(next);
-    if (stream.entries.length > MAX_EVENT_ENTRIES) {
-      stream.entries = stream.entries.slice(stream.entries.length - MAX_EVENT_ENTRIES);
-      stream.lastToolEntryIndex = -1;
-    }
-
-    return next;
-  }
-
-  function connectSessionSocket(sessionID, forceReconnect) {
-    if (!sessionID) return;
-
-    if (!forceReconnect && state.ws && state.wsSessionID === sessionID && state.ws.readyState <= 1) {
-      return;
-    }
+      localStorage.removeItem('adaf_token');
+    } catch (_) {}
 
     disconnectSessionSocket();
-
-    state.wsSessionID = sessionID;
-    state.ws = new WebSocket(buildWSURL('/ws/sessions/' + encodeURIComponent(String(sessionID))));
-
-    state.ws.addEventListener('open', function () {
-      state.wsConnected = true;
-      updateConnectionStatus();
-      addSessionEntry(sessionID, {
-        kind: 'system',
-        label: 'stream',
-        text: 'Connected to live stream.'
-      });
-      refreshSessionPanels(sessionID);
-    });
-
-    state.ws.addEventListener('message', function (event) {
-      handleSessionMessage(sessionID, event.data);
-    });
-
-    state.ws.addEventListener('error', function () {
-      state.wsConnected = false;
-      updateConnectionStatus();
-      addSessionEntry(sessionID, {
-        kind: 'error',
-        label: 'stream',
-        text: 'Session stream error.'
-      });
-      refreshSessionPanels(sessionID);
-    });
-
-    state.ws.addEventListener('close', function () {
-      state.wsConnected = false;
-      updateConnectionStatus();
-      addSessionEntry(sessionID, {
-        kind: 'system',
-        label: 'stream',
-        text: 'Session stream disconnected.'
-      });
-      state.ws = null;
-      state.wsSessionID = null;
-      refreshSessionPanels(sessionID);
-    });
-  }
-
-  function disconnectSessionSocket() {
-    if (state.ws) {
-      try {
-        state.ws.close();
-      } catch (_) {
-        // Best effort.
-      }
-    }
-    state.ws = null;
-    state.wsSessionID = null;
-    state.wsConnected = false;
-    updateConnectionStatus();
-  }
-
-  function handleSessionMessage(sessionID, rawData) {
-    var parsed;
-    try {
-      parsed = JSON.parse(rawData);
-    } catch (_) {
-      addSessionEntry(sessionID, {
-        kind: 'raw',
-        label: 'raw',
-        text: String(rawData)
-      });
-      refreshSessionPanels(sessionID);
-      return;
-    }
-
-    ingestSessionWireMessage(sessionID, parsed, false);
-    refreshSessionPanels(sessionID);
-  }
-
-  function ingestSessionWireMessage(sessionID, message, replay) {
-    if (!message || typeof message !== 'object') return;
-
-    var type = message.type || 'event';
-    var data = message.data;
-    var stream = ensureSessionStream(sessionID);
-
-    if (type === 'snapshot') {
-      applySessionSnapshot(sessionID, data, replay);
-      return;
-    }
-
-    if (type === 'event') {
-      handleSessionStreamEvent(sessionID, data && data.event ? data.event : data);
-      return;
-    }
-
-    if (type === 'raw') {
-      var rawText = rawPayloadText(data);
-      addSessionEntry(sessionID, {
-        kind: 'raw',
-        label: 'stdout',
-        text: cropText(rawText)
-      });
-      return;
-    }
-
-    if (type === 'started') {
-      addSessionEntry(sessionID, {
-        kind: 'system',
-        label: 'started',
-        text: 'Agent turn started.'
-      });
-      return;
-    }
-
-    if (type === 'prompt') {
-      addSessionEntry(sessionID, {
-        kind: 'assistant',
-        label: 'prompt',
-        text: data && data.prompt ? String(data.prompt) : 'Prompt emitted.'
-      });
-      return;
-    }
-
-    if (type === 'finished') {
-      if (data && typeof data.exit_code === 'number') {
-        stream.metrics.exitCode = data.exit_code;
-      }
-      addSessionEntry(sessionID, {
-        kind: data && data.error ? 'error' : 'result',
-        label: 'finished',
-        text: 'Exit code ' + String((data && typeof data.exit_code === 'number') ? data.exit_code : 0) + (data && data.error ? (' · ' + data.error) : '')
-      });
-      return;
-    }
-
-    if (type === 'done') {
-      addSessionEntry(sessionID, {
-        kind: 'result',
-        label: 'done',
-        text: 'Session complete.' + (data && data.error ? ' ' + data.error : '')
-      });
-      return;
-    }
-
-    if (type === 'spawn') {
-      stream.spawns = arrayOrEmpty(data && data.spawns);
-      addSessionEntry(sessionID, {
-        kind: 'spawn',
-        label: 'spawn',
-        text: stream.spawns.length + ' spawn(s) tracked.'
-      });
-      return;
-    }
-
-    if (type === 'loop_step_start') {
-      updateLoopProgress(stream, data);
-      addSessionEntry(sessionID, {
-        kind: 'loop',
-        label: 'loop step start',
-        text: loopProgressText(stream.loop, true)
-      });
-      return;
-    }
-
-    if (type === 'loop_step_end') {
-      updateLoopProgress(stream, data);
-      addSessionEntry(sessionID, {
-        kind: 'loop',
-        label: 'loop step end',
-        text: loopProgressText(stream.loop, false)
-      });
-      return;
-    }
-
-    if (type === 'loop_done') {
-      addSessionEntry(sessionID, {
-        kind: data && data.error ? 'error' : 'loop',
-        label: 'loop done',
-        text: data && data.reason ? ('Reason: ' + data.reason) : 'Loop finished.'
-      });
-      return;
-    }
-
-    if (type === 'error') {
-      addSessionEntry(sessionID, {
-        kind: 'error',
-        label: 'error',
-        text: data && data.error ? data.error : safeJSONString(data)
-      });
-      return;
-    }
-
-    addSessionEntry(sessionID, {
-      kind: 'system',
-      label: type,
-      text: safeJSONString(data)
-    });
-  }
-
-  function applySessionSnapshot(sessionID, snapshot, replay) {
-    var data = asObject(snapshot);
-    if (!data || typeof data !== 'object') {
-      addSessionEntry(sessionID, {
-        kind: 'system',
-        label: 'snapshot',
-        text: safeJSONString(snapshot)
-      });
-      return;
-    }
-
-    var stream = ensureSessionStream(sessionID);
-
-    if (data.session && typeof data.session === 'object') {
-      stream.metrics.inputTokens = numberOr(stream.metrics.inputTokens, data.session.input_tokens);
-      stream.metrics.outputTokens = numberOr(stream.metrics.outputTokens, data.session.output_tokens);
-      stream.metrics.costUSD = numberOr(stream.metrics.costUSD, data.session.cost_usd);
-      stream.metrics.turns = numberOr(stream.metrics.turns, data.session.num_turns);
-    }
-
-    if (data.loop && typeof data.loop === 'object') {
-      updateLoopProgress(stream, data.loop);
-    }
-
-    if (Array.isArray(data.spawns)) {
-      stream.spawns = data.spawns;
-    }
-
-    if (Array.isArray(data.recent)) {
-      data.recent.forEach(function (recentMessage) {
-        if (!recentMessage || recentMessage.type === 'snapshot') return;
-        ingestSessionWireMessage(sessionID, recentMessage, true);
-      });
-    }
-
-    if (!replay) {
-      addSessionEntry(sessionID, {
-        kind: 'system',
-        label: 'snapshot',
-        text: 'Stream snapshot received.'
-      });
-    }
-  }
-
-  function handleSessionStreamEvent(sessionID, rawEvent) {
-    var event = asObject(rawEvent);
-    if (!event || typeof event !== 'object') {
-      addSessionEntry(sessionID, {
-        kind: 'system',
-        label: 'event',
-        text: safeJSONString(rawEvent)
-      });
-      return;
-    }
-
-    var stream = ensureSessionStream(sessionID);
-
-    if (event.type === 'assistant') {
-      var blocks = extractContentBlocks(event);
-      if (!blocks.length) {
-        addSessionEntry(sessionID, {
-          kind: 'assistant',
-          label: 'assistant',
-          text: '[assistant event]'
-        });
-        return;
-      }
-      blocks.forEach(function (block) {
-        handleAssistantBlock(sessionID, block);
-      });
-      return;
-    }
-
-    if (event.type === 'user') {
-      var userBlocks = extractContentBlocks(event);
-      userBlocks.forEach(function (block) {
-        if (!block || typeof block !== 'object') return;
-        if (block.type === 'tool_result') {
-          attachToolResult(stream, block.content || block.output || block.text || safeJSONString(block));
-        }
-      });
-      return;
-    }
-
-    if (event.type === 'content_block_delta') {
-      var delta = event.delta && (event.delta.text || event.delta.partial_json);
-      if (delta) {
-        var last = stream.entries[stream.entries.length - 1];
-        if (last && last.kind === 'assistant' && last.isDelta) {
-          last.text += delta;
-          last.ts = Date.now();
-        } else {
-          addSessionEntry(sessionID, {
-            kind: 'assistant',
-            label: 'assistant',
-            text: String(delta),
-            isDelta: true
-          });
-        }
-      }
-      return;
-    }
-
-    if (event.type === 'result') {
-      applyResultMetrics(stream, event);
-      var resultBits = [];
-      if (event.subtype) resultBits.push(String(event.subtype));
-      if (typeof stream.metrics.inputTokens === 'number' && stream.metrics.inputTokens > 0) resultBits.push('in=' + stream.metrics.inputTokens);
-      if (typeof stream.metrics.outputTokens === 'number' && stream.metrics.outputTokens > 0) resultBits.push('out=' + stream.metrics.outputTokens);
-      if (typeof stream.metrics.costUSD === 'number' && stream.metrics.costUSD > 0) resultBits.push('cost=$' + stream.metrics.costUSD.toFixed(4));
-      addSessionEntry(sessionID, {
-        kind: 'result',
-        label: 'result',
-        text: resultBits.length ? resultBits.join(' · ') : 'Result event received.'
-      });
-      return;
-    }
-
-    addSessionEntry(sessionID, {
-      kind: 'system',
-      label: event.type || 'event',
-      text: safeJSONString(event)
-    });
-  }
-
-  function handleAssistantBlock(sessionID, block) {
-    if (!block || typeof block !== 'object') return;
-
-    var stream = ensureSessionStream(sessionID);
-
-    if (block.type === 'text' && block.text) {
-      addSessionEntry(sessionID, {
-        kind: 'assistant',
-        label: 'assistant',
-        text: String(block.text)
-      });
-      return;
-    }
-
-    if (block.type === 'tool_use') {
-      var toolEntry = addSessionEntry(sessionID, {
-        kind: 'tool_use',
-        label: 'tool',
-        name: block.name || 'tool',
-        input: block.input || {},
-        output: null,
-        text: 'Tool invoked.'
-      });
-      stream.lastToolEntryIndex = stream.entries.length - 1;
-      return toolEntry;
-    }
-
-    if (block.type === 'tool_result') {
-      attachToolResult(stream, block.content || block.output || block.text || safeJSONString(block));
-      return;
-    }
-
-    addSessionEntry(sessionID, {
-      kind: 'assistant',
-      label: 'assistant',
-      text: safeJSONString(block)
-    });
-  }
-
-  function attachToolResult(stream, output) {
-    if (stream.lastToolEntryIndex >= 0 && stream.lastToolEntryIndex < stream.entries.length) {
-      var existing = stream.entries[stream.lastToolEntryIndex];
-      if (existing && existing.kind === 'tool_use') {
-        existing.output = output;
-        existing.ts = Date.now();
-        return;
-      }
-    }
-
-    stream.entries.push({
-      kind: 'tool_use',
-      label: 'tool',
-      name: 'tool_result',
-      input: {},
-      output: output,
-      text: 'Tool result',
-      ts: Date.now(),
-      isDelta: false
-    });
-  }
-
-  function applyResultMetrics(stream, event) {
-    if (!stream || !event) return;
-
-    var usage = event.usage && typeof event.usage === 'object' ? event.usage : {};
-
-    stream.metrics.inputTokens = numberOr(stream.metrics.inputTokens, event.input_tokens, usage.input_tokens);
-    stream.metrics.outputTokens = numberOr(stream.metrics.outputTokens, event.output_tokens, usage.output_tokens);
-    stream.metrics.turns = numberOr(stream.metrics.turns, event.num_turns, usage.num_turns);
-    stream.metrics.costUSD = numberOr(stream.metrics.costUSD, event.total_cost_usd, event.cost_usd, usage.total_cost_usd, usage.cost_usd);
-  }
-
-  function updateLoopProgress(stream, loopData) {
-    if (!stream || !loopData) return;
-
-    stream.loop.cycle = numberOr(stream.loop.cycle, loopData.cycle);
-    stream.loop.stepIndex = numberOr(stream.loop.stepIndex, loopData.step_index);
-    stream.loop.totalSteps = numberOr(stream.loop.totalSteps, loopData.total_steps);
-    if (loopData.profile) {
-      stream.loop.profile = String(loopData.profile);
-    }
-  }
-
-  function loopProgressText(loop, started) {
-    var step = (typeof loop.stepIndex === 'number' ? (loop.stepIndex + 1) : 0);
-    var total = (typeof loop.totalSteps === 'number' && loop.totalSteps > 0) ? loop.totalSteps : '?';
-    return (started ? 'Starting' : 'Finished') + ' cycle ' + (loop.cycle + 1) + ' step ' + step + ' of ' + total + (loop.profile ? (' · ' + loop.profile) : '');
-  }
-
-  function refreshSessionPanels(sessionID) {
-    if (state.tab !== 'sessions') return;
-    if (sessionID !== state.selectedSessionID) return;
-
-    var stream = ensureSessionStream(sessionID);
-
-    var metricsNode = document.getElementById('session-metrics');
-    if (metricsNode) {
-      metricsNode.innerHTML = renderSessionMetrics(stream.metrics);
-    }
-
-    var loopNode = document.getElementById('session-loop-progress');
-    if (loopNode) {
-      loopNode.innerHTML = renderLoopProgress(stream.loop);
-    }
-
-    var spawnNode = document.getElementById('session-spawns');
-    if (spawnNode) {
-      spawnNode.innerHTML = renderSpawnCards(stream.spawns);
-    }
-
-    var feed = document.getElementById('session-events-feed');
-    if (feed) {
-      var stickToBottom = feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 18;
-      feed.innerHTML = renderSessionEvents(stream.entries);
-      if (stickToBottom) {
-        feed.scrollTop = feed.scrollHeight;
-      }
-    }
-  }
-
-  function renderSessionMetrics(metrics) {
-    var inputTokens = metrics && typeof metrics.inputTokens === 'number' ? metrics.inputTokens : 0;
-    var outputTokens = metrics && typeof metrics.outputTokens === 'number' ? metrics.outputTokens : 0;
-    var cost = metrics && typeof metrics.costUSD === 'number' ? metrics.costUSD : 0;
-    var turns = metrics && typeof metrics.turns === 'number' ? metrics.turns : 0;
-    var totalTokens = inputTokens + outputTokens;
-
-    return '' +
-      metricCard('Input Tokens', formatNumber(inputTokens), 'metric-input') +
-      metricCard('Output Tokens', formatNumber(outputTokens), 'metric-output') +
-      metricCard('Total Tokens', formatNumber(totalTokens), 'metric-total') +
-      metricCard('Cost (USD)', cost > 0 ? ('$' + cost.toFixed(4)) : '$0.0000', 'metric-cost') +
-      metricCard('Turns', formatNumber(turns), 'metric-turns') +
-      metricCard('Avg Tokens/Turn', turns > 0 ? formatNumber(Math.round(totalTokens / turns)) : '-', 'metric-avg');
-  }
-
-  function metricCard(label, value, extraClass) {
-    var cls = 'metric-card' + (extraClass ? ' ' + extraClass : '');
-    return '<div class="' + cls + '"><div class="label">' + escapeHTML(label) + '</div><div class="value">' + escapeHTML(String(value)) + '</div></div>';
-  }
-
-  function renderLoopProgress(loop) {
-    if (!loop) return '';
-
-    var step = (typeof loop.stepIndex === 'number' ? loop.stepIndex + 1 : 0);
-    var total = (typeof loop.totalSteps === 'number' && loop.totalSteps > 0) ? loop.totalSteps : '?';
-
-    return '' +
-      '<div class="loop-progress">' +
-        '<strong>Loop Progress:</strong> cycle ' + (loop.cycle + 1) + ', step ' + step + ' of ' + total +
-        (loop.profile ? (' · profile ' + escapeHTML(loop.profile)) : '') +
-      '</div>';
-  }
-
-  function renderSpawnCards(spawns) {
-    var list = arrayOrEmpty(spawns);
-    if (!list.length) return '';
-
-    var roots = [];
-    var childMap = {};
-    list.forEach(function (spawn) {
-      var parentID = spawn.parent_id || spawn.parent_spawn_id || 0;
-      if (!parentID) {
-        roots.push(spawn);
-      } else {
-        if (!childMap[parentID]) childMap[parentID] = [];
-        childMap[parentID].push(spawn);
-      }
-    });
-
-    if (!roots.length) roots = list;
-
-    function renderSpawnNode(spawn, depth) {
-      var children = childMap[spawn.id] || [];
-      var statusNorm = normalizeStatus(spawn.status || 'unknown');
-      var statusIcon = statusNorm === 'running' || statusNorm === 'active' ? '\u{1F7E2}' :
-                       statusNorm === 'complete' || statusNorm === 'done' ? '\u{2705}' :
-                       statusNorm === 'error' ? '\u{1F534}' : '\u{26AA}';
-
-      var html = '' +
-        '<div class="spawn-tree-node" style="margin-left:' + (depth * 1.2) + 'rem">' +
-          '<details class="spawn-details"' + (children.length || spawn.objective ? '' : ' open') + '>' +
-            '<summary class="spawn-summary">' +
-              '<span class="spawn-status-icon">' + statusIcon + '</span>' +
-              '<strong>Spawn #' + escapeHTML(String(spawn.id)) + '</strong>' +
-              '<span class="meta"> ' + escapeHTML(spawn.profile || spawn.agent || 'unknown') + '</span>' +
-              (spawn.role ? '<span class="spawn-role-tag">' + escapeHTML(spawn.role) + '</span>' : '') +
-              '<span class="pill status-' + statusNorm + '" style="margin-left:0.4rem"><span class="dot"></span>' + escapeHTML(spawn.status || 'unknown') + '</span>' +
-            '</summary>' +
-            '<div class="spawn-tree-body">' +
-              (spawn.objective ? '<div class="spawn-objective">' + escapeHTML(String(spawn.objective).slice(0, 200)) + '</div>' : '') +
-              (spawn.description ? '<div class="spawn-description meta">' + escapeHTML(String(spawn.description).slice(0, 300)) + '</div>' : '') +
-            '</div>' +
-          '</details>' +
-          (children.length ? children.map(function (child) { return renderSpawnNode(child, depth + 1); }).join('') : '') +
-        '</div>';
-
-      return html;
-    }
-
-    return '<div class="spawn-tree">' +
-      '<h4 class="spawn-tree-title">Spawn Tree (' + list.length + ')</h4>' +
-      roots.map(function (root) { return renderSpawnNode(root, 0); }).join('') +
-    '</div>';
-  }
-
-  var TOOL_ICONS = {
-    Read: '\u{1F4C4}', Write: '\u{1F4DD}', Edit: '\u{270F}\uFE0F',
-    Bash: '\u{1F4BB}', Grep: '\u{1F50D}', Glob: '\u{1F4C2}',
-    WebFetch: '\u{1F310}', WebSearch: '\u{1F50E}', Task: '\u{1F9E9}',
-    TodoWrite: '\u{2705}', NotebookEdit: '\u{1F4D3}',
-    AskUserQuestion: '\u{2753}', Skill: '\u{26A1}',
-    shell: '\u{1F4BB}', command_execution: '\u{1F4BB}'
-  };
-
-  function toolIcon(name) {
-    return TOOL_ICONS[name] || '\u{1F527}';
-  }
-
-  function isDiffContent(text) {
-    if (typeof text !== 'string' || text.length < 10) return false;
-    var lines = text.split('\n');
-    var diffIndicators = 0;
-    for (var i = 0; i < Math.min(lines.length, 20); i++) {
-      if (/^[+-]{3}\s/.test(lines[i]) || /^@@\s/.test(lines[i]) || /^diff\s--git/.test(lines[i])) diffIndicators++;
-    }
-    return diffIndicators >= 2;
-  }
-
-  function renderDiff(text) {
-    var lines = String(text).split('\n');
-    return '<div class="diff-block">' + lines.map(function (line) {
-      var cls = 'diff-line';
-      if (/^@@/.test(line)) cls += ' diff-hunk';
-      else if (/^\+/.test(line)) cls += ' diff-add';
-      else if (/^-/.test(line)) cls += ' diff-del';
-      else if (/^diff\s--git/.test(line) || /^index\s/.test(line)) cls += ' diff-meta';
-      return '<div class="' + cls + '">' + escapeHTML(line) + '</div>';
-    }).join('') + '</div>';
-  }
-
-  function renderToolOutput(output) {
-    if (output == null || output === '') {
-      return '<div class="meta tool-output-pending">Waiting for tool output...</div>';
-    }
-    var text = typeof output === 'object' ? safeJSONString(output) : String(output);
-    if (isDiffContent(text)) {
-      return '<div class="tool-output-label">Output</div>' + renderDiff(text);
-    }
-    if (typeof output === 'object') {
-      return '<div class="tool-output-label">Output</div><pre class="code-block">' + highlightJSON(output) + '</pre>';
-    }
-    return '<div class="tool-output-label">Output</div><pre class="code-block">' + escapeHTML(text) + '</pre>';
-  }
-
-  function renderToolInput(toolName, input) {
-    if (input == null) return '';
-    var inputObj = typeof input === 'object' ? input : {};
-
-    if (toolName === 'Edit' && inputObj.file_path) {
-      var parts = [];
-      parts.push('<div class="tool-file-path">' + escapeHTML(inputObj.file_path) + '</div>');
-      if (inputObj.old_string) {
-        parts.push('<div class="tool-diff-inline">');
-        parts.push('<div class="diff-block"><div class="diff-line diff-del">' + escapeHTML(inputObj.old_string).replace(/\n/g, '</div><div class="diff-line diff-del">') + '</div></div>');
-        if (inputObj.new_string) {
-          parts.push('<div class="diff-block"><div class="diff-line diff-add">' + escapeHTML(inputObj.new_string).replace(/\n/g, '</div><div class="diff-line diff-add">') + '</div></div>');
-        }
-        parts.push('</div>');
-      }
-      return parts.join('');
-    }
-
-    if ((toolName === 'Read' || toolName === 'Write' || toolName === 'Glob' || toolName === 'Grep') && inputObj.file_path) {
-      return '<div class="tool-file-path">' + escapeHTML(inputObj.file_path) + '</div>' +
-        '<pre class="code-block">' + highlightJSON(inputObj) + '</pre>';
-    }
-
-    if (toolName === 'Bash' && inputObj.command) {
-      var cmdHTML = escapeHTML(inputObj.command);
-      if (typeof hljs !== 'undefined') {
-        try { cmdHTML = hljs.highlight(inputObj.command, { language: 'bash' }).value; } catch (_) {}
-      }
-      return '<pre class="code-block hljs"><code>' + cmdHTML + '</code></pre>';
-    }
-
-    return '<pre class="code-block">' + highlightJSON(inputObj) + '</pre>';
-  }
-
-  function renderSessionEvents(entries) {
-    if (!entries || !entries.length) {
-      return '<p class="empty">Waiting for stream events...</p>';
-    }
-    return entries.map(function (entry, index) {
-      return renderSessionEventCard(entry, index, entries);
-    }).join('');
-  }
-
-  function renderSessionEventCard(entry, index, entries) {
-    var kind = entry.kind || 'system';
-    var eventClass = 'event-card event-' + normalizeStatus(kind.replace(/_use$/, '').replace(/_result$/, ''));
-    if (kind === 'tool_use') eventClass = 'event-card event-tool';
-    if (kind === 'assistant') eventClass = 'event-card event-assistant';
-    if (kind === 'result') eventClass = 'event-card event-result';
-    if (kind === 'spawn') eventClass = 'event-card event-spawn';
-    if (kind === 'loop') eventClass = 'event-card event-loop';
-    if (kind === 'error') eventClass = 'event-card event-error';
-    if (kind === 'raw' || kind === 'system') eventClass = 'event-card event-raw';
-
-    var turnBoundary = '';
-    if (kind === 'result' && entry.label === 'result') {
-      var turnNum = 0;
-      for (var t = 0; t <= index; t++) {
-        if (entries[t] && entries[t].kind === 'result' && entries[t].label === 'result') turnNum++;
-      }
-      turnBoundary = '<div class="turn-boundary"><span class="turn-boundary-line"></span><span class="turn-boundary-label">Turn ' + turnNum + ' complete</span><span class="turn-boundary-line"></span></div>';
-    }
-    if (kind === 'loop' && entry.label === 'loop step start') {
-      turnBoundary = '<div class="turn-boundary turn-boundary-loop"><span class="turn-boundary-line"></span><span class="turn-boundary-label">' + escapeHTML(entry.text || 'Loop step') + '</span><span class="turn-boundary-line"></span></div>';
-    }
-
-    var bodyHTML = '';
-
-    if (kind === 'assistant') {
-      bodyHTML = '<div class="markdown">' + renderMarkdown(entry.text || '') + '</div>';
-    } else if (kind === 'tool_use') {
-      var toolName = entry.name || 'tool';
-      var icon = toolIcon(toolName);
-      var defaultOpen = (toolName === 'Edit' || toolName === 'Write') ? ' open' : '';
-
-      bodyHTML = '' +
-        '<details class="tool-section"' + defaultOpen + '>' +
-          '<summary class="tool-summary">' +
-            '<span class="tool-icon">' + icon + '</span>' +
-            '<span class="tool-name">' + escapeHTML(toolName) + '</span>' +
-            (entry.output != null && entry.output !== '' ? '<span class="tool-done-badge">done</span>' : '<span class="tool-pending-badge">running</span>') +
-          '</summary>' +
-          '<div class="tool-body">' +
-            '<div class="tool-input-label">Input</div>' +
-            renderToolInput(toolName, entry.input) +
-            renderToolOutput(entry.output) +
-          '</div>' +
-        '</details>';
-    } else if (kind === 'raw') {
-      bodyHTML = '<pre class="code-block">' + escapeHTML(entry.text || '') + '</pre>';
-    } else if (kind === 'system' || kind === 'loop' || kind === 'spawn' || kind === 'result' || kind === 'error') {
-      bodyHTML = '<div>' + escapeHTML(entry.text || '') + '</div>';
-      if (entry.data) {
-        bodyHTML += '<pre class="code-block">' + highlightJSON(entry.data) + '</pre>';
-      }
-    } else {
-      bodyHTML = '<pre class="code-block">' + escapeHTML(entry.text || safeJSONString(entry.data)) + '</pre>';
-    }
-
-    return turnBoundary +
-      '<article class="' + eventClass + '">' +
-        '<div class="event-header"><span>' + escapeHTML(entry.label || entry.kind || 'event') + '</span><span>' + escapeHTML(formatClock(entry.ts)) + '</span></div>' +
-        '<div class="event-body">' + bodyHTML + '</div>' +
-      '</article>';
-  }
-  async function renderPlans() {
-    var tab = state.tab;
-    renderLoading('plans');
-
-    try {
-      var plans = arrayOrEmpty(await apiCall(apiBase() + '/plans', 'GET'));
-      if (state.tab !== tab) return;
-
-      state.cache.plans = plans;
-      if (!state.selectedPlanID && plans.length > 0) {
-        state.selectedPlanID = plans[0].id;
-      }
-
-      var detail = null;
-      if (state.selectedPlanID) {
-        detail = await apiCall(apiBase() + '/plans/' + encodeURIComponent(state.selectedPlanID), 'GET', null, { allow404: true });
-      }
-      if (state.tab !== tab) return;
-
-      state.cache.planDetail = detail || null;
-
-      content.innerHTML = '' +
-        '<section class="grid">' +
-          '<article class="card span-4">' +
-            '<div class="card-title-row"><h2>Plans</h2><button data-action="open-create-plan">Create Plan</button></div>' +
-            renderPlanList(plans) +
-          '</article>' +
-          '<article class="card span-8">' +
-            renderPlanDetail(detail) +
-          '</article>' +
-        '</section>';
-    } catch (err) {
-      if (err && err.authRequired) return;
-      renderError('Failed to load plans: ' + errorMessage(err));
-    }
-  }
-
-  function renderPlanList(plans) {
-    if (!plans.length) return '<p class="empty">No plans found.</p>';
-
-    return '<ul class="list">' + plans.map(function (plan) {
-      var active = plan.id === state.selectedPlanID;
-      return '' +
-        '<li>' +
-          '<div class="list-item">' +
-            '<div class="list-item-main">' +
-              '<strong>' + escapeHTML(plan.title || plan.id) + '</strong>' +
-              '<span class="meta mono">' + escapeHTML(plan.id) + '</span>' +
-              '<div class="filters">' + createPill(plan.status || 'active', plan.status || 'active') + '</div>' +
-            '</div>' +
-            '<div class="list-item-actions"><button data-action="select-plan" data-plan-id="' + escapeHTML(plan.id) + '" class="' + (active ? 'active' : '') + '">View</button></div>' +
-          '</div>' +
-        '</li>';
-    }).join('') + '</ul>';
-  }
-
-  function renderPlanDetail(plan) {
-    if (!plan) {
-      return '<h2>Plan Detail</h2><p class="empty">Select a plan to inspect phases.</p>';
-    }
-
-    var phases = arrayOrEmpty(plan.phases);
-
-    return '' +
-      '<div class="card-title-row">' +
-        '<h2>' + escapeHTML(plan.title || plan.id) + '</h2>' +
-        '<div class="button-row">' +
-          '<button data-action="open-edit-plan">Edit Plan</button>' +
-          '<button data-action="activate-plan" class="success">Activate Plan</button>' +
-          '<button data-action="delete-plan" class="danger">Delete Plan</button>' +
-        '</div>' +
-      '</div>' +
-      '<p class="meta mono">ID: ' + escapeHTML(plan.id) + '</p>' +
-      '<div class="filters">' + createPill(plan.status || 'active', plan.status || 'active') + '</div>' +
-      '<div class="markdown">' + renderMarkdown(plan.description || '_No description._') + '</div>' +
-      '<div class="card-title-row" style="margin-top:0.8rem"><h3>Phases</h3><button data-action="open-create-phase">Create Phase</button></div>' +
-      (phases.length ? '<ul class="list">' + phases.map(function (phase) {
-        return '' +
-          '<li>' +
-            '<div class="list-item">' +
-              '<div class="list-item-main">' +
-                '<strong>' + escapeHTML(phase.title || phase.id || 'Untitled') + '</strong>' +
-                '<span class="meta mono">' + escapeHTML(phase.id || '-') + '</span>' +
-                '<div class="item-preview">' + escapeHTML(phase.description || 'No description') + '</div>' +
-                '<div class="filters">' + createPill(phase.status || 'not_started', phase.status || 'not_started') + '<span class="meta">Priority ' + escapeHTML(String(phase.priority || 0)) + '</span></div>' +
-              '</div>' +
-              '<div class="list-item-actions"><button data-action="open-edit-phase" data-phase-id="' + escapeHTML(phase.id || '') + '">Edit</button></div>' +
-            '</div>' +
-          '</li>';
-      }).join('') + '</ul>' : '<p class="empty">No phases defined.</p>');
-  }
-
-  async function activatePlan(planID) {
-    try {
-      await apiCall(apiBase() + '/plans/' + encodeURIComponent(planID) + '/activate', 'POST');
-      showToast('Plan ' + planID + ' activated.', 'success');
-      renderPlans();
-    } catch (err) {
-      showToast('Failed to activate plan: ' + errorMessage(err), 'error');
-    }
-  }
-
-  async function deletePlan(planID) {
-    if (!window.confirm('Delete plan "' + planID + '"?')) return;
-
-    try {
-      await apiCall(apiBase() + '/plans/' + encodeURIComponent(planID), 'DELETE');
-      showToast('Plan deleted: ' + planID, 'success');
-      if (state.selectedPlanID === planID) state.selectedPlanID = '';
-      renderPlans();
-    } catch (err) {
-      showToast('Failed to delete plan: ' + errorMessage(err), 'error');
-    }
-  }
-
-  async function renderIssues() {
-    var tab = state.tab;
-    renderLoading('issues');
-
-    try {
-      var issuePath = apiBase() + '/issues';
-      if (state.issueStatusFilter !== 'all') {
-        issuePath += '?status=' + encodeURIComponent(state.issueStatusFilter);
-      }
-
-      var results = await Promise.all([
-        apiCall(issuePath, 'GET'),
-        apiCall(apiBase() + '/plans', 'GET')
-      ]);
-
-      if (state.tab !== tab) return;
-
-      var issues = arrayOrEmpty(results[0]);
-      var plans = arrayOrEmpty(results[1]);
-      state.cache.plans = plans;
-
-      if (state.issuePriorityFilter !== 'all') {
-        issues = issues.filter(function (issue) {
-          return normalizeStatus(issue.priority) === normalizeStatus(state.issuePriorityFilter);
-        });
-      }
-
-      state.cache.issues = issues;
-
-      if (!state.selectedIssueID && issues.length > 0) {
-        state.selectedIssueID = issues[0].id;
-      }
-
-      var selected = issues.find(function (issue) {
-        return issue.id === state.selectedIssueID;
-      }) || null;
-
-      content.innerHTML = '' +
-        '<section class="grid">' +
-          '<article class="card span-5">' +
-            '<div class="card-title-row"><h2>Issues</h2><button data-action="open-create-issue">Create Issue</button></div>' +
-            '<div class="filters">' +
-              '<select data-change="issue-status-filter">' +
-                issueFilterOptions('all', state.issueStatusFilter, 'All statuses') +
-                issueFilterOptions('open', state.issueStatusFilter, 'Open') +
-                issueFilterOptions('in_progress', state.issueStatusFilter, 'In Progress') +
-                issueFilterOptions('resolved', state.issueStatusFilter, 'Resolved') +
-                issueFilterOptions('wontfix', state.issueStatusFilter, 'Wontfix') +
-              '</select>' +
-              '<select data-change="issue-priority-filter">' +
-                issueFilterOptions('all', state.issuePriorityFilter, 'All priorities') +
-                issueFilterOptions('critical', state.issuePriorityFilter, 'Critical') +
-                issueFilterOptions('high', state.issuePriorityFilter, 'High') +
-                issueFilterOptions('medium', state.issuePriorityFilter, 'Medium') +
-                issueFilterOptions('low', state.issuePriorityFilter, 'Low') +
-              '</select>' +
-            '</div>' +
-            renderIssueList(issues) +
-          '</article>' +
-          '<article class="card span-7">' +
-            renderIssueDetail(selected) +
-          '</article>' +
-        '</section>';
-    } catch (err) {
-      if (err && err.authRequired) return;
-      renderError('Failed to load issues: ' + errorMessage(err));
-    }
-  }
-
-  function issueFilterOptions(value, current, label) {
-    return '<option value="' + value + '"' + (value === current ? ' selected' : '') + '>' + escapeHTML(label) + '</option>';
-  }
-
-  function renderIssueList(issues) {
-    if (!issues.length) return '<p class="empty">No matching issues.</p>';
-
-    return '<ul class="list">' + issues.map(function (issue) {
-      return '' +
-        '<li>' +
-          '<div class="list-item">' +
-            '<div class="list-item-main">' +
-              '<strong>#' + issue.id + ' ' + escapeHTML(issue.title || 'Untitled') + '</strong>' +
-              '<span class="meta">Plan: ' + escapeHTML(issue.plan_id || 'none') + ' · Updated ' + escapeHTML(formatRelativeTime(issue.updated)) + '</span>' +
-              '<div class="item-preview">' + escapeHTML((issue.description || '').slice(0, 160) || 'No description') + '</div>' +
-              '<div class="filters">' + createPill(issue.priority || 'medium', issue.priority || 'medium') + createPill(issue.status || 'open', issue.status || 'open') + '</div>' +
-            '</div>' +
-            '<div class="list-item-actions">' +
-              '<button data-action="select-issue" data-issue-id="' + issue.id + '" class="' + (issue.id === state.selectedIssueID ? 'active' : '') + '">View</button>' +
-              '<button data-action="open-edit-issue" data-issue-id="' + issue.id + '">Edit</button>' +
-              '<button data-action="delete-issue" data-issue-id="' + issue.id + '" class="danger">Delete</button>' +
-            '</div>' +
-          '</div>' +
-        '</li>';
-    }).join('') + '</ul>';
-  }
-
-  function renderIssueDetail(issue) {
-    if (!issue) {
-      return '<h2>Issue Detail</h2><p class="empty">Select an issue to view full details.</p>';
-    }
-
-    return '' +
-      '<div class="card-title-row"><h2>#' + issue.id + ' ' + escapeHTML(issue.title || 'Untitled') + '</h2><div class="button-row"><button data-action="open-edit-issue" data-issue-id="' + issue.id + '">Edit</button><button data-action="delete-issue" data-issue-id="' + issue.id + '" class="danger">Delete</button></div></div>' +
-      '<div class="filters">' + createPill(issue.status || 'open', issue.status || 'open') + createPill(issue.priority || 'medium', issue.priority || 'medium') + '</div>' +
-      '<div class="kv-grid">' +
-        '<div class="kv"><div class="label">Plan</div><div class="value mono">' + escapeHTML(issue.plan_id || 'none') + '</div></div>' +
-        '<div class="kv"><div class="label">Labels</div><div class="value">' + escapeHTML((issue.labels || []).join(', ') || 'none') + '</div></div>' +
-        '<div class="kv"><div class="label">Created</div><div class="value">' + escapeHTML(formatAbsolute(issue.created)) + '</div></div>' +
-        '<div class="kv"><div class="label">Updated</div><div class="value">' + escapeHTML(formatAbsolute(issue.updated)) + '</div></div>' +
-      '</div>' +
-      '<section class="markdown">' + renderMarkdown(issue.description || '_No description provided._') + '</section>';
-  }
-
-  async function deleteIssue(issueID) {
-    if (!window.confirm('Delete issue #' + issueID + '?')) return;
-
-    try {
-      await apiCall(apiBase() + '/issues/' + encodeURIComponent(String(issueID)), 'DELETE');
-      showToast('Issue deleted: #' + issueID, 'success');
-      if (state.selectedIssueID === issueID) state.selectedIssueID = null;
-      renderIssues();
-    } catch (err) {
-      showToast('Failed to delete issue: ' + errorMessage(err), 'error');
-    }
-  }
-
-  async function renderDocs() {
-    var tab = state.tab;
-    renderLoading('docs');
-
-    try {
-      var docsPath = apiBase() + '/docs';
-      if (state.docsPlanFilter !== 'all') {
-        docsPath += '?plan=' + encodeURIComponent(state.docsPlanFilter);
-      }
-
-      var results = await Promise.all([
-        apiCall(docsPath, 'GET'),
-        apiCall(apiBase() + '/plans', 'GET')
-      ]);
-
-      if (state.tab !== tab) return;
-
-      var docs = arrayOrEmpty(results[0]);
-      var plans = arrayOrEmpty(results[1]);
-
-      state.cache.docs = docs;
-      state.cache.plans = plans;
-
-      if (!state.selectedDocID && docs.length > 0) {
-        state.selectedDocID = docs[0].id;
-      }
-
-      var selected = docs.find(function (doc) { return doc.id === state.selectedDocID; }) || null;
-
-      content.innerHTML = '' +
-        '<section class="grid">' +
-          '<article class="card span-5">' +
-            '<div class="card-title-row"><h2>Docs</h2><button data-action="open-create-doc">Create Doc</button></div>' +
-            '<div class="filters"><select data-change="docs-plan-filter">' +
-              '<option value="all">All plans</option>' +
-              plans.map(function (plan) {
-                return '<option value="' + escapeHTML(plan.id) + '"' + (plan.id === state.docsPlanFilter ? ' selected' : '') + '>' + escapeHTML(plan.id) + '</option>';
-              }).join('') +
-            '</select></div>' +
-            renderDocList(docs) +
-          '</article>' +
-          '<article class="card span-7">' +
-            renderDocDetail(selected) +
-          '</article>' +
-        '</section>';
-    } catch (err) {
-      if (err && err.authRequired) return;
-      renderError('Failed to load docs: ' + errorMessage(err));
-    }
-  }
-
-  function renderDocList(docs) {
-    if (!docs.length) return '<p class="empty">No docs found.</p>';
-
-    return '<ul class="list">' + docs.map(function (doc) {
-      return '' +
-        '<li>' +
-          '<div class="list-item">' +
-            '<div class="list-item-main">' +
-              '<strong>' + escapeHTML(doc.title || doc.id) + '</strong>' +
-              '<span class="meta mono">' + escapeHTML(doc.id) + ' · plan ' + escapeHTML(doc.plan_id || 'shared') + '</span>' +
-              '<div class="item-preview">' + escapeHTML((doc.content || '').slice(0, 160) || 'No content') + '</div>' +
-            '</div>' +
-            '<div class="list-item-actions">' +
-              '<button data-action="select-doc" data-doc-id="' + escapeHTML(doc.id) + '" class="' + (state.selectedDocID === doc.id ? 'active' : '') + '">View</button>' +
-              '<button data-action="open-edit-doc" data-doc-id="' + escapeHTML(doc.id) + '">Edit</button>' +
-              '<button data-action="delete-doc" data-doc-id="' + escapeHTML(doc.id) + '" class="danger">Delete</button>' +
-            '</div>' +
-          '</div>' +
-        '</li>';
-    }).join('') + '</ul>';
-  }
-
-  function renderDocDetail(doc) {
-    if (!doc) {
-      return '<h2>Doc Detail</h2><p class="empty">Select a document to view details.</p>';
-    }
-
-    return '' +
-      '<div class="card-title-row"><h2>' + escapeHTML(doc.title || doc.id) + '</h2><div class="button-row"><button data-action="open-edit-doc" data-doc-id="' + escapeHTML(doc.id) + '">Edit</button><button data-action="delete-doc" data-doc-id="' + escapeHTML(doc.id) + '" class="danger">Delete</button></div></div>' +
-      '<div class="kv-grid">' +
-        '<div class="kv"><div class="label">ID</div><div class="value mono">' + escapeHTML(doc.id) + '</div></div>' +
-        '<div class="kv"><div class="label">Plan</div><div class="value mono">' + escapeHTML(doc.plan_id || 'shared') + '</div></div>' +
-        '<div class="kv"><div class="label">Created</div><div class="value">' + escapeHTML(formatAbsolute(doc.created)) + '</div></div>' +
-        '<div class="kv"><div class="label">Updated</div><div class="value">' + escapeHTML(formatAbsolute(doc.updated)) + '</div></div>' +
-      '</div>' +
-      '<section class="markdown">' + renderMarkdown(doc.content || '_No content._') + '</section>';
-  }
-
-  async function deleteDoc(docID) {
-    if (!window.confirm('Delete doc "' + docID + '"?')) return;
-
-    try {
-      await apiCall(apiBase() + '/docs/' + encodeURIComponent(docID), 'DELETE');
-      showToast('Doc deleted: ' + docID, 'success');
-      if (state.selectedDocID === docID) state.selectedDocID = '';
-      renderDocs();
-    } catch (err) {
-      showToast('Failed to delete doc: ' + errorMessage(err), 'error');
-    }
-  }
-
-  async function renderConfig() {
-    var tab = state.tab;
-    renderLoading('config');
-
-    try {
-      var results = await Promise.all([
-        apiCall('/api/config/profiles', 'GET'),
-        apiCall('/api/config/loops', 'GET'),
-        apiCall('/api/config/roles', 'GET'),
-        apiCall('/api/config/rules', 'GET'),
-        apiCall('/api/config/pushover', 'GET')
-      ]);
-
-      if (state.tab !== tab) return;
-
-      state.cache.profiles = arrayOrEmpty(results[0]);
-      state.cache.loops = arrayOrEmpty(results[1]);
-      state.cache.roles = arrayOrEmpty(results[2]);
-      state.cache.rules = arrayOrEmpty(results[3]);
-      state.cache.pushover = results[4] || {};
-
-      var sectionHTML = '';
-      if (state.configSection === 'profiles') sectionHTML = renderProfileSection(state.cache.profiles);
-      if (state.configSection === 'loops') sectionHTML = renderLoopSection(state.cache.loops);
-      if (state.configSection === 'roles') sectionHTML = renderRoleSection(state.cache.roles);
-      if (state.configSection === 'rules') sectionHTML = renderRuleSection(state.cache.rules);
-      if (state.configSection === 'pushover') sectionHTML = renderPushoverSection(state.cache.pushover);
-
-      content.innerHTML = '' +
-        '<section class="card">' +
-          '<h2>Config</h2>' +
-          '<div class="subtabs">' +
-            configTabButton('profiles', 'Profiles') +
-            configTabButton('loops', 'Loop Definitions') +
-            configTabButton('roles', 'Roles') +
-            configTabButton('rules', 'Rules') +
-            configTabButton('pushover', 'Pushover') +
-          '</div>' +
-          sectionHTML +
-        '</section>';
-    } catch (err) {
-      if (err && err.authRequired) return;
-      renderError('Failed to load config: ' + errorMessage(err));
-    }
-  }
-
-  function configTabButton(section, label) {
-    return '<button data-action="set-config-section" data-section="' + section + '" class="' + (section === state.configSection ? 'active' : '') + '">' + escapeHTML(label) + '</button>';
-  }
-
-  function renderProfileSection(profiles) {
-    return '' +
-      '<div class="card-title-row"><h3>Profiles</h3><button data-action="open-create-profile">Create Profile</button></div>' +
-      (profiles.length ? '<ul class="list">' + profiles.map(function (profile) {
-        return '' +
-          '<li>' +
-            '<div class="list-item">' +
-              '<div class="list-item-main">' +
-                '<strong>' + escapeHTML(profile.name || 'unnamed') + '</strong>' +
-                '<span class="meta">' + escapeHTML(profile.agent || 'agent') + ' · ' + escapeHTML(profile.model || 'default model') + '</span>' +
-                '<div class="item-preview">Reasoning: ' + escapeHTML(profile.reasoning_level || 'default') + ' · Intelligence: ' + escapeHTML(String(profile.intelligence || 0)) + ' · Max instances: ' + escapeHTML(String(profile.max_instances || 0)) + ' · Speed: ' + escapeHTML(profile.speed || 'n/a') + '</div>' +
-              '</div>' +
-              '<div class="list-item-actions">' +
-                '<button data-action="open-edit-profile" data-profile-name="' + escapeHTML(profile.name) + '">Edit</button>' +
-                '<button data-action="delete-profile" data-profile-name="' + escapeHTML(profile.name) + '" class="danger">Delete</button>' +
-              '</div>' +
-            '</div>' +
-          '</li>';
-      }).join('') + '</ul>' : '<p class="empty">No profiles configured.</p>');
-  }
-  function renderLoopSection(loops) {
-    return '' +
-      '<div class="card-title-row"><h3>Loop Definitions</h3><button data-action="open-create-loop">Create Loop</button></div>' +
-      (loops.length ? '<ul class="list">' + loops.map(function (loop) {
-        var steps = arrayOrEmpty(loop.steps);
-        return '' +
-          '<li>' +
-            '<div class="list-item">' +
-              '<div class="list-item-main">' +
-                '<strong>' + escapeHTML(loop.name || 'unnamed-loop') + '</strong>' +
-                '<span class="meta">' + steps.length + ' steps</span>' +
-                '<div class="item-preview">' + escapeHTML(steps.map(function (step, index) {
-                  return (index + 1) + '. ' + (step.profile || 'profile?') + (step.role ? (' [' + step.role + ']') : '');
-                }).join('  |  ')) + '</div>' +
-              '</div>' +
-              '<div class="list-item-actions">' +
-                '<button data-action="open-edit-loop" data-loop-name="' + escapeHTML(loop.name) + '">Edit</button>' +
-                '<button data-action="delete-loop" data-loop-name="' + escapeHTML(loop.name) + '" class="danger">Delete</button>' +
-              '</div>' +
-            '</div>' +
-          '</li>';
-      }).join('') + '</ul>' : '<p class="empty">No loop definitions configured.</p>');
-  }
-
-  function renderRoleSection(roles) {
-    return '' +
-      '<div class="card-title-row"><h3>Roles</h3><button data-action="open-create-role">Create Role</button></div>' +
-      (roles.length ? '<ul class="list">' + roles.map(function (role) {
-        return '' +
-          '<li>' +
-            '<div class="list-item">' +
-              '<div class="list-item-main">' +
-                '<strong>' + escapeHTML(role.name || 'unnamed-role') + '</strong>' +
-                '<span class="meta">' + escapeHTML(role.title || '') + '</span>' +
-                '<div class="item-preview">' + escapeHTML(role.description || '') + '</div>' +
-              '</div>' +
-              '<div class="list-item-actions"><button data-action="delete-role" data-role-name="' + escapeHTML(role.name || '') + '" class="danger">Delete</button></div>' +
-            '</div>' +
-          '</li>';
-      }).join('') + '</ul>' : '<p class="empty">No roles configured.</p>');
-  }
-
-  function renderRuleSection(rules) {
-    return '' +
-      '<div class="card-title-row"><h3>Rules</h3><button data-action="open-create-rule">Create Rule</button></div>' +
-      (rules.length ? '<ul class="list">' + rules.map(function (rule) {
-        return '' +
-          '<li>' +
-            '<div class="list-item">' +
-              '<div class="list-item-main">' +
-                '<strong class="mono">' + escapeHTML(rule.id || 'rule') + '</strong>' +
-                '<div class="item-preview">' + escapeHTML((rule.body || '').slice(0, 220) || 'No body') + '</div>' +
-              '</div>' +
-              '<div class="list-item-actions"><button data-action="delete-rule" data-rule-id="' + escapeHTML(rule.id || '') + '" class="danger">Delete</button></div>' +
-            '</div>' +
-          '</li>';
-      }).join('') + '</ul>' : '<p class="empty">No prompt rules configured.</p>');
-  }
-
-  function renderPushoverSection(pushover) {
-    var cfg = pushover || {};
-    return '' +
-      '<div class="card-title-row"><h3>Pushover</h3></div>' +
-      '<form data-form="save-pushover">' +
-        '<div class="form-grid">' +
-          '<div class="form-field"><label>User Key</label><input type="text" name="user_key" value="' + escapeHTML(cfg.user_key || '') + '"></div>' +
-          '<div class="form-field"><label>App Token</label><input type="text" name="app_token" value="' + escapeHTML(cfg.app_token || '') + '"></div>' +
-        '</div>' +
-        '<div class="form-actions"><button type="submit" class="success">Save Pushover</button></div>' +
-      '</form>';
-  }
-
-  async function savePushover(form) {
-    var payload = {
-      user_key: readString(form, 'user_key'),
-      app_token: readString(form, 'app_token')
-    };
-
-    try {
-      await apiCall('/api/config/pushover', 'PUT', payload);
-      showToast('Pushover config saved.', 'success');
-      renderConfig();
-    } catch (err) {
-      showToast('Failed to save pushover config: ' + errorMessage(err), 'error');
-    }
-  }
-
-  function renderTerminal() {
-    if (typeof Terminal === 'undefined' || typeof FitAddon === 'undefined' || typeof FitAddon.FitAddon === 'undefined') {
-      renderError('Terminal runtime unavailable. Verify bundled xterm assets.');
-      return;
-    }
-
-    content.innerHTML = '<section class="card terminal-card"><div id="terminal-container"></div></section>';
-
-    var container = document.getElementById('terminal-container');
-    if (!container) return;
-
-    if (!state.term) {
-      state.term = new Terminal({
-        cursorBlink: true,
-        fontSize: 13,
-        fontFamily: '"IBM Plex Mono", "SFMono-Regular", monospace',
-        theme: {
-          background: '#11111b',
-          foreground: '#cdd6f4',
-          cursor: '#f5e0dc',
-          selectionBackground: '#45475a',
-          black: '#45475a',
-          red: '#f38ba8',
-          green: '#a6e3a1',
-          yellow: '#f9e2af',
-          blue: '#89b4fa',
-          magenta: '#cba6f7',
-          cyan: '#89dceb',
-          white: '#bac2de',
-          brightBlack: '#585b70',
-          brightRed: '#f38ba8',
-          brightGreen: '#a6e3a1',
-          brightYellow: '#f9e2af',
-          brightBlue: '#89b4fa',
-          brightMagenta: '#cba6f7',
-          brightCyan: '#89dceb',
-          brightWhite: '#a6adc8'
-        }
-      });
-
-      state.termFit = new FitAddon.FitAddon();
-      state.term.loadAddon(state.termFit);
-
-      state.term.onData(function (data) {
-        if (state.termWS && state.termWS.readyState === WebSocket.OPEN) {
-          state.termWS.send(JSON.stringify({ type: 'input', data: btoa(data) }));
-        }
-      });
-
-      state.term.onResize(function (size) {
-        if (state.termWS && state.termWS.readyState === WebSocket.OPEN) {
-          state.termWS.send(JSON.stringify({ type: 'resize', cols: size.cols, rows: size.rows }));
-        }
-      });
-
-      state.term.open(container);
-    } else if (state.term.element) {
-      container.appendChild(state.term.element);
-    } else {
-      state.term.open(container);
-    }
-
-    fitTerminal();
-    connectTerminalSocket();
-
-    window.removeEventListener('resize', fitTerminal);
-    window.addEventListener('resize', fitTerminal);
-
-    state.term.focus();
-  }
-
-  function fitTerminal() {
-    if (state.termFit) {
-      try {
-        state.termFit.fit();
-      } catch (_) {
-        // Best effort.
-      }
-    }
-  }
-
-  function connectTerminalSocket() {
     disconnectTerminal();
-
-    state.termWS = new WebSocket(buildWSURL('/ws/terminal'));
-
-    state.termWS.addEventListener('open', function () {
-      state.termWSConnected = true;
-      updateConnectionStatus();
-      fitTerminal();
-      if (state.term) {
-        state.termWS.send(JSON.stringify({
-          type: 'resize',
-          cols: state.term.cols,
-          rows: state.term.rows
-        }));
-      }
-    });
-
-    state.termWS.addEventListener('message', function (event) {
-      var msg;
-      try {
-        msg = JSON.parse(event.data);
-      } catch (_) {
-        return;
-      }
-
-      if (msg.type === 'output' && msg.data && state.term) {
-        state.term.write(atob(msg.data));
-      } else if (msg.type === 'exit' && state.term) {
-        state.term.write('\r\n[Process exited with code ' + (msg.code || 0) + ']\r\n');
-      }
-    });
-
-    state.termWS.addEventListener('close', function () {
-      state.termWSConnected = false;
-      updateConnectionStatus();
-      if (state.term) state.term.write('\r\n[Connection closed]\r\n');
-      state.termWS = null;
-    });
-
-    state.termWS.addEventListener('error', function () {
-      state.termWSConnected = false;
-      updateConnectionStatus();
-      if (state.term) state.term.write('\r\n[Connection error]\r\n');
-    });
+    stopPolling();
   }
 
-  function disconnectTerminal() {
-    window.removeEventListener('resize', fitTerminal);
-
-    if (state.termWS) {
-      try {
-        state.termWS.close();
-      } catch (_) {
-        // Best effort.
-      }
-      state.termWS = null;
-    }
-
-    state.termWSConnected = false;
-    updateConnectionStatus();
-  }
-
-  function openStartSessionModal() {
-    var profiles = state.cache.profiles;
-    var loops = state.cache.loops;
-    var plans = state.cache.plans;
-
-    openModal('Start New Session', '' +
-      '<form data-modal-submit="start-session">' +
+  function showAuthPrompt() {
+    openModal('Authentication Required', '' +
+      '<form data-modal-submit="auth">' +
         '<div class="form-grid">' +
-          '<div class="form-field"><label>Session Type</label>' +
-            '<select name="session_type">' +
-              '<option value="ask">Ask</option>' +
-              '<option value="pm">PM</option>' +
-              '<option value="loop">Loop</option>' +
-            '</select>' +
-          '</div>' +
-          '<div class="form-field" data-session-only="ask,pm"><label>Profile</label>' +
-            '<select name="profile">' +
-              profiles.map(function (profile) {
-                return '<option value="' + escapeHTML(profile.name) + '">' + escapeHTML(profile.name) + '</option>';
-              }).join('') +
-            '</select>' +
-          '</div>' +
-          '<div class="form-field" data-session-only="loop"><label>Loop Definition</label>' +
-            '<select name="loop">' +
-              loops.map(function (loop) {
-                return '<option value="' + escapeHTML(loop.name) + '">' + escapeHTML(loop.name) + '</option>';
-              }).join('') +
-            '</select>' +
-          '</div>' +
-          '<div class="form-field" data-session-only="ask,pm"><label>Model Override (optional)</label><input type="text" name="model" placeholder="optional model"></div>' +
-          '<div class="form-field" data-session-only="loop"><label>Max Cycles (optional)</label><input type="number" min="1" name="max_cycles" placeholder="e.g. 5"></div>' +
-          '<div class="form-field"><label>Plan (optional)</label>' +
-            '<select name="plan_id">' +
-              '<option value="">Use active plan</option>' +
-              plans.map(function (plan) {
-                return '<option value="' + escapeHTML(plan.id) + '">' + escapeHTML(plan.id) + '</option>';
-              }).join('') +
-            '</select>' +
-          '</div>' +
-          '<div class="form-field span-2"><label>Prompt / Message</label><textarea name="prompt" required placeholder="What should the session do?"></textarea></div>' +
+          '<div class="form-field form-span-2"><label>Bearer Token</label><input type="text" name="auth_token" placeholder="Paste your token" autocomplete="off" required></div>' +
         '</div>' +
-        '<div class="form-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="success">Start Session</button></div>' +
-      '</form>'
-    );
-
-    var form = modalRoot.querySelector('form[data-modal-submit="start-session"]');
-    if (form) updateStartSessionFormVisibility(form);
-  }
-
-  function updateStartSessionFormVisibility(form) {
-    if (!form) return;
-
-    var type = readString(form, 'session_type') || 'ask';
-    form.querySelectorAll('[data-session-only]').forEach(function (node) {
-      var list = (node.getAttribute('data-session-only') || '').split(',').map(function (item) {
-        return item.trim();
-      });
-      var visible = list.indexOf(type) >= 0;
-      node.classList.toggle('hidden', !visible);
-    });
-  }
-
-  async function submitStartSession(form) {
-    var sessionType = readString(form, 'session_type') || 'ask';
-    var profile = readString(form, 'profile');
-    var loop = readString(form, 'loop');
-    var prompt = readString(form, 'prompt');
-    var model = readString(form, 'model');
-    var planID = readString(form, 'plan_id');
-    var maxCycles = parseInt(readString(form, 'max_cycles'), 10);
-
-    if ((sessionType === 'ask' || sessionType === 'pm') && (!profile || !prompt)) {
-      showToast('Profile and prompt are required for ask/pm sessions.', 'error');
-      return;
-    }
-
-    if (sessionType === 'loop' && !loop) {
-      showToast('Loop definition is required for loop sessions.', 'error');
-      return;
-    }
-
-    var path = apiBase() + '/sessions/ask';
-    var payload = {};
-
-    if (sessionType === 'ask') {
-      path = apiBase() + '/sessions/ask';
-      payload = {
-        profile: profile,
-        prompt: prompt,
-        model: model || ''
-      };
-    } else if (sessionType === 'pm') {
-      path = apiBase() + '/sessions/pm';
-      payload = {
-        profile: profile,
-        prompt: prompt,
-        model: model || ''
-      };
-    } else {
-      path = apiBase() + '/sessions/loop';
-      payload = {
-        loop: loop,
-        prompt: prompt
-      };
-      if (!Number.isNaN(maxCycles) && maxCycles > 0) payload.max_cycles = maxCycles;
-    }
-
-    if (planID) payload.plan_id = planID;
-
-    try {
-      var created = await apiCall(path, 'POST', payload);
-      closeModal();
-      showToast('Session started successfully.', 'success');
-      if (created && typeof created.id === 'number') {
-        state.selectedSessionID = created.id;
-      }
-      renderSessions();
-    } catch (err) {
-      showToast('Failed to start session: ' + errorMessage(err), 'error');
-    }
-  }
-  function openIssueModal(mode, issue) {
-    var plans = state.cache.plans;
-    var current = issue || {};
-    var title = mode === 'create' ? 'Create Issue' : 'Edit Issue #' + current.id;
-
-    openModal(title, '' +
-      '<form data-modal-submit="' + (mode === 'create' ? 'issue-create' : 'issue-edit') + '"' + (mode === 'edit' ? (' data-issue-id="' + current.id + '"') : '') + '>' +
-        '<div class="form-grid">' +
-          '<div class="form-field span-2"><label>Title</label><input type="text" name="title" value="' + escapeHTML(current.title || '') + '" required></div>' +
-          '<div class="form-field span-2"><label>Description</label><textarea name="description" placeholder="Describe the issue">' + escapeHTML(current.description || '') + '</textarea></div>' +
-          '<div class="form-field"><label>Priority</label><select name="priority">' + ISSUE_PRIORITIES.map(function (priority) {
-            var selected = normalizeStatus(current.priority || 'medium') === priority;
-            return '<option value="' + priority + '"' + (selected ? ' selected' : '') + '>' + capitalize(priority) + '</option>';
-          }).join('') + '</select></div>' +
-          '<div class="form-field"><label>Status</label><select name="status">' + ISSUE_STATUSES.map(function (status) {
-            var selected = normalizeStatus(current.status || 'open') === status;
-            return '<option value="' + status + '"' + (selected ? ' selected' : '') + '>' + capitalize(status.replace('_', ' ')) + '</option>';
-          }).join('') + '</select></div>' +
-          '<div class="form-field"><label>Plan (optional)</label><select name="plan_id"><option value="">No plan</option>' + plans.map(function (plan) {
-            return '<option value="' + escapeHTML(plan.id) + '"' + (plan.id === (current.plan_id || '') ? ' selected' : '') + '>' + escapeHTML(plan.id) + '</option>';
-          }).join('') + '</select></div>' +
-          '<div class="form-field"><label>Labels (comma separated)</label><input type="text" name="labels" value="' + escapeHTML((current.labels || []).join(', ')) + '" placeholder="bug, ui"></div>' +
+        '<div class="form-actions">' +
+          '<button type="button" data-action="disconnect-auth" class="danger">Clear Stored Token</button>' +
+          '<button type="button" data-action="close-modal">Cancel</button>' +
+          '<button type="submit" class="primary">Connect</button>' +
         '</div>' +
-        '<div class="form-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="success">' + (mode === 'create' ? 'Create Issue' : 'Save Issue') + '</button></div>' +
-      '</form>'
-    );
-  }
-
-  async function submitIssueCreate(form) {
-    var payload = issuePayloadFromForm(form);
-    if (!payload.title) {
-      showToast('Issue title is required.', 'error');
-      return;
-    }
-
-    try {
-      await apiCall(apiBase() + '/issues', 'POST', payload);
-      closeModal();
-      showToast('Issue created.', 'success');
-      renderIssues();
-    } catch (err) {
-      showToast('Failed to create issue: ' + errorMessage(err), 'error');
-    }
-  }
-
-  async function submitIssueEdit(form) {
-    var issueID = parseInt(form.getAttribute('data-issue-id') || '', 10);
-    if (Number.isNaN(issueID)) return;
-
-    var payload = issuePayloadFromForm(form);
-
-    try {
-      await apiCall(apiBase() + '/issues/' + encodeURIComponent(String(issueID)), 'PUT', payload);
-      closeModal();
-      showToast('Issue updated.', 'success');
-      renderIssues();
-    } catch (err) {
-      showToast('Failed to update issue: ' + errorMessage(err), 'error');
-    }
-  }
-
-  function issuePayloadFromForm(form) {
-    var labelsRaw = readString(form, 'labels');
-
-    return {
-      title: readString(form, 'title'),
-      description: readString(form, 'description'),
-      priority: readString(form, 'priority') || 'medium',
-      status: readString(form, 'status') || 'open',
-      plan_id: readString(form, 'plan_id'),
-      labels: labelsRaw ? labelsRaw.split(',').map(function (item) { return item.trim(); }).filter(Boolean) : []
-    };
-  }
-
-  function openPlanModal(mode, plan) {
-    var current = plan || {};
-    var title = mode === 'create' ? 'Create Plan' : 'Edit Plan ' + (current.id || '');
-
-    openModal(title, '' +
-      '<form data-modal-submit="' + (mode === 'create' ? 'plan-create' : 'plan-edit') + '"' + (mode === 'edit' ? (' data-plan-id="' + escapeHTML(current.id || '') + '"') : '') + '>' +
-        '<div class="form-grid">' +
-          '<div class="form-field"><label>ID (slug)</label><input type="text" name="id" value="' + escapeHTML(current.id || '') + '" ' + (mode === 'edit' ? 'disabled' : 'required') + '></div>' +
-          '<div class="form-field"><label>Title</label><input type="text" name="title" value="' + escapeHTML(current.title || '') + '" required></div>' +
-          '<div class="form-field span-2"><label>Description</label><textarea name="description" placeholder="Plan description">' + escapeHTML(current.description || '') + '</textarea></div>' +
-        '</div>' +
-        '<div class="form-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="success">' + (mode === 'create' ? 'Create Plan' : 'Save Plan') + '</button></div>' +
-      '</form>'
-    );
-  }
-
-  async function submitPlanCreate(form) {
-    var payload = {
-      id: slugify(readString(form, 'id')),
-      title: readString(form, 'title'),
-      description: readString(form, 'description')
-    };
-
-    if (!payload.id || !payload.title) {
-      showToast('Plan ID and title are required.', 'error');
-      return;
-    }
-
-    try {
-      await apiCall(apiBase() + '/plans', 'POST', payload);
-      closeModal();
-      state.selectedPlanID = payload.id;
-      showToast('Plan created.', 'success');
-      renderPlans();
-    } catch (err) {
-      showToast('Failed to create plan: ' + errorMessage(err), 'error');
-    }
-  }
-
-  async function submitPlanEdit(form) {
-    var planID = form.getAttribute('data-plan-id') || state.selectedPlanID;
-    if (!planID) return;
-
-    var payload = {
-      title: readString(form, 'title'),
-      description: readString(form, 'description')
-    };
-
-    try {
-      await apiCall(apiBase() + '/plans/' + encodeURIComponent(planID), 'PUT', payload);
-      closeModal();
-      showToast('Plan updated.', 'success');
-      renderPlans();
-    } catch (err) {
-      showToast('Failed to update plan: ' + errorMessage(err), 'error');
-    }
-  }
-
-  function openPhaseModal(mode, plan, phase) {
-    if (!plan) {
-      showToast('Select a plan first.', 'error');
-      return;
-    }
-
-    var current = phase || {};
-
-    openModal((mode === 'create' ? 'Create Phase' : 'Edit Phase') + ' · ' + escapeHTML(plan.id), '' +
-      '<form data-modal-submit="' + (mode === 'create' ? 'phase-create' : 'phase-edit') + '" data-plan-id="' + escapeHTML(plan.id) + '"' + (mode === 'edit' ? (' data-phase-id="' + escapeHTML(current.id || '') + '"') : '') + '>' +
-        '<div class="form-grid">' +
-          '<div class="form-field"><label>Phase ID</label><input type="text" name="id" value="' + escapeHTML(current.id || '') + '" ' + (mode === 'edit' ? 'disabled' : 'required') + '></div>' +
-          '<div class="form-field"><label>Status</label><select name="status">' + PLAN_PHASE_STATUSES.map(function (status) {
-            var selected = normalizeStatus(current.status || 'not_started') === status;
-            return '<option value="' + status + '"' + (selected ? ' selected' : '') + '>' + capitalize(status.replace('_', ' ')) + '</option>';
-          }).join('') + '</select></div>' +
-          '<div class="form-field span-2"><label>Title</label><input type="text" name="title" value="' + escapeHTML(current.title || '') + '" required></div>' +
-          '<div class="form-field span-2"><label>Description</label><textarea name="description" placeholder="Phase description">' + escapeHTML(current.description || '') + '</textarea></div>' +
-          '<div class="form-field"><label>Priority</label><input type="number" name="priority" value="' + escapeHTML(String(current.priority || 0)) + '"></div>' +
-          '<div class="form-field"><label>Depends On (comma separated IDs)</label><input type="text" name="depends_on" value="' + escapeHTML((current.depends_on || []).join(', ')) + '"></div>' +
-        '</div>' +
-        '<div class="form-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="success">' + (mode === 'create' ? 'Create Phase' : 'Save Phase') + '</button></div>' +
-      '</form>'
-    );
-  }
-
-  async function submitPhaseEdit(form) {
-    var planID = form.getAttribute('data-plan-id') || state.selectedPlanID;
-    var phaseID = form.getAttribute('data-phase-id') || '';
-    if (!planID || !phaseID) return;
-
-    var payload = {
-      title: readString(form, 'title'),
-      description: readString(form, 'description'),
-      status: readString(form, 'status') || 'not_started'
-    };
-
-    var priority = parseInt(readString(form, 'priority'), 10);
-    if (!Number.isNaN(priority)) payload.priority = priority;
-
-    var dependsOn = readString(form, 'depends_on');
-    if (dependsOn) {
-      payload.depends_on = dependsOn.split(',').map(function (item) { return item.trim(); }).filter(Boolean);
-    }
-
-    try {
-      await apiCall(apiBase() + '/plans/' + encodeURIComponent(planID) + '/phases/' + encodeURIComponent(phaseID), 'PUT', payload);
-      closeModal();
-      showToast('Phase updated.', 'success');
-      renderPlans();
-    } catch (err) {
-      showToast('Failed to update phase: ' + errorMessage(err), 'error');
-    }
-  }
-
-  async function submitPhaseCreate(form) {
-    var planID = form.getAttribute('data-plan-id') || state.selectedPlanID;
-    if (!planID || !state.cache.planDetail) return;
-
-    var phaseID = slugify(readString(form, 'id') || readString(form, 'title'));
-    if (!phaseID) {
-      showToast('Phase ID is required.', 'error');
-      return;
-    }
-
-    var priority = parseInt(readString(form, 'priority'), 10);
-    if (Number.isNaN(priority)) priority = 0;
-
-    var dependsOn = readString(form, 'depends_on');
-    var nextPhase = {
-      id: phaseID,
-      title: readString(form, 'title'),
-      description: readString(form, 'description'),
-      status: readString(form, 'status') || 'not_started',
-      priority: priority,
-      depends_on: dependsOn ? dependsOn.split(',').map(function (item) { return item.trim(); }).filter(Boolean) : []
-    };
-
-    var existingPhases = arrayOrEmpty(state.cache.planDetail.phases).slice();
-    existingPhases.push(nextPhase);
-
-    try {
-      await apiCall(apiBase() + '/plans/' + encodeURIComponent(planID), 'PUT', {
-        phases: existingPhases
-      });
-      closeModal();
-      showToast('Phase created.', 'success');
-      renderPlans();
-    } catch (err) {
-      showToast('Failed to create phase: ' + errorMessage(err), 'error');
-    }
-  }
-
-  function openDocModal(mode, doc) {
-    var current = doc || {};
-    var plans = state.cache.plans;
-
-    openModal((mode === 'create' ? 'Create Doc' : 'Edit Doc ' + escapeHTML(current.id || '')), '' +
-      '<form data-modal-submit="' + (mode === 'create' ? 'doc-create' : 'doc-edit') + '"' + (mode === 'edit' ? (' data-doc-id="' + escapeHTML(current.id || '') + '"') : '') + '>' +
-        '<div class="form-grid">' +
-          '<div class="form-field span-2"><label>Title</label><input type="text" name="title" value="' + escapeHTML(current.title || '') + '" required></div>' +
-          '<div class="form-field"><label>Plan (optional)</label><select name="plan_id"><option value="">Shared</option>' + plans.map(function (plan) {
-            return '<option value="' + escapeHTML(plan.id) + '"' + (plan.id === (current.plan_id || '') ? ' selected' : '') + '>' + escapeHTML(plan.id) + '</option>';
-          }).join('') + '</select></div>' +
-          '<div class="form-field span-2"><label>Content</label><textarea name="content" placeholder="Markdown content">' + escapeHTML(current.content || '') + '</textarea></div>' +
-        '</div>' +
-        '<div class="form-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="success">' + (mode === 'create' ? 'Create Doc' : 'Save Doc') + '</button></div>' +
-      '</form>'
-    );
-  }
-  async function submitDocCreate(form) {
-    var payload = {
-      title: readString(form, 'title'),
-      content: readString(form, 'content'),
-      plan_id: readString(form, 'plan_id')
-    };
-
-    if (!payload.title) {
-      showToast('Doc title is required.', 'error');
-      return;
-    }
-
-    try {
-      var created = await apiCall(apiBase() + '/docs', 'POST', payload);
-      closeModal();
-      if (created && created.id) state.selectedDocID = created.id;
-      showToast('Doc created.', 'success');
-      renderDocs();
-    } catch (err) {
-      showToast('Failed to create doc: ' + errorMessage(err), 'error');
-    }
-  }
-
-  async function submitDocEdit(form) {
-    var docID = form.getAttribute('data-doc-id') || '';
-    if (!docID) return;
-
-    var payload = {
-      title: readString(form, 'title'),
-      content: readString(form, 'content'),
-      plan_id: readString(form, 'plan_id')
-    };
-
-    try {
-      await apiCall(apiBase() + '/docs/' + encodeURIComponent(docID), 'PUT', payload);
-      closeModal();
-      showToast('Doc updated.', 'success');
-      renderDocs();
-    } catch (err) {
-      showToast('Failed to update doc: ' + errorMessage(err), 'error');
-    }
-  }
-
-  function openProfileModal(mode, profile) {
-    var current = profile || {};
-
-    openModal((mode === 'create' ? 'Create Profile' : 'Edit Profile ' + escapeHTML(current.name || '')), '' +
-      '<form data-modal-submit="' + (mode === 'create' ? 'profile-create' : 'profile-edit') + '"' + (mode === 'edit' ? (' data-profile-name="' + escapeHTML(current.name || '') + '"') : '') + '>' +
-        '<div class="form-grid">' +
-          '<div class="form-field"><label>Name</label><input type="text" name="name" value="' + escapeHTML(current.name || '') + '" ' + (mode === 'edit' ? 'disabled' : 'required') + '></div>' +
-          '<div class="form-field"><label>Agent</label><input type="text" name="agent" value="' + escapeHTML(current.agent || '') + '" required></div>' +
-          '<div class="form-field"><label>Model</label><input type="text" name="model" value="' + escapeHTML(current.model || '') + '"></div>' +
-          '<div class="form-field"><label>Reasoning Level</label><input type="text" name="reasoning_level" value="' + escapeHTML(current.reasoning_level || '') + '"></div>' +
-          '<div class="form-field"><label>Intelligence (1-10)</label><input type="number" min="1" max="10" name="intelligence" value="' + escapeHTML(String(current.intelligence || 5)) + '"></div>' +
-          '<div class="form-field"><label>Max Instances</label><input type="number" min="0" name="max_instances" value="' + escapeHTML(String(current.max_instances || 0)) + '"></div>' +
-          '<div class="form-field"><label>Speed</label><input type="text" name="speed" value="' + escapeHTML(current.speed || '') + '"></div>' +
-          '<div class="form-field span-2"><label>Description</label><textarea name="description">' + escapeHTML(current.description || '') + '</textarea></div>' +
-        '</div>' +
-        '<div class="form-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="success">' + (mode === 'create' ? 'Create Profile' : 'Save Profile') + '</button></div>' +
-      '</form>'
-    );
-  }
-
-  function profilePayloadFromForm(form, fixedName) {
-    var intelligence = parseInt(readString(form, 'intelligence'), 10);
-    if (Number.isNaN(intelligence)) intelligence = 0;
-
-    var maxInstances = parseInt(readString(form, 'max_instances'), 10);
-    if (Number.isNaN(maxInstances)) maxInstances = 0;
-
-    return {
-      name: fixedName || readString(form, 'name'),
-      agent: readString(form, 'agent'),
-      model: readString(form, 'model'),
-      reasoning_level: readString(form, 'reasoning_level'),
-      intelligence: intelligence,
-      description: readString(form, 'description'),
-      max_instances: maxInstances,
-      speed: readString(form, 'speed')
-    };
-  }
-
-  async function submitProfileCreate(form) {
-    var payload = profilePayloadFromForm(form, '');
-
-    if (!payload.name || !payload.agent) {
-      showToast('Profile name and agent are required.', 'error');
-      return;
-    }
-
-    try {
-      await apiCall('/api/config/profiles', 'POST', payload);
-      closeModal();
-      showToast('Profile created.', 'success');
-      renderConfig();
-    } catch (err) {
-      showToast('Failed to create profile: ' + errorMessage(err), 'error');
-    }
-  }
-
-  async function submitProfileEdit(form) {
-    var name = form.getAttribute('data-profile-name') || '';
-    if (!name) return;
-
-    var payload = profilePayloadFromForm(form, name);
-
-    try {
-      await apiCall('/api/config/profiles/' + encodeURIComponent(name), 'PUT', payload);
-      closeModal();
-      showToast('Profile updated.', 'success');
-      renderConfig();
-    } catch (err) {
-      showToast('Failed to update profile: ' + errorMessage(err), 'error');
-    }
-  }
-
-  async function deleteProfile(name) {
-    if (!name) return;
-    if (!window.confirm('Delete profile "' + name + '"?')) return;
-
-    try {
-      await apiCall('/api/config/profiles/' + encodeURIComponent(name), 'DELETE');
-      showToast('Profile deleted: ' + name, 'success');
-      renderConfig();
-    } catch (err) {
-      showToast('Failed to delete profile: ' + errorMessage(err), 'error');
-    }
-  }
-
-  function openLoopModal(mode, loop) {
-    var current = loop || { name: '', steps: [{ profile: '', role: '', turns: 1, instructions: '' }] };
-    if (!current.steps || !current.steps.length) {
-      current.steps = [{ profile: '', role: '', turns: 1, instructions: '' }];
-    }
-
-    openModal((mode === 'create' ? 'Create Loop Definition' : 'Edit Loop ' + escapeHTML(current.name || '')), '' +
-      '<form data-modal-submit="' + (mode === 'create' ? 'loop-create' : 'loop-edit') + '"' + (mode === 'edit' ? (' data-loop-name="' + escapeHTML(current.name || '') + '"') : '') + '>' +
-        '<div class="form-grid">' +
-          '<div class="form-field span-2"><label>Name</label><input type="text" name="name" value="' + escapeHTML(current.name || '') + '" ' + (mode === 'edit' ? 'disabled' : 'required') + '></div>' +
-        '</div>' +
-        '<div class="card-title-row" style="margin-top:0.7rem"><h4>Steps</h4><button type="button" data-action="add-loop-step">Add Step</button></div>' +
-        '<div class="step-list" data-loop-steps>' + current.steps.map(function (step, index) {
-          return loopStepCardHTML(step, index);
-        }).join('') + '</div>' +
-        '<div class="form-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="success">' + (mode === 'create' ? 'Create Loop' : 'Save Loop') + '</button></div>' +
-      '</form>'
-    );
-  }
-
-  function loopStepCardHTML(step, index) {
-    var safeStep = step || {};
-
-    return '' +
-      '<section class="step-card" data-loop-step>' +
-        '<div class="step-head"><strong>Step ' + (index + 1) + '</strong><button type="button" data-action="remove-loop-step" class="danger">Remove</button></div>' +
-        '<div class="form-grid">' +
-          '<div class="form-field"><label>Profile</label><input type="text" name="profile" value="' + escapeHTML(safeStep.profile || '') + '" required></div>' +
-          '<div class="form-field"><label>Role</label><input type="text" name="role" value="' + escapeHTML(safeStep.role || '') + '"></div>' +
-          '<div class="form-field"><label>Turns</label><input type="number" name="turns" min="1" value="' + escapeHTML(String(safeStep.turns || 1)) + '"></div>' +
-          '<div class="form-field span-2"><label>Instructions</label><textarea name="instructions">' + escapeHTML(safeStep.instructions || '') + '</textarea></div>' +
-        '</div>' +
-      '</section>';
-  }
-
-  function addLoopStepCard(step) {
-    var list = modalRoot.querySelector('[data-loop-steps]');
-    if (!list) return;
-
-    var count = list.querySelectorAll('[data-loop-step]').length;
-    list.insertAdjacentHTML('beforeend', loopStepCardHTML(step || { profile: '', role: '', turns: 1, instructions: '' }, count));
-    refreshLoopStepIndices(list);
-  }
-
-  function removeLoopStepCard(actionNode) {
-    var card = actionNode.closest('[data-loop-step]');
-    var list = modalRoot.querySelector('[data-loop-steps]');
-    if (!card || !list) return;
-
-    var cards = list.querySelectorAll('[data-loop-step]');
-    if (cards.length <= 1) {
-      showToast('Loop must have at least one step.', 'error');
-      return;
-    }
-
-    card.remove();
-    refreshLoopStepIndices(list);
-  }
-
-  function refreshLoopStepIndices(list) {
-    if (!list) return;
-    list.querySelectorAll('[data-loop-step]').forEach(function (node, index) {
-      var head = node.querySelector('.step-head strong');
-      if (head) head.textContent = 'Step ' + (index + 1);
-    });
-  }
-
-  function loopPayloadFromForm(form, fixedName) {
-    var steps = [];
-
-    form.querySelectorAll('[data-loop-step]').forEach(function (stepNode) {
-      var stepProfile = readString(stepNode, 'profile');
-      var stepRole = readString(stepNode, 'role');
-      var turns = parseInt(readString(stepNode, 'turns'), 10);
-      var instructions = readString(stepNode, 'instructions');
-
-      if (!stepProfile) return;
-
-      var step = {
-        profile: stepProfile,
-        role: stepRole,
-        turns: Number.isNaN(turns) || turns <= 0 ? 1 : turns,
-        instructions: instructions
-      };
-      steps.push(step);
-    });
-
-    return {
-      name: fixedName || readString(form, 'name'),
-      steps: steps
-    };
-  }
-
-  async function submitLoopCreate(form) {
-    var payload = loopPayloadFromForm(form, '');
-
-    if (!payload.name || !payload.steps.length) {
-      showToast('Loop name and at least one step are required.', 'error');
-      return;
-    }
-
-    try {
-      await apiCall('/api/config/loops', 'POST', payload);
-      closeModal();
-      showToast('Loop definition created.', 'success');
-      renderConfig();
-    } catch (err) {
-      showToast('Failed to create loop: ' + errorMessage(err), 'error');
-    }
-  }
-
-  async function submitLoopEdit(form) {
-    var name = form.getAttribute('data-loop-name') || '';
-    if (!name) return;
-
-    var payload = loopPayloadFromForm(form, name);
-
-    try {
-      await apiCall('/api/config/loops/' + encodeURIComponent(name), 'PUT', payload);
-      closeModal();
-      showToast('Loop definition updated.', 'success');
-      renderConfig();
-    } catch (err) {
-      showToast('Failed to update loop: ' + errorMessage(err), 'error');
-    }
-  }
-
-  async function deleteLoop(name) {
-    if (!name) return;
-    if (!window.confirm('Delete loop definition "' + name + '"?')) return;
-
-    try {
-      await apiCall('/api/config/loops/' + encodeURIComponent(name), 'DELETE');
-      showToast('Loop deleted: ' + name, 'success');
-      renderConfig();
-    } catch (err) {
-      showToast('Failed to delete loop: ' + errorMessage(err), 'error');
-    }
-  }
-
-  function openRoleModal() {
-    openModal('Create Role', '' +
-      '<form data-modal-submit="role-create">' +
-        '<div class="form-grid">' +
-          '<div class="form-field span-2"><label>Name</label><input type="text" name="name" required></div>' +
-        '</div>' +
-        '<div class="form-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="success">Create Role</button></div>' +
-      '</form>'
-    );
-  }
-
-  async function submitRoleCreate(form) {
-    var name = readString(form, 'name');
-    if (!name) {
-      showToast('Role name is required.', 'error');
-      return;
-    }
-
-    try {
-      await apiCall('/api/config/roles', 'POST', { name: name });
-      closeModal();
-      showToast('Role created.', 'success');
-      renderConfig();
-    } catch (err) {
-      showToast('Failed to create role: ' + errorMessage(err), 'error');
-    }
-  }
-
-  async function deleteRole(name) {
-    if (!name) return;
-    if (!window.confirm('Delete role "' + name + '"?')) return;
-
-    try {
-      await apiCall('/api/config/roles/' + encodeURIComponent(name), 'DELETE');
-      showToast('Role deleted: ' + name, 'success');
-      renderConfig();
-    } catch (err) {
-      showToast('Failed to delete role: ' + errorMessage(err), 'error');
-    }
-  }
-
-  function openRuleModal() {
-    openModal('Create Rule', '' +
-      '<form data-modal-submit="rule-create">' +
-        '<div class="form-grid">' +
-          '<div class="form-field"><label>Rule ID</label><input type="text" name="id" required></div>' +
-          '<div class="form-field span-2"><label>Body</label><textarea name="body" required></textarea></div>' +
-        '</div>' +
-        '<div class="form-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="success">Create Rule</button></div>' +
-      '</form>'
-    );
-  }
-
-  async function submitRuleCreate(form) {
-    var id = readString(form, 'id');
-    var body = readString(form, 'body');
-
-    if (!id || !body) {
-      showToast('Rule id and body are required.', 'error');
-      return;
-    }
-
-    try {
-      await apiCall('/api/config/rules', 'POST', { id: id, body: body });
-      closeModal();
-      showToast('Rule created.', 'success');
-      renderConfig();
-    } catch (err) {
-      showToast('Failed to create rule: ' + errorMessage(err), 'error');
-    }
-  }
-
-  async function deleteRule(id) {
-    if (!id) return;
-    if (!window.confirm('Delete rule "' + id + '"?')) return;
-
-    try {
-      await apiCall('/api/config/rules/' + encodeURIComponent(id), 'DELETE');
-      showToast('Rule deleted: ' + id, 'success');
-      renderConfig();
-    } catch (err) {
-      showToast('Failed to delete rule: ' + errorMessage(err), 'error');
-    }
+      '</form>');
   }
 
   function openModal(title, bodyHTML) {
     state.modal = {
-      title: title || 'Form',
+      title: title || 'Dialog',
       bodyHTML: bodyHTML || ''
     };
     renderModal();
@@ -3184,6 +2628,8 @@
   }
 
   function renderModal() {
+    if (!modalRoot) return;
+
     if (!state.modal) {
       modalRoot.innerHTML = '';
       return;
@@ -3192,23 +2638,11 @@
     modalRoot.innerHTML = '' +
       '<div class="modal-backdrop" data-action="close-modal"></div>' +
       '<section class="modal" role="dialog" aria-modal="true" aria-label="' + escapeHTML(state.modal.title) + '">' +
-        '<header class="modal-header">' +
+        '<div class="modal-header">' +
           '<h3>' + escapeHTML(state.modal.title) + '</h3>' +
           '<button class="modal-close" data-action="close-modal" aria-label="Close">×</button>' +
-        '</header>' +
+        '</div>' +
         '<div class="modal-body">' + state.modal.bodyHTML + '</div>' +
-      '</section>';
-  }
-
-  function showAuthPrompt() {
-    content.innerHTML = '' +
-      '<section class="card">' +
-        '<h2>Authentication Required</h2>' +
-        '<p class="meta">Enter the auth token to access ADAF API endpoints.</p>' +
-        '<form class="inline-form" data-form="auth">' +
-          '<input type="text" name="auth_token" placeholder="Auth token" autocomplete="off" required>' +
-          '<button type="submit" class="success">Connect</button>' +
-        '</form>' +
       '</section>';
   }
 
@@ -3217,22 +2651,27 @@
 
     var node = document.createElement('div');
     node.className = 'toast ' + (type === 'error' ? 'error' : 'success');
-    node.textContent = message || '';
+    node.textContent = String(message || '');
 
     toastRoot.appendChild(node);
 
-    window.setTimeout(function () {
+    setTimeout(function () {
       if (node.parentNode) node.parentNode.removeChild(node);
     }, 4200);
   }
-  function setLoading(active) {
-    if (active) state.loadingCount += 1;
-    else state.loadingCount = Math.max(0, state.loadingCount - 1);
 
-    if (loadingNode) {
-      loadingNode.classList.toggle('hidden', state.loadingCount === 0);
-      loadingNode.setAttribute('aria-hidden', state.loadingCount === 0 ? 'true' : 'false');
+  function setLoading(active) {
+    if (active) {
+      state.loadingCount += 1;
+    } else {
+      state.loadingCount = Math.max(0, state.loadingCount - 1);
     }
+
+    if (!loadingNode) return;
+
+    var show = state.loadingCount > 0;
+    loadingNode.classList.toggle('hidden', !show);
+    loadingNode.setAttribute('aria-hidden', show ? 'false' : 'true');
   }
 
   async function apiCall(path, method, body, options) {
@@ -3242,22 +2681,23 @@
       var headers = { Accept: 'application/json' };
       if (state.authToken) headers.Authorization = 'Bearer ' + state.authToken;
 
-      var opts = {
+      var request = {
         method: method || 'GET',
         headers: headers
       };
 
       if (body != null) {
         headers['Content-Type'] = 'application/json';
-        opts.body = JSON.stringify(body);
+        request.body = JSON.stringify(body);
       }
 
-      var response = await fetch(path, opts);
+      var response = await fetch(path, request);
 
       if (response.ok) {
         if (response.status === 204) return null;
         var text = await response.text();
         if (!text) return null;
+
         try {
           return JSON.parse(text);
         } catch (_) {
@@ -3272,61 +2712,24 @@
         throw authErr;
       }
 
+      if (response.status === 404 && options && options.allow404) {
+        return null;
+      }
+
       if (response.status === 204) return null;
-      if (options && options.allow404 && response.status === 404) return null;
 
       var message = response.status + ' ' + response.statusText;
       try {
         var payload = await response.json();
         if (payload && payload.error) message = payload.error;
       } catch (_) {
-        // Ignore non-JSON payload.
+        // Ignore JSON parse errors.
       }
 
       throw new Error(message);
     } finally {
       setLoading(false);
     }
-  }
-
-  function findActivePlan(project, plans) {
-    var list = arrayOrEmpty(plans);
-
-    if (project && project.active_plan_id) {
-      var configured = list.find(function (plan) {
-        return plan.id === project.active_plan_id;
-      });
-      if (configured) return configured;
-    }
-
-    return list.find(function (plan) { return normalizeStatus(plan.status) === 'active'; }) || list[0] || null;
-  }
-
-  function summarizePlanPhases(plan) {
-    var out = {
-      total: 0,
-      complete: 0,
-      in_progress: 0,
-      not_started: 0,
-      blocked: 0
-    };
-
-    if (!plan || !Array.isArray(plan.phases)) return out;
-
-    plan.phases.forEach(function (phase) {
-      out.total += 1;
-      var key = normalizeStatus(phase.status || 'not_started');
-      if (Object.prototype.hasOwnProperty.call(out, key)) out[key] += 1;
-    });
-
-    return out;
-  }
-
-  function findPhase(plan, phaseID) {
-    if (!plan || !Array.isArray(plan.phases)) return null;
-    return plan.phases.find(function (phase) {
-      return phase.id === phaseID;
-    }) || null;
   }
 
   function buildWSURL(path) {
@@ -3340,107 +2743,34 @@
     return url;
   }
 
-  function createPill(status, label) {
-    var normalized = normalizeStatus(status);
-    return '<span class="pill status-' + normalized + '"><span class="dot"></span>' + escapeHTML(label == null ? status : label) + '</span>';
-  }
-
-  var markedRenderer = (function () {
-    if (typeof marked === 'undefined') return null;
-
-    marked.setOptions({
-      breaks: true,
-      gfm: true,
-      highlight: function (code, lang) {
-        if (typeof hljs !== 'undefined' && lang && hljs.getLanguage(lang)) {
-          try { return hljs.highlight(code, { language: lang }).value; } catch (_) {}
-        }
-        if (typeof hljs !== 'undefined') {
-          try { return hljs.highlightAuto(code).value; } catch (_) {}
-        }
-        return escapeHTML(code);
-      }
-    });
-
-    var renderer = new marked.Renderer();
-
-    renderer.link = function (href, title, text) {
-      var url = sanitizeURL(typeof href === 'object' ? href.href : href);
-      var linkText = typeof href === 'object' ? href.text : text;
-      return '<a href="' + escapeHTML(url) + '" target="_blank" rel="noopener noreferrer">' + (linkText || url) + '</a>';
-    };
-
-    renderer.code = function (code, infostring) {
-      var text = typeof code === 'object' ? code.text : code;
-      var lang = typeof code === 'object' ? code.lang : infostring;
-      lang = String(lang || '').trim();
-
-      var highlighted;
-      if (typeof hljs !== 'undefined' && lang && hljs.getLanguage(lang)) {
-        try { highlighted = hljs.highlight(text, { language: lang }).value; } catch (_) { highlighted = escapeHTML(text); }
-      } else if (typeof hljs !== 'undefined') {
-        try { highlighted = hljs.highlightAuto(text).value; } catch (_) { highlighted = escapeHTML(text); }
-      } else {
-        highlighted = escapeHTML(text);
-      }
-
-      var langLabel = lang ? '<span class="code-lang-label">' + escapeHTML(lang) + '</span>' : '';
-      return '<div class="code-block-wrapper">' + langLabel + '<pre class="hljs"><code>' + highlighted + '</code></pre></div>';
-    };
-
-    return renderer;
-  })();
-
-  function renderMarkdown(text) {
-    var source = String(text == null ? '' : text);
-    if (!source.trim()) return '';
-
-    if (markedRenderer) {
-      try {
-        return marked.parse(source, { renderer: markedRenderer });
-      } catch (_) {}
-    }
-
-    return '<p>' + escapeHTML(source) + '</p>';
-  }
-
-  function sanitizeURL(raw) {
-    var url = String(raw || '').trim();
-    if (/^(https?:|mailto:)/i.test(url)) return url;
-    return '#';
-  }
-
-  function highlightJSON(value) {
-    var json;
+  function stringifyToolPayload(value) {
+    if (value == null) return '';
+    if (typeof value === 'string') return value;
     try {
-      json = JSON.stringify(value == null ? null : value, null, 2);
+      return JSON.stringify(value);
     } catch (_) {
-      json = String(value);
+      return String(value);
     }
+  }
 
-    var safe = escapeHTML(json);
-
-    safe = safe.replace(/(&quot;[^&]*&quot;)(\s*:)/g, '<span class="json-key">$1</span>$2');
-    safe = safe.replace(/(:\s*)(&quot;[^&]*&quot;)/g, '$1<span class="json-string">$2</span>');
-    safe = safe.replace(/(:\s*)(-?\d+(?:\.\d+)?)/g, '$1<span class="json-number">$2</span>');
-    safe = safe.replace(/\b(true|false)\b/g, '<span class="json-bool">$1</span>');
-    safe = safe.replace(/\bnull\b/g, '<span class="json-null">null</span>');
-
-    return safe;
+  function rawPayloadText(data) {
+    if (typeof data === 'string') return data;
+    if (data && typeof data.data === 'string') return data.data;
+    return safeJSONString(data);
   }
 
   function extractContentBlocks(event) {
     if (!event || typeof event !== 'object') return [];
 
-    var blocks = [];
-
     if (event.message && Array.isArray(event.message.content)) {
-      blocks = event.message.content.slice();
-    } else if (event.content_block && typeof event.content_block === 'object') {
-      blocks = [event.content_block];
+      return event.message.content.slice();
     }
 
-    return blocks;
+    if (event.content_block && typeof event.content_block === 'object') {
+      return [event.content_block];
+    }
+
+    return [];
   }
 
   function asObject(value) {
@@ -3456,46 +2786,48 @@
     return null;
   }
 
-  function rawPayloadText(data) {
-    if (typeof data === 'string') return data;
-    if (data && typeof data.data === 'string') return data.data;
-    return safeJSONString(data);
+  function formatElapsed(start, end) {
+    var startMS = parseTimestamp(start);
+    if (!startMS) return '--';
+
+    var endMS = end ? parseTimestamp(end) : Date.now();
+    if (!endMS || endMS < startMS) endMS = Date.now();
+
+    var sec = Math.floor((endMS - startMS) / 1000);
+    if (sec < 60) return sec + 's';
+
+    var min = Math.floor(sec / 60);
+    if (min < 60) return min + 'm ' + (sec % 60) + 's';
+
+    var hour = Math.floor(min / 60);
+    return hour + 'h ' + (min % 60) + 'm';
   }
 
-  function cropText(input) {
-    var text = String(input || '');
-    if (text.length <= MAX_OUTPUT_CHARS) return text;
-    return text.slice(text.length - MAX_OUTPUT_CHARS);
+  function formatRelativeTime(value) {
+    var ts = parseTimestamp(value);
+    if (!ts) return 'unknown';
+
+    var diff = Math.max(0, Date.now() - ts);
+    var sec = Math.floor(diff / 1000);
+    if (sec < 60) return sec + 's ago';
+
+    var min = Math.floor(sec / 60);
+    if (min < 60) return min + 'm ago';
+
+    var hour = Math.floor(min / 60);
+    if (hour < 24) return hour + 'h ago';
+
+    var day = Math.floor(hour / 24);
+    return day + 'd ago';
   }
 
-  function formatRelativeTime(iso) {
-    if (!iso) return 'unknown';
-    var then = new Date(iso);
-    if (Number.isNaN(then.getTime())) return String(iso);
+  function parseTimestamp(value) {
+    if (value == null || value === '') return 0;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
 
-    var diff = Math.abs(Date.now() - then.getTime());
-    var minute = 60 * 1000;
-    var hour = 60 * minute;
-    var day = 24 * hour;
-
-    if (diff < minute) return 'just now';
-    if (diff < hour) return Math.round(diff / minute) + 'm ago';
-    if (diff < day) return Math.round(diff / hour) + 'h ago';
-    return Math.round(diff / day) + 'd ago';
-  }
-
-  function formatAbsolute(iso) {
-    if (!iso) return 'unknown';
-    var then = new Date(iso);
-    if (Number.isNaN(then.getTime())) return String(iso);
-    return then.toLocaleString();
-  }
-
-  function formatClock(timestamp) {
-    if (!timestamp) return '--:--:--';
-    var date = new Date(timestamp);
-    if (Number.isNaN(date.getTime())) return '--:--:--';
-    return date.toLocaleTimeString();
+    var ts = new Date(value).getTime();
+    if (!Number.isFinite(ts)) return 0;
+    return ts;
   }
 
   function formatNumber(value) {
@@ -3504,18 +2836,37 @@
     return num.toLocaleString();
   }
 
-  function capitalize(text) {
-    var value = String(text || '');
-    if (!value) return '';
-    return value.charAt(0).toUpperCase() + value.slice(1);
+  function cropText(input, limit) {
+    var max = Number(limit || 120000);
+    var text = String(input || '');
+    if (text.length <= max) return text;
+    return text.slice(0, max - 1) + '…';
   }
 
-  function slugify(raw) {
-    return String(raw || '')
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
+  function withAlpha(color, alpha) {
+    var value = String(color || '').trim();
+    var a = Number(alpha);
+    if (!Number.isFinite(a)) a = 1;
+    if (a < 0) a = 0;
+    if (a > 1) a = 1;
+
+    if (/^#([a-fA-F0-9]{6})$/.test(value)) {
+      var hex = value.slice(1);
+      var r = parseInt(hex.slice(0, 2), 16);
+      var g = parseInt(hex.slice(2, 4), 16);
+      var b = parseInt(hex.slice(4, 6), 16);
+      return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + a + ')';
+    }
+
+    return value;
+  }
+
+  function isTypingTarget(target) {
+    if (!target || !target.tagName) return false;
+    var tag = String(target.tagName).toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+    if (target.isContentEditable) return true;
+    return false;
   }
 
   function normalizeStatus(value) {
@@ -3553,7 +2904,7 @@
   function readString(scope, name) {
     if (!scope || !name) return '';
 
-    var node;
+    var node = null;
     if (typeof scope.querySelector === 'function') {
       node = scope.querySelector('[name="' + name + '"]');
     }
