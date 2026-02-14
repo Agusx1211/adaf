@@ -75,7 +75,7 @@
       "id": "p8-cleanup",
       "title": "Codebase Cleanup \u0026 API Simplification",
       "description": "With the TUI removed and the system-service model in place, simplify the codebase.\n\n1. **CLI simplification:**\n   - Remove TUI-related CLI flags and options\n   - Remove `--tui` flags if any exist\n   - Simplify `root.go` now that the no-command case doesn't launch TUI\n   - Review all CLI commands for unnecessary complexity\n   - The `attach` command now just streams text, simplify its implementation\n\n2. **Event protocol cleanup:**\n   - Review `internal/events/` (moved from runtui) for TUI-specific event types that are no longer needed\n   - Remove `tickMsg` (was for TUI elapsed time display — webserver has its own timer)\n   - Remove `BackToSelectorMsg` (TUI navigation concept)\n   - Remove `DetachMsg` (TUI detach concept — attach cmd now just Ctrl+C)\n   - Simplify `SessionSnapshotMsg` and `SessionLiveMsg` if the webserver has its own snapshot model\n   - Keep all agent/spawn/loop events — these are the core protocol\n\n3. **Package cleanup:**\n   - Remove `internal/theme/` if no longer needed after charmbracelet removal (or simplify to just ANSI color constants)\n   - Review `internal/eventq/` — is it still needed without TUI?\n   - Check for any dead code paths that only existed to support TUI\n\n4. **Dependency audit:**\n   - `go mod tidy` to remove unused transitive deps\n   - Verify charmbracelet packages are fully gone\n   - Check if `isatty` is still needed (was used to decide TUI vs non-TTY)\n\n5. **Test cleanup:**\n   - Remove all TUI-specific tests (state transition tests, detach tests, etc.)\n   - Remove runtui model tests\n   - Update integration tests that assumed TUI behavior\n   - Ensure `make all` passes cleanly\n\n6. **Documentation:**\n   - Update README.md to reflect web-only architecture\n   - Update CLAUDE.md to remove TUI references, add web architecture section\n   - Update any inline documentation",
-      "status": "in_progress",
+      "status": "complete",
       "priority": 2,
       "depends_on": [
         "p2-system-service",
@@ -104,5 +104,5 @@
     "p9-polish"
   ],
   "created": "2026-02-14T15:37:30.322476305Z",
-  "updated": "2026-02-14T17:10:03.612344303Z"
+  "updated": "2026-02-14T17:12:14.245125477Z"
 }
