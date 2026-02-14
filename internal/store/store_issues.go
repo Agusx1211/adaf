@@ -94,3 +94,17 @@ func (s *Store) UpdateIssue(issue *Issue) error {
 	issue.Updated = time.Now().UTC()
 	return s.writeJSON(filepath.Join(s.root, "issues", fmt.Sprintf("%d.json", issue.ID)), issue)
 }
+
+func (s *Store) DeleteIssue(id int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	path := filepath.Join(s.root, "issues", fmt.Sprintf("%d.json", id))
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return err
+		}
+		return fmt.Errorf("deleting issue %d: %w", id, err)
+	}
+	return nil
+}

@@ -8,14 +8,14 @@
       "id": "p1-write-api",
       "title": "Web API: Write Endpoints \u0026 Session Control",
       "description": "Add POST/PUT/DELETE endpoints for full project control through the web UI. Includes: (1) Issue CRUD - create, update status/priority, close issues via API. (2) Plan management - create plans, switch active plan, update phase status, freeze/cancel/archive. (3) Session control - start new ask/pm/loop session from API, stop session by ID (also resolves issue #33), send message to running loop (spawn-message equivalent). (4) Profile and loop CRUD - create, edit, delete profiles and loops via API, reading/writing the global config. (5) Config management - roles, rules, pushover settings. All mutations go through existing store/config packages. Add request validation, proper HTTP methods, and error responses. This phase makes the web UI capable of everything the TUI and CLI can do.",
-      "status": "not_started",
+      "status": "complete",
       "priority": 1
     },
     {
       "id": "p2-web-ui-overhaul",
       "title": "Web Frontend: Full Interactive UI",
       "description": "Rewrite the web frontend to be a full interactive control surface, matching TUI capabilities. (1) Rich session viewer - render agent output with markdown formatting, syntax-highlighted code blocks, tool use visualization (collapsible tool calls with name/input/output), diff rendering, cost/token counters per turn. Replace the plain-text session-events div with structured rendering. (2) Session control panel - start new sessions (ask/PM/loop) with profile picker, model selector, prompt input. Stop running sessions. Send messages to running loops via input box (equivalent to spawn-message/loop-message). (3) Issue management - create/edit issues inline, update status, view full descriptions with markdown rendering. (4) Plan management - create plans, add/edit phases, update phase status, switch active plan, freeze/cancel. (5) Profile/loop editor - create and edit profiles (agent, model, reasoning, speed) and loops (steps, delegation trees) through forms. (6) Config panel - manage roles, prompt rules, pushover settings. (7) Responsive design - maintain mobile usability. (8) Offline assets - bundle xterm.js instead of CDN loading. The goal is that a user should never need the TUI or CLI for any project operation.",
-      "status": "not_started",
+      "status": "complete",
       "priority": 1,
       "depends_on": [
         "p1-write-api"
@@ -104,5 +104,5 @@
     }
   ],
   "created": "2026-02-14T11:22:27.60226705Z",
-  "updated": "2026-02-14T11:24:17.376316504Z"
+  "updated": "2026-02-14T12:14:20.295956301Z"
 }

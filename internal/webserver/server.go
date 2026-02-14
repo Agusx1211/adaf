@@ -32,7 +32,8 @@ type Options struct {
 
 // Server hosts the HTTP API and WebSocket session stream bridge.
 type Server struct {
-	store      *store.Store
+	store      *store.Store // default store (backward compat)
+	registry   *ProjectRegistry
 	httpServer *http.Server
 	port       int
 	host       string
@@ -43,8 +44,21 @@ type Server struct {
 	rateLimit  float64
 }
 
-// New constructs a web server bound to host:port.
+// New constructs a web server bound to host:port with a single project store.
 func New(s *store.Store, opts Options) *Server {
+	reg := NewProjectRegistry()
+	reg.registerStore("default", s)
+
+	return newServer(s, reg, opts)
+}
+
+// NewMulti constructs a web server with a pre-populated project registry.
+func NewMulti(registry *ProjectRegistry, opts Options) *Server {
+	defaultStore, _ := registry.Default()
+	return newServer(defaultStore, registry, opts)
+}
+
+func newServer(defaultStore *store.Store, registry *ProjectRegistry, opts Options) *Server {
 	host := strings.TrimSpace(opts.Host)
 	if host == "" {
 		host = "127.0.0.1"
@@ -56,7 +70,8 @@ func New(s *store.Store, opts Options) *Server {
 	}
 
 	srv := &Server{
-		store:     s,
+		store:     defaultStore,
+		registry:  registry,
 		host:      host,
 		port:      port,
 		tlsMode:   strings.TrimSpace(opts.TLSMode),
@@ -156,52 +171,47 @@ func (srv *Server) Scheme() string {
 	return "http"
 }
 
+// resolveProjectStore extracts the project store from a request.
+// For project-scoped routes (/api/projects/{projectID}/...), it looks up
+// the registry. For legacy routes (/api/...), it returns the default store.
+func (srv *Server) resolveProjectStore(r *http.Request) (*store.Store, string, bool) {
+	projectID := r.PathValue("projectID")
+	if projectID != "" {
+		s, ok := srv.registry.Get(projectID)
+		if !ok {
+			return nil, projectID, false
+		}
+		return s, projectID, true
+	}
+	// Legacy route — use default store
+	return srv.store, "", true
+}
+
+// projectHandler wraps a handler that needs a project store, resolving
+// it from either the project-scoped or legacy route.
+func (srv *Server) projectHandler(handler func(*store.Store, http.ResponseWriter, *http.Request)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s, projectID, ok := srv.resolveProjectStore(r)
+		if !ok {
+			writeError(w, http.StatusNotFound, fmt.Sprintf("project %q not found", projectID))
+			return
+		}
+		handler(s, w, r)
+	}
+}
+
 func (srv *Server) setupRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/project", srv.handleProject)
+	// Multi-project management endpoints
+	mux.HandleFunc("GET /api/projects", srv.handleListProjects)
+	mux.HandleFunc("GET /api/projects/dashboard", srv.handleGlobalDashboard)
 
-	mux.HandleFunc("GET /api/plans", srv.handlePlans)
-	mux.HandleFunc("GET /api/plans/{id}", srv.handlePlanByID)
-	// Plan write endpoints
-	mux.HandleFunc("POST /api/plans", srv.handleCreatePlan)
-	mux.HandleFunc("PUT /api/plans/{id}", srv.handleUpdatePlan)
-	mux.HandleFunc("PUT /api/plans/{id}/phases/{phaseId}", srv.handleUpdatePlanPhase)
-	mux.HandleFunc("POST /api/plans/{id}/activate", srv.handleActivatePlan)
-	mux.HandleFunc("DELETE /api/plans/{id}", srv.handleDeletePlan)
+	// Register project-scoped routes under /api/projects/{projectID}/...
+	srv.registerProjectRoutes(mux, "/api/projects/{projectID}")
 
-	mux.HandleFunc("GET /api/issues", srv.handleIssues)
-	mux.HandleFunc("GET /api/issues/{id}", srv.handleIssueByID)
-	// Issue write endpoints
-	mux.HandleFunc("POST /api/issues", srv.handleCreateIssue)
-	mux.HandleFunc("PUT /api/issues/{id}", srv.handleUpdateIssue)
+	// Register legacy routes under /api/... (backward compat, uses default project)
+	srv.registerProjectRoutes(mux, "/api")
 
-	// Doc endpoints (read + write)
-	mux.HandleFunc("GET /api/docs", srv.handleDocs)
-	mux.HandleFunc("GET /api/docs/{id}", srv.handleDocByID)
-	mux.HandleFunc("POST /api/docs", srv.handleCreateDoc)
-	mux.HandleFunc("PUT /api/docs/{id}", srv.handleUpdateDoc)
-
-	mux.HandleFunc("GET /api/turns", srv.handleTurns)
-	mux.HandleFunc("GET /api/turns/{id}", srv.handleTurnByID)
-	mux.HandleFunc("GET /api/spawns", srv.handleSpawns)
-	mux.HandleFunc("GET /api/spawns/{id}", srv.handleSpawnByID)
-
-	// Session control
-	mux.HandleFunc("POST /api/sessions/ask", srv.handleStartAskSession)
-	mux.HandleFunc("POST /api/sessions/loop", srv.handleStartLoopSession)
-	mux.HandleFunc("POST /api/sessions/{id}/stop", srv.handleStopSession)
-	mux.HandleFunc("POST /api/sessions/{id}/message", srv.handleSessionMessage)
-
-	mux.HandleFunc("GET /api/sessions", srv.handleSessions)
-	mux.HandleFunc("GET /api/sessions/{id}", srv.handleSessionByID)
-
-	// Loop runs
-	mux.HandleFunc("GET /api/loops", srv.handleLoopRuns)
-	mux.HandleFunc("GET /api/loops/{id}", srv.handleLoopRunByID)
-	mux.HandleFunc("GET /api/loops/{id}/messages", srv.handleLoopMessages)
-	mux.HandleFunc("POST /api/loops/{id}/stop", srv.handleStopLoopRun)
-	mux.HandleFunc("POST /api/loops/{id}/message", srv.handleLoopRunMessage)
-
-	// Config
+	// Config endpoints (global, not project-scoped)
 	mux.HandleFunc("GET /api/config", srv.handleConfig)
 	mux.HandleFunc("GET /api/config/profiles", srv.handleListProfiles)
 	mux.HandleFunc("POST /api/config/profiles", srv.handleCreateProfile)
@@ -220,16 +230,16 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/config/pushover", srv.handleGetPushover)
 	mux.HandleFunc("PUT /api/config/pushover", srv.handleUpdatePushover)
 
-	mux.HandleFunc("GET /api/stats/loops", srv.handleLoopStats)
-	mux.HandleFunc("GET /api/stats/profiles", srv.handleProfileStats)
-
+	// WebSocket endpoints
 	mux.HandleFunc("GET /ws/sessions/{id}", srv.handleSessionWebSocket)
 	mux.HandleFunc("GET /ws/terminal", srv.handleTerminalWebSocket)
 
+	// Catch-all for unknown API routes
 	mux.HandleFunc("GET /api/{rest...}", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 	})
 
+	// Static files
 	staticHandler := http.FileServer(http.FS(staticFS))
 	mux.Handle("GET /static/", staticHandler)
 
@@ -248,4 +258,55 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(data)
 	})
+}
+
+// registerProjectRoutes registers all project-scoped API routes under a given prefix.
+// The prefix is either "/api/projects/{projectID}" or "/api" (for backward compat).
+func (srv *Server) registerProjectRoutes(mux *http.ServeMux, prefix string) {
+	mux.HandleFunc("GET "+prefix+"/project", srv.projectHandler(handleProjectP))
+
+	mux.HandleFunc("GET "+prefix+"/plans", srv.projectHandler(handlePlansP))
+	mux.HandleFunc("GET "+prefix+"/plans/{id}", srv.projectHandler(handlePlanByIDP))
+	mux.HandleFunc("POST "+prefix+"/plans", srv.projectHandler(handleCreatePlanP))
+	mux.HandleFunc("PUT "+prefix+"/plans/{id}", srv.projectHandler(handleUpdatePlanP))
+	mux.HandleFunc("PUT "+prefix+"/plans/{id}/phases/{phaseId}", srv.projectHandler(handleUpdatePlanPhaseP))
+	mux.HandleFunc("POST "+prefix+"/plans/{id}/activate", srv.projectHandler(handleActivatePlanP))
+	mux.HandleFunc("DELETE "+prefix+"/plans/{id}", srv.projectHandler(handleDeletePlanP))
+
+	mux.HandleFunc("GET "+prefix+"/issues", srv.projectHandler(handleIssuesP))
+	mux.HandleFunc("GET "+prefix+"/issues/{id}", srv.projectHandler(handleIssueByIDP))
+	mux.HandleFunc("POST "+prefix+"/issues", srv.projectHandler(handleCreateIssueP))
+	mux.HandleFunc("PUT "+prefix+"/issues/{id}", srv.projectHandler(handleUpdateIssueP))
+	mux.HandleFunc("DELETE "+prefix+"/issues/{id}", srv.projectHandler(handleDeleteIssueP))
+
+	mux.HandleFunc("GET "+prefix+"/docs", srv.projectHandler(handleDocsP))
+	mux.HandleFunc("GET "+prefix+"/docs/{id}", srv.projectHandler(handleDocByIDP))
+	mux.HandleFunc("POST "+prefix+"/docs", srv.projectHandler(handleCreateDocP))
+	mux.HandleFunc("PUT "+prefix+"/docs/{id}", srv.projectHandler(handleUpdateDocP))
+	mux.HandleFunc("DELETE "+prefix+"/docs/{id}", srv.projectHandler(handleDeleteDocP))
+
+	mux.HandleFunc("GET "+prefix+"/turns", srv.projectHandler(handleTurnsP))
+	mux.HandleFunc("GET "+prefix+"/turns/{id}", srv.projectHandler(handleTurnByIDP))
+	mux.HandleFunc("GET "+prefix+"/spawns", srv.projectHandler(handleSpawnsP))
+	mux.HandleFunc("GET "+prefix+"/spawns/{id}", srv.projectHandler(handleSpawnByIDP))
+
+	// Session control (project-scoped for create, since the store determines context)
+	mux.HandleFunc("POST "+prefix+"/sessions/ask", srv.projectHandler(handleStartAskSessionP))
+	mux.HandleFunc("POST "+prefix+"/sessions/pm", srv.projectHandler(handleStartPMSessionP))
+	mux.HandleFunc("POST "+prefix+"/sessions/loop", srv.projectHandler(handleStartLoopSessionP))
+	mux.HandleFunc("POST "+prefix+"/sessions/{id}/stop", srv.projectHandler(handleStopSessionP))
+	mux.HandleFunc("POST "+prefix+"/sessions/{id}/message", srv.projectHandler(handleSessionMessageP))
+	mux.HandleFunc("GET "+prefix+"/sessions", srv.projectHandler(handleSessionsP))
+	mux.HandleFunc("GET "+prefix+"/sessions/{id}", srv.projectHandler(handleSessionByIDP))
+
+	// Loop runs
+	mux.HandleFunc("GET "+prefix+"/loops", srv.projectHandler(handleLoopRunsP))
+	mux.HandleFunc("GET "+prefix+"/loops/{id}", srv.projectHandler(handleLoopRunByIDP))
+	mux.HandleFunc("GET "+prefix+"/loops/{id}/messages", srv.projectHandler(handleLoopMessagesP))
+	mux.HandleFunc("POST "+prefix+"/loops/{id}/stop", srv.projectHandler(handleStopLoopRunP))
+	mux.HandleFunc("POST "+prefix+"/loops/{id}/message", srv.projectHandler(handleLoopRunMessageP))
+
+	// Stats
+	mux.HandleFunc("GET "+prefix+"/stats/loops", srv.projectHandler(handleLoopStatsP))
+	mux.HandleFunc("GET "+prefix+"/stats/profiles", srv.projectHandler(handleProfileStatsP))
 }

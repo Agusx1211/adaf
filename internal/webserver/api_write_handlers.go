@@ -73,6 +73,10 @@ type docWriteRequest struct {
 }
 
 func (srv *Server) handleCreateIssue(w http.ResponseWriter, r *http.Request) {
+	handleCreateIssueP(srv.store, w, r)
+}
+
+func handleCreateIssueP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	var req issueWriteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -114,7 +118,7 @@ func (srv *Server) handleCreateIssue(w http.ResponseWriter, r *http.Request) {
 		Created:     now,
 		Updated:     now,
 	}
-	if err := srv.store.CreateIssue(&issue); err != nil {
+	if err := s.CreateIssue(&issue); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create issue")
 		return
 	}
@@ -123,13 +127,17 @@ func (srv *Server) handleCreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (srv *Server) handleUpdateIssue(w http.ResponseWriter, r *http.Request) {
+	handleUpdateIssueP(srv.store, w, r)
+}
+
+func handleUpdateIssueP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	id, err := parsePathID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "issue not found")
 		return
 	}
 
-	issue, err := srv.store.GetIssue(id)
+	issue, err := s.GetIssue(id)
 	if err != nil {
 		if isNotFoundErr(err) {
 			writeError(w, http.StatusNotFound, "issue not found")
@@ -173,7 +181,7 @@ func (srv *Server) handleUpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	issue.Updated = time.Now().UTC()
-	if err := srv.store.UpdateIssue(issue); err != nil {
+	if err := s.UpdateIssue(issue); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update issue")
 		return
 	}
@@ -181,7 +189,34 @@ func (srv *Server) handleUpdateIssue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, issue)
 }
 
+func (srv *Server) handleDeleteIssue(w http.ResponseWriter, r *http.Request) {
+	handleDeleteIssueP(srv.store, w, r)
+}
+
+func handleDeleteIssueP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	id, err := parsePathID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
+
+	if err := s.DeleteIssue(id); err != nil {
+		if isNotFoundErr(err) {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to delete issue")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func (srv *Server) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
+	handleCreatePlanP(srv.store, w, r)
+}
+
+func handleCreatePlanP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	var req planWriteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -205,7 +240,7 @@ func (srv *Server) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 		Created:     now,
 		Updated:     now,
 	}
-	if err := srv.store.CreatePlan(&plan); err != nil {
+	if err := s.CreatePlan(&plan); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "already exists") {
 			writeError(w, http.StatusBadRequest, "plan already exists")
 			return
@@ -218,13 +253,17 @@ func (srv *Server) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (srv *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
+	handleUpdatePlanP(srv.store, w, r)
+}
+
+func handleUpdatePlanP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	planID := strings.TrimSpace(r.PathValue("id"))
 	if planID == "" {
 		writeError(w, http.StatusNotFound, "plan not found")
 		return
 	}
 
-	plan, err := srv.store.GetPlan(planID)
+	plan, err := s.GetPlan(planID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load plan")
 		return
@@ -258,7 +297,7 @@ func (srv *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	plan.Updated = time.Now().UTC()
-	if err := srv.store.UpdatePlan(plan); err != nil {
+	if err := s.UpdatePlan(plan); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update plan")
 		return
 	}
@@ -267,6 +306,10 @@ func (srv *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (srv *Server) handleUpdatePlanPhase(w http.ResponseWriter, r *http.Request) {
+	handleUpdatePlanPhaseP(srv.store, w, r)
+}
+
+func handleUpdatePlanPhaseP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	planID := strings.TrimSpace(r.PathValue("id"))
 	phaseID := strings.TrimSpace(r.PathValue("phaseId"))
 	if planID == "" || phaseID == "" {
@@ -274,7 +317,7 @@ func (srv *Server) handleUpdatePlanPhase(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	plan, err := srv.store.GetPlan(planID)
+	plan, err := s.GetPlan(planID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load plan")
 		return
@@ -324,7 +367,7 @@ func (srv *Server) handleUpdatePlanPhase(w http.ResponseWriter, r *http.Request)
 	}
 
 	plan.Updated = time.Now().UTC()
-	if err := srv.store.UpdatePlan(plan); err != nil {
+	if err := s.UpdatePlan(plan); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update plan")
 		return
 	}
@@ -333,13 +376,17 @@ func (srv *Server) handleUpdatePlanPhase(w http.ResponseWriter, r *http.Request)
 }
 
 func (srv *Server) handleActivatePlan(w http.ResponseWriter, r *http.Request) {
+	handleActivatePlanP(srv.store, w, r)
+}
+
+func handleActivatePlanP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	planID := strings.TrimSpace(r.PathValue("id"))
 	if planID == "" {
 		writeError(w, http.StatusNotFound, "plan not found")
 		return
 	}
 
-	if err := srv.store.SetActivePlan(planID); err != nil {
+	if err := s.SetActivePlan(planID); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
 			writeError(w, http.StatusNotFound, "plan not found")
 			return
@@ -352,13 +399,17 @@ func (srv *Server) handleActivatePlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (srv *Server) handleDeletePlan(w http.ResponseWriter, r *http.Request) {
+	handleDeletePlanP(srv.store, w, r)
+}
+
+func handleDeletePlanP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	planID := strings.TrimSpace(r.PathValue("id"))
 	if planID == "" {
 		writeError(w, http.StatusNotFound, "plan not found")
 		return
 	}
 
-	plan, err := srv.store.GetPlan(planID)
+	plan, err := s.GetPlan(planID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load plan")
 		return
@@ -368,7 +419,7 @@ func (srv *Server) handleDeletePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := srv.store.DeletePlan(planID); err != nil {
+	if err := s.DeletePlan(planID); err != nil {
 		errText := strings.ToLower(err.Error())
 		if strings.Contains(errText, "active") || strings.Contains(errText, "done/cancelled") || strings.Contains(errText, "status") {
 			writeError(w, http.StatusBadRequest, "plan cannot be deleted")
@@ -386,6 +437,10 @@ func (srv *Server) handleDeletePlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (srv *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
+	handleDocsP(srv.store, w, r)
+}
+
+func handleDocsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	planID := strings.TrimSpace(r.URL.Query().Get("plan"))
 
 	var (
@@ -393,9 +448,9 @@ func (srv *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
 		err  error
 	)
 	if planID == "" {
-		docs, err = srv.store.ListDocs()
+		docs, err = s.ListDocs()
 	} else {
-		docs, err = srv.store.ListDocsForPlan(planID)
+		docs, err = s.ListDocsForPlan(planID)
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list docs")
@@ -409,13 +464,17 @@ func (srv *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (srv *Server) handleDocByID(w http.ResponseWriter, r *http.Request) {
+	handleDocByIDP(srv.store, w, r)
+}
+
+func handleDocByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	docID := strings.TrimSpace(r.PathValue("id"))
 	if docID == "" {
 		writeError(w, http.StatusNotFound, "doc not found")
 		return
 	}
 
-	doc, err := srv.store.GetDoc(docID)
+	doc, err := s.GetDoc(docID)
 	if err != nil {
 		if isNotFoundErr(err) {
 			writeError(w, http.StatusNotFound, "doc not found")
@@ -429,6 +488,10 @@ func (srv *Server) handleDocByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (srv *Server) handleCreateDoc(w http.ResponseWriter, r *http.Request) {
+	handleCreateDocP(srv.store, w, r)
+}
+
+func handleCreateDocP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	var req docWriteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -459,7 +522,7 @@ func (srv *Server) handleCreateDoc(w http.ResponseWriter, r *http.Request) {
 		Created: now,
 		Updated: now,
 	}
-	if err := srv.store.CreateDoc(&doc); err != nil {
+	if err := s.CreateDoc(&doc); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create doc")
 		return
 	}
@@ -468,13 +531,17 @@ func (srv *Server) handleCreateDoc(w http.ResponseWriter, r *http.Request) {
 }
 
 func (srv *Server) handleUpdateDoc(w http.ResponseWriter, r *http.Request) {
+	handleUpdateDocP(srv.store, w, r)
+}
+
+func handleUpdateDocP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	docID := strings.TrimSpace(r.PathValue("id"))
 	if docID == "" {
 		writeError(w, http.StatusNotFound, "doc not found")
 		return
 	}
 
-	doc, err := srv.store.GetDoc(docID)
+	doc, err := s.GetDoc(docID)
 	if err != nil {
 		if isNotFoundErr(err) {
 			writeError(w, http.StatusNotFound, "doc not found")
@@ -501,12 +568,35 @@ func (srv *Server) handleUpdateDoc(w http.ResponseWriter, r *http.Request) {
 	}
 
 	doc.Updated = time.Now().UTC()
-	if err := srv.store.UpdateDoc(doc); err != nil {
+	if err := s.UpdateDoc(doc); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update doc")
 		return
 	}
 
 	writeJSON(w, http.StatusOK, doc)
+}
+
+func (srv *Server) handleDeleteDoc(w http.ResponseWriter, r *http.Request) {
+	handleDeleteDocP(srv.store, w, r)
+}
+
+func handleDeleteDocP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	docID := strings.TrimSpace(r.PathValue("id"))
+	if docID == "" {
+		writeError(w, http.StatusNotFound, "doc not found")
+		return
+	}
+
+	if err := s.DeleteDoc(docID); err != nil {
+		if isNotFoundErr(err) {
+			writeError(w, http.StatusNotFound, "doc not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to delete doc")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func normalizeLower(raw string) string {

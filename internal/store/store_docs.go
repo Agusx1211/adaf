@@ -93,3 +93,17 @@ func (s *Store) UpdateDoc(doc *Doc) error {
 	doc.Updated = time.Now().UTC()
 	return s.writeJSON(filepath.Join(s.root, "docs", doc.ID+".json"), doc)
 }
+
+func (s *Store) DeleteDoc(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	path := filepath.Join(s.root, "docs", id+".json")
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return err
+		}
+		return fmt.Errorf("deleting doc %q: %w", id, err)
+	}
+	return nil
+}

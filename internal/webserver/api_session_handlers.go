@@ -3,16 +3,21 @@ package webserver
 import (
 	"encoding/json"
 	"net/http"
-	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/agusx1211/adaf/internal/config"
+	promptpkg "github.com/agusx1211/adaf/internal/prompt"
 	"github.com/agusx1211/adaf/internal/session"
 	"github.com/agusx1211/adaf/internal/store"
 )
 
 func (srv *Server) handleStartAskSession(w http.ResponseWriter, r *http.Request) {
+	handleStartAskSessionP(srv.store, w, r)
+}
+
+func handleStartAskSessionP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Profile string `json:"profile"`
 		Prompt  string `json:"prompt"`
@@ -39,7 +44,7 @@ func (srv *Server) handleStartAskSession(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	projCfg, err := srv.store.LoadProject()
+	projCfg, err := s.LoadProject()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load project")
 		return
@@ -50,7 +55,7 @@ func (srv *Server) handleStartAskSession(w http.ResponseWriter, r *http.Request)
 		planID = projCfg.ActivePlanID
 	}
 
-	projectDir := filepath.Dir(srv.store.Root())
+	projDir := projectDir(s)
 
 	loopDef := config.LoopDef{
 		Name: "ask",
@@ -62,9 +67,9 @@ func (srv *Server) handleStartAskSession(w http.ResponseWriter, r *http.Request)
 	}
 
 	dcfg := session.DaemonConfig{
-		ProjectDir:  projectDir,
+		ProjectDir:  projDir,
 		ProjectName: projCfg.Name,
-		WorkDir:     projectDir,
+		WorkDir:     projDir,
 		PlanID:      planID,
 		ProfileName: prof.Name,
 		AgentName:   prof.Agent,
@@ -87,7 +92,131 @@ func (srv *Server) handleStartAskSession(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, meta)
 }
 
+func (srv *Server) handleStartPMSession(w http.ResponseWriter, r *http.Request) {
+	handleStartPMSessionP(srv.store, w, r)
+}
+
+func handleStartPMSessionP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Profile string `json:"profile"`
+		Message string `json:"message"`
+		PlanID  string `json:"plan_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Profile == "" || req.Message == "" {
+		writeError(w, http.StatusBadRequest, "profile and message are required")
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load config")
+		return
+	}
+
+	prof := cfg.FindProfile(req.Profile)
+	if prof == nil {
+		writeError(w, http.StatusBadRequest, "profile not found")
+		return
+	}
+
+	projCfg, err := s.LoadProject()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load project")
+		return
+	}
+
+	planID := req.PlanID
+	if planID == "" {
+		planID = projCfg.ActivePlanID
+	}
+
+	projDir := projectDir(s)
+
+	fullPrompt, err := buildPMPromptForAPI(s, projCfg, planID, prof, req.Message, cfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build PM prompt")
+		return
+	}
+
+	loopDef := config.LoopDef{
+		Name: "pm",
+		Steps: []config.LoopStep{{
+			Profile:      prof.Name,
+			Turns:        1,
+			Instructions: fullPrompt,
+		}},
+	}
+
+	dcfg := session.DaemonConfig{
+		ProjectDir:  projDir,
+		ProjectName: projCfg.Name,
+		WorkDir:     projDir,
+		PlanID:      planID,
+		ProfileName: prof.Name,
+		AgentName:   prof.Agent,
+		Loop:        loopDef,
+		Profiles:    []config.Profile{*prof},
+		MaxCycles:   1,
+	}
+
+	sessionID, err := session.CreateSession(dcfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create session")
+		return
+	}
+
+	if err := session.StartDaemon(sessionID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start daemon")
+		return
+	}
+
+	meta, _ := session.LoadMeta(sessionID)
+	writeJSON(w, http.StatusCreated, meta)
+}
+
+func buildPMPromptForAPI(s *store.Store, projCfg *store.ProjectConfig, planID string, prof *config.Profile, message string, globalCfg *config.GlobalConfig) (string, error) {
+	basePrompt, err := promptpkg.Build(promptpkg.BuildOpts{
+		Store:     s,
+		Project:   projCfg,
+		PlanID:    planID,
+		Profile:   prof,
+		Role:      config.RoleManager,
+		GlobalCfg: globalCfg,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	var b strings.Builder
+	b.WriteString("# Role: Project Manager\n\n")
+	b.WriteString("You manage project execution through plans, issues, and documentation.\n")
+	b.WriteString("You do NOT write code or directly edit implementation files.\n")
+	b.WriteString("Keep outcomes concrete, prioritized, and actionable.\n\n")
+
+	b.WriteString("## Your Capabilities\n\n")
+	b.WriteString("- Plan management: `adaf plan ...`\n")
+	b.WriteString("- Issue management: `adaf issue ...`\n")
+	b.WriteString("- Documentation management: `adaf doc ...`\n")
+	b.WriteString("- Project overview: `adaf status`\n")
+	b.WriteString("- Historical context: `adaf log`\n\n")
+
+	b.WriteString(basePrompt)
+	b.WriteString("\n\n## User Message\n\n")
+	b.WriteString(strings.TrimSpace(message))
+	b.WriteString("\n")
+
+	return b.String(), nil
+}
+
 func (srv *Server) handleStartLoopSession(w http.ResponseWriter, r *http.Request) {
+	handleStartLoopSessionP(srv.store, w, r)
+}
+
+func handleStartLoopSessionP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Loop   string `json:"loop"`
 		PlanID string `json:"plan_id"`
@@ -113,7 +242,7 @@ func (srv *Server) handleStartLoopSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	projCfg, err := srv.store.LoadProject()
+	projCfg, err := s.LoadProject()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load project")
 		return
@@ -124,7 +253,7 @@ func (srv *Server) handleStartLoopSession(w http.ResponseWriter, r *http.Request
 		planID = projCfg.ActivePlanID
 	}
 
-	projectDir := filepath.Dir(srv.store.Root())
+	projDir := projectDir(s)
 	profiles := collectLoopProfiles(cfg, loopDef)
 
 	// We need a main profile for the daemon config, pick the first step's profile
@@ -138,9 +267,9 @@ func (srv *Server) handleStartLoopSession(w http.ResponseWriter, r *http.Request
 	}
 
 	dcfg := session.DaemonConfig{
-		ProjectDir:  projectDir,
+		ProjectDir:  projDir,
 		ProjectName: projCfg.Name,
-		WorkDir:     projectDir,
+		WorkDir:     projDir,
 		PlanID:      planID,
 		ProfileName: mainProf.Name,
 		AgentName:   mainProf.Agent,
@@ -188,6 +317,10 @@ func collectLoopProfiles(cfg *config.GlobalConfig, loopDef *config.LoopDef) []co
 }
 
 func (srv *Server) handleStopSession(w http.ResponseWriter, r *http.Request) {
+	handleStopSessionP(srv.store, w, r)
+}
+
+func handleStopSessionP(_ *store.Store, w http.ResponseWriter, r *http.Request) {
 	sessionID, err := parsePathID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "session not found")
@@ -221,6 +354,10 @@ func (srv *Server) handleStopSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (srv *Server) handleSessionMessage(w http.ResponseWriter, r *http.Request) {
+	handleSessionMessageP(srv.store, w, r)
+}
+
+func handleSessionMessageP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	sessionID, err := parsePathID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "session not found")
@@ -245,7 +382,7 @@ func (srv *Server) handleSessionMessage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	run, err := srv.store.ActiveLoopRun()
+	run, err := s.ActiveLoopRun()
 	if err != nil {
 		writeError(w, http.StatusNotFound, "no active loop run found")
 		return
@@ -256,7 +393,7 @@ func (srv *Server) handleSessionMessage(w http.ResponseWriter, r *http.Request) 
 		Content:   req.Content,
 		CreatedAt: time.Now(),
 	}
-	if err := srv.store.CreateLoopMessage(msg); err != nil {
+	if err := s.CreateLoopMessage(msg); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to send message")
 		return
 	}
@@ -265,7 +402,11 @@ func (srv *Server) handleSessionMessage(w http.ResponseWriter, r *http.Request) 
 }
 
 func (srv *Server) handleLoopRuns(w http.ResponseWriter, r *http.Request) {
-	runs, err := srv.store.ListLoopRuns()
+	handleLoopRunsP(srv.store, w, r)
+}
+
+func handleLoopRunsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	runs, err := s.ListLoopRuns()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list loop runs")
 		return
@@ -277,13 +418,17 @@ func (srv *Server) handleLoopRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (srv *Server) handleLoopRunByID(w http.ResponseWriter, r *http.Request) {
+	handleLoopRunByIDP(srv.store, w, r)
+}
+
+func handleLoopRunByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	runID, err := parsePathID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "loop run not found")
 		return
 	}
 
-	run, err := srv.store.GetLoopRun(runID)
+	run, err := s.GetLoopRun(runID)
 	if err != nil {
 		if isNotFoundErr(err) {
 			writeError(w, http.StatusNotFound, "loop run not found")
@@ -297,13 +442,17 @@ func (srv *Server) handleLoopRunByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (srv *Server) handleLoopMessages(w http.ResponseWriter, r *http.Request) {
+	handleLoopMessagesP(srv.store, w, r)
+}
+
+func handleLoopMessagesP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	runID, err := parsePathID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "loop run not found")
 		return
 	}
 
-	msgs, err := srv.store.ListLoopMessages(runID)
+	msgs, err := s.ListLoopMessages(runID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list messages")
 		return
@@ -315,13 +464,17 @@ func (srv *Server) handleLoopMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (srv *Server) handleStopLoopRun(w http.ResponseWriter, r *http.Request) {
+	handleStopLoopRunP(srv.store, w, r)
+}
+
+func handleStopLoopRunP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	runID, err := parsePathID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "loop run not found")
 		return
 	}
 
-	if err := srv.store.SignalLoopStop(runID); err != nil {
+	if err := s.SignalLoopStop(runID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to signal stop")
 		return
 	}
@@ -330,6 +483,10 @@ func (srv *Server) handleStopLoopRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (srv *Server) handleLoopRunMessage(w http.ResponseWriter, r *http.Request) {
+	handleLoopRunMessageP(srv.store, w, r)
+}
+
+func handleLoopRunMessageP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	runID, err := parsePathID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "loop run not found")
@@ -353,7 +510,7 @@ func (srv *Server) handleLoopRunMessage(w http.ResponseWriter, r *http.Request) 
 		Content:   req.Content,
 		CreatedAt: time.Now(),
 	}
-	if err := srv.store.CreateLoopMessage(msg); err != nil {
+	if err := s.CreateLoopMessage(msg); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to send message")
 		return
 	}

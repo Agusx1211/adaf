@@ -341,6 +341,285 @@ func TestSessionsEndpoint(t *testing.T) {
 	}
 }
 
+func TestDeleteIssueEndpoint(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// Create issue first
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/issues", `{"title":"To Delete","priority":"low"}`)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
+	}
+	created := decodeResponse[store.Issue](t, createRec)
+
+	// Delete it
+	deleteRec := performRequest(t, srv, http.MethodDelete, "/api/issues/"+strconv.Itoa(created.ID))
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want %d", deleteRec.Code, http.StatusOK)
+	}
+
+	// Verify it's gone
+	getRec := performRequest(t, srv, http.MethodGet, "/api/issues/"+strconv.Itoa(created.ID))
+	if getRec.Code != http.StatusNotFound {
+		t.Fatalf("get after delete status = %d, want %d", getRec.Code, http.StatusNotFound)
+	}
+
+	// Delete non-existent
+	notFoundRec := performRequest(t, srv, http.MethodDelete, "/api/issues/999")
+	if notFoundRec.Code != http.StatusNotFound {
+		t.Fatalf("delete non-existent status = %d, want %d", notFoundRec.Code, http.StatusNotFound)
+	}
+}
+
+func TestDeleteDocEndpoint(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// Create doc first
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/docs", `{"title":"Temp Doc","content":"delete me"}`)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
+	}
+	created := decodeResponse[store.Doc](t, createRec)
+
+	// Delete it
+	deleteRec := performRequest(t, srv, http.MethodDelete, "/api/docs/"+created.ID)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want %d", deleteRec.Code, http.StatusOK)
+	}
+
+	// Verify it's gone
+	getRec := performRequest(t, srv, http.MethodGet, "/api/docs/"+created.ID)
+	if getRec.Code != http.StatusNotFound {
+		t.Fatalf("get after delete status = %d, want %d", getRec.Code, http.StatusNotFound)
+	}
+
+	// Delete non-existent
+	notFoundRec := performRequest(t, srv, http.MethodDelete, "/api/docs/no-such-doc")
+	if notFoundRec.Code != http.StatusNotFound {
+		t.Fatalf("delete non-existent status = %d, want %d", notFoundRec.Code, http.StatusNotFound)
+	}
+}
+
+func TestConfigProfileEndpoints(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// List profiles (empty initially)
+	listRec := performRequest(t, srv, http.MethodGet, "/api/config/profiles")
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d", listRec.Code, http.StatusOK)
+	}
+
+	// Create profile
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/config/profiles", `{"name":"test-prof","agent":"claude","model":"sonnet"}`)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
+	}
+
+	// Verify it appears in list
+	listRec = performRequest(t, srv, http.MethodGet, "/api/config/profiles")
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list after create status = %d, want %d", listRec.Code, http.StatusOK)
+	}
+
+	// Update profile
+	updateRec := performJSONRequest(t, srv, http.MethodPut, "/api/config/profiles/test-prof", `{"name":"test-prof","agent":"claude","model":"opus"}`)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, want %d", updateRec.Code, http.StatusOK)
+	}
+
+	// Delete profile
+	deleteRec := performRequest(t, srv, http.MethodDelete, "/api/config/profiles/test-prof")
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want %d", deleteRec.Code, http.StatusOK)
+	}
+}
+
+func TestConfigLoopDefEndpoints(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// Create a profile first (needed for loop step)
+	performJSONRequest(t, srv, http.MethodPost, "/api/config/profiles", `{"name":"loop-prof","agent":"claude","model":"sonnet"}`)
+
+	// Create loop
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/config/loops", `{"name":"test-loop","steps":[{"profile":"loop-prof","turns":1}]}`)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
+	}
+
+	// List loops
+	listRec := performRequest(t, srv, http.MethodGet, "/api/config/loops")
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d", listRec.Code, http.StatusOK)
+	}
+
+	// Update loop
+	updateRec := performJSONRequest(t, srv, http.MethodPut, "/api/config/loops/test-loop", `{"name":"test-loop","steps":[{"profile":"loop-prof","turns":2}]}`)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, want %d", updateRec.Code, http.StatusOK)
+	}
+
+	// Delete loop
+	deleteRec := performRequest(t, srv, http.MethodDelete, "/api/config/loops/test-loop")
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want %d", deleteRec.Code, http.StatusOK)
+	}
+}
+
+func TestConfigRolesEndpoints(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// List roles (includes defaults)
+	listRec := performRequest(t, srv, http.MethodGet, "/api/config/roles")
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d", listRec.Code, http.StatusOK)
+	}
+
+	// Create role
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/config/roles", `{"name":"test-role","title":"Test Role","identity":"You are a test role.","can_write_code":true}`)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
+	}
+
+	// Delete role
+	deleteRec := performRequest(t, srv, http.MethodDelete, "/api/config/roles/test-role")
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want %d", deleteRec.Code, http.StatusOK)
+	}
+}
+
+func TestConfigRulesEndpoints(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// List rules
+	listRec := performRequest(t, srv, http.MethodGet, "/api/config/rules")
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d", listRec.Code, http.StatusOK)
+	}
+
+	// Create rule
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/config/rules", `{"id":"test-rule","body":"Always test your code."}`)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
+	}
+
+	// Delete rule
+	deleteRec := performRequest(t, srv, http.MethodDelete, "/api/config/rules/test-rule")
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want %d", deleteRec.Code, http.StatusOK)
+	}
+}
+
+func TestConfigPushoverEndpoint(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// Get pushover (empty initially)
+	getRec := performRequest(t, srv, http.MethodGet, "/api/config/pushover")
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get status = %d, want %d", getRec.Code, http.StatusOK)
+	}
+
+	// Update pushover
+	updateRec := performJSONRequest(t, srv, http.MethodPut, "/api/config/pushover", `{"user_key":"test-user","app_token":"test-token"}`)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, want %d", updateRec.Code, http.StatusOK)
+	}
+}
+
+func TestLoopRunEndpoints(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// List loop runs (empty)
+	listRec := performRequest(t, srv, http.MethodGet, "/api/loops")
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d", listRec.Code, http.StatusOK)
+	}
+	runs := decodeResponse[[]store.LoopRun](t, listRec)
+	if len(runs) != 0 {
+		t.Fatalf("loop runs length = %d, want 0", len(runs))
+	}
+
+	// Get non-existent
+	notFoundRec := performRequest(t, srv, http.MethodGet, "/api/loops/999")
+	if notFoundRec.Code != http.StatusNotFound {
+		t.Fatalf("get non-existent status = %d, want %d", notFoundRec.Code, http.StatusNotFound)
+	}
+}
+
+func TestStatsEndpoints(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	loopRec := performRequest(t, srv, http.MethodGet, "/api/stats/loops")
+	if loopRec.Code != http.StatusOK {
+		t.Fatalf("loop stats status = %d, want %d", loopRec.Code, http.StatusOK)
+	}
+
+	profileRec := performRequest(t, srv, http.MethodGet, "/api/stats/profiles")
+	if profileRec.Code != http.StatusOK {
+		t.Fatalf("profile stats status = %d, want %d", profileRec.Code, http.StatusOK)
+	}
+}
+
+func TestIssueValidation(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// Missing title
+	rec := performJSONRequest(t, srv, http.MethodPost, "/api/issues", `{"description":"no title"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("no title status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	// Invalid status
+	rec = performJSONRequest(t, srv, http.MethodPost, "/api/issues", `{"title":"Bad","status":"invalid"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	// Invalid priority
+	rec = performJSONRequest(t, srv, http.MethodPost, "/api/issues", `{"title":"Bad","priority":"extreme"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid priority = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestPlanValidation(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// Missing id
+	rec := performJSONRequest(t, srv, http.MethodPost, "/api/plans", `{"title":"No ID"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("no id status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	// Missing title
+	rec = performJSONRequest(t, srv, http.MethodPost, "/api/plans", `{"id":"no-title"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("no title status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	// Invalid plan status on update
+	performJSONRequest(t, srv, http.MethodPost, "/api/plans", `{"id":"val-test","title":"Validation Test"}`)
+	rec = performJSONRequest(t, srv, http.MethodPut, "/api/plans/val-test", `{"status":"bogus"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid plan status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	// Invalid phase status
+	performJSONRequest(t, srv, http.MethodPost, "/api/plans", `{"id":"phase-test","title":"Phase Test","phases":[{"id":"p1","title":"P1","status":"not_started"}]}`)
+	rec = performJSONRequest(t, srv, http.MethodPut, "/api/plans/phase-test/phases/p1", `{"status":"wrong"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid phase status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestDocValidation(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// Missing title
+	rec := performJSONRequest(t, srv, http.MethodPost, "/api/docs", `{"content":"no title"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("no title status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
 func TestCORS(t *testing.T) {
 	srv, _ := newTestServer(t)
 

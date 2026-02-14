@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -41,8 +42,73 @@ func isNotFoundErr(err error) bool {
 	return os.IsNotExist(err)
 }
 
-func (srv *Server) handleProject(w http.ResponseWriter, r *http.Request) {
-	project, err := srv.store.LoadProject()
+// --- Multi-project management endpoints ---
+
+// handleListProjects returns all registered projects.
+func (srv *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
+	entries := srv.registry.List()
+	writeJSON(w, http.StatusOK, entries)
+}
+
+// globalDashboardResponse is the aggregate view across all projects.
+type globalDashboardResponse struct {
+	Projects []projectSummary `json:"projects"`
+}
+
+type projectSummary struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Path           string `json:"path"`
+	IsDefault      bool   `json:"is_default"`
+	ActivePlanID   string `json:"active_plan_id,omitempty"`
+	OpenIssueCount int    `json:"open_issue_count"`
+	PlanCount      int    `json:"plan_count"`
+	TurnCount      int    `json:"turn_count"`
+}
+
+// handleGlobalDashboard returns an aggregate view across all projects.
+func (srv *Server) handleGlobalDashboard(w http.ResponseWriter, r *http.Request) {
+	entries := srv.registry.List()
+	summaries := make([]projectSummary, 0, len(entries))
+
+	for _, entry := range entries {
+		summary := projectSummary{
+			ID:        entry.ID,
+			Name:      entry.Name,
+			Path:      entry.Path,
+			IsDefault: entry.IsDefault,
+		}
+
+		if cfg, err := entry.store.LoadProject(); err == nil {
+			summary.ActivePlanID = cfg.ActivePlanID
+		}
+
+		if plans, err := entry.store.ListPlans(); err == nil {
+			summary.PlanCount = len(plans)
+		}
+
+		if issues, err := entry.store.ListIssues(); err == nil {
+			for _, issue := range issues {
+				if strings.EqualFold(issue.Status, "open") {
+					summary.OpenIssueCount++
+				}
+			}
+		}
+
+		if turns, err := entry.store.ListTurns(); err == nil {
+			summary.TurnCount = len(turns)
+		}
+
+		summaries = append(summaries, summary)
+	}
+
+	writeJSON(w, http.StatusOK, globalDashboardResponse{Projects: summaries})
+}
+
+// --- Project-scoped handlers (store-parameterized) ---
+
+func handleProjectP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	project, err := s.LoadProject()
 	if err != nil {
 		if isNotFoundErr(err) {
 			writeError(w, http.StatusNotFound, "project not found")
@@ -54,8 +120,8 @@ func (srv *Server) handleProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, project)
 }
 
-func (srv *Server) handlePlans(w http.ResponseWriter, r *http.Request) {
-	plans, err := srv.store.ListPlans()
+func handlePlansP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	plans, err := s.ListPlans()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list plans")
 		return
@@ -66,14 +132,14 @@ func (srv *Server) handlePlans(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, plans)
 }
 
-func (srv *Server) handlePlanByID(w http.ResponseWriter, r *http.Request) {
+func handlePlanByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	planID := strings.TrimSpace(r.PathValue("id"))
 	if planID == "" {
 		writeError(w, http.StatusNotFound, "plan not found")
 		return
 	}
 
-	plan, err := srv.store.GetPlan(planID)
+	plan, err := s.GetPlan(planID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load plan")
 		return
@@ -86,7 +152,7 @@ func (srv *Server) handlePlanByID(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, plan)
 }
 
-func (srv *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
+func handleIssuesP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	planID := strings.TrimSpace(r.URL.Query().Get("plan"))
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
 
@@ -96,9 +162,9 @@ func (srv *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if planID != "" {
-		issues, err = srv.store.ListIssuesForPlan(planID)
+		issues, err = s.ListIssuesForPlan(planID)
 	} else {
-		issues, err = srv.store.ListIssues()
+		issues, err = s.ListIssues()
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -121,14 +187,14 @@ func (srv *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, issues)
 }
 
-func (srv *Server) handleIssueByID(w http.ResponseWriter, r *http.Request) {
+func handleIssueByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	issueID, err := parsePathID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "issue not found")
 		return
 	}
 
-	issue, err := srv.store.GetIssue(issueID)
+	issue, err := s.GetIssue(issueID)
 	if err != nil {
 		if isNotFoundErr(err) {
 			writeError(w, http.StatusNotFound, "issue not found")
@@ -141,8 +207,8 @@ func (srv *Server) handleIssueByID(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, issue)
 }
 
-func (srv *Server) handleTurns(w http.ResponseWriter, r *http.Request) {
-	turns, err := srv.store.ListTurns()
+func handleTurnsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	turns, err := s.ListTurns()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list turns")
 		return
@@ -166,14 +232,14 @@ func (srv *Server) handleTurns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, turns)
 }
 
-func (srv *Server) handleTurnByID(w http.ResponseWriter, r *http.Request) {
+func handleTurnByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	turnID, err := parsePathID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "turn not found")
 		return
 	}
 
-	turn, err := srv.store.GetTurn(turnID)
+	turn, err := s.GetTurn(turnID)
 	if err != nil {
 		if isNotFoundErr(err) {
 			writeError(w, http.StatusNotFound, "turn not found")
@@ -186,8 +252,8 @@ func (srv *Server) handleTurnByID(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, turn)
 }
 
-func (srv *Server) handleSpawns(w http.ResponseWriter, r *http.Request) {
-	spawns, err := srv.store.ListSpawns()
+func handleSpawnsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	spawns, err := s.ListSpawns()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list spawns")
 		return
@@ -198,14 +264,14 @@ func (srv *Server) handleSpawns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, spawns)
 }
 
-func (srv *Server) handleSpawnByID(w http.ResponseWriter, r *http.Request) {
+func handleSpawnByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	spawnID, err := parsePathID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "spawn not found")
 		return
 	}
 
-	rec, err := srv.store.GetSpawn(spawnID)
+	rec, err := s.GetSpawn(spawnID)
 	if err != nil {
 		if isNotFoundErr(err) {
 			writeError(w, http.StatusNotFound, "spawn not found")
@@ -218,7 +284,7 @@ func (srv *Server) handleSpawnByID(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rec)
 }
 
-func (srv *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+func handleSessionsP(_ *store.Store, w http.ResponseWriter, r *http.Request) {
 	sessions, err := session.ListSessions()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list sessions")
@@ -230,7 +296,7 @@ func (srv *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sessions)
 }
 
-func (srv *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
+func handleSessionByIDP(_ *store.Store, w http.ResponseWriter, r *http.Request) {
 	sessionID, err := parsePathID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "session not found")
@@ -253,8 +319,8 @@ func (srv *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusNotFound, "session not found")
 }
 
-func (srv *Server) handleLoopStats(w http.ResponseWriter, r *http.Request) {
-	stats, err := srv.store.ListLoopStats()
+func handleLoopStatsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	stats, err := s.ListLoopStats()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list loop stats")
 		return
@@ -265,8 +331,8 @@ func (srv *Server) handleLoopStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stats)
 }
 
-func (srv *Server) handleProfileStats(w http.ResponseWriter, r *http.Request) {
-	stats, err := srv.store.ListProfileStats()
+func handleProfileStatsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	stats, err := s.ListProfileStats()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list profile stats")
 		return
@@ -275,4 +341,9 @@ func (srv *Server) handleProfileStats(w http.ResponseWriter, r *http.Request) {
 		stats = []store.ProfileStats{}
 	}
 	writeJSON(w, http.StatusOK, stats)
+}
+
+// projectDir derives the project root directory from a store.
+func projectDir(s *store.Store) string {
+	return filepath.Dir(s.Root())
 }
