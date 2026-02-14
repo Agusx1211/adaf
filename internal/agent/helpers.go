@@ -26,6 +26,11 @@ import (
 	"github.com/agusx1211/adaf/internal/stream"
 )
 
+const (
+	processGroupTerminateGrace = 600 * time.Millisecond
+	processGroupTerminatePoll  = 30 * time.Millisecond
+)
+
 // --- Command setup helpers ---
 
 // setupEnv configures the command environment by inheriting the current
@@ -44,10 +49,42 @@ func setupEnv(cmd *exec.Cmd, env map[string]string) {
 func setupProcessGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if cmd.Process == nil {
+			return nil
+		}
+
+		pgid := -cmd.Process.Pid
+		// Try graceful shutdown first so stream parsers can flush any final output.
+		if err := syscall.Kill(pgid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+			return err
+		}
+		if waitForProcessGroupExit(pgid, processGroupTerminateGrace, processGroupTerminatePoll) {
+			return nil
+		}
+		if err := syscall.Kill(pgid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+			return err
 		}
 		return nil
+	}
+}
+
+func waitForProcessGroupExit(pgid int, timeout, pollEvery time.Duration) bool {
+	if timeout <= 0 {
+		return false
+	}
+	if pollEvery <= 0 {
+		pollEvery = 25 * time.Millisecond
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		err := syscall.Kill(pgid, 0)
+		if errors.Is(err, syscall.ESRCH) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(pollEvery)
 	}
 }
 

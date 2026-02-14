@@ -721,10 +721,62 @@ func reparentHandoffs(s *store.Store, handoffs []store.HandoffInfo, newParentTur
 // prior wait cycles for this turn. The bool return indicates whether more
 // spawns are still running (wait-for-any semantics).
 func waitForAnySessionSpawns(ctx context.Context, s *store.Store, parentTurnID int, alreadySeen map[int]struct{}) ([]loop.WaitResult, bool) {
+	if alreadySeen == nil {
+		alreadySeen = make(map[int]struct{})
+	}
+
 	debug.LogKV("looprun", "waitForAnySessionSpawns() called",
 		"parent_turn", parentTurnID,
 		"already_seen", len(alreadySeen),
 	)
+
+	// Prefer orchestrator notifications to avoid polling the store.
+	if o := orchestrator.Get(); o != nil {
+		activeIDs := o.ActiveSpawnsForParent(parentTurnID)
+		if len(activeIDs) > 0 {
+			debug.LogKV("looprun", "waitForAnySessionSpawns using orchestrator WaitAny",
+				"parent_turn", parentTurnID,
+				"already_seen", len(alreadySeen),
+				"active_spawns", len(activeIDs),
+			)
+			spawnResults, morePending := o.WaitAny(ctx, parentTurnID, alreadySeen)
+			results := make([]loop.WaitResult, 0, len(spawnResults))
+			for _, sr := range spawnResults {
+				profile := ""
+				if rec, err := s.GetSpawn(sr.SpawnID); err == nil && rec != nil {
+					profile = rec.ChildProfile
+				}
+				results = append(results, loop.WaitResult{
+					SpawnID:  sr.SpawnID,
+					Profile:  profile,
+					Status:   sr.Status,
+					ExitCode: sr.ExitCode,
+					Result:   sr.Result,
+					Summary:  sr.Summary,
+					ReadOnly: sr.ReadOnly,
+					Branch:   sr.Branch,
+				})
+			}
+			debug.LogKV("looprun", "waitForAnySessionSpawns returning from orchestrator WaitAny",
+				"parent_turn", parentTurnID,
+				"already_seen", len(alreadySeen),
+				"results", len(results),
+				"more_pending", morePending,
+			)
+			return results, morePending
+		}
+		debug.LogKV("looprun", "waitForAnySessionSpawns orchestrator has no active spawns; using polling fallback",
+			"parent_turn", parentTurnID,
+			"already_seen", len(alreadySeen),
+			"active_spawns", 0,
+		)
+	}
+
+	debug.LogKV("looprun", "waitForAnySessionSpawns using polling fallback",
+		"parent_turn", parentTurnID,
+		"already_seen", len(alreadySeen),
+	)
+
 	records, err := s.SpawnsByParent(parentTurnID)
 	if err != nil || len(records) == 0 {
 		debug.LogKV("looprun", "waitForAnySessionSpawns: no spawns found",
@@ -769,6 +821,8 @@ func waitForAnySessionSpawns(ctx context.Context, s *store.Store, parentTurnID i
 			"pending", len(pending),
 		)
 		waitStart := time.Now()
+		nextProgressLog := waitStart.Add(30 * time.Second)
+		pollCount := 0
 		ticker := time.NewTicker(250 * time.Millisecond)
 		defer ticker.Stop()
 		for len(completed) == 0 && len(pending) > 0 {
@@ -781,6 +835,17 @@ func waitForAnySessionSpawns(ctx context.Context, s *store.Store, parentTurnID i
 				)
 				return nil, false
 			case <-ticker.C:
+				pollCount++
+				now := time.Now()
+				if now.After(nextProgressLog) {
+					debug.LogKV("looprun", "waitForAnySessionSpawns still waiting",
+						"parent_turn", parentTurnID,
+						"wait_duration", now.Sub(waitStart),
+						"pending", len(pending),
+						"poll_count", pollCount,
+					)
+					nextProgressLog = now.Add(30 * time.Second)
+				}
 			}
 			for id := range pending {
 				rec, err := s.GetSpawn(id)

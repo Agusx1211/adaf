@@ -118,18 +118,25 @@ type Loop struct {
 	lastInterruptMsg string
 }
 
+const defaultTurnTimeout = 45 * time.Minute
+
 // Run executes the agent loop. It will run the agent up to Config.MaxTurns times
 // (or infinitely if MaxTurns is 0). The loop respects context cancellation for
 // graceful shutdown (e.g. ctrl+c).
 func (l *Loop) Run(ctx context.Context) error {
 	maxTurns := l.Config.MaxTurns
 	turn := 0
+	turnTimeout := l.Config.Timeout
+	if turnTimeout <= 0 {
+		turnTimeout = defaultTurnTimeout
+	}
 
 	debug.LogKV("loop", "loop starting",
 		"agent", l.Agent.Name(),
 		"profile", l.ProfileName,
 		"plan_id", l.PlanID,
 		"max_turns", maxTurns,
+		"turn_timeout", turnTimeout,
 		"loop_run_hex", l.LoopRunHexID,
 		"step_hex", l.StepHexID,
 	)
@@ -137,6 +144,10 @@ func (l *Loop) Run(ctx context.Context) error {
 	for {
 		// Check if we've hit the turn limit.
 		if maxTurns > 0 && turn >= maxTurns {
+			debug.LogKV("loop", "max turns reached; exiting loop",
+				"completed_turns", turn,
+				"max_turns", maxTurns,
+			)
 			return nil
 		}
 
@@ -318,8 +329,21 @@ func (l *Loop) Run(ctx context.Context) error {
 		}
 
 		// Create a turn-scoped context so guardrails can cancel just the
-		// current turn without stopping the entire loop.
-		turnCtx, turnCancel := context.WithCancel(ctx)
+		// current turn without stopping the entire loop. A timeout safety net
+		// avoids indefinite hangs in agent execution.
+		var (
+			turnCtx    context.Context
+			turnCancel context.CancelFunc
+		)
+		if turnTimeout > 0 {
+			turnCtx, turnCancel = context.WithTimeout(ctx, turnTimeout)
+		} else {
+			turnCtx, turnCancel = context.WithCancel(ctx)
+		}
+		debug.LogKV("loop", "turn context ready",
+			"turn_id", turnID,
+			"timeout", turnTimeout,
+		)
 		// Enforce wait-for-spawns as immediate control flow: as soon as a
 		// wait signal exists for this turn, cancel the active agent turn.
 		waitSignalSeen := make(chan struct{}, 1)
@@ -336,6 +360,10 @@ func (l *Loop) Run(ctx context.Context) error {
 					case waitSignalSeen <- struct{}{}:
 					default:
 					}
+					debug.LogKV("loop", "wait-for-spawns: canceling active turn (expected)",
+						"turn_id", turnID,
+						"source", "startup_check",
+					)
 					turnCancel()
 					return
 				}
@@ -352,6 +380,10 @@ func (l *Loop) Run(ctx context.Context) error {
 						case waitSignalSeen <- struct{}{}:
 						default:
 						}
+						debug.LogKV("loop", "wait-for-spawns: canceling active turn (expected)",
+							"turn_id", turnID,
+							"source", "watcher",
+						)
 						turnCancel()
 						return
 					}
@@ -388,7 +420,15 @@ func (l *Loop) Run(ctx context.Context) error {
 			"has_result", result != nil,
 			"has_error", runErr != nil,
 		)
-		if result != nil {
+		if waitTriggeredMidTurn {
+			debug.LogKV("loop", "agent interrupted by wait-for-spawns signal (expected)",
+				"turn_id", turnID,
+				"exit_code", resultExitCode(result),
+				"output_len", resultOutputLen(result),
+				"stderr_len", resultErrorLen(result),
+				"session_id", resultSessionID(result),
+			)
+		} else if result != nil {
 			debug.LogKV("loop", "agent result",
 				"turn_id", turnID,
 				"exit_code", result.ExitCode,
@@ -399,7 +439,14 @@ func (l *Loop) Run(ctx context.Context) error {
 			)
 		}
 		if runErr != nil {
-			debug.LogKV("loop", "agent error", "turn_id", turnID, "error", runErr)
+			if waitTriggeredMidTurn && errors.Is(runErr, context.Canceled) {
+				debug.LogKV("loop", "agent canceled by wait-for-spawns signal (expected)",
+					"turn_id", turnID,
+					"error", runErr,
+				)
+			} else {
+				debug.LogKV("loop", "agent error", "turn_id", turnID, "error", runErr)
+			}
 		}
 
 		// Capture the result and session ID for potential resume.
@@ -427,6 +474,12 @@ func (l *Loop) Run(ctx context.Context) error {
 		if waitTriggeredMidTurn {
 			waitingForSpawns = true
 		}
+		debug.LogKV("loop", "post-run state",
+			"turn_id", turnID,
+			"waiting_for_spawns", waitingForSpawns,
+			"wait_triggered_mid_turn", waitTriggeredMidTurn,
+			"run_error", runErr != nil,
+		)
 
 		// Update the turn with results.
 		if result != nil {
@@ -459,11 +512,24 @@ func (l *Loop) Run(ctx context.Context) error {
 
 		// Best-effort update of the turn. We re-read the ID since
 		// CreateTurn already assigned it.
-		_ = l.Store.UpdateTurn(turnLog)
+		if err := l.Store.UpdateTurn(turnLog); err != nil {
+			debug.LogKV("loop", "turn update failed", "turn_id", turnID, "error", err)
+		} else {
+			debug.LogKV("loop", "turn updated",
+				"turn_id", turnID,
+				"build_state", turnLog.BuildState,
+			)
+		}
 
 		// Notify listener.
 		if l.OnEnd != nil {
+			debug.LogKV("loop", "calling OnEnd callback", "turn_id", turnID)
+			cbStart := time.Now()
 			l.OnEnd(turnID, turnHexID, result)
+			debug.LogKV("loop", "OnEnd callback returned",
+				"turn_id", turnID,
+				"duration", time.Since(cbStart),
+			)
 		}
 		if flushErr != nil {
 			flushRunErr := fmt.Errorf("flushing recording for turn %d: %w", turnID, flushErr)
@@ -506,6 +572,11 @@ func (l *Loop) Run(ctx context.Context) error {
 			}
 			l.waitResumeTurnID = turnID
 			l.waitResumeTurnHexID = turnHexID
+			debug.LogKV("loop", "wait-for-spawns resume prepared",
+				"turn_id", turnID,
+				"results", len(l.lastWaitResults),
+				"more_pending", l.moreSpawnsPending,
+			)
 			// Don't increment turn count — the wait turn doesn't count toward the limit.
 			// Loop continues to next iteration with wait results in the prompt.
 			continue
@@ -528,10 +599,21 @@ func (l *Loop) Run(ctx context.Context) error {
 				// cancel support (OnTurnContext), this was a turn-only cancel
 				// (e.g. guardrail) that raced with drainInterrupt.
 				if l.OnTurnContext != nil && ctx.Err() == nil {
+					debug.LogKV("loop", "turn canceled without interrupt payload; continuing",
+						"turn_id", turnID,
+					)
 					continue
 				}
 				// Preserve cancellation semantics so callers can classify graceful stop.
+				debug.LogKV("loop", "loop exiting with context canceled", "turn_id", turnID)
 				return context.Canceled
+			}
+			if errors.Is(runErr, context.DeadlineExceeded) {
+				debug.LogKV("loop", "turn timed out",
+					"turn_id", turnID,
+					"timeout", turnTimeout,
+				)
+				return fmt.Errorf("agent turn timed out after %s (turn %d): %w", turnTimeout, turnID, runErr)
 			}
 			return fmt.Errorf("agent run failed (turn %d): %w", turnID, runErr)
 		}
@@ -544,22 +626,70 @@ func (l *Loop) Run(ctx context.Context) error {
 		// so the message is injected into the next turn.
 		if msg := l.drainInterrupt(); msg != "" {
 			l.lastInterruptMsg = msg
+			debug.LogKV("loop", "interrupt drained after successful run",
+				"turn_id", turnID,
+				"msg_len", len(msg),
+			)
 			continue
 		}
 		// If the parent context was canceled but no interrupt message was
 		// pending, exit the loop. This handles child contexts canceled by
 		// the orchestrator.
 		if ctx.Err() != nil {
+			debug.LogKV("loop", "parent context canceled after turn",
+				"turn_id", turnID,
+				"error", ctx.Err(),
+			)
 			return ctx.Err()
 		}
 
 		// Update profile stats from a fully completed turn.
 		if l.ProfileName != "" {
-			_ = stats.UpdateProfileStats(l.Store, l.ProfileName, turnID)
+			if err := stats.UpdateProfileStats(l.Store, l.ProfileName, turnID); err != nil {
+				debug.LogKV("loop", "profile stats update failed",
+					"turn_id", turnID,
+					"profile", l.ProfileName,
+					"error", err,
+				)
+			} else {
+				debug.LogKV("loop", "profile stats updated",
+					"turn_id", turnID,
+					"profile", l.ProfileName,
+				)
+			}
 		}
 
 		turn++
+		debug.LogKV("loop", "turn counter incremented", "next_turn_index", turn)
 	}
+}
+
+func resultExitCode(result *agent.Result) int {
+	if result == nil {
+		return -1
+	}
+	return result.ExitCode
+}
+
+func resultOutputLen(result *agent.Result) int {
+	if result == nil {
+		return 0
+	}
+	return len(result.Output)
+}
+
+func resultErrorLen(result *agent.Result) int {
+	if result == nil {
+		return 0
+	}
+	return len(result.Error)
+}
+
+func resultSessionID(result *agent.Result) string {
+	if result == nil {
+		return ""
+	}
+	return result.AgentSessionID
 }
 
 // drainInterrupt checks if there's a pending interrupt and drains the channel.

@@ -65,7 +65,7 @@ func ParseCodex(ctx context.Context, r io.Reader) <-chan RawEvent {
 		defer close(ch)
 
 		scanner := bufio.NewScanner(r)
-		scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+		scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
 
 		for scanner.Scan() {
 			select {

@@ -7,7 +7,10 @@ import (
 	"io"
 )
 
-const maxLineSize = 1024 * 1024 // 1 MB
+// maxLineSize is the maximum NDJSON line size accepted across all stream
+// parsers. Keep this consistent so large events don't parse on one agent and
+// fail on another.
+const maxLineSize = 8 * 1024 * 1024 // 8 MB
 
 // Parse reads NDJSON lines from r and sends parsed events on the returned
 // channel. The channel is closed when the reader reaches EOF or the context
