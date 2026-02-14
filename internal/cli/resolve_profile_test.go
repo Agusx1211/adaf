@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/spf13/cobra"
 )
 
@@ -140,14 +141,62 @@ func TestResolveProfile_AgentFlagWithModelOverride(t *testing.T) {
 	writeGlobalConfig(t, home, map[string]any{})
 
 	cmd := newResolveProfileCmd(t)
+	_ = cmd.Flags().Set("agent", "codex")
 	_ = cmd.Flags().Set("model", "custom-model-v2")
 
 	prof, _, _, err := resolveProfile(cmd, ProfileResolveOpts{Prefix: "pm"})
 	if err != nil {
 		t.Fatalf("resolveProfile() error = %v", err)
 	}
+	if prof.Agent != "codex" {
+		t.Fatalf("agent = %q, want %q", prof.Agent, "codex")
+	}
 	if prof.Model != "custom-model-v2" {
 		t.Fatalf("model = %q, want %q", prof.Model, "custom-model-v2")
+	}
+}
+
+func TestResolveProfile_AgentFlagWithoutModelUsesDefaultModel(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeGlobalConfig(t, home, map[string]any{})
+
+	cmd := newResolveProfileCmd(t)
+
+	prof, _, _, err := resolveProfile(cmd, ProfileResolveOpts{Prefix: "ask"})
+	if err != nil {
+		t.Fatalf("resolveProfile() error = %v", err)
+	}
+
+	if prof.Model != agent.DefaultModel("claude") {
+		t.Fatalf("model = %q, want %q", prof.Model, agent.DefaultModel("claude"))
+	}
+}
+
+func TestResolveProfile_AgentFlagUsesAgentsConfigPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeGlobalConfig(t, home, map[string]any{})
+	writeAgentsConfig(t, home, map[string]any{
+		"agents": map[string]any{
+			"codex": map[string]any{
+				"name": "codex",
+				"path": "/custom/bin/codex",
+			},
+		},
+	})
+
+	cmd := newResolveProfileCmd(t)
+	_ = cmd.Flags().Set("agent", "codex")
+
+	_, _, cmdOverride, err := resolveProfile(cmd, ProfileResolveOpts{Prefix: "ask"})
+	if err != nil {
+		t.Fatalf("resolveProfile() error = %v", err)
+	}
+	if cmdOverride != "/custom/bin/codex" {
+		t.Fatalf("cmdOverride = %q, want %q", cmdOverride, "/custom/bin/codex")
 	}
 }
 

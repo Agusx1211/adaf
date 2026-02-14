@@ -73,6 +73,9 @@ func resolveProfile(cmd *cobra.Command, opts ProfileResolveOpts) (*config.Profil
 	if modelFlag != "" {
 		modelOverride = modelFlag
 	}
+	if modelOverride == "" {
+		modelOverride = agent.ResolveDefaultModel(agentsCfg, globalCfg, agentName)
+	}
 
 	prof := &config.Profile{
 		Name:           fmt.Sprintf("%s:%s", opts.Prefix, agentName),
