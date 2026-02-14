@@ -2,12 +2,14 @@ package webserver
 
 import (
 	"context"
+	"crypto/tls"
 	"embed"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/agusx1211/adaf/internal/debug"
@@ -17,30 +19,57 @@ import (
 //go:embed static
 var staticFS embed.FS
 
+// Options configures web server behavior.
+type Options struct {
+	Host      string
+	Port      int
+	TLSMode   string
+	CertFile  string
+	KeyFile   string
+	AuthToken string
+	RateLimit float64
+}
+
 // Server hosts the HTTP API and WebSocket session stream bridge.
 type Server struct {
 	store      *store.Store
 	httpServer *http.Server
 	port       int
 	host       string
+	tlsMode    string
+	certFile   string
+	keyFile    string
+	authToken  string
+	rateLimit  float64
 }
 
 // New constructs a web server bound to host:port.
-func New(s *store.Store, host string, port int) *Server {
+func New(s *store.Store, opts Options) *Server {
+	host := strings.TrimSpace(opts.Host)
 	if host == "" {
 		host = "127.0.0.1"
 	}
 
+	port := opts.Port
+	if port <= 0 {
+		port = 8080
+	}
+
 	srv := &Server{
-		store: s,
-		host:  host,
-		port:  port,
+		store:     s,
+		host:      host,
+		port:      port,
+		tlsMode:   strings.TrimSpace(opts.TLSMode),
+		certFile:  strings.TrimSpace(opts.CertFile),
+		keyFile:   strings.TrimSpace(opts.KeyFile),
+		authToken: strings.TrimSpace(opts.AuthToken),
+		rateLimit: opts.RateLimit,
 	}
 
 	mux := http.NewServeMux()
 	srv.setupRoutes(mux)
 
-	handler := corsMiddleware(logMiddleware(mux))
+	handler := corsMiddleware(logMiddleware(rateLimitMiddleware(srv.rateLimit, authMiddleware(srv.authToken, mux))))
 	srv.httpServer = &http.Server{
 		Addr:              srv.Addr(),
 		Handler:           handler,
@@ -56,6 +85,31 @@ func (srv *Server) Start() error {
 		return fmt.Errorf("webserver not initialized")
 	}
 
+	if srv.tlsMode != "" {
+		var cert tls.Certificate
+		var err error
+
+		switch srv.tlsMode {
+		case "self-signed":
+			cert, err = generateSelfSignedCert(srv.host)
+			if err != nil {
+				return fmt.Errorf("generating self-signed certificate: %w", err)
+			}
+		case "custom":
+			cert, err = tls.LoadX509KeyPair(srv.certFile, srv.keyFile)
+			if err != nil {
+				return fmt.Errorf("loading TLS certificate: %w", err)
+			}
+		default:
+			return fmt.Errorf("unsupported TLS mode: %q", srv.tlsMode)
+		}
+
+		srv.httpServer.TLSConfig = &tls.Config{
+			MinVersion:   tls.VersionTLS12,
+			Certificates: []tls.Certificate{cert},
+		}
+	}
+
 	ln, err := net.Listen("tcp", srv.Addr())
 	if err != nil {
 		return err
@@ -67,7 +121,12 @@ func (srv *Server) Start() error {
 	}
 
 	go func() {
-		err := srv.httpServer.Serve(ln)
+		var err error
+		if srv.tlsMode != "" {
+			err = srv.httpServer.ServeTLS(ln, "", "")
+		} else {
+			err = srv.httpServer.Serve(ln)
+		}
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			debug.LogKV("webserver", "server stopped with error", "error", err)
 		}
@@ -87,6 +146,14 @@ func (srv *Server) Shutdown(ctx context.Context) error {
 // Addr returns the bound host:port address.
 func (srv *Server) Addr() string {
 	return net.JoinHostPort(srv.host, strconv.Itoa(srv.port))
+}
+
+// Scheme returns the URL scheme for the running server.
+func (srv *Server) Scheme() string {
+	if srv.tlsMode != "" {
+		return "https"
+	}
+	return "http"
 }
 
 func (srv *Server) setupRoutes(mux *http.ServeMux) {

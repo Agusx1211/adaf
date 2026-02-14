@@ -8,16 +8,23 @@
     selectedSessionID: null,
     selectedPlanID: null,
     issueFilter: 'all',
+    authToken: '',
     ws: null,
+    wsConnected: false,
     wsSessionID: null,
     term: null,
     termFit: null,
-    termWS: null
+    termWS: null,
+    termWSConnected: false
   };
   var nav = document.getElementById('nav');
   var content = document.getElementById('content');
+  var connDot = document.getElementById('conn-dot');
+  var connLabel = document.getElementById('conn-label');
   function init() {
     if (!nav || !content) return;
+    loadAuthToken();
+    updateConnectionStatus();
     nav.addEventListener('click', function (event) {
       var link = event.target.closest('a[data-tab]');
       if (!link) return;
@@ -26,6 +33,31 @@
     });
     content.addEventListener('click', onContentClick);
     switchTab('dashboard');
+  }
+  function loadAuthToken() {
+    var hash = window.location.hash || '';
+    if (hash.indexOf('#token=') === 0) {
+      state.authToken = hash.slice(7);
+      window.location.hash = '';
+      try {
+        localStorage.setItem('adaf_token', state.authToken);
+      } catch (_) {
+        // best effort
+      }
+      return;
+    }
+    try {
+      state.authToken = localStorage.getItem('adaf_token') || '';
+    } catch (_) {
+      state.authToken = '';
+    }
+  }
+  function updateConnectionStatus() {
+    if (!connDot || !connLabel) return;
+    var online = !!(state.wsConnected || state.termWSConnected);
+    connDot.classList.toggle('online', online);
+    connDot.classList.toggle('offline', !online);
+    connLabel.textContent = online ? 'Online' : 'Offline';
   }
   function switchTab(tab) {
     if (!tab) return;
@@ -120,6 +152,7 @@
         }, REFRESH_MS);
       }
     } catch (err) {
+      if (err && err.authRequired) return;
       renderError('Failed to load dashboard: ' + errorMessage(err));
     }
   }
@@ -133,6 +166,7 @@
       if (selected) connectSessionSocket(selected.id, false);
       else disconnectSessionSocket();
     } catch (err) {
+      if (err && err.authRequired) return;
       renderError('Failed to load sessions: ' + errorMessage(err));
     }
   }
@@ -144,6 +178,7 @@
       var detail = state.selectedPlanID ? await api('/api/plans/' + encodeURIComponent(state.selectedPlanID), true) : null;
       content.innerHTML = '<section class="grid"><article class="card span-4"><h2>Plans</h2>' + renderPlanList(plans) + '</article><article class="card span-8">' + renderPlanDetail(detail) + '</article></section>';
     } catch (err) {
+      if (err && err.authRequired) return;
       renderError('Failed to load plans: ' + errorMessage(err));
     }
   }
@@ -154,6 +189,7 @@
       var issues = arrayOrEmpty(await api(path));
       content.innerHTML = '<section class="card"><h2>Issues</h2><div class="filters">' + renderFilterButton('all', 'All') + renderFilterButton('open', 'Open') + renderFilterButton('resolved', 'Resolved') + '</div>' + renderIssueList(issues, false) + '</section>';
     } catch (err) {
+      if (err && err.authRequired) return;
       renderError('Failed to load issues: ' + errorMessage(err));
     }
   }
@@ -231,6 +267,8 @@
     disconnectTerminal();
     state.termWS = new WebSocket(buildWSURL('/ws/terminal'));
     state.termWS.addEventListener('open', function () {
+      state.termWSConnected = true;
+      updateConnectionStatus();
       fitTerminal();
       if (state.term) {
         state.termWS.send(JSON.stringify({
@@ -254,10 +292,14 @@
       }
     });
     state.termWS.addEventListener('close', function () {
+      state.termWSConnected = false;
+      updateConnectionStatus();
       if (state.term) state.term.write('\r\n[Connection closed]\r\n');
       state.termWS = null;
     });
     state.termWS.addEventListener('error', function () {
+      state.termWSConnected = false;
+      updateConnectionStatus();
       if (state.term) state.term.write('\r\n[Connection error]\r\n');
     });
   }
@@ -271,6 +313,8 @@
       }
       state.termWS = null;
     }
+    state.termWSConnected = false;
+    updateConnectionStatus();
   }
   function renderSessionList(sessions, compact) {
     if (!sessions.length) return '<p class="empty">No sessions found.</p>';
@@ -316,10 +360,20 @@
     if (terminal) terminal.textContent = 'Connecting to stream...\n';
     state.wsSessionID = sessionID;
     state.ws = new WebSocket(buildWSURL('/ws/sessions/' + encodeURIComponent(String(sessionID))));
-    state.ws.addEventListener('open', function () { appendTerminal('[connected] live stream', true); });
+    state.ws.addEventListener('open', function () {
+      state.wsConnected = true;
+      updateConnectionStatus();
+      appendTerminal('[connected] live stream', true);
+    });
     state.ws.addEventListener('message', function (event) { handleSessionMessage(event.data); });
-    state.ws.addEventListener('error', function () { appendTerminal('[error] stream error', true); });
+    state.ws.addEventListener('error', function () {
+      state.wsConnected = false;
+      updateConnectionStatus();
+      appendTerminal('[error] stream error', true);
+    });
     state.ws.addEventListener('close', function () {
+      state.wsConnected = false;
+      updateConnectionStatus();
       appendTerminal('[closed] stream disconnected', true);
       state.ws = null;
       state.wsSessionID = null;
@@ -334,6 +388,8 @@
     }
     state.ws = null;
     state.wsSessionID = null;
+    state.wsConnected = false;
+    updateConnectionStatus();
   }
   function handleSessionMessage(raw) {
     var msg;
@@ -431,8 +487,18 @@
     return list.find(function (plan) { return plan.status === 'active'; }) || list[0] || null;
   }
   async function api(path, allow404) {
-    var response = await fetch(path, { method: 'GET', headers: { Accept: 'application/json' } });
+    var headers = { Accept: 'application/json' };
+    if (state.authToken) {
+      headers.Authorization = 'Bearer ' + state.authToken;
+    }
+    var response = await fetch(path, { method: 'GET', headers: headers });
     if (response.ok) return response.json();
+    if (response.status === 401) {
+      showAuthPrompt();
+      var authErr = new Error('Authentication required');
+      authErr.authRequired = true;
+      throw authErr;
+    }
     if (allow404 && response.status === 404) return null;
     var message = response.status + ' ' + response.statusText;
     try {
@@ -442,6 +508,25 @@
       // ignore parsing errors
     }
     throw new Error(message);
+  }
+  function showAuthPrompt() {
+    content.innerHTML = '<section class="card"><h2>Authentication Required</h2><p class="meta">Enter the auth token to access the API.</p><div class="auth-form"><input type="text" id="auth-input" placeholder="Auth token" autocomplete="off"><button id="auth-submit">Connect</button></div></section>';
+    var input = document.getElementById('auth-input');
+    var submit = document.getElementById('auth-submit');
+    if (!input || !submit) return;
+    submit.addEventListener('click', function () {
+      state.authToken = input.value.trim();
+      try {
+        localStorage.setItem('adaf_token', state.authToken);
+      } catch (_) {
+        // best effort
+      }
+      renderCurrentTab();
+    });
+    input.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') submit.click();
+    });
+    input.focus();
   }
   function renderError(message) {
     content.innerHTML = '<section class="card error-card"><h2>Error</h2><p class="error-text">' + escapeHTML(message) + '</p></section>';
@@ -473,7 +558,11 @@
   }
   function buildWSURL(path) {
     var proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return proto + '//' + window.location.host + path;
+    var url = proto + '//' + window.location.host + path;
+    if (state.authToken) {
+      url += (path.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(state.authToken);
+    }
+    return url;
   }
   function escapeHTML(value) {
     return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');

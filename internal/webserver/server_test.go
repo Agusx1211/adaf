@@ -24,7 +24,7 @@ func newTestServer(t *testing.T) (*Server, *store.Store) {
 		t.Fatalf("store.Init: %v", err)
 	}
 
-	return New(s, "127.0.0.1", 8080), s
+	return New(s, Options{}), s
 }
 
 func performRequest(t *testing.T, srv *Server, method, target string) *httptest.ResponseRecorder {

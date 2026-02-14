@@ -40,6 +40,23 @@ a:hover { text-decoration: underline; }
   letter-spacing: 0.08em;
   font: 700 1rem/1 "IBM Plex Mono", "SFMono-Regular", monospace;
 }
+.conn-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.conn-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.conn-dot.online { background: var(--success); }
+.conn-dot.offline { background: var(--error); }
 #nav a {
   padding: 0.45rem 0.7rem;
   border-radius: 0.5rem;
@@ -98,6 +115,24 @@ a:hover { text-decoration: underline; }
   gap: 0.45rem;
   flex-wrap: wrap;
   margin-bottom: 0.75rem;
+}
+.auth-form {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.auth-form input {
+  flex: 1;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--panel-strong);
+  color: var(--text);
+  font: inherit;
+}
+.auth-form input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 button,
 .button {
