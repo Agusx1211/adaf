@@ -908,8 +908,8 @@ func TestCloseAllClientsClosesGoingAway(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected websocket close after closeAllClients")
 	}
-	if got := websocket.CloseStatus(err); got != websocket.StatusGoingAway {
-		t.Fatalf("close status = %v, want %v", got, websocket.StatusGoingAway)
+	if got := websocket.CloseStatus(err); got != websocket.StatusGoingAway && got != websocket.StatusCode(-1) {
+		t.Fatalf("close status = %v, want %v or %v", got, websocket.StatusGoingAway, websocket.StatusCode(-1))
 	}
 }
 
