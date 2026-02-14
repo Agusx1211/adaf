@@ -49,34 +49,10 @@ func (g *GenericAgent) Run(ctx context.Context, cfg Config, recorder *recording.
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cfg.WorkDir
 
+	setupProcessGroup(cmd)
+	cmd.WaitDelay = 5 * time.Second
 	setupEnv(cmd, cfg.Env)
 	setupStdin(cmd, cfg.Prompt, recorder)
-	bo := setupBufferOutput(cmd, cfg, recorder)
 
-	recordMeta(recorder, g.name, cmdName, args, cfg.WorkDir)
-
-	start := time.Now()
-	debug.LogKV("agent.generic", "process starting", "name", g.name, "binary", cmdName)
-	err := cmd.Run()
-	duration := time.Since(start)
-
-	exitCode, err := extractExitCode(err)
-	if err != nil {
-		debug.LogKV("agent.generic", "cmd.Run() error (not ExitError)", "name", g.name, "error", err)
-		return nil, fmt.Errorf("agent %q: failed to run command: %w", g.name, err)
-	}
-
-	debug.LogKV("agent.generic", "process finished",
-		"name", g.name,
-		"exit_code", exitCode,
-		"duration", duration,
-		"output_len", bo.StdoutBuf.Len(),
-	)
-
-	return &Result{
-		ExitCode: exitCode,
-		Duration: duration,
-		Output:   bo.StdoutBuf.String(),
-		Error:    bo.StderrBuf.String(),
-	}, nil
+	return runBufferAgent(cmd, cfg, recorder, g.name, cmdName, args)
 }

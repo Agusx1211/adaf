@@ -121,37 +121,16 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 		cmd.Stdin = stdinReader
 	}
 
+	setupProcessGroup(cmd)
+	cmd.WaitDelay = 5 * time.Second
 	setupEnv(cmd, cfg.Env)
-	bo := setupBufferOutput(cmd, cfg, recorder)
-	recordMeta(recorder, "vibe", cmdName, args, cfg.WorkDir)
 
-	start := time.Now()
-	debug.LogKV("agent.vibe", "process starting", "binary", cmdName)
-	runErr := cmd.Run()
-	duration := time.Since(start)
-
-	exitCode, runErr := extractExitCode(runErr)
-	if runErr != nil {
-		debug.LogKV("agent.vibe", "cmd.Run() error (not ExitError)", "error", runErr)
-		return nil, fmt.Errorf("vibe agent: failed to run command: %w", runErr)
+	result, err := runBufferAgent(cmd, cfg, recorder, "vibe", cmdName, args)
+	if err != nil {
+		return nil, err
 	}
-
-	agentSessionID := extractVibeSessionID(sessionLogDir)
-
-	debug.LogKV("agent.vibe", "process finished",
-		"exit_code", exitCode,
-		"duration", duration,
-		"output_len", bo.StdoutBuf.Len(),
-		"session_id", agentSessionID,
-	)
-
-	return &Result{
-		ExitCode:       exitCode,
-		Duration:       duration,
-		Output:         bo.StdoutBuf.String(),
-		Error:          bo.StderrBuf.String(),
-		AgentSessionID: agentSessionID,
-	}, nil
+	result.AgentSessionID = extractVibeSessionID(sessionLogDir)
+	return result, nil
 }
 
 func canUseVibeStdinPrompt() bool {

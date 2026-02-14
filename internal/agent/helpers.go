@@ -6,7 +6,7 @@ package agent
 // Two patterns are supported:
 //   - Stream agents (claude, codex, gemini): pipe stdout through an NDJSON
 //     parser, use setupStreamStderr + runStreamLoop.
-//   - Buffer agents (vibe, opencode, generic): capture stdout/stderr into
+//   - Buffer agents (vibe, generic): capture stdout/stderr into
 //     buffers, use setupBufferOutput.
 
 import (
@@ -202,6 +202,47 @@ func setupBufferOutput(cmd *exec.Cmd, cfg Config, recorder *recording.Recorder) 
 	cmd.Stdout = io.MultiWriter(stdoutWriters...)
 	cmd.Stderr = io.MultiWriter(stderrWriters...)
 	return bo
+}
+
+// runBufferAgent executes a pre-configured cmd as a buffer agent: captures
+// stdout/stderr via setupBufferOutput, records metadata, runs the command,
+// and returns a Result. The caller is responsible for building the command
+// (args, stdin, env, process group, WaitDelay) before calling this.
+func runBufferAgent(
+	cmd *exec.Cmd,
+	cfg Config,
+	recorder *recording.Recorder,
+	agentName string,
+	cmdName string,
+	args []string,
+) (*Result, error) {
+	bo := setupBufferOutput(cmd, cfg, recorder)
+	recordMeta(recorder, agentName, cmdName, args, cfg.WorkDir)
+
+	start := time.Now()
+	debug.LogKV("agent."+agentName, "process starting", "binary", cmdName)
+	runErr := cmd.Run()
+	duration := time.Since(start)
+
+	exitCode, runErr := extractExitCode(runErr)
+	if runErr != nil {
+		debug.LogKV("agent."+agentName, "cmd.Run() error (not ExitError)", "error", runErr)
+		return nil, fmt.Errorf("%s agent: failed to run command: %w", agentName, runErr)
+	}
+
+	debug.LogKV("agent."+agentName, "process finished",
+		"exit_code", exitCode,
+		"duration", duration,
+		"output_len", bo.StdoutBuf.Len(),
+		"stderr_len", bo.StderrBuf.Len(),
+	)
+
+	return &Result{
+		ExitCode: exitCode,
+		Duration: duration,
+		Output:   bo.StdoutBuf.String(),
+		Error:    bo.StderrBuf.String(),
+	}, nil
 }
 
 // --- Stream agent helpers ---
