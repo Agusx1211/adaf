@@ -86,8 +86,23 @@ func TestCreateSessionPopulatesProjectID(t *testing.T) {
 	if meta.ProjectID != expectedID {
 		t.Fatalf("ProjectID = %q, want %q", meta.ProjectID, expectedID)
 	}
-	if len(meta.ProjectID) != 16 {
-		t.Fatalf("ProjectID length = %d, want 16", len(meta.ProjectID))
+
+	// Format check: name-8charhash
+	if !strings.Contains(meta.ProjectID, "-") {
+		t.Fatalf("ProjectID %q does not contain '-'", meta.ProjectID)
+	}
+	parts := strings.Split(meta.ProjectID, "-")
+	if len(parts) < 2 {
+		t.Fatalf("ProjectID %q has wrong format", meta.ProjectID)
+	}
+	hash := parts[len(parts)-1]
+	if len(hash) != 8 {
+		t.Fatalf("hash part of ProjectID %q length = %d, want 8", meta.ProjectID, len(hash))
+	}
+
+	// Determinism check
+	if ProjectIDFromDir(projectDir) != expectedID {
+		t.Fatal("ProjectID is not deterministic")
 	}
 }
 

@@ -2,8 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"crypto/sha1"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/agusx1211/adaf/internal/session"
 )
 
 type DaemonClient struct {
@@ -138,42 +138,18 @@ func (c *DaemonClient) doJSON(method, path string, req map[string]interface{}, o
 func projectIDFromPath(projectDir string) string {
 	cleanedPath := normalizeProjectDir(projectDir)
 
+	// Check registry first for existing ID
 	registry, err := loadWebProjectRegistry(webProjectsRegistryPath())
 	if err == nil && registry != nil {
-		usedIDs := make(map[string]struct{}, len(registry.Projects))
 		for _, project := range registry.Projects {
-			id := strings.TrimSpace(project.ID)
-			if id != "" {
-				usedIDs[id] = struct{}{}
-			}
-			if normalizeProjectDir(project.Path) == cleanedPath && id != "" {
-				return id
-			}
-		}
-
-		for _, hashChars := range []int{8, 10, 12, 16} {
-			candidate := deriveProjectID(cleanedPath, hashChars)
-			if _, exists := usedIDs[candidate]; !exists {
-				return candidate
+			if normalizeProjectDir(project.Path) == cleanedPath && project.ID != "" {
+				return project.ID
 			}
 		}
 	}
 
-	return deriveProjectID(cleanedPath, 8)
-}
-
-func deriveProjectID(projectPath string, hashChars int) string {
-	base := sanitizeProjectID(filepath.Base(projectPath))
-	if base == "" {
-		base = "project"
-	}
-
-	sum := sha1.Sum([]byte(projectPath))
-	hash := hex.EncodeToString(sum[:])
-	if hashChars > 0 && hashChars < len(hash) {
-		hash = hash[:hashChars]
-	}
-	return fmt.Sprintf("%s-%s", base, hash)
+	// Derive using the canonical function
+	return session.ProjectIDFromDir(cleanedPath)
 }
 
 func normalizeProjectDir(projectDir string) string {
@@ -188,28 +164,3 @@ func normalizeProjectDir(projectDir string) string {
 	return filepath.Clean(path)
 }
 
-func sanitizeProjectID(raw string) string {
-	raw = strings.ToLower(strings.TrimSpace(raw))
-	if raw == "" {
-		return ""
-	}
-
-	var b strings.Builder
-	prevDash := false
-	for _, r := range raw {
-		switch {
-		case r >= 'a' && r <= 'z':
-			b.WriteRune(r)
-			prevDash = false
-		case r >= '0' && r <= '9':
-			b.WriteRune(r)
-			prevDash = false
-		default:
-			if !prevDash {
-				b.WriteByte('-')
-				prevDash = true
-			}
-		}
-	}
-	return strings.Trim(b.String(), "-")
-}

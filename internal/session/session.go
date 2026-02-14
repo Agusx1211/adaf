@@ -2,7 +2,7 @@ package session
 
 import (
 	"context"
-	"crypto/sha256"
+	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -141,8 +141,32 @@ func ProjectIDFromDir(dir string) string {
 	if err != nil {
 		abs = dir
 	}
-	h := sha256.Sum256([]byte(abs))
-	return hex.EncodeToString(h[:8]) // 16-char hex ID
+	abs = filepath.Clean(abs)
+
+	base := sanitizeForID(filepath.Base(abs))
+	if base == "" {
+		base = "project"
+	}
+
+	h := sha1.Sum([]byte(abs))
+	hash := hex.EncodeToString(h[:])[:8]
+	return base + "-" + hash
+}
+
+func sanitizeForID(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	var b strings.Builder
+	prevDash := false
+	for _, r := range raw {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevDash = false
+		} else if !prevDash {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 // CreateSession allocates a new session ID, writes the DaemonConfig and initial
