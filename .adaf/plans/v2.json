@@ -45,7 +45,7 @@
       "id": "p5-stream-panel",
       "title": "Web Frontend: Stream Panel \u0026 Activity Feed",
       "description": "Implement the StreamPanel and Activity feed from `reference-ui.jsx` for the right panel's Raw and Activity tabs.\n\n**StreamPanel (Raw tab):**\n- Displays stream events filtered by the selected scope\n- Event types with distinct styling:\n  - `thinking`: italic, dimmed text (C.overlay1), with brain icon\n  - `text`: regular text (C.text)\n  - `tool_use`: highlighted with wrench icon, shows tool name + input (collapsible)\n  - `tool_result`: shows result text, dimmed background\n- Each event shows timestamp and scope badge\n- Scope-based color coding for multi-agent streams\n- Auto-scroll behavior: scroll to bottom on new events (toggleable via button)\n- Markdown rendering for text events (reuse marked.js)\n- Syntax highlighting for code in tool inputs/results (reuse highlight.js)\n\n**Activity feed (Activity tab):**\n- Timeline of high-level events:\n  - Session started/finished\n  - Spawn created/completed/failed\n  - Loop step transitions\n  - Messages sent between agents\n  - Plan/issue mutations\n- Each entry has: timestamp, icon, description, optional detail\n- Grouped by time proximity\n\n**CommunicationPanel (Messages tab):**\n- Shows parent-child messages for the selected scope\n- Direction indicators: up arrow for child-to-parent, down arrow for parent-to-child\n- Message type badges: `ask` (blue), `message` (green), `reply` (mauve)\n- Content rendered with markdown\n- Chronological order within the selected spawn's conversation\n\n**Data flow:**\n- Stream events arrive via WebSocket (existing ws_handler.go endpoint)\n- Activity events derived from session/spawn lifecycle events\n- Messages fetched from `/api/projects/{id}/messages` filtered by spawn\n\n**Performance:**\n- Virtualized scrolling for large event lists (or efficient DOM recycling)\n- Batch DOM updates to avoid layout thrashing\n- Limit retained events (e.g. last 5000) with ability to scroll back and load more",
-      "status": "not_started",
+      "status": "complete",
       "priority": 1,
       "depends_on": [
         "p4-agent-tree"
@@ -104,5 +104,5 @@
     "p9-polish"
   ],
   "created": "2026-02-14T15:37:30.322476305Z",
-  "updated": "2026-02-14T17:04:14.347385206Z"
+  "updated": "2026-02-14T17:04:14.369350134Z"
 }
