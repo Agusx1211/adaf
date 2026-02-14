@@ -9,7 +9,32 @@ import (
 	"github.com/agusx1211/adaf/internal/store"
 )
 
-func TestBuild_SubAgentIncludesCommitRule(t *testing.T) {
+func TestBuild_TopLevelIncludesAutonomyRule(t *testing.T) {
+	s, project := initPromptTestStore(t)
+
+	profile := &config.Profile{
+		Name:  "dev",
+		Agent: "codex",
+	}
+
+	got, err := Build(BuildOpts{
+		Store:   s,
+		Project: project,
+		Profile: profile,
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if !strings.Contains(got, "fully autonomous") {
+		t.Fatalf("missing autonomy rule for top-level agent\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "no human in the loop") {
+		t.Fatalf("missing no-human-in-the-loop rule for top-level agent\nprompt:\n%s", got)
+	}
+}
+
+func TestBuild_SubAgentOmitsAutonomyRule(t *testing.T) {
 	s, project := initPromptTestStore(t)
 
 	profile := &config.Profile{
@@ -27,13 +52,12 @@ func TestBuild_SubAgentIncludesCommitRule(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	wantLine := "As a sub-agent, if you modify files you MUST create a git commit before finishing your turn."
-	if !strings.Contains(got, wantLine) {
-		t.Fatalf("missing sub-agent commit rule\nwant substring: %q\nprompt:\n%s", wantLine, got)
+	if strings.Contains(got, "no human in the loop") {
+		t.Fatalf("sub-agent should not see autonomy rule (parent is their human)\nprompt:\n%s", got)
 	}
 }
 
-func TestBuild_MainAgentDoesNotIncludeSubAgentCommitRule(t *testing.T) {
+func TestBuild_IncludesCommitOwnershipRule(t *testing.T) {
 	s, project := initPromptTestStore(t)
 
 	profile := &config.Profile{
@@ -50,9 +74,31 @@ func TestBuild_MainAgentDoesNotIncludeSubAgentCommitRule(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	wantLine := "As a sub-agent, if you modify files you MUST create a git commit before finishing your turn."
-	if strings.Contains(got, wantLine) {
-		t.Fatalf("unexpected sub-agent commit rule in main-agent prompt\nprompt:\n%s", got)
+	if !strings.Contains(got, "You own your repository") {
+		t.Fatalf("missing commit ownership rule\nprompt:\n%s", got)
+	}
+}
+
+func TestBuild_ReadOnlyOmitsCommitRule(t *testing.T) {
+	s, project := initPromptTestStore(t)
+
+	profile := &config.Profile{
+		Name:  "dev",
+		Agent: "codex",
+	}
+
+	got, err := Build(BuildOpts{
+		Store:    s,
+		Project:  project,
+		Profile:  profile,
+		ReadOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if strings.Contains(got, "You own your repository") {
+		t.Fatalf("read-only agent should not have commit ownership rule\nprompt:\n%s", got)
 	}
 }
 

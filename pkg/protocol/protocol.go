@@ -89,13 +89,17 @@ Use ` + "`--read-only`" + ` scouts for any information gathering (repo structure
 - ` + "`adaf spawn-message --spawn-id N \"guidance\"`" + ` — Send async message to running child
 - ` + "`adaf spawn-message --spawn-id N --interrupt \"new instructions\"`" + ` — Redirect a running child
 
+## Repository Ownership
+
+You own your worktree. Do not leave changes uncommitted. Commit after every coherent unit of work — uncommitted changes are invisible to scouts, other agents, and future sessions. Treat committing like saving: do it frequently, do it before logging, do it before finishing. Your worktree is yours alone; there is no one else to commit for you.
+
 ## Session Protocol
 
 1. **Orient**: Run ` + "`adaf status`" + ` and ` + "`adaf log latest`" + ` to understand current state. If you need more history, use ` + "`adaf log list`" + ` and ` + "`adaf log show <id>`" + ` or ` + "`adaf log search --query \"...\"`" + `
 2. **Decide**: Pick the highest-impact work based on the plan, open issues, and the previous session's next steps
-3. **Work**: Build, test, integrate. Run tests frequently. Ensure ` + "`go build`" + ` passes before moving on
+3. **Work**: Build, test, integrate. Run tests frequently. Ensure ` + "`go build`" + ` passes before moving on. Commit after each meaningful change — do not batch everything into one final commit
 4. **Log**: Write a detailed session log with ` + "`adaf log create`" + ` — include ALL fields, especially --build-state, --next, and --issues
-5. **Commit**: Commit your code changes
+5. **Commit**: Ensure all changes are committed. If you have any uncommitted work, commit it now before finishing
 `
 }
 

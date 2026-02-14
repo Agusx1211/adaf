@@ -169,14 +169,22 @@ func Build(opts BuildOpts) (string, error) {
 
 	// Rules.
 	b.WriteString("# Rules\n\n")
+	if opts.ParentTurnID == 0 {
+		b.WriteString("- **You are fully autonomous. There is no human in the loop.** No one will answer questions, grant permissions, or provide clarification. " +
+			"You must make all decisions yourself. Do not ask for confirmation or direction — decide and act. " +
+			"If something is ambiguous, use your best judgment and move forward.\n")
+	}
 	b.WriteString("- Write code, run tests, and ensure everything compiles before finishing.\n")
 	b.WriteString("- Focus on one coherent unit of work. Stop when the current phase (or a meaningful increment of it) is complete.\n")
+	if !opts.ReadOnly {
+		b.WriteString("- **You own your repository. Commit your work.** Do not leave changes uncommitted. " +
+			"Every time you finish a coherent piece of work, create a git commit. " +
+			"Uncommitted changes are invisible to scouts, other agents, and future sessions. " +
+			"Commit early and often — your worktree is yours alone.\n")
+	}
 	b.WriteString("- Do NOT read or write files inside the `.adaf/` directory directly. " +
 		"Use `adaf` CLI commands instead (`adaf issues`, `adaf log`, `adaf plan`, etc.). " +
 		"The `.adaf/` directory structure may change and direct access will be restricted in the future.\n")
-	if opts.ParentTurnID > 0 && !opts.ReadOnly {
-		b.WriteString("- As a sub-agent, if you modify files you MUST create a git commit before finishing your turn.\n")
-	}
 	b.WriteString("\n")
 
 	// Context.
