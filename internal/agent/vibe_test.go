@@ -98,6 +98,70 @@ printf 'ok\n'
 	}
 }
 
+func TestVibeRunBasic(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script helper not supported on windows")
+	}
+
+	tmp := t.TempDir()
+	cmdPath := filepath.Join(tmp, "fake-vibe")
+	script := `#!/usr/bin/env sh
+echo "Hello from vibe"
+`
+	if err := os.WriteFile(cmdPath, []byte(script), 0755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	s, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	rec := recording.New(1, s)
+
+	t.Run("happy path", func(t *testing.T) {
+		result, err := NewVibeAgent().Run(context.Background(), Config{
+			Command: cmdPath,
+			WorkDir: tmp,
+			Prompt:  "hello",
+		}, rec)
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+		if result.ExitCode != 0 {
+			t.Fatalf("Run() exit code = %d, want 0", result.ExitCode)
+		}
+		if !strings.Contains(result.Output, "Hello from vibe") {
+			t.Errorf("Run() output = %q, want to contain %q", result.Output, "Hello from vibe")
+		}
+	})
+
+	t.Run("non-zero exit", func(t *testing.T) {
+		failPath := filepath.Join(tmp, "fake-vibe-fail")
+		failScript := `#!/usr/bin/env sh
+echo "vibe failed" >&2
+exit 42
+`
+		if err := os.WriteFile(failPath, []byte(failScript), 0755); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+
+		result, err := NewVibeAgent().Run(context.Background(), Config{
+			Command: failPath,
+			WorkDir: tmp,
+			Prompt:  "fail",
+		}, rec)
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+		if result.ExitCode != 42 {
+			t.Errorf("Run() exit code = %d, want 42", result.ExitCode)
+		}
+		if !strings.Contains(result.Error, "vibe failed") {
+			t.Errorf("Run() stderr = %q, want to contain %q", result.Error, "vibe failed")
+		}
+	})
+}
+
 func TestExtractVibeSessionID(t *testing.T) {
 	tests := []struct {
 		name  string

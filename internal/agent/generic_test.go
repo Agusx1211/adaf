@@ -12,21 +12,17 @@ import (
 	"github.com/agusx1211/adaf/internal/store"
 )
 
-// fake-opencode script that emits NDJSON matching OpenCode's format.
-const fakeOpencode = `#!/usr/bin/env sh
-printf '{"type":"step_start","sessionID":"test-sess"}\n'
-printf '{"type":"text","sessionID":"test-sess","part":{"text":"Hello from opencode"}}\n'
-printf '{"type":"step_finish","sessionID":"test-sess","part":{"tokens":{"input":10,"output":5},"cost":0.001}}\n'
-`
-
-func TestOpencodeRun(t *testing.T) {
+func TestGenericRun(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script helper not supported on windows")
 	}
 
 	tmp := t.TempDir()
-	cmdPath := filepath.Join(tmp, "fake-opencode")
-	if err := os.WriteFile(cmdPath, []byte(fakeOpencode), 0755); err != nil {
+	cmdPath := filepath.Join(tmp, "fake-generic")
+	script := `#!/usr/bin/env sh
+echo "Hello from generic"
+`
+	if err := os.WriteFile(cmdPath, []byte(script), 0755); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -36,57 +32,30 @@ func TestOpencodeRun(t *testing.T) {
 	}
 	rec := recording.New(1, s)
 
-	result, err := NewOpencodeAgent().Run(context.Background(), Config{
+	result, err := NewGenericAgent("test-agent").Run(context.Background(), Config{
 		Command: cmdPath,
 		WorkDir: tmp,
-		Prompt:  "Say hello",
 	}, rec)
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if result == nil {
-		t.Fatal("Run() result is nil")
-	}
 	if result.ExitCode != 0 {
-		t.Fatalf("Run() exit code = %d, want 0; stderr = %q", result.ExitCode, result.Error)
+		t.Fatalf("Run() exit code = %d, want 0", result.ExitCode)
 	}
-
-	if !strings.Contains(result.Output, "Hello from opencode") {
-		t.Errorf("Run() output = %q, want to contain %q", result.Output, "Hello from opencode")
-	}
-
-	if result.AgentSessionID != "test-sess" {
-		t.Errorf("Run() AgentSessionID = %q, want %q", result.AgentSessionID, "test-sess")
-	}
-
-	events := rec.Events()
-	var opencodeStreamCount int
-	var metaAgentCount int
-	for _, ev := range events {
-		if ev.Type == "claude_stream" {
-			opencodeStreamCount++
-		}
-		if ev.Type == "meta" && strings.HasPrefix(ev.Data, "agent=opencode") {
-			metaAgentCount++
-		}
-	}
-	if opencodeStreamCount != 3 {
-		t.Errorf("expected 3 claude_stream events, got %d", opencodeStreamCount)
-	}
-	if metaAgentCount == 0 {
-		t.Error("missing agent=opencode meta event")
+	if !strings.Contains(result.Output, "Hello from generic") {
+		t.Errorf("Run() output = %q, want to contain %q", result.Output, "Hello from generic")
 	}
 }
 
-func TestOpencodeRunNonZeroExit(t *testing.T) {
+func TestGenericRunNonZeroExit(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script helper not supported on windows")
 	}
 
 	tmp := t.TempDir()
-	cmdPath := filepath.Join(tmp, "fake-opencode-fail")
+	cmdPath := filepath.Join(tmp, "fake-generic-fail")
 	script := `#!/usr/bin/env sh
-echo "error message" >&2
+echo "failed" >&2
 exit 42
 `
 	if err := os.WriteFile(cmdPath, []byte(script), 0755); err != nil {
@@ -99,10 +68,9 @@ exit 42
 	}
 	rec := recording.New(1, s)
 
-	result, err := NewOpencodeAgent().Run(context.Background(), Config{
+	result, err := NewGenericAgent("test-agent").Run(context.Background(), Config{
 		Command: cmdPath,
 		WorkDir: tmp,
-		Prompt:  "fail",
 	}, rec)
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -110,18 +78,18 @@ exit 42
 	if result.ExitCode != 42 {
 		t.Errorf("Run() exit code = %d, want 42", result.ExitCode)
 	}
-	if !strings.Contains(result.Error, "error message") {
-		t.Errorf("Run() stderr = %q, want to contain %q", result.Error, "error message")
+	if !strings.Contains(result.Error, "failed") {
+		t.Errorf("Run() stderr = %q, want to contain %q", result.Error, "failed")
 	}
 }
 
-func TestOpencodePromptUsesStdinNotArgv(t *testing.T) {
+func TestGenericPromptUsesStdinNotArgv(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script helper not supported on windows")
 	}
 
 	tmp := t.TempDir()
-	cmdPath := filepath.Join(tmp, "fake-opencode-stdin")
+	cmdPath := filepath.Join(tmp, "fake-generic-stdin")
 	script := `#!/usr/bin/env sh
 expected="PROMPT_SENTINEL_123"
 stdin_data="$(cat)"
@@ -135,7 +103,7 @@ for arg in "$@"; do
 		exit 97
 	fi
 done
-printf '{"type":"text","sessionID":"ok","part":{"text":"ok"}}\n'
+echo "ok"
 `
 	if err := os.WriteFile(cmdPath, []byte(script), 0755); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -147,7 +115,7 @@ printf '{"type":"text","sessionID":"ok","part":{"text":"ok"}}\n'
 	}
 	rec := recording.New(1, s)
 
-	result, err := NewOpencodeAgent().Run(context.Background(), Config{
+	result, err := NewGenericAgent("test-agent").Run(context.Background(), Config{
 		Command: cmdPath,
 		WorkDir: tmp,
 		Prompt:  "PROMPT_SENTINEL_123",
@@ -164,5 +132,23 @@ printf '{"type":"text","sessionID":"ok","part":{"text":"ok"}}\n'
 		if ev.Type == "meta" && strings.HasPrefix(ev.Data, "command=") && strings.Contains(ev.Data, "PROMPT_SENTINEL_123") {
 			t.Fatalf("command metadata leaked prompt into argv: %q", ev.Data)
 		}
+	}
+}
+
+func TestGenericNoCommandError(t *testing.T) {
+	s, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	rec := recording.New(1, s)
+
+	_, err = NewGenericAgent("test-agent").Run(context.Background(), Config{
+		Command: "",
+	}, rec)
+	if err == nil {
+		t.Fatal("Run() expected error with empty command, got nil")
+	}
+	if !strings.Contains(err.Error(), "no command configured") {
+		t.Errorf("Run() error = %v, want to contain %q", err, "no command configured")
 	}
 }
