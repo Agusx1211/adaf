@@ -88,7 +88,7 @@ adaf run --agent claude --max-turns 1
 # 4. Check project status
 adaf status
 
-# 5. Launch the interactive TUI
+# 5. Check project status
 adaf
 ```
 
@@ -98,7 +98,7 @@ adaf
 
 | Command | Aliases | Description |
 |---------|---------|-------------|
-| `adaf` | | Launch interactive TUI (in terminal) or show brief status (in pipe) |
+| `adaf` | | Show a concise status summary (or JSON status with `--json`) |
 | `adaf init` | `setup` | Initialize a new project (creates `.adaf/` directory) |
 | `adaf run` | `exec` | Run an agent against the project |
 | `adaf status` | `st`, `info` | Show comprehensive project status |
@@ -345,18 +345,9 @@ Created by `adaf init`. Contains project name, repo path, and project-level agen
 2. Agent detection cache (`~/.adaf/agents.json`)
 3. Global user-level config (`~/.adaf/config.json`)
 
-## Interactive TUI
+## Default command behavior
 
-Running `adaf` with no arguments in a terminal launches the interactive TUI dashboard built with [Bubble Tea](https://github.com/charmbracelet/bubbletea):
-
-- **Dashboard** -- Project overview with plan progress bar, issue counts, recent sessions
-- **Plan** -- Phase list with status indicators and detail panel
-- **Issues** -- Issue table with status/priority filtering
-- **Logs** -- Session log browser with full detail view
-- **Sessions** -- Recording viewer with color-coded event timeline
-- **Docs** -- Document browser
-
-**Navigation:** `Tab`/`1-6` to switch views, `j/k` to browse, `Enter` to expand, `Esc` to go back, `q` to quit.
+Running `adaf` with no arguments prints a concise project status summary (or JSON when `--json` is provided).
 
 ## Detachable Sessions
 
@@ -432,13 +423,12 @@ internal/
   prompt/              Context-aware prompt building
   pushover/            Pushover notification client
   recording/           Session I/O recording and playback
-  runtui/              TUI mode runner
   session/             Detachable session management (daemon/client)
+  eventq/              Local event queue and dispatch
   stats/               Statistics extraction from recordings
   store/               File-based project store (.adaf/ directory)
   stream/              Agent output stream parsing (NDJSON)
-  theme/               TUI styling and theming
-  tui/                 Interactive TUI (Bubble Tea)
+  webserver/           Internal webserver helpers
   worktree/            Git worktree management for sub-agents
 pkg/protocol/          Agent protocol documentation
 ```

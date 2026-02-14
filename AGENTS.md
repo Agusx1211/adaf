@@ -11,21 +11,27 @@ ADAF (Autonomous Developer Agent Flow) is a Go CLI that orchestrates AI coding a
 ```
 cmd/adaf/              Entry point
 internal/
+  buildinfo/           Build metadata and version helpers
   agent/               Agent interface + per-tool implementations (claude, codex, vibe, gemini, opencode, generic)
   agentmeta/           Built-in metadata catalog (models, capabilities, reasoning levels)
   cli/                 Cobra commands (~25 subcommands)
   config/              Global user config (~/.adaf/config.json)
+  debug/               Runtime debug tools and diagnostics
   detect/              PATH scanning, version probing, dynamic model discovery
-  events/              Shared event protocol (agent, loop, spawn events)
+  eventq/              Local event queue and dispatch
   loop/                Single-agent loop controller (turn management, recording, callbacks)
   looprun/             Multi-step loop runtime
   orchestrator/        Sub-agent spawning with worktree isolation and concurrency limits
-  project/             Project management (plans, issues, docs)
+  guardrail/           Runtime policy enforcement
+  hexid/               Stable identifiers for sessions and work items
+  pushover/            Pushover notification integration
+  stats/               Statistics extraction from recordings
   prompt/              Context-aware prompt building
   recording/           Session I/O recording (NDJSON)
   session/             Detachable session management
   store/               File-based project store (.adaf/)
   stream/              NDJSON stream parsing and terminal display
+  webserver/           Internal webserver helpers
   worktree/            Git worktree lifecycle
 pkg/protocol/          Agent instruction protocol (system prompt generation)
 ```
