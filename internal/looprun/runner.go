@@ -196,15 +196,15 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			cfg.Store.UpdateLoopRun(run)
 
 			promptOpts := promptpkg.BuildOpts{
-				Store:      cfg.Store,
-				Project:    cfg.Project,
-				Profile:    prof,
-				Role:       stepDef.Role,
-				GlobalCfg:  cfg.GlobalCfg,
-				PlanID:     cfg.PlanID,
+				Store:       cfg.Store,
+				Project:     cfg.Project,
+				Profile:     prof,
+				Role:        stepDef.Role,
+				GlobalCfg:   cfg.GlobalCfg,
+				PlanID:      cfg.PlanID,
 				LoopContext: loopCtx,
-				Delegation: stepDef.Delegation,
-				Handoffs:   handoffs,
+				Delegation:  stepDef.Delegation,
+				Handoffs:    handoffs,
 			}
 
 			prompt, err := promptpkg.Build(promptOpts)

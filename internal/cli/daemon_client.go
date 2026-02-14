@@ -163,4 +163,3 @@ func normalizeProjectDir(projectDir string) string {
 	}
 	return filepath.Clean(path)
 }
-

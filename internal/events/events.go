@@ -136,4 +136,3 @@ type LoopDoneMsg struct {
 	Reason   string // "stopped", "cancelled", "error"
 	Err      error
 }
-

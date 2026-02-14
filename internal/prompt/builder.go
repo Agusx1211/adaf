@@ -74,7 +74,6 @@ type BuildOpts struct {
 
 	// Handoffs from previous loop step, injected into the prompt.
 	Handoffs []store.HandoffInfo
-
 }
 
 // WaitResultInfo describes the result of a spawn that was waited on.
