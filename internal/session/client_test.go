@@ -3,8 +3,11 @@ package session
 import (
 	"context"
 	"math"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -397,4 +400,114 @@ func mustWireMsg(t *testing.T, msgType string, payload any) WireMsg {
 		t.Fatalf("DecodeMsg(%q): %v", msgType, err)
 	}
 	return *msg
+}
+
+
+
+
+func TestStreamEventsReconnection(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "adaf-reconnect-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	socketPath := filepath.Join(tmpDir, "session.sock")
+
+	meta := WireMeta{SessionID: 123}
+	
+	// Track connections
+	var connCount atomic.Int32
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		count := connCount.Add(1)
+		ws, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.CloseNow()
+
+		ctx := r.Context()
+
+		// Send meta
+		metaLine, _ := EncodeMsg(MsgMeta, meta)
+		if len(metaLine) > 0 && metaLine[len(metaLine)-1] == '\n' {
+			metaLine = metaLine[:len(metaLine)-1]
+		}
+		ws.Write(ctx, websocket.MessageText, metaLine)
+
+		if count == 1 {
+			// First connection: send one message and then close abruptly
+			msgLine, _ := EncodeMsg(MsgRaw, WireRaw{Data: "first"})
+			if len(msgLine) > 0 && msgLine[len(msgLine)-1] == '\n' {
+				msgLine = msgLine[:len(msgLine)-1]
+			}
+			ws.Write(ctx, websocket.MessageText, msgLine)
+			// Abrupt close
+			return 
+		} else {
+			// Second connection: send another message and then close normally
+			msgLine, _ := EncodeMsg(MsgRaw, WireRaw{Data: "second"})
+			if len(msgLine) > 0 && msgLine[len(msgLine)-1] == '\n' {
+				msgLine = msgLine[:len(msgLine)-1]
+			}
+			ws.Write(ctx, websocket.MessageText, msgLine)
+			doneLine, _ := EncodeMsg(MsgDone, WireDone{})
+			if len(doneLine) > 0 && doneLine[len(doneLine)-1] == '\n' {
+				doneLine = doneLine[:len(doneLine)-1]
+			}
+			ws.Write(ctx, websocket.MessageText, doneLine)
+			ws.Close(websocket.StatusNormalClosure, "done")
+		}
+	}
+
+	server := &http.Server{Handler: http.HandlerFunc(handler)}
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	
+	go server.Serve(listener)
+	defer server.Close()
+
+	c, err := Connect(socketPath)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer c.Close()
+
+	eventCh := make(chan any, 10)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- c.StreamEvents(eventCh, nil)
+	}()
+
+	var got []string
+	timeout := time.After(10 * time.Second)
+	
+loop:
+	for {
+		select {
+		case ev, ok := <-eventCh:
+			if !ok {
+				break loop
+			}
+			if msg, ok := ev.(runtui.AgentRawOutputMsg); ok {
+				got = append(got, msg.Data)
+			}
+		case err := <-errCh:
+			if err != nil {
+				t.Errorf("StreamEvents returned error: %v", err)
+			}
+			break loop
+		case <-timeout:
+			t.Fatal("timed out waiting for events")
+		}
+	}
+
+	if len(got) != 2 || got[0] != "first" || got[1] != "second" {
+		t.Errorf("got messages %v, want [first second]", got)
+	}
+	if connCount.Load() != 2 {
+		t.Errorf("got %d connections, want 2", connCount.Load())
+	}
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/agusx1211/adaf/internal/agent"
+	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/stream"
 )
@@ -21,6 +22,7 @@ type Client struct {
 	ws                *websocket.Conn
 	ctx               context.Context
 	cancel            context.CancelFunc
+	socketPath        string
 	Meta              WireMeta
 	unknownTypeLogged map[string]struct{}
 }
@@ -30,6 +32,25 @@ type Client struct {
 func Connect(socketPath string) (*Client, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	ws, meta, err := dialAndHandshake(ctx, socketPath)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("connecting to session: %w", err)
+	}
+
+	c := &Client{
+		ws:                ws,
+		ctx:               ctx,
+		cancel:            cancel,
+		socketPath:        socketPath,
+		Meta:              *meta,
+		unknownTypeLogged: make(map[string]struct{}),
+	}
+
+	return c, nil
+}
+
+func dialAndHandshake(ctx context.Context, socketPath string) (*websocket.Conn, *WireMeta, error) {
 	// Dial WebSocket over Unix socket.
 	ws, _, err := websocket.Dial(ctx, "ws://localhost/", &websocket.DialOptions{
 		HTTPClient: &http.Client{
@@ -41,49 +62,36 @@ func Connect(socketPath string) (*Client, error) {
 		},
 	})
 	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("connecting to session: %w", err)
+		return nil, nil, err
 	}
 
 	// Set a generous read limit for large snapshot messages.
 	ws.SetReadLimit(4 * 1024 * 1024)
 
-	c := &Client{
-		ws:                ws,
-		ctx:               ctx,
-		cancel:            cancel,
-		unknownTypeLogged: make(map[string]struct{}),
-	}
-
 	// Read the metadata message.
 	_, data, err := ws.Read(ctx)
 	if err != nil {
 		ws.Close(websocket.StatusNormalClosure, "")
-		cancel()
-		return nil, fmt.Errorf("reading metadata: %w", err)
+		return nil, nil, fmt.Errorf("reading metadata: %w", err)
 	}
 
 	msg, err := DecodeMsg(data)
 	if err != nil {
 		ws.Close(websocket.StatusNormalClosure, "")
-		cancel()
-		return nil, fmt.Errorf("decoding metadata: %w", err)
+		return nil, nil, fmt.Errorf("decoding metadata: %w", err)
 	}
 	if msg.Type != MsgMeta {
 		ws.Close(websocket.StatusNormalClosure, "")
-		cancel()
-		return nil, fmt.Errorf("expected meta message, got %q", msg.Type)
+		return nil, nil, fmt.Errorf("expected meta message, got %q", msg.Type)
 	}
 
 	meta, err := DecodeData[WireMeta](msg)
 	if err != nil {
 		ws.Close(websocket.StatusNormalClosure, "")
-		cancel()
-		return nil, fmt.Errorf("decoding meta data: %w", err)
+		return nil, nil, fmt.Errorf("decoding meta data: %w", err)
 	}
-	c.Meta = *meta
 
-	return c, nil
+	return ws, meta, nil
 }
 
 // ConnectToSession connects to a session by ID, looking up the socket path.
@@ -114,11 +122,24 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 			if c.ctx.Err() != nil {
 				return nil
 			}
-			// Connection closed without a done message — daemon may have died.
-			eventCh <- runtui.AgentLoopDoneMsg{
-				Err: fmt.Errorf("connection to session daemon lost"),
+
+			// If it's a normal closure, we're done.
+			if websocket.CloseStatus(err) == websocket.StatusNormalClosure {
+				return nil
 			}
-			return nil
+
+			// Connection lost — attempt reconnect.
+			debug.LogKV("session.client", "connection lost, attempting reconnect", "error", err)
+			if recErr := c.reconnect(); recErr != nil {
+				debug.LogKV("session.client", "reconnection failed", "error", recErr)
+				// Connection closed without a done message — daemon may have died.
+				eventCh <- runtui.AgentLoopDoneMsg{
+					Err: fmt.Errorf("connection to session daemon lost: %w", err),
+				}
+				return nil
+			}
+			debug.LogKV("session.client", "reconnected")
+			continue
 		}
 
 		msg, err := DecodeMsg(data)
@@ -198,6 +219,41 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 
 		if done := c.forwardEventMsg(eventCh, msg, &loopDoneSeen); done {
 			return nil
+		}
+	}
+}
+
+func (c *Client) reconnect() error {
+	backoff := 100 * time.Millisecond
+	maxBackoff := 5 * time.Second
+	totalTimeout := 30 * time.Second
+	start := time.Now()
+
+	for {
+		if time.Since(start) > totalTimeout {
+			return fmt.Errorf("reconnection timed out after %v", totalTimeout)
+		}
+
+		debug.LogKV("session.client", "reconnecting", "socket", c.socketPath, "backoff", backoff)
+
+		ws, meta, err := dialAndHandshake(c.ctx, c.socketPath)
+		if err == nil {
+			c.ws = ws
+			c.Meta = *meta
+			return nil
+		}
+
+		debug.LogKV("session.client", "reconnect failed", "error", err)
+
+		select {
+		case <-c.ctx.Done():
+			return c.ctx.Err()
+		case <-time.After(backoff):
+		}
+
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
 		}
 	}
 }

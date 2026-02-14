@@ -1,6 +1,7 @@
 package webserver
 
 import (
+	"context"
 	"encoding/base64"
 	"net/http/httptest"
 	"os"
@@ -8,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/net/websocket"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 )
 
 func TestTerminalWebSocketInputOutput(t *testing.T) {
@@ -22,38 +24,33 @@ func TestTerminalWebSocketInputOutput(t *testing.T) {
 	ts := httptest.NewServer(srv.httpServer.Handler)
 	defer ts.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/terminal"
-	ws, err := websocket.Dial(wsURL, "", ts.URL)
+	ws, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
-	defer ws.Close()
+	defer ws.Close(websocket.StatusNormalClosure, "test finished")
 
-	if err := websocket.JSON.Send(ws, terminalWSMessage{Type: "resize", Cols: 120, Rows: 32}); err != nil {
+	if err := wsjson.Write(ctx, ws, terminalWSMessage{Type: "resize", Cols: 120, Rows: 32}); err != nil {
 		t.Fatalf("send resize: %v", err)
 	}
 
 	input := "echo __adaf_terminal_test__\r\n"
 	encodedInput := base64.StdEncoding.EncodeToString([]byte(input))
-	if err := websocket.JSON.Send(ws, terminalWSMessage{Type: "input", Data: encodedInput}); err != nil {
+	if err := wsjson.Write(ctx, ws, terminalWSMessage{Type: "input", Data: encodedInput}); err != nil {
 		t.Fatalf("send input: %v", err)
-	}
-
-	deadline := time.Now().Add(10 * time.Second)
-	if err := ws.SetDeadline(deadline); err != nil {
-		t.Fatalf("SetDeadline: %v", err)
 	}
 
 	var combinedOutput strings.Builder
 	for {
 		var msg terminalWSMessage
-		if err := websocket.JSON.Receive(ws, &msg); err != nil {
+		if err := wsjson.Read(ctx, ws, &msg); err != nil {
 			t.Fatalf("receive message: %v (output=%q)", err, combinedOutput.String())
 		}
 		if msg.Type != "output" || msg.Data == "" {
-			if time.Now().After(deadline) {
-				break
-			}
 			continue
 		}
 
@@ -66,6 +63,4 @@ func TestTerminalWebSocketInputOutput(t *testing.T) {
 			return
 		}
 	}
-
-	t.Fatalf("expected terminal output not found; output=%q", combinedOutput.String())
 }
