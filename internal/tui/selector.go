@@ -339,18 +339,36 @@ func renderProjectPanel(
 		}
 	}
 
-	// Issues count
-	openCount := 0
+	// Issues split by status
+	openIssues := make([]store.Issue, 0, len(issues))
+	resolvedIssues := make([]store.Issue, 0, len(issues))
 	for _, iss := range issues {
-		if iss.Status == "open" || iss.Status == "in_progress" {
-			openCount++
+		switch iss.Status {
+		case "resolved", "wontfix":
+			resolvedIssues = append(resolvedIssues, iss)
+		case "open", "in_progress":
+			openIssues = append(openIssues, iss)
+		default:
+			openIssues = append(openIssues, iss)
 		}
 	}
-	if openCount > 0 {
-		lines = append(lines, labelStyle.Render("Issues")+
-			lipgloss.NewStyle().Foreground(ColorYellow).Render(fmt.Sprintf("%d open", openCount)))
+
+	lines = append(lines, labelStyle.Render("Issues")+valueStyle.Render(fmt.Sprintf("%d", len(issues))))
+	lines = append(lines, "")
+	lines = append(lines, sectionStyle.Render("Open Issues"))
+	if len(openIssues) == 0 {
+		lines = append(lines, dimStyle.Render("  none"))
 	} else {
-		lines = append(lines, labelStyle.Render("Issues")+dimStyle.Render("none"))
+		for _, iss := range openIssues {
+			lines = append(lines, fmt.Sprintf("  #%d %s [%s]", iss.ID, iss.Title, iss.Status))
+		}
+	}
+	if len(resolvedIssues) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, sectionStyle.Render("Resolved"))
+		for _, iss := range resolvedIssues {
+			lines = append(lines, dimStyle.Render(fmt.Sprintf("  #%d %s [%s]", iss.ID, iss.Title, iss.Status)))
+		}
 	}
 
 	// Turns count
