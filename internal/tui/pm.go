@@ -32,11 +32,6 @@ func (m *AppModel) initPMWizard() {
 	initWizardProfiles(m, &m.pmWiz.WizardState, pmConfigFieldTotal)
 }
 
-// clampPMProfileSelection delegates to the shared clampProfileSelection.
-func (m *AppModel) clampPMProfileSelection() {
-	clampProfileSelection(&m.pmWiz.WizardState)
-}
-
 // adjustPMProfileSelection delegates to the shared adjustProfileSelection.
 func (m *AppModel) adjustPMProfileSelection(delta int) {
 	adjustProfileSelection(&m.pmWiz.WizardState, delta)
@@ -45,16 +40,6 @@ func (m *AppModel) adjustPMProfileSelection(delta int) {
 // pmSelectedProfile delegates to the shared selectedProfile.
 func (m *AppModel) pmSelectedProfile() *config.Profile {
 	return selectedProfile(m, &m.pmWiz.WizardState)
-}
-
-// pmConfigNextField delegates to the shared wizardNextField.
-func (m *AppModel) pmConfigNextField() {
-	wizardNextField(&m.pmWiz.WizardState, pmConfigFieldTotal)
-}
-
-// pmConfigPrevField delegates to the shared wizardPrevField.
-func (m *AppModel) pmConfigPrevField() {
-	wizardPrevField(&m.pmWiz.WizardState, pmConfigFieldTotal)
 }
 
 func (m AppModel) startPMWizard() (tea.Model, tea.Cmd) {
@@ -229,7 +214,7 @@ func (m AppModel) viewPMConfig() string {
 	cursorLine := -1
 
 	// Use shared function for common fields
-	lines = viewWizardConfigCommon(&m, &m.pmWiz.WizardState, "Project Manager — Configure", func(field int, label, value string) {
+	lines = viewWizardConfigCommon(&m, &m.pmWiz.WizardState, "Project Manager — Configure", pmConfigFieldProfile, pmConfigFieldModel, func(field int, label, value string) {
 		line := fmt.Sprintf("%-8s %s", label, value)
 		if m.pmWiz.ConfigSel == field {
 			lines = append(lines, selectedStyle.Render("> "+line))

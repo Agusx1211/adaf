@@ -137,7 +137,8 @@ func viewWizardPrompt(m AppModel, ws *WizardState, title, textareaID, text strin
 }
 
 // viewWizardConfigCommon renders the common configuration sections for both Ask and PM wizards.
-func viewWizardConfigCommon(m *AppModel, ws *WizardState, title string, renderField func(field int, label, value string), cursorLine *int) []string {
+// profileField and modelField are the config field indices for the Profile and Model fields respectively.
+func viewWizardConfigCommon(m *AppModel, ws *WizardState, title string, profileField, modelField int, renderField func(field int, label, value string), cursorLine *int) []string {
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 
 	var lines []string
@@ -154,13 +155,13 @@ func viewWizardConfigCommon(m *AppModel, ws *WizardState, title string, renderFi
 		profileText = fmt.Sprintf("%s (%s, %s)", selectedProfile.Name, selectedProfile.Agent, modelText)
 	}
 
-	renderField(0, "Profile:", profileText)
+	renderField(profileField, "Profile:", profileText)
 
 	modelValue := strings.TrimSpace(ws.ModelOverride)
 	if modelValue == "" {
 		modelValue = "(default profile model)"
 	}
-	renderField(1, "Model:", modelValue)
+	renderField(modelField, "Model:", modelValue)
 
 	return lines
 }

@@ -34,11 +34,6 @@ func (m *AppModel) initAskWizard() {
 	}
 }
 
-// clampAskProfileSelection delegates to the shared clampProfileSelection.
-func (m *AppModel) clampAskProfileSelection() {
-	clampProfileSelection(&m.askWiz.WizardState)
-}
-
 // adjustAskProfileSelection delegates to the shared adjustProfileSelection.
 func (m *AppModel) adjustAskProfileSelection(delta int) {
 	adjustProfileSelection(&m.askWiz.WizardState, delta)
@@ -58,16 +53,6 @@ func (m *AppModel) adjustAskCount(delta int) {
 // askSelectedProfile delegates to the shared selectedProfile.
 func (m *AppModel) askSelectedProfile() *config.Profile {
 	return selectedProfile(m, &m.askWiz.WizardState)
-}
-
-// askConfigNextField delegates to the shared wizardNextField.
-func (m *AppModel) askConfigNextField() {
-	wizardNextField(&m.askWiz.WizardState, askConfigFieldTotal)
-}
-
-// askConfigPrevField delegates to the shared wizardPrevField.
-func (m *AppModel) askConfigPrevField() {
-	wizardPrevField(&m.askWiz.WizardState, askConfigFieldTotal)
 }
 
 func (m AppModel) startAskWizard() (tea.Model, tea.Cmd) {
@@ -264,7 +249,7 @@ func (m AppModel) viewAskConfig() string {
 	cursorLine := -1
 
 	// Use shared function for common fields
-	lines = viewWizardConfigCommon(&m, &m.askWiz.WizardState, "Ask — Configure", func(field int, label, value string) {
+	lines = viewWizardConfigCommon(&m, &m.askWiz.WizardState, "Ask — Configure", askConfigFieldProfile, askConfigFieldModel, func(field int, label, value string) {
 		line := fmt.Sprintf("%-8s %s", label, value)
 		if m.askWiz.ConfigSel == field {
 			lines = append(lines, selectedStyle.Render("> "+line))
