@@ -19,76 +19,29 @@ const (
 	askConfigFieldTotal
 )
 
+// AskWizardState holds the state for the Ask wizard, embedding the common WizardState.
 type AskWizardState struct {
-	PromptText    string
-	ProfileSel    int
-	Profiles      []string
-	Count         int
-	Chain         bool
-	ModelOverride string
-
-	ConfigSel int
-	Msg       string
+	WizardState
+	PromptText string
+	Count      int
+	Chain      bool
 }
 
 func (m *AppModel) initAskWizard() {
-	if m.globalCfg == nil {
-		m.globalCfg = &config.GlobalConfig{}
-	}
-
-	prevName := ""
-	if m.askWiz.ProfileSel >= 0 && m.askWiz.ProfileSel < len(m.askWiz.Profiles) {
-		prevName = m.askWiz.Profiles[m.askWiz.ProfileSel]
-	}
-
-	profiles := make([]string, 0, len(m.globalCfg.Profiles))
-	for _, prof := range m.globalCfg.Profiles {
-		profiles = append(profiles, prof.Name)
-	}
-	m.askWiz.Profiles = profiles
-	m.askWiz.ProfileSel = 0
-	if prevName != "" {
-		for i, name := range profiles {
-			if strings.EqualFold(name, prevName) {
-				m.askWiz.ProfileSel = i
-				break
-			}
-		}
-	}
-	if m.askWiz.ProfileSel >= len(profiles) {
-		m.askWiz.ProfileSel = len(profiles) - 1
-	}
-	if m.askWiz.ProfileSel < 0 {
-		m.askWiz.ProfileSel = 0
-	}
+	initWizardProfiles(m, &m.askWiz.WizardState, askConfigFieldTotal)
 	if m.askWiz.Count < 1 {
 		m.askWiz.Count = 1
 	}
-	if m.askWiz.ConfigSel < 0 || m.askWiz.ConfigSel >= askConfigFieldTotal {
-		m.askWiz.ConfigSel = 0
-	}
-	m.askWiz.Msg = ""
 }
 
+// clampAskProfileSelection delegates to the shared clampProfileSelection.
 func (m *AppModel) clampAskProfileSelection() {
-	if m.askWiz.ProfileSel >= len(m.askWiz.Profiles) {
-		m.askWiz.ProfileSel = len(m.askWiz.Profiles) - 1
-	}
-	if m.askWiz.ProfileSel < 0 {
-		m.askWiz.ProfileSel = 0
-	}
+	clampProfileSelection(&m.askWiz.WizardState)
 }
 
+// adjustAskProfileSelection delegates to the shared adjustProfileSelection.
 func (m *AppModel) adjustAskProfileSelection(delta int) {
-	if len(m.askWiz.Profiles) == 0 {
-		m.askWiz.ProfileSel = 0
-		return
-	}
-	sel := m.askWiz.ProfileSel + delta
-	for sel < 0 {
-		sel += len(m.askWiz.Profiles)
-	}
-	m.askWiz.ProfileSel = sel % len(m.askWiz.Profiles)
+	adjustProfileSelection(&m.askWiz.WizardState, delta)
 }
 
 func (m *AppModel) adjustAskCount(delta int) {
@@ -102,26 +55,19 @@ func (m *AppModel) adjustAskCount(delta int) {
 	m.askWiz.Count = next
 }
 
+// askSelectedProfile delegates to the shared selectedProfile.
 func (m *AppModel) askSelectedProfile() *config.Profile {
-	if m.globalCfg == nil {
-		return nil
-	}
-	if len(m.askWiz.Profiles) == 0 {
-		return nil
-	}
-	m.clampAskProfileSelection()
-	if m.askWiz.ProfileSel < 0 || m.askWiz.ProfileSel >= len(m.askWiz.Profiles) {
-		return nil
-	}
-	return m.globalCfg.FindProfile(m.askWiz.Profiles[m.askWiz.ProfileSel])
+	return selectedProfile(m, &m.askWiz.WizardState)
 }
 
+// askConfigNextField delegates to the shared wizardNextField.
 func (m *AppModel) askConfigNextField() {
-	m.askWiz.ConfigSel = (m.askWiz.ConfigSel + 1) % askConfigFieldTotal
+	wizardNextField(&m.askWiz.WizardState, askConfigFieldTotal)
 }
 
+// askConfigPrevField delegates to the shared wizardPrevField.
 func (m *AppModel) askConfigPrevField() {
-	m.askWiz.ConfigSel = (m.askWiz.ConfigSel - 1 + askConfigFieldTotal) % askConfigFieldTotal
+	wizardPrevField(&m.askWiz.WizardState, askConfigFieldTotal)
 }
 
 func (m AppModel) startAskWizard() (tea.Model, tea.Cmd) {
@@ -218,45 +164,13 @@ func (m AppModel) updateAskPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(initCmd, cmd)
 }
 
+// viewAskPrompt delegates to the shared viewWizardPrompt.
 func (m AppModel) viewAskPrompt() string {
-	header := m.renderHeader()
-	statusBar := m.renderStatusBar()
-	style, cw, ch := profileWizardPanel(m)
-
-	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
-	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-	errStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorRed)
-
-	m.ensureTextarea("ask-prompt", m.askWiz.PromptText)
-	m.syncTextarea(m.askWiz.PromptText)
-
-	var lines []string
-	lines = append(lines, sectionStyle.Render("Ask — Enter Prompt"))
-	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("Type your standalone prompt (multi-line supported)."))
-	lines = append(lines, dimStyle.Render("ctrl+s or ctrl+enter: next  esc: cancel"))
-	lines = append(lines, "")
-
-	if msg := strings.TrimSpace(m.askWiz.Msg); msg != "" {
-		lines = append(lines, errStyle.Render(msg))
-		lines = append(lines, "")
-	}
-
-	prefixLines := wrapRenderableLines(lines, cw)
-	editorHeight := ch - len(prefixLines)
-	if editorHeight < 3 {
-		editorHeight = 3
-	}
-	editorView := m.viewTextarea(cw, editorHeight)
-	lines = append(lines, splitRenderableLines(editorView)...)
-
-	content := fitLines(lines, cw, ch)
-	panel := style.Render(content)
-	return header + "\n" + panel + "\n" + statusBar
+	return viewWizardPrompt(m, &m.askWiz.WizardState, "Ask — Enter Prompt", "ask-prompt", m.askWiz.PromptText)
 }
 
 func (m AppModel) updateAskConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
-	m.clampAskProfileSelection()
+	clampProfileSelection(&m.askWiz.WizardState)
 	if m.askWiz.Count < 1 {
 		m.askWiz.Count = 1
 	}
@@ -275,13 +189,13 @@ func (m AppModel) updateAskConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = stateAskPrompt
 				return m, nil
 			case "tab", "down", "j":
-				m.askConfigNextField()
+				wizardNextField(&m.askWiz.WizardState, askConfigFieldTotal)
 				return m, nil
 			case "shift+tab", "up", "k":
-				m.askConfigPrevField()
+				wizardPrevField(&m.askWiz.WizardState, askConfigFieldTotal)
 				return m, nil
 			case "enter":
-				m.askConfigNextField()
+				wizardNextField(&m.askWiz.WizardState, askConfigFieldTotal)
 				return m, nil
 			}
 		}
@@ -297,10 +211,10 @@ func (m AppModel) updateAskConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state = stateAskPrompt
 			return m, nil
 		case "tab", "down", "j":
-			m.askConfigNextField()
+			wizardNextField(&m.askWiz.WizardState, askConfigFieldTotal)
 			return m, nil
 		case "shift+tab", "up", "k":
-			m.askConfigPrevField()
+			wizardPrevField(&m.askWiz.WizardState, askConfigFieldTotal)
 			return m, nil
 		}
 
@@ -312,7 +226,7 @@ func (m AppModel) updateAskConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "right", "l":
 				m.adjustAskProfileSelection(1)
 			case "enter":
-				m.askConfigNextField()
+				wizardNextField(&m.askWiz.WizardState, askConfigFieldTotal)
 			}
 		case askConfigFieldCount:
 			switch keyMsg.String() {
@@ -321,7 +235,7 @@ func (m AppModel) updateAskConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "right", "l", "+", "=":
 				m.adjustAskCount(1)
 			case "enter":
-				m.askConfigNextField()
+				wizardNextField(&m.askWiz.WizardState, askConfigFieldTotal)
 			}
 		case askConfigFieldChain:
 			switch keyMsg.String() {
@@ -339,32 +253,28 @@ func (m AppModel) updateAskConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m AppModel) viewAskConfig() string {
-	header := m.renderHeader()
-	statusBar := m.renderStatusBar()
-	style, cw, ch := profileWizardPanel(m)
+	_, cw, ch := profileWizardPanel(m)
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
 	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
 	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve)
-	errStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorRed)
 
 	var lines []string
 	cursorLine := -1
 
-	lines = append(lines, sectionStyle.Render("Ask — Configure"))
-	lines = append(lines, "")
-
-	selectedProfile := m.askSelectedProfile()
-	profileText := "(no profile)"
-	if selectedProfile != nil {
-		modelText := selectedProfile.Model
-		if strings.TrimSpace(modelText) == "" {
-			modelText = "(default)"
+	// Use shared function for common fields
+	lines = viewWizardConfigCommon(&m, &m.askWiz.WizardState, "Ask — Configure", func(field int, label, value string) {
+		line := fmt.Sprintf("%-8s %s", label, value)
+		if m.askWiz.ConfigSel == field {
+			lines = append(lines, selectedStyle.Render("> "+line))
+			cursorLine = len(lines) - 1
+		} else {
+			lines = append(lines, "  "+valueStyle.Render(line))
 		}
-		profileText = fmt.Sprintf("%s (%s, %s)", selectedProfile.Name, selectedProfile.Agent, modelText)
-	}
+	}, &cursorLine)
 
+	// Ask-specific fields
 	renderField := func(field int, label, value string) {
 		line := fmt.Sprintf("%-8s %s", label, value)
 		if m.askWiz.ConfigSel == field {
@@ -375,7 +285,6 @@ func (m AppModel) viewAskConfig() string {
 		}
 	}
 
-	renderField(askConfigFieldProfile, "Profile:", profileText)
 	renderField(askConfigFieldCount, "Count:", fmt.Sprintf("%d", m.askWiz.Count))
 	chainText := "off"
 	if m.askWiz.Chain {
@@ -383,11 +292,14 @@ func (m AppModel) viewAskConfig() string {
 	}
 	renderField(askConfigFieldChain, "Chain:", chainText)
 
-	modelValue := strings.TrimSpace(m.askWiz.ModelOverride)
-	if modelValue == "" {
-		modelValue = "(default profile model)"
+	// Model field (already handled by shared function, but we need to handle the input editor)
+	if m.askWiz.ConfigSel == askConfigFieldModel {
+		m.ensureTextInput("ask-model-override", m.askWiz.ModelOverride, 0)
+		m.syncTextInput(m.askWiz.ModelOverride)
+		lines = append(lines, "")
+		lines = append(lines, dimStyle.Render("Model override input:"))
+		lines = append(lines, m.viewTextInput(cw-4))
 	}
-	renderField(askConfigFieldModel, "Model:", modelValue)
 
 	runLabel := "[ Run Ask ]"
 	if m.askWiz.ConfigSel == askConfigFieldRun {
@@ -395,14 +307,6 @@ func (m AppModel) viewAskConfig() string {
 		cursorLine = len(lines) - 1
 	} else {
 		lines = append(lines, "  "+valueStyle.Render(runLabel))
-	}
-
-	if m.askWiz.ConfigSel == askConfigFieldModel {
-		m.ensureTextInput("ask-model-override", m.askWiz.ModelOverride, 0)
-		m.syncTextInput(m.askWiz.ModelOverride)
-		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("Model override input:"))
-		lines = append(lines, m.viewTextInput(cw-4))
 	}
 
 	lines = append(lines, "")
@@ -420,15 +324,6 @@ func (m AppModel) viewAskConfig() string {
 		lines = append(lines, dimStyle.Render("Chain: currently reuses the same prompt each cycle."))
 	}
 
-	if msg := strings.TrimSpace(m.askWiz.Msg); msg != "" {
-		lines = append(lines, "")
-		lines = append(lines, errStyle.Render(msg))
-	}
-
-	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("tab/up/down: field  left/right: adjust  enter: run/select  esc: back"))
-
-	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
-	panel := style.Render(content)
-	return header + "\n" + panel + "\n" + statusBar
+	// Use shared function for footer
+	return viewWizardConfigFooter(&m, &m.askWiz.WizardState, lines, cursorLine, cw, ch)
 }
