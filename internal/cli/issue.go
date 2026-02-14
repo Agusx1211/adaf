@@ -67,6 +67,7 @@ func init() {
 
 	issueCreateCmd.Flags().String("title", "", "Issue title (required)")
 	issueCreateCmd.Flags().String("description", "", "Issue description")
+	issueCreateCmd.Flags().String("description-file", "", "Read description from file (use '-' for stdin)")
 	issueCreateCmd.Flags().String("priority", "medium", "Priority (critical, high, medium, low)")
 	issueCreateCmd.Flags().StringSlice("labels", nil, "Labels (comma-separated)")
 	issueCreateCmd.Flags().String("plan", "", "Plan scope for this issue (empty = shared)")
@@ -178,9 +179,18 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 
 	title, _ := cmd.Flags().GetString("title")
 	description, _ := cmd.Flags().GetString("description")
+	descriptionFile, _ := cmd.Flags().GetString("description-file")
 	priority, _ := cmd.Flags().GetString("priority")
 	labels, _ := cmd.Flags().GetStringSlice("labels")
 	planID, _ := cmd.Flags().GetString("plan")
+	descriptionFile = strings.TrimSpace(descriptionFile)
+	if description == "-" && descriptionFile == "" {
+		descriptionFile = "-"
+	}
+	description, err = resolveTextFlag(description, descriptionFile)
+	if err != nil {
+		return fmt.Errorf("resolving description: %w", err)
+	}
 	planID = strings.TrimSpace(planID)
 	turnFlag, _ := cmd.Flags().GetInt("session")
 	turnID, err := resolveOptionalTurnID(turnFlag)

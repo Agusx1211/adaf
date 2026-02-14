@@ -20,8 +20,19 @@ func runPlanCreate(cmd *cobra.Command, args []string) error {
 	id, _ := cmd.Flags().GetString("id")
 	title, _ := cmd.Flags().GetString("title")
 	description, _ := cmd.Flags().GetString("description")
+	descriptionFile, _ := cmd.Flags().GetString("description-file")
 	filePath, _ := cmd.Flags().GetString("file")
 	id = strings.TrimSpace(id)
+	descriptionFile = strings.TrimSpace(descriptionFile)
+	descriptionExplicit := cmd.Flags().Changed("description") || descriptionFile != ""
+	if description == "-" && descriptionFile == "" {
+		descriptionFile = "-"
+		descriptionExplicit = true
+	}
+	description, err = resolveTextFlag(description, descriptionFile)
+	if err != nil {
+		return fmt.Errorf("resolving description: %w", err)
+	}
 
 	if err := validatePlanID(id); err != nil {
 		return err
@@ -46,7 +57,7 @@ func runPlanCreate(cmd *cobra.Command, args []string) error {
 		if strings.TrimSpace(title) != "" {
 			plan.Title = strings.TrimSpace(title)
 		}
-		if description != "" {
+		if descriptionExplicit {
 			plan.Description = description
 		}
 		if plan.Status == "" {

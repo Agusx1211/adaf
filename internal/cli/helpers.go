@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -36,6 +37,26 @@ func openStoreRequired() (*store.Store, error) {
 		return nil, fmt.Errorf("ensuring project store dirs: %w", err)
 	}
 	return s, nil
+}
+
+// resolveTextFlag reads text from an inline flag value or from a file/stdin path.
+// If filePath is non-empty, it takes precedence over flagValue.
+func resolveTextFlag(flagValue, filePath string) (string, error) {
+	if filePath == "" {
+		return flagValue, nil
+	}
+	if filePath == "-" {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("reading stdin: %w", err)
+		}
+		return string(data), nil
+	}
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("reading file %s: %w", filePath, err)
+	}
+	return string(data), nil
 }
 
 // printHeader prints a formatted section header.

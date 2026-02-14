@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/agusx1211/adaf/internal/store"
@@ -66,6 +65,7 @@ func init() {
 
 	docCreateCmd.Flags().String("title", "", "Document title (required)")
 	docCreateCmd.Flags().String("file", "", "Read content from file")
+	docCreateCmd.Flags().String("content-file", "", "Read content from file (use '-' for stdin)")
 	docCreateCmd.Flags().String("content", "", "Document content (inline)")
 	docCreateCmd.Flags().String("id", "", "Custom document ID (optional, auto-generated if not set)")
 	docCreateCmd.Flags().String("plan", "", "Plan scope for this doc (empty = shared)")
@@ -73,6 +73,7 @@ func init() {
 
 	docUpdateCmd.Flags().String("title", "", "New title")
 	docUpdateCmd.Flags().String("file", "", "Read new content from file")
+	docUpdateCmd.Flags().String("content-file", "", "Read new content from file (use '-' for stdin)")
 	docUpdateCmd.Flags().String("content", "", "New content (inline)")
 	docUpdateCmd.Flags().String("plan", "", "Move doc to a plan scope (empty = shared)")
 
@@ -194,6 +195,7 @@ func runDocCreate(cmd *cobra.Command, args []string) error {
 
 	title, _ := cmd.Flags().GetString("title")
 	file, _ := cmd.Flags().GetString("file")
+	contentFile, _ := cmd.Flags().GetString("content-file")
 	content, _ := cmd.Flags().GetString("content")
 	id, _ := cmd.Flags().GetString("id")
 	planID, _ := cmd.Flags().GetString("plan")
@@ -211,17 +213,20 @@ func runDocCreate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get content from file or flag
-	if file != "" {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			return fmt.Errorf("reading file %s: %w", file, err)
-		}
-		content = string(data)
+	resolvedContentFile := strings.TrimSpace(contentFile)
+	if resolvedContentFile == "" {
+		resolvedContentFile = strings.TrimSpace(file)
+	}
+	if content == "-" && resolvedContentFile == "" {
+		resolvedContentFile = "-"
+	}
+	content, err = resolveTextFlag(content, resolvedContentFile)
+	if err != nil {
+		return fmt.Errorf("resolving content: %w", err)
 	}
 
 	if content == "" {
-		return fmt.Errorf("provide content via --file or --content flag")
+		return fmt.Errorf("provide content via --content/--content-file (or legacy --file)")
 	}
 
 	doc := &store.Doc{
@@ -271,17 +276,25 @@ func runDocUpdate(cmd *cobra.Command, args []string) error {
 		changed = true
 	}
 
-	if cmd.Flags().Changed("file") {
-		file, _ := cmd.Flags().GetString("file")
-		data, err := os.ReadFile(file)
-		if err != nil {
-			return fmt.Errorf("reading file %s: %w", file, err)
-		}
-		doc.Content = string(data)
-		changed = true
-	} else if cmd.Flags().Changed("content") {
+	contentFileChanged := cmd.Flags().Changed("content-file")
+	legacyFileChanged := cmd.Flags().Changed("file")
+	contentChanged := cmd.Flags().Changed("content")
+	if contentFileChanged || legacyFileChanged || contentChanged {
 		content, _ := cmd.Flags().GetString("content")
-		doc.Content = content
+		file, _ := cmd.Flags().GetString("file")
+		contentFile, _ := cmd.Flags().GetString("content-file")
+		resolvedContentFile := strings.TrimSpace(contentFile)
+		if resolvedContentFile == "" && legacyFileChanged {
+			resolvedContentFile = strings.TrimSpace(file)
+		}
+		if content == "-" && resolvedContentFile == "" {
+			resolvedContentFile = "-"
+		}
+		resolvedContent, err := resolveTextFlag(content, resolvedContentFile)
+		if err != nil {
+			return fmt.Errorf("resolving content: %w", err)
+		}
+		doc.Content = resolvedContent
 		changed = true
 	}
 

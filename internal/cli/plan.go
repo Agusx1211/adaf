@@ -132,6 +132,7 @@ func init() {
 	planCreateCmd.Flags().String("id", "", "Plan ID (required)")
 	planCreateCmd.Flags().String("title", "", "Plan title (required unless --file contains title)")
 	planCreateCmd.Flags().String("description", "", "Plan description")
+	planCreateCmd.Flags().String("description-file", "", "Read description from file (use '-' for stdin)")
 	planCreateCmd.Flags().String("file", "", "Load additional plan fields (phases, etc) from JSON file")
 	_ = planCreateCmd.MarkFlagRequired("id")
 
