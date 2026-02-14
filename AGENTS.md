@@ -16,6 +16,7 @@ internal/
   cli/                 Cobra commands (~25 subcommands)
   config/              Global user config (~/.adaf/config.json)
   detect/              PATH scanning, version probing, dynamic model discovery
+  events/              Shared event protocol (agent, loop, spawn events)
   loop/                Single-agent loop controller (turn management, recording, callbacks)
   looprun/             Multi-step loop runtime
   orchestrator/        Sub-agent spawning with worktree isolation and concurrency limits
@@ -25,12 +26,11 @@ internal/
   session/             Detachable session management
   store/               File-based project store (.adaf/)
   stream/              NDJSON stream parsing and terminal display
-  tui/                 Interactive Bubble Tea TUI
   worktree/            Git worktree lifecycle
 pkg/protocol/          Agent instruction protocol (system prompt generation)
 ```
 
-Key data flow: **CLI command -> Loop -> Agent.Run() -> child process (exec) -> stream parser -> recorder/TUI**
+Key data flow: **CLI command -> Loop -> Agent.Run() -> child process (exec) -> stream parser -> recorder/event sink**
 
 All agent integrations are CLI wrappers via `os/exec`. There are zero Go library dependencies on any agent SDK.
 
@@ -88,13 +88,6 @@ The `references/` directory is git-ignored. Never commit files from it.
 - The `agent` package owns the `Agent` interface, `Config`, `Result`, and the global registry.
 - The `stream` package handles parsing and display independently of which agent produced the output.
 
-### TUI First-Class
-
-- The TUI (`internal/tui/`) is a first-class user surface, not an optional wrapper.
-- Any user-facing feature added to CLI/config must be represented in the TUI flow unless explicitly scoped out by the user.
-- Do not ship CLI-only feature changes that leave TUI unable to configure or operate the same capability.
-- When changing loop/delegation/sub-agent behavior, update both runtime behavior and TUI editing/visibility paths together.
-
 ## Agent Integration Patterns
 
 When adding or modifying an agent integration, follow these patterns from the existing implementations:
@@ -117,7 +110,7 @@ type Agent interface {
 4. For agents that spawn child processes (codex, gemini): set `cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}` and a `cmd.Cancel` that kills the process group.
 5. Record metadata via `recorder.RecordMeta()`.
 6. Capture output: either NDJSON stream parsing (claude, gemini) or simple buffer capture (codex, vibe, generic).
-7. Support `cfg.EventSink` for TUI mode when the agent produces stream events.
+7. Support `cfg.EventSink` when the agent produces stream events.
 8. Return `*Result` with exit code, duration, captured output, and stderr.
 
 ### Stream vs. Buffer Agents

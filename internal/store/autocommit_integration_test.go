@@ -28,7 +28,7 @@ func runGitOutputIntegration(dir string, args ...string) ([]byte, error) {
 func TestAutoCommitIntegration(t *testing.T) {
 	t.Run("issue creation triggers auto-commit", func(t *testing.T) {
 		dir := t.TempDir()
-		
+
 		// Initialize a git repo
 		if err := runGitIntegration(dir, "init"); err != nil {
 			t.Fatal("failed to init git repo:", err)
@@ -39,18 +39,18 @@ func TestAutoCommitIntegration(t *testing.T) {
 		if err := runGitIntegration(dir, "config", "user.name", "Test User"); err != nil {
 			t.Fatal("failed to set git name:", err)
 		}
-		
+
 		// Create store
 		s, err := New(dir)
 		if err != nil {
 			t.Fatal("failed to create store:", err)
 		}
-		
+
 		// Initialize project
 		if err := s.Init(ProjectConfig{Name: "test", RepoPath: dir}); err != nil {
 			t.Fatal("failed to init project:", err)
 		}
-		
+
 		// Create an issue
 		issue := &Issue{
 			Title:       "Test Issue",
@@ -58,21 +58,21 @@ func TestAutoCommitIntegration(t *testing.T) {
 			Status:      "open",
 			Priority:    "medium",
 		}
-		
+
 		if err := s.CreateIssue(issue); err != nil {
 			t.Fatal("failed to create issue:", err)
 		}
-		
+
 		// Check that a commit was created
 		output, err := runGitOutputIntegration(dir, "log", "--oneline", "-1")
 		if err != nil {
 			t.Fatal("failed to get git log:", err, string(output))
 		}
-		
+
 		if len(output) == 0 {
 			t.Fatal("no commit was created")
 		}
-		
+
 		// Check commit message contains issue ID and title
 		expectedMsg := "adaf: create issue #" + fmt.Sprintf("%d", issue.ID)
 		if !strings.Contains(string(output), expectedMsg) {
@@ -82,10 +82,10 @@ func TestAutoCommitIntegration(t *testing.T) {
 			t.Errorf("commit message = %q, want to contain %q", string(output), issue.Title)
 		}
 	})
-	
+
 	t.Run("plan creation triggers auto-commit", func(t *testing.T) {
 		dir := t.TempDir()
-		
+
 		// Initialize a git repo
 		if err := runGitIntegration(dir, "init"); err != nil {
 			t.Fatal("failed to init git repo:", err)
@@ -96,18 +96,18 @@ func TestAutoCommitIntegration(t *testing.T) {
 		if err := runGitIntegration(dir, "config", "user.name", "Test User"); err != nil {
 			t.Fatal("failed to set git name:", err)
 		}
-		
+
 		// Create store
 		s, err := New(dir)
 		if err != nil {
 			t.Fatal("failed to create store:", err)
 		}
-		
+
 		// Initialize project
 		if err := s.Init(ProjectConfig{Name: "test", RepoPath: dir}); err != nil {
 			t.Fatal("failed to init project:", err)
 		}
-		
+
 		// Create a plan
 		plan := &Plan{
 			ID:          "test-plan",
@@ -115,31 +115,31 @@ func TestAutoCommitIntegration(t *testing.T) {
 			Description: "This is a test plan",
 			Status:      "active",
 		}
-		
+
 		if err := s.CreatePlan(plan); err != nil {
 			t.Fatal("failed to create plan:", err)
 		}
-		
+
 		// Check that a commit was created
 		output, err := runGitOutputIntegration(dir, "log", "--oneline", "-1")
 		if err != nil {
 			t.Fatal("failed to get git log:", err, string(output))
 		}
-		
+
 		if len(output) == 0 {
 			t.Fatal("no commit was created")
 		}
-		
+
 		// Check commit message
 		expectedMsg := "adaf: create plan test-plan"
 		if !strings.Contains(string(output), expectedMsg) {
 			t.Errorf("commit message = %q, want to contain %q", string(output), expectedMsg)
 		}
 	})
-	
+
 	t.Run("doc creation triggers auto-commit", func(t *testing.T) {
 		dir := t.TempDir()
-		
+
 		// Initialize a git repo
 		if err := runGitIntegration(dir, "init"); err != nil {
 			t.Fatal("failed to init git repo:", err)
@@ -150,39 +150,39 @@ func TestAutoCommitIntegration(t *testing.T) {
 		if err := runGitIntegration(dir, "config", "user.name", "Test User"); err != nil {
 			t.Fatal("failed to set git name:", err)
 		}
-		
+
 		// Create store
 		s, err := New(dir)
 		if err != nil {
 			t.Fatal("failed to create store:", err)
 		}
-		
+
 		// Initialize project
 		if err := s.Init(ProjectConfig{Name: "test", RepoPath: dir}); err != nil {
 			t.Fatal("failed to init project:", err)
 		}
-		
+
 		// Create a doc
 		doc := &Doc{
 			ID:      "test-doc",
 			Title:   "Test Document",
 			Content: "This is test content",
 		}
-		
+
 		if err := s.CreateDoc(doc); err != nil {
 			t.Fatal("failed to create doc:", err)
 		}
-		
+
 		// Check that a commit was created
 		output, err := runGitOutputIntegration(dir, "log", "--oneline", "-1")
 		if err != nil {
 			t.Fatal("failed to get git log:", err, string(output))
 		}
-		
+
 		if len(output) == 0 {
 			t.Fatal("no commit was created")
 		}
-		
+
 		// Check commit message
 		expectedMsg := "adaf: create doc test-doc"
 		if !strings.Contains(string(output), expectedMsg) {

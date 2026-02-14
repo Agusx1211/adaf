@@ -156,7 +156,7 @@ func (s *Store) CreatePlan(plan *Plan) error {
 	if err := s.writeJSON(path, plan); err != nil {
 		return err
 	}
-	
+
 	// Auto-commit the created plan
 	s.AutoCommit([]string{"plans/" + filename}, fmt.Sprintf("adaf: create plan %s", plan.ID))
 	return nil
@@ -199,7 +199,7 @@ func (s *Store) UpdatePlan(plan *Plan) error {
 	if err := s.writeJSON(s.planPath(plan.ID), plan); err != nil {
 		return err
 	}
-	
+
 	// Auto-commit the updated plan
 	s.AutoCommit([]string{"plans/" + filename}, fmt.Sprintf("adaf: update plan %s", plan.ID))
 	return nil

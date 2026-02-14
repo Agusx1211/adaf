@@ -74,7 +74,7 @@ func (s *Store) Init(config ProjectConfig) error {
 	if err := s.writeJSON(filepath.Join(s.root, "project.json"), config); err != nil {
 		return err
 	}
-	
+
 	// Auto-commit the project initialization
 	s.AutoCommit([]string{"project.json"}, "adaf: initialize project")
 	return nil
