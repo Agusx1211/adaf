@@ -3,7 +3,9 @@ package cli
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/agusx1211/adaf/internal/store"
 )
@@ -179,4 +181,80 @@ func firstLine(s string) string {
 		return s[:idx]
 	}
 	return s
+}
+
+func formatTimeAgo(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		days := int(d.Hours()) / 24
+		return fmt.Sprintf("%dd ago", days)
+	}
+}
+
+func formatTokens(n int) string {
+	if n >= 1_000_000 {
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	}
+	if n >= 1_000 {
+		return fmt.Sprintf("%.1fK", float64(n)/1_000)
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+func formatDuration(secs int) string {
+	if secs < 60 {
+		return fmt.Sprintf("%ds", secs)
+	}
+	if secs < 3600 {
+		return fmt.Sprintf("%dm %ds", secs/60, secs%60)
+	}
+	hours := secs / 3600
+	mins := (secs % 3600) / 60
+	return fmt.Sprintf("%dh %dm", hours, mins)
+}
+
+func formatTopTools(tools map[string]int) string {
+	type toolCount struct {
+		name  string
+		count int
+	}
+	var sorted []toolCount
+	for name, count := range tools {
+		sorted = append(sorted, toolCount{name, count})
+	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].count > sorted[j].count })
+
+	var parts []string
+	for i, tc := range sorted {
+		if i >= 5 {
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s(%d)", tc.name, tc.count))
+	}
+	return strings.Join(parts, " ")
+}
+
+func isMarkdownFormat(format string) bool {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "md", "markdown":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTableFormat(format string) bool {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "", "table", "text":
+		return true
+	default:
+		return false
+	}
 }
