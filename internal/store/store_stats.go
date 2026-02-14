@@ -11,7 +11,7 @@ import (
 
 // profileStatsDir returns the directory for profile stats files.
 func (s *Store) profileStatsDir() string {
-	return filepath.Join(s.root, "stats", "profiles")
+	return s.localDir("stats", "profiles")
 }
 
 // profileStatsPath returns the path for a specific profile's stats file.
@@ -80,7 +80,7 @@ func (s *Store) ListProfileStats() ([]ProfileStats, error) {
 
 // loopStatsDir returns the directory for loop stats files.
 func (s *Store) loopStatsDir() string {
-	return filepath.Join(s.root, "stats", "loops")
+	return s.localDir("stats", "loops")
 }
 
 // loopStatsPath returns the path for a specific loop's stats file.

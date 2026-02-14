@@ -559,7 +559,7 @@ func emitSpawnOutput(records []store.SpawnRecord, s *store.Store, offsets map[in
 			continue
 		}
 
-		eventsPath := filepath.Join(s.Root(), "records", fmt.Sprintf("%d", rec.ChildTurnID), "events.jsonl")
+		eventsPath := filepath.Join(s.Root(), "local", "records", fmt.Sprintf("%d", rec.ChildTurnID), "events.jsonl")
 		f, err := os.Open(eventsPath)
 		if err != nil {
 			continue

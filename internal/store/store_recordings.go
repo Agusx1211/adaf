@@ -9,7 +9,7 @@ import (
 )
 
 func (s *Store) SaveRecording(rec *TurnRecording) error {
-	dir := filepath.Join(s.root, "records", fmt.Sprintf("%d", rec.TurnID))
+	dir := s.localDir("records", fmt.Sprintf("%d", rec.TurnID))
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
@@ -17,7 +17,7 @@ func (s *Store) SaveRecording(rec *TurnRecording) error {
 }
 
 func (s *Store) AppendRecordingEvent(turnID int, event RecordingEvent) error {
-	dir := filepath.Join(s.root, "records", fmt.Sprintf("%d", turnID))
+	dir := s.localDir("records", fmt.Sprintf("%d", turnID))
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
@@ -38,7 +38,7 @@ func (s *Store) AppendRecordingEvent(turnID int, event RecordingEvent) error {
 
 func (s *Store) LoadRecording(turnID int) (*TurnRecording, error) {
 	var rec TurnRecording
-	path := filepath.Join(s.root, "records", fmt.Sprintf("%d", turnID), "recording.json")
+	path := s.localDir("records", fmt.Sprintf("%d", turnID), "recording.json")
 	if err := s.readJSON(path, &rec); err != nil {
 		return nil, err
 	}
@@ -48,5 +48,5 @@ func (s *Store) LoadRecording(turnID int) (*TurnRecording, error) {
 // RecordsDirs returns paths to scan for turn recording directories.
 
 func (s *Store) RecordsDirs() []string {
-	return []string{filepath.Join(s.root, "records")}
+	return []string{s.localDir("records")}
 }

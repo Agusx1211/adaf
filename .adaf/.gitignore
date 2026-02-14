@@ -1,6 +1,9 @@
 # Ignore everything in .adaf by default.
 /*
 
+# Operational data — local only, not committed
+/local/
+
 # Keep this rule file.
 !/.gitignore
 
@@ -9,4 +12,3 @@
 !/issues/
 !/plans/
 !/decisions/
-!/decissions/

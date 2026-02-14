@@ -129,6 +129,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 	gitignoreContent := `# Ignore everything in .adaf by default.
 /*
 
+# Operational data — local only, not committed
+/local/
+
 # Keep this rule file.
 !/.gitignore
 
@@ -136,6 +139,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 !/docs/
 !/issues/
 !/plans/
+!/decisions/
 `
 
 	if err := os.WriteFile(gitignorePath, []byte(gitignoreContent), 0644); err != nil {
@@ -159,10 +163,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  %sCreated:%s\n", colorDim, colorReset)
 	fmt.Printf("    %s/.adaf/project.json\n", absRepo)
 	fmt.Printf("    %s/.adaf/plans/\n", absRepo)
-	fmt.Printf("    %s/.adaf/turns/\n", absRepo)
+	fmt.Printf("    %s/.adaf/local/turns/\n", absRepo)
 	fmt.Printf("    %s/.adaf/issues/\n", absRepo)
 	fmt.Printf("    %s/.adaf/docs/\n", absRepo)
-	fmt.Printf("    %s/.adaf/recordings/\n", absRepo)
+	fmt.Printf("    %s/.adaf/local/records/\n", absRepo)
 	if agentsCfg != nil {
 		detected := 0
 		for _, rec := range agentsCfg.Agents {

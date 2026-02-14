@@ -57,7 +57,7 @@ func runSpawnWatch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("spawn %d has not started a session yet", spawnID)
 	}
 
-	eventsPath := filepath.Join(s.Root(), "records", fmt.Sprintf("%d", rec.ChildTurnID), "events.jsonl")
+	eventsPath := filepath.Join(s.Root(), "local", "records", fmt.Sprintf("%d", rec.ChildTurnID), "events.jsonl")
 
 	var offset int64
 	for {

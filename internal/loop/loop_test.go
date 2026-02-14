@@ -275,7 +275,7 @@ func TestLoopRunReturnsErrorWhenRecordingFlushFails(t *testing.T) {
 	}
 
 	// Block SaveRecording/MkdirAll by replacing the expected turn record path with a file.
-	blockPath := filepath.Join(s.Root(), "records", "1")
+	blockPath := filepath.Join(s.Root(), "local", "records", "1")
 	if err := os.WriteFile(blockPath, []byte("block"), 0644); err != nil {
 		t.Fatalf("WriteFile(%q) error = %v", blockPath, err)
 	}

@@ -11,13 +11,13 @@ import (
 )
 
 func (s *Store) loopRunPath(id int) string {
-	return filepath.Join(s.root, "loopruns", fmt.Sprintf("%d.json", id))
+	return s.localDir("loopruns", fmt.Sprintf("%d.json", id))
 }
 
 // loopRunDir returns the directory for a loop run's associated data.
 
 func (s *Store) loopRunDir(id int) string {
-	return filepath.Join(s.root, "loopruns", fmt.Sprintf("%d", id))
+	return s.localDir("loopruns", fmt.Sprintf("%d", id))
 }
 
 // CreateLoopRun persists a new loop run with an auto-assigned ID.
@@ -26,7 +26,7 @@ func (s *Store) CreateLoopRun(run *LoopRun) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	dir := filepath.Join(s.root, "loopruns")
+	dir := s.localDir("loopruns")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func (s *Store) UpdateLoopRun(run *LoopRun) error {
 // ActiveLoopRun finds the currently running loop run, if any.
 
 func (s *Store) ActiveLoopRun() (*LoopRun, error) {
-	dir := filepath.Join(s.root, "loopruns")
+	dir := s.localDir("loopruns")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -95,7 +95,7 @@ func (s *Store) ActiveLoopRun() (*LoopRun, error) {
 // ListLoopRuns returns all loop runs, sorted by ID.
 
 func (s *Store) ListLoopRuns() ([]LoopRun, error) {
-	dir := filepath.Join(s.root, "loopruns")
+	dir := s.localDir("loopruns")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {

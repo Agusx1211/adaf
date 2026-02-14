@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,29 +26,43 @@ type Store struct {
 	interruptSignals map[int]chan string
 }
 
-var requiredProjectSubdirs = []string{
+var operationalProjectSubdirs = []string{
 	"turns",
 	"records",
-	"plans",
-	"docs",
-	"issues",
 	"spawns",
 	"messages",
 	"loopruns",
 	"stats",
-	"stats/profiles",
-	"stats/loops",
+}
+
+var requiredProjectSubdirs = []string{
+	"local",
+	"local/turns",
+	"local/records",
+	"plans",
+	"docs",
+	"issues",
+	"local/spawns",
+	"local/messages",
+	"local/loopruns",
+	"local/stats",
+	"local/stats/profiles",
+	"local/stats/loops",
 	"waits",
 	"interrupts",
 }
 
 func New(projectDir string) (*Store, error) {
 	root := filepath.Join(projectDir, AdafDir)
-	return &Store{
+	s := &Store{
 		root:             root,
 		waitSignals:      make(map[int]chan struct{}),
 		interruptSignals: make(map[int]chan string),
-	}, nil
+	}
+	if err := s.migrateToLocalScope(); err != nil {
+		return nil, fmt.Errorf("migrating project store layout: %w", err)
+	}
+	return s, nil
 }
 
 func (s *Store) Init(config ProjectConfig) error {
@@ -66,6 +81,13 @@ func (s *Store) Exists() bool {
 
 func (s *Store) Root() string {
 	return s.root
+}
+
+func (s *Store) localDir(parts ...string) string {
+	all := make([]string, 0, len(parts)+2)
+	all = append(all, s.root, "local")
+	all = append(all, parts...)
+	return filepath.Join(all...)
 }
 
 // Project config
@@ -181,6 +203,9 @@ func (s *Store) ensureProjectDirs() ([]string, error) {
 	if err := os.MkdirAll(s.root, 0755); err != nil {
 		return nil, err
 	}
+	if err := s.migrateToLocalScope(); err != nil {
+		return nil, err
+	}
 
 	created := make([]string, 0, len(requiredProjectSubdirs))
 	for _, sub := range requiredProjectSubdirs {
@@ -197,4 +222,44 @@ func (s *Store) ensureProjectDirs() ([]string, error) {
 		}
 	}
 	return created, nil
+}
+
+func (s *Store) migrateToLocalScope() error {
+	if _, err := os.Stat(s.root); err != nil {
+		if os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) {
+			return nil
+		}
+		return err
+	}
+
+	localRoot := s.localDir()
+	if err := os.MkdirAll(localRoot, 0755); err != nil {
+		return err
+	}
+
+	for _, dir := range operationalProjectSubdirs {
+		oldPath := filepath.Join(s.root, dir)
+		newPath := filepath.Join(localRoot, dir)
+
+		if _, err := os.Stat(oldPath); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		if _, err := os.Stat(newPath); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+
+		if err := os.Rename(oldPath, newPath); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+	}
+
+	return nil
 }

@@ -26,6 +26,63 @@ func TestInit(t *testing.T) {
 	}
 }
 
+func TestNewMigratesOperationalDirsToLocalScope(t *testing.T) {
+	repo := t.TempDir()
+	root := filepath.Join(repo, AdafDir)
+
+	oldEvents := filepath.Join(root, "records", "1", "events.jsonl")
+	if err := os.MkdirAll(filepath.Dir(oldEvents), 0755); err != nil {
+		t.Fatalf("MkdirAll(old records) error = %v", err)
+	}
+	if err := os.WriteFile(oldEvents, []byte("{\"type\":\"stdout\",\"data\":\"hello\"}\n"), 0644); err != nil {
+		t.Fatalf("WriteFile(old events) error = %v", err)
+	}
+
+	oldTurn := filepath.Join(root, "turns", "1.json")
+	if err := os.MkdirAll(filepath.Dir(oldTurn), 0755); err != nil {
+		t.Fatalf("MkdirAll(old turns) error = %v", err)
+	}
+	if err := os.WriteFile(oldTurn, []byte("{}"), 0644); err != nil {
+		t.Fatalf("WriteFile(old turn) error = %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(root, "stats", "loops"), 0755); err != nil {
+		t.Fatalf("MkdirAll(old stats) error = %v", err)
+	}
+
+	s, err := New(repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	newEvents := filepath.Join(s.Root(), "local", "records", "1", "events.jsonl")
+	if _, err := os.Stat(newEvents); err != nil {
+		t.Fatalf("expected migrated events file at %q, stat err=%v", newEvents, err)
+	}
+
+	newTurn := filepath.Join(s.Root(), "local", "turns", "1.json")
+	if _, err := os.Stat(newTurn); err != nil {
+		t.Fatalf("expected migrated turn file at %q, stat err=%v", newTurn, err)
+	}
+
+	oldRecordsDir := filepath.Join(s.Root(), "records")
+	if _, err := os.Stat(oldRecordsDir); !os.IsNotExist(err) {
+		t.Fatalf("expected old records dir to be absent after migration, stat err=%v", err)
+	}
+
+	oldTurnsDir := filepath.Join(s.Root(), "turns")
+	if _, err := os.Stat(oldTurnsDir); !os.IsNotExist(err) {
+		t.Fatalf("expected old turns dir to be absent after migration, stat err=%v", err)
+	}
+
+	if err := s.migrateToLocalScope(); err != nil {
+		t.Fatalf("second migrateToLocalScope() error = %v", err)
+	}
+	if _, err := os.Stat(newEvents); err != nil {
+		t.Fatalf("expected migrated events file to remain after second migration, stat err=%v", err)
+	}
+}
+
 func TestInitDoesNotCreateRetiredDirectories(t *testing.T) {
 	dir := t.TempDir()
 	s, err := New(dir)

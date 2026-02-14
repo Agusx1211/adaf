@@ -14,7 +14,7 @@ func (s *Store) ListSpawns() ([]SpawnRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	dir := filepath.Join(s.root, "spawns")
+	dir := s.localDir("spawns")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -44,7 +44,7 @@ func (s *Store) CreateSpawn(rec *SpawnRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	dir := filepath.Join(s.root, "spawns")
+	dir := s.localDir("spawns")
 	os.MkdirAll(dir, 0755)
 	rec.ID = s.nextID(dir)
 	rec.StartedAt = time.Now().UTC()
@@ -58,7 +58,7 @@ func (s *Store) CreateSpawn(rec *SpawnRecord) error {
 
 func (s *Store) GetSpawn(id int) (*SpawnRecord, error) {
 	var rec SpawnRecord
-	if err := s.readJSONLocked(filepath.Join(s.root, "spawns", fmt.Sprintf("%d.json", id)), &rec); err != nil {
+	if err := s.readJSONLocked(s.localDir("spawns", fmt.Sprintf("%d.json", id)), &rec); err != nil {
 		return nil, err
 	}
 	return &rec, nil
@@ -67,7 +67,7 @@ func (s *Store) GetSpawn(id int) (*SpawnRecord, error) {
 // UpdateSpawn persists changes to a spawn record.
 
 func (s *Store) UpdateSpawn(rec *SpawnRecord) error {
-	return s.writeJSONLocked(filepath.Join(s.root, "spawns", fmt.Sprintf("%d.json", rec.ID)), rec)
+	return s.writeJSONLocked(s.localDir("spawns", fmt.Sprintf("%d.json", rec.ID)), rec)
 }
 
 // SpawnsByParent returns spawn records created by a given parent turn.
@@ -91,7 +91,7 @@ func (s *Store) SpawnsByParent(parentTurnID int) ([]SpawnRecord, error) {
 // messagesDir returns the directory for messages of a given spawn.
 
 func (s *Store) messagesDir(spawnID int) string {
-	return filepath.Join(s.root, "messages", fmt.Sprintf("%d", spawnID))
+	return s.localDir("messages", fmt.Sprintf("%d", spawnID))
 }
 
 // CreateMessage persists a new message with an auto-assigned ID.

@@ -21,7 +21,7 @@ func TestRunInitRepairsExistingProject(t *testing.T) {
 		t.Fatalf("store.Init() error = %v", err)
 	}
 
-	missingDir := filepath.Join(s.Root(), "stats", "loops")
+	missingDir := filepath.Join(s.Root(), "local", "stats", "loops")
 	if err := os.RemoveAll(missingDir); err != nil {
 		t.Fatalf("RemoveAll(%q) error = %v", missingDir, err)
 	}

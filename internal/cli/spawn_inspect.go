@@ -91,7 +91,7 @@ func runSpawnInspect(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	eventsPath := filepath.Join(s.Root(), "records", fmt.Sprintf("%d", rec.ChildTurnID), "events.jsonl")
+	eventsPath := filepath.Join(s.Root(), "local", "records", fmt.Sprintf("%d", rec.ChildTurnID), "events.jsonl")
 	data, err := os.ReadFile(eventsPath)
 	if err != nil {
 		if os.IsNotExist(err) {

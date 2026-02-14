@@ -11,7 +11,7 @@ import (
 )
 
 func (s *Store) turnsDir() string {
-	return filepath.Join(s.root, "turns")
+	return s.localDir("turns")
 }
 
 func (s *Store) ListTurns() ([]Turn, error) {
