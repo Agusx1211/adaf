@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agusx1211/adaf/internal/runtui"
+	"github.com/agusx1211/adaf/internal/events"
 )
 
 func TestEmitEventDoesNotBlockWhenChannelIsFull(t *testing.T) {
@@ -15,7 +15,7 @@ func TestEmitEventDoesNotBlockWhenChannelIsFull(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		o.emitEvent("agent_finished", runtui.AgentFinishedMsg{SessionID: -1})
+		o.emitEvent("agent_finished", events.AgentFinishedMsg{SessionID: -1})
 		close(done)
 	}()
 
@@ -32,7 +32,7 @@ func TestEmitEventHandlesClosedChannelWithoutPanic(t *testing.T) {
 	o.SetEventCh(ch)
 	close(ch)
 
-	if sent := o.emitEvent("agent_finished", runtui.AgentFinishedMsg{SessionID: -1}); sent {
+	if sent := o.emitEvent("agent_finished", events.AgentFinishedMsg{SessionID: -1}); sent {
 		t.Fatalf("emitEvent on closed channel returned true, want false")
 	}
 

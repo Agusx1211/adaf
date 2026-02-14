@@ -8,7 +8,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/agusx1211/adaf/internal/runtui"
+	"github.com/agusx1211/adaf/internal/events"
 	"github.com/agusx1211/adaf/internal/session"
 )
 
@@ -80,7 +80,7 @@ func (srv *Server) handleSessionWebSocket(w http.ResponseWriter, r *http.Request
 
 func toWSEnvelope(event any) wsEnvelope {
 	switch ev := event.(type) {
-	case runtui.SessionSnapshotMsg:
+	case events.SessionSnapshotMsg:
 		msg := session.WireSnapshot{
 			Loop: session.WireSnapshotLoop{
 				RunID:      ev.Loop.RunID,
@@ -127,7 +127,7 @@ func toWSEnvelope(event any) wsEnvelope {
 		}
 		return wsEnvelope{Type: session.MsgSnapshot, Data: msg}
 
-	case runtui.AgentStartedMsg:
+	case events.AgentStartedMsg:
 		return wsEnvelope{Type: session.MsgStarted, Data: session.WireStarted{
 			SessionID: ev.SessionID,
 			TurnHexID: ev.TurnHexID,
@@ -135,7 +135,7 @@ func toWSEnvelope(event any) wsEnvelope {
 			RunHexID:  ev.RunHexID,
 		}}
 
-	case runtui.AgentPromptMsg:
+	case events.AgentPromptMsg:
 		return wsEnvelope{Type: session.MsgPrompt, Data: session.WirePrompt{
 			SessionID:      ev.SessionID,
 			TurnHexID:      ev.TurnHexID,
@@ -145,7 +145,7 @@ func toWSEnvelope(event any) wsEnvelope {
 			OriginalLength: ev.OriginalLength,
 		}}
 
-	case runtui.AgentEventMsg:
+	case events.AgentEventMsg:
 		eventData, _ := json.Marshal(ev.Event)
 		wireEvent := session.WireEvent{Event: json.RawMessage(eventData)}
 		if len(ev.Raw) > 0 {
@@ -153,13 +153,13 @@ func toWSEnvelope(event any) wsEnvelope {
 		}
 		return wsEnvelope{Type: session.MsgEvent, Data: wireEvent}
 
-	case runtui.AgentRawOutputMsg:
+	case events.AgentRawOutputMsg:
 		return wsEnvelope{Type: session.MsgRaw, Data: session.WireRaw{
 			Data:      ev.Data,
 			SessionID: ev.SessionID,
 		}}
 
-	case runtui.AgentFinishedMsg:
+	case events.AgentFinishedMsg:
 		payload := session.WireFinished{
 			SessionID:     ev.SessionID,
 			TurnHexID:     ev.TurnHexID,
@@ -174,7 +174,7 @@ func toWSEnvelope(event any) wsEnvelope {
 		}
 		return wsEnvelope{Type: session.MsgFinished, Data: payload}
 
-	case runtui.SpawnStatusMsg:
+	case events.SpawnStatusMsg:
 		spawns := make([]session.WireSpawnInfo, 0, len(ev.Spawns))
 		for i := range ev.Spawns {
 			spawns = append(spawns, session.WireSpawnInfo{
@@ -190,7 +190,7 @@ func toWSEnvelope(event any) wsEnvelope {
 		}
 		return wsEnvelope{Type: session.MsgSpawn, Data: session.WireSpawn{Spawns: spawns}}
 
-	case runtui.LoopStepStartMsg:
+	case events.LoopStepStartMsg:
 		return wsEnvelope{Type: session.MsgLoopStepStart, Data: session.WireLoopStepStart{
 			RunID:      ev.RunID,
 			RunHexID:   ev.RunHexID,
@@ -202,7 +202,7 @@ func toWSEnvelope(event any) wsEnvelope {
 			TotalSteps: ev.TotalSteps,
 		}}
 
-	case runtui.LoopStepEndMsg:
+	case events.LoopStepEndMsg:
 		return wsEnvelope{Type: session.MsgLoopStepEnd, Data: session.WireLoopStepEnd{
 			RunID:      ev.RunID,
 			RunHexID:   ev.RunHexID,
@@ -213,7 +213,7 @@ func toWSEnvelope(event any) wsEnvelope {
 			TotalSteps: ev.TotalSteps,
 		}}
 
-	case runtui.LoopDoneMsg:
+	case events.LoopDoneMsg:
 		payload := session.WireLoopDone{
 			RunID:    ev.RunID,
 			RunHexID: ev.RunHexID,
@@ -224,7 +224,7 @@ func toWSEnvelope(event any) wsEnvelope {
 		}
 		return wsEnvelope{Type: session.MsgLoopDone, Data: payload}
 
-	case runtui.AgentLoopDoneMsg:
+	case events.AgentLoopDoneMsg:
 		payload := session.WireDone{}
 		if ev.Err != nil {
 			payload.Error = ev.Err.Error()

@@ -22,9 +22,9 @@ import (
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/debug"
+	"github.com/agusx1211/adaf/internal/events"
 	"github.com/agusx1211/adaf/internal/looprun"
 	"github.com/agusx1211/adaf/internal/orchestrator"
-	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/store"
 	"github.com/agusx1211/adaf/internal/stream"
 )
@@ -1217,14 +1217,14 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 		totalSteps := len(loopDef.Steps)
 		for msg := range eventCh {
 			switch ev := msg.(type) {
-			case runtui.AgentStartedMsg:
+			case events.AgentStartedMsg:
 				b.broadcastTyped(MsgStarted, WireStarted{
 					SessionID: ev.SessionID,
 					TurnHexID: ev.TurnHexID,
 					StepHexID: ev.StepHexID,
 					RunHexID:  ev.RunHexID,
 				})
-			case runtui.AgentPromptMsg:
+			case events.AgentPromptMsg:
 				b.broadcastTyped(MsgPrompt, WirePrompt{
 					SessionID:      ev.SessionID,
 					TurnHexID:      ev.TurnHexID,
@@ -1233,7 +1233,7 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 					Truncated:      ev.Truncated,
 					OriginalLength: ev.OriginalLength,
 				})
-			case runtui.AgentFinishedMsg:
+			case events.AgentFinishedMsg:
 				wf := WireFinished{SessionID: ev.SessionID, TurnHexID: ev.TurnHexID}
 				wf.WaitForSpawns = ev.WaitForSpawns
 				if ev.Result != nil {
@@ -1244,9 +1244,9 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 					wf.Error = ev.Err.Error()
 				}
 				b.broadcastTyped(MsgFinished, wf)
-			case runtui.AgentRawOutputMsg:
+			case events.AgentRawOutputMsg:
 				b.broadcastTyped(MsgRaw, WireRaw{Data: ev.Data, SessionID: ev.SessionID})
-			case runtui.AgentEventMsg:
+			case events.AgentEventMsg:
 				eventJSON, err := json.Marshal(ev.Event)
 				if err != nil {
 					continue
@@ -1254,7 +1254,7 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 				b.broadcastTypedWithUpdate(MsgEvent, WireEvent{Event: eventJSON, Raw: ev.Raw}, snapshotUpdate{
 					model: ev.Event.Model,
 				})
-			case runtui.SpawnStatusMsg:
+			case events.SpawnStatusMsg:
 				spawns := make([]WireSpawnInfo, len(ev.Spawns))
 				for i, sp := range ev.Spawns {
 					spawns[i] = WireSpawnInfo{
@@ -1269,7 +1269,7 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 					}
 				}
 				b.broadcastTyped(MsgSpawn, WireSpawn{Spawns: spawns})
-			case runtui.LoopStepStartMsg:
+			case events.LoopStepStartMsg:
 				if ev.RunID > 0 {
 					loopRunID = ev.RunID
 				}
@@ -1286,7 +1286,7 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 					Turns:      ev.Turns,
 					TotalSteps: totalSteps,
 				})
-			case runtui.LoopStepEndMsg:
+			case events.LoopStepEndMsg:
 				if ev.RunID > 0 {
 					loopRunID = ev.RunID
 				}

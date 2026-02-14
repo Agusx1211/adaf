@@ -14,7 +14,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/agusx1211/adaf/internal/runtui"
+	"github.com/agusx1211/adaf/internal/events"
 )
 
 // wsTestClientServer creates a test WebSocket server that sends the given
@@ -148,25 +148,25 @@ func TestStreamEventsForwardsLoopMessages(t *testing.T) {
 		t.Fatalf("events = %d, want 3", len(got))
 	}
 
-	start, ok := got[0].(runtui.LoopStepStartMsg)
+	start, ok := got[0].(events.LoopStepStartMsg)
 	if !ok {
-		t.Fatalf("event[0] type = %T, want runtui.LoopStepStartMsg", got[0])
+		t.Fatalf("event[0] type = %T, want events.LoopStepStartMsg", got[0])
 	}
 	if start.RunID != 12 || start.Cycle != 1 || start.StepIndex != 2 || start.Profile != "reviewer" || start.Turns != 3 || start.TotalSteps != 5 {
 		t.Fatalf("unexpected LoopStepStartMsg: %+v", start)
 	}
 
-	end, ok := got[1].(runtui.LoopStepEndMsg)
+	end, ok := got[1].(events.LoopStepEndMsg)
 	if !ok {
-		t.Fatalf("event[1] type = %T, want runtui.LoopStepEndMsg", got[1])
+		t.Fatalf("event[1] type = %T, want events.LoopStepEndMsg", got[1])
 	}
 	if end.RunID != 12 || end.Cycle != 1 || end.StepIndex != 2 || end.Profile != "reviewer" || end.TotalSteps != 5 {
 		t.Fatalf("unexpected LoopStepEndMsg: %+v", end)
 	}
 
-	done, ok := got[2].(runtui.LoopDoneMsg)
+	done, ok := got[2].(events.LoopDoneMsg)
 	if !ok {
-		t.Fatalf("event[2] type = %T, want runtui.LoopDoneMsg", got[2])
+		t.Fatalf("event[2] type = %T, want events.LoopDoneMsg", got[2])
 	}
 	if done.RunID != 12 || done.Reason != "stopped" || done.Err != nil {
 		t.Fatalf("unexpected LoopDoneMsg: %+v", done)
@@ -200,10 +200,10 @@ func TestStreamEventsForwardsPromptMessages(t *testing.T) {
 	if err := <-errCh; err != nil {
 		t.Fatalf("StreamEvents() error = %v", err)
 	}
-	var msg runtui.AgentPromptMsg
+	var msg events.AgentPromptMsg
 	found := false
 	for _, ev := range got {
-		pm, ok := ev.(runtui.AgentPromptMsg)
+		pm, ok := ev.(events.AgentPromptMsg)
 		if !ok {
 			continue
 		}
@@ -212,7 +212,7 @@ func TestStreamEventsForwardsPromptMessages(t *testing.T) {
 		break
 	}
 	if !found {
-		t.Fatalf("missing runtui.AgentPromptMsg in events: %#v", got)
+		t.Fatalf("missing events.AgentPromptMsg in events: %#v", got)
 	}
 	if msg.SessionID != 4 || msg.TurnHexID != "abc123" || msg.Prompt != "hello prompt" {
 		t.Fatalf("unexpected AgentPromptMsg: %+v", msg)
@@ -291,9 +291,9 @@ func TestStreamEventsAppliesSnapshotAndRecentMessages(t *testing.T) {
 		t.Fatalf("events = %d, want 5", len(got))
 	}
 
-	snap, ok := got[0].(runtui.SessionSnapshotMsg)
+	snap, ok := got[0].(events.SessionSnapshotMsg)
 	if !ok {
-		t.Fatalf("event[0] type = %T, want runtui.SessionSnapshotMsg", got[0])
+		t.Fatalf("event[0] type = %T, want events.SessionSnapshotMsg", got[0])
 	}
 	if snap.Loop.RunID != 3 || snap.Loop.StepIndex != 2 || snap.Loop.TotalSteps != 5 {
 		t.Fatalf("unexpected loop snapshot: %+v", snap.Loop)
@@ -311,25 +311,25 @@ func TestStreamEventsAppliesSnapshotAndRecentMessages(t *testing.T) {
 		t.Fatalf("unexpected spawns snapshot: %+v", snap.Spawns)
 	}
 
-	prompt, ok := got[1].(runtui.AgentPromptMsg)
+	prompt, ok := got[1].(events.AgentPromptMsg)
 	if !ok {
-		t.Fatalf("event[1] type = %T, want runtui.AgentPromptMsg", got[1])
+		t.Fatalf("event[1] type = %T, want events.AgentPromptMsg", got[1])
 	}
 	if prompt.Prompt != "snapshot prompt" || prompt.SessionID != 7 {
 		t.Fatalf("unexpected AgentPromptMsg: %+v", prompt)
 	}
 
-	raw, ok := got[2].(runtui.AgentRawOutputMsg)
+	raw, ok := got[2].(events.AgentRawOutputMsg)
 	if !ok {
-		t.Fatalf("event[2] type = %T, want runtui.AgentRawOutputMsg", got[2])
+		t.Fatalf("event[2] type = %T, want events.AgentRawOutputMsg", got[2])
 	}
 	if raw.Data != "snapshot output" || raw.SessionID != 7 {
 		t.Fatalf("unexpected AgentRawOutputMsg: %+v", raw)
 	}
 
-	liveRaw, ok := got[3].(runtui.AgentRawOutputMsg)
+	liveRaw, ok := got[3].(events.AgentRawOutputMsg)
 	if !ok {
-		t.Fatalf("event[3] type = %T, want runtui.AgentRawOutputMsg", got[3])
+		t.Fatalf("event[3] type = %T, want events.AgentRawOutputMsg", got[3])
 	}
 	if liveRaw.Data != "live output" || liveRaw.SessionID != 7 {
 		t.Fatalf("unexpected live AgentRawOutputMsg: %+v", liveRaw)
@@ -338,8 +338,8 @@ func TestStreamEventsAppliesSnapshotAndRecentMessages(t *testing.T) {
 		t.Fatalf("isLive callback count = %d, want 1", liveCalls.Load())
 	}
 
-	if _, ok := got[4].(runtui.AgentLoopDoneMsg); !ok {
-		t.Fatalf("event[4] type = %T, want runtui.AgentLoopDoneMsg", got[4])
+	if _, ok := got[4].(events.AgentLoopDoneMsg); !ok {
+		t.Fatalf("event[4] type = %T, want events.AgentLoopDoneMsg", got[4])
 	}
 }
 
@@ -371,20 +371,20 @@ func TestStreamEventsIgnoresUnsupportedSnapshotRecentTypes(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("events = %d, want 3", len(got))
 	}
-	if _, ok := got[0].(runtui.SessionSnapshotMsg); !ok {
-		t.Fatalf("event[0] type = %T, want runtui.SessionSnapshotMsg", got[0])
+	if _, ok := got[0].(events.SessionSnapshotMsg); !ok {
+		t.Fatalf("event[0] type = %T, want events.SessionSnapshotMsg", got[0])
 	}
-	if raw, ok := got[1].(runtui.AgentRawOutputMsg); !ok {
-		t.Fatalf("event[1] type = %T, want runtui.AgentRawOutputMsg", got[1])
+	if raw, ok := got[1].(events.AgentRawOutputMsg); !ok {
+		t.Fatalf("event[1] type = %T, want events.AgentRawOutputMsg", got[1])
 	} else if raw.Data != "snapshot output" {
 		t.Fatalf("event[1] raw data = %q, want %q", raw.Data, "snapshot output")
 	}
-	if _, ok := got[2].(runtui.AgentLoopDoneMsg); !ok {
-		t.Fatalf("event[2] type = %T, want runtui.AgentLoopDoneMsg", got[2])
+	if _, ok := got[2].(events.AgentLoopDoneMsg); !ok {
+		t.Fatalf("event[2] type = %T, want events.AgentLoopDoneMsg", got[2])
 	}
 	for i, ev := range got {
-		if _, ok := ev.(runtui.LoopDoneMsg); ok {
-			t.Fatalf("event[%d] unexpectedly contains runtui.LoopDoneMsg from snapshot recent", i)
+		if _, ok := ev.(events.LoopDoneMsg); ok {
+			t.Fatalf("event[%d] unexpectedly contains events.LoopDoneMsg from snapshot recent", i)
 		}
 	}
 }
@@ -488,7 +488,7 @@ loop:
 			if !ok {
 				break loop
 			}
-			if msg, ok := ev.(runtui.AgentRawOutputMsg); ok {
+			if msg, ok := ev.(events.AgentRawOutputMsg); ok {
 				got = append(got, msg.Data)
 			}
 		case err := <-errCh:

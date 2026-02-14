@@ -9,7 +9,6 @@ import (
 
 	"github.com/agusx1211/adaf/internal/buildinfo"
 	"github.com/agusx1211/adaf/internal/debug"
-	"github.com/agusx1211/adaf/internal/tui"
 )
 
 const (
@@ -57,7 +56,7 @@ var rootCmd = &cobra.Command{
   adaf plan switch core           Select active plan
   adaf run --agent claude         Run an agent session
   adaf status                     Show project overview
-  adaf                            Launch interactive TUI
+  adaf                            Show project status
 
 ` + colorBold + `Supported Agents:` + colorReset + `
   claude, codex, vibe, opencode, gemini, generic
@@ -81,12 +80,15 @@ var rootCmd = &cobra.Command{
 			fmt.Println("Run " + styleBoldWhite + "adaf init" + colorReset + " to create one.")
 			return nil
 		}
-		// If running in a terminal, launch the unified TUI.
-		if isatty.IsTerminal(os.Stdout.Fd()) {
-			return tui.RunApp(s)
+		// Show brief status and suggest web dashboard.
+		if err := runStatusBrief(s); err != nil {
+			return err
 		}
-		// Non-interactive: show brief status.
-		return runStatusBrief(s)
+		if isatty.IsTerminal(os.Stdout.Fd()) {
+			fmt.Println()
+			fmt.Printf("  %sRun %sadaf web%s to open the dashboard.%s\n", colorDim, styleBoldWhite, colorDim, colorReset)
+		}
+		return nil
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,

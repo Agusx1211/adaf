@@ -16,9 +16,9 @@ import (
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
+	"github.com/agusx1211/adaf/internal/events"
 	"github.com/agusx1211/adaf/internal/looprun"
 	"github.com/agusx1211/adaf/internal/pushover"
-	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/session"
 	"github.com/agusx1211/adaf/internal/store"
 	"github.com/agusx1211/adaf/internal/stream"
@@ -309,13 +309,13 @@ func runLoopForeground(parentCtx context.Context, s *store.Store, globalCfg *con
 
 	for msg := range eventCh {
 		switch ev := msg.(type) {
-		case runtui.AgentRawOutputMsg:
+		case events.AgentRawOutputMsg:
 			if ev.Data != "" {
 				fmt.Print(ev.Data)
 			}
-		case runtui.AgentEventMsg:
+		case events.AgentEventMsg:
 			display.Handle(ev.Event)
-		case runtui.LoopStepStartMsg:
+		case events.LoopStepStartMsg:
 			totalSteps := ev.TotalSteps
 			if totalSteps <= 0 {
 				totalSteps = ev.StepIndex + 1
@@ -336,7 +336,7 @@ func runLoopForeground(parentCtx context.Context, s *store.Store, globalCfg *con
 			}
 			fmt.Printf("  %s[loop]%s cycle=%d step=%d/%d profile=%s turns=%d%s\n",
 				colorDim, colorReset, ev.Cycle+1, ev.StepIndex+1, totalSteps, ev.Profile, ev.Turns, hexInfo)
-		case runtui.LoopStepEndMsg:
+		case events.LoopStepEndMsg:
 			totalSteps := ev.TotalSteps
 			if totalSteps <= 0 {
 				totalSteps = ev.StepIndex + 1
@@ -347,13 +347,13 @@ func runLoopForeground(parentCtx context.Context, s *store.Store, globalCfg *con
 			}
 			fmt.Printf("  %s[loop]%s step=%d/%d profile=%s completed%s\n",
 				colorDim, colorReset, ev.StepIndex+1, totalSteps, ev.Profile, stepHexTag)
-		case runtui.AgentStartedMsg:
+		case events.AgentStartedMsg:
 			hexTag := ""
 			if ev.TurnHexID != "" {
 				hexTag = " [" + ev.TurnHexID + "]"
 			}
 			fmt.Printf("  %s>>> Turn #%d%s starting%s\n", styleBoldGreen, ev.SessionID, hexTag, colorReset)
-		case runtui.AgentFinishedMsg:
+		case events.AgentFinishedMsg:
 			if ev.Result != nil {
 				hexTag := ""
 				if ev.TurnHexID != "" {

@@ -14,8 +14,8 @@ import (
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/debug"
+	"github.com/agusx1211/adaf/internal/events"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
-	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/session"
 	"github.com/agusx1211/adaf/internal/store"
 	"github.com/agusx1211/adaf/internal/stream"
@@ -268,13 +268,13 @@ func streamRunSession(parentCtx context.Context, sessionID int, projectName, age
 				return nil
 			}
 			switch ev := msg.(type) {
-			case runtui.AgentRawOutputMsg:
+			case events.AgentRawOutputMsg:
 				if ev.Data != "" {
 					fmt.Print(ev.Data)
 				}
-			case runtui.AgentEventMsg:
+			case events.AgentEventMsg:
 				display.Handle(ev.Event)
-			case runtui.LoopDoneMsg:
+			case events.LoopDoneMsg:
 				if ev.Err != nil && ev.Reason != "cancelled" {
 					return fmt.Errorf("loop error: %w", ev.Err)
 				}

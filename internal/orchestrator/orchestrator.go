@@ -15,10 +15,10 @@ import (
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/debug"
+	"github.com/agusx1211/adaf/internal/events"
 	"github.com/agusx1211/adaf/internal/guardrail"
 	"github.com/agusx1211/adaf/internal/loop"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
-	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/store"
 	"github.com/agusx1211/adaf/internal/stream"
 	"github.com/agusx1211/adaf/internal/worktree"
@@ -588,15 +588,15 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 				continue
 			}
 			if ev.Text != "" {
-				o.emitEvent("agent_raw_output", runtui.AgentRawOutputMsg{Data: ev.Text, SessionID: -rec.ID})
+				o.emitEvent("agent_raw_output", events.AgentRawOutputMsg{Data: ev.Text, SessionID: -rec.ID})
 				continue
 			}
-			o.emitEvent("agent_event", runtui.AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw})
+			o.emitEvent("agent_event", events.AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw})
 
 			// Guardrail check on parsed events.
 			if monitor != nil {
 				if toolName := monitor.CheckEvent(ev.Parsed); toolName != "" {
-					o.emitEvent("guardrail_violation", runtui.GuardrailViolationMsg{
+					o.emitEvent("guardrail_violation", events.GuardrailViolationMsg{
 						Tool: toolName,
 						Role: effectiveRole,
 					})
@@ -697,7 +697,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 			},
 			OnPrompt: func(turnID int, turnHexID, prompt string, isResume bool) {
 				trimmed, truncated, origLen := truncatePrompt(prompt)
-				o.emitEvent("agent_prompt", runtui.AgentPromptMsg{
+				o.emitEvent("agent_prompt", events.AgentPromptMsg{
 					SessionID:      -rec.ID,
 					TurnHexID:      turnHexID,
 					Prompt:         trimmed,
@@ -707,7 +707,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 				})
 			},
 			OnEnd: func(turnID int, turnHexID string, result *agent.Result) {
-				o.emitEvent("agent_finished", runtui.AgentFinishedMsg{
+				o.emitEvent("agent_finished", events.AgentFinishedMsg{
 					SessionID: -rec.ID,
 					TurnHexID: turnHexID,
 					Result:    result,

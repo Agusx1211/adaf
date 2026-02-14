@@ -13,7 +13,7 @@ import (
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/debug"
-	"github.com/agusx1211/adaf/internal/runtui"
+	"github.com/agusx1211/adaf/internal/events"
 	"github.com/agusx1211/adaf/internal/stream"
 )
 
@@ -133,7 +133,7 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 			if recErr := c.reconnect(); recErr != nil {
 				debug.LogKV("session.client", "reconnection failed", "error", recErr)
 				// Connection closed without a done message — daemon may have died.
-				eventCh <- runtui.AgentLoopDoneMsg{
+				eventCh <- events.AgentLoopDoneMsg{
 					Err: fmt.Errorf("connection to session daemon lost: %w", err),
 				}
 				return nil
@@ -159,8 +159,8 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 			if err != nil {
 				continue
 			}
-			snapshot := runtui.SessionSnapshotMsg{
-				Loop: runtui.SessionLoopSnapshot{
+			snapshot := events.SessionSnapshotMsg{
+				Loop: events.SessionLoopSnapshot{
 					RunID:      snapData.Loop.RunID,
 					RunHexID:   snapData.Loop.RunHexID,
 					StepHexID:  snapData.Loop.StepHexID,
@@ -171,7 +171,7 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 				},
 			}
 			if snapData.Session != nil {
-				snapshot.Session = &runtui.SessionTurnSnapshot{
+				snapshot.Session = &events.SessionTurnSnapshot{
 					SessionID:    snapData.Session.SessionID,
 					TurnHexID:    snapData.Session.TurnHexID,
 					Agent:        snapData.Session.Agent,
@@ -188,9 +188,9 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 				}
 			}
 			if len(snapData.Spawns) > 0 {
-				spawns := make([]runtui.SpawnInfo, len(snapData.Spawns))
+				spawns := make([]events.SpawnInfo, len(snapData.Spawns))
 				for i, s := range snapData.Spawns {
-					spawns[i] = runtui.SpawnInfo{
+					spawns[i] = events.SpawnInfo{
 						ID:            s.ID,
 						ParentTurnID:  s.ParentTurnID,
 						ParentSpawnID: s.ParentSpawnID,
@@ -265,7 +265,7 @@ func (c *Client) forwardEventMsg(eventCh chan<- any, msg *WireMsg, loopDoneSeen 
 		if err != nil {
 			return false
 		}
-		eventCh <- runtui.AgentStartedMsg{
+		eventCh <- events.AgentStartedMsg{
 			SessionID: data.SessionID,
 			TurnHexID: data.TurnHexID,
 			StepHexID: data.StepHexID,
@@ -278,7 +278,7 @@ func (c *Client) forwardEventMsg(eventCh chan<- any, msg *WireMsg, loopDoneSeen 
 		if err != nil {
 			return false
 		}
-		eventCh <- runtui.AgentPromptMsg{
+		eventCh <- events.AgentPromptMsg{
 			SessionID:      data.SessionID,
 			TurnHexID:      data.TurnHexID,
 			Prompt:         data.Prompt,
@@ -297,7 +297,7 @@ func (c *Client) forwardEventMsg(eventCh chan<- any, msg *WireMsg, loopDoneSeen 
 		if err := json.Unmarshal(data.Event, &ev); err != nil {
 			return false
 		}
-		eventCh <- runtui.AgentEventMsg{Event: ev, Raw: data.Raw}
+		eventCh <- events.AgentEventMsg{Event: ev, Raw: data.Raw}
 		return false
 
 	case MsgRaw:
@@ -305,7 +305,7 @@ func (c *Client) forwardEventMsg(eventCh chan<- any, msg *WireMsg, loopDoneSeen 
 		if err != nil {
 			return false
 		}
-		eventCh <- runtui.AgentRawOutputMsg{Data: data.Data, SessionID: data.SessionID}
+		eventCh <- events.AgentRawOutputMsg{Data: data.Data, SessionID: data.SessionID}
 		return false
 
 	case MsgFinished:
@@ -313,7 +313,7 @@ func (c *Client) forwardEventMsg(eventCh chan<- any, msg *WireMsg, loopDoneSeen 
 		if err != nil {
 			return false
 		}
-		finished := runtui.AgentFinishedMsg{
+		finished := events.AgentFinishedMsg{
 			SessionID:     data.SessionID,
 			TurnHexID:     data.TurnHexID,
 			WaitForSpawns: data.WaitForSpawns,
@@ -333,9 +333,9 @@ func (c *Client) forwardEventMsg(eventCh chan<- any, msg *WireMsg, loopDoneSeen 
 		if err != nil {
 			return false
 		}
-		spawns := make([]runtui.SpawnInfo, len(data.Spawns))
+		spawns := make([]events.SpawnInfo, len(data.Spawns))
 		for i, s := range data.Spawns {
-			spawns[i] = runtui.SpawnInfo{
+			spawns[i] = events.SpawnInfo{
 				ID:            s.ID,
 				ParentTurnID:  s.ParentTurnID,
 				ParentSpawnID: s.ParentSpawnID,
@@ -346,7 +346,7 @@ func (c *Client) forwardEventMsg(eventCh chan<- any, msg *WireMsg, loopDoneSeen 
 				Question:      s.Question,
 			}
 		}
-		eventCh <- runtui.SpawnStatusMsg{Spawns: spawns}
+		eventCh <- events.SpawnStatusMsg{Spawns: spawns}
 		return false
 
 	case MsgLoopStepStart:
@@ -354,7 +354,7 @@ func (c *Client) forwardEventMsg(eventCh chan<- any, msg *WireMsg, loopDoneSeen 
 		if err != nil {
 			return false
 		}
-		eventCh <- runtui.LoopStepStartMsg{
+		eventCh <- events.LoopStepStartMsg{
 			RunID:      data.RunID,
 			RunHexID:   data.RunHexID,
 			StepHexID:  data.StepHexID,
@@ -371,7 +371,7 @@ func (c *Client) forwardEventMsg(eventCh chan<- any, msg *WireMsg, loopDoneSeen 
 		if err != nil {
 			return false
 		}
-		eventCh <- runtui.LoopStepEndMsg{
+		eventCh <- events.LoopStepEndMsg{
 			RunID:      data.RunID,
 			RunHexID:   data.RunHexID,
 			StepHexID:  data.StepHexID,
@@ -387,7 +387,7 @@ func (c *Client) forwardEventMsg(eventCh chan<- any, msg *WireMsg, loopDoneSeen 
 		if err != nil {
 			return false
 		}
-		done := runtui.LoopDoneMsg{
+		done := events.LoopDoneMsg{
 			RunID:    data.RunID,
 			RunHexID: data.RunHexID,
 			Reason:   data.Reason,
@@ -405,10 +405,10 @@ func (c *Client) forwardEventMsg(eventCh chan<- any, msg *WireMsg, loopDoneSeen 
 		}
 		data, err := DecodeData[WireDone](msg)
 		if err != nil {
-			eventCh <- runtui.AgentLoopDoneMsg{}
+			eventCh <- events.AgentLoopDoneMsg{}
 			return true
 		}
-		done := runtui.AgentLoopDoneMsg{}
+		done := events.AgentLoopDoneMsg{}
 		if data.Error != "" {
 			done.Err = fmt.Errorf("%s", data.Error)
 		}

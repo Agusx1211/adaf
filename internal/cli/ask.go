@@ -15,8 +15,8 @@ import (
 
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/debug"
+	"github.com/agusx1211/adaf/internal/events"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
-	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/session"
 	"github.com/agusx1211/adaf/internal/store"
 	"github.com/agusx1211/adaf/internal/stream"
@@ -331,18 +331,18 @@ func streamAskSession(parentCtx context.Context, sessionID int, projectName, age
 				return lastOutput.String(), exitCode, nil
 			}
 			switch ev := msg.(type) {
-			case runtui.AgentRawOutputMsg:
+			case events.AgentRawOutputMsg:
 				if ev.Data != "" {
 					fmt.Print(ev.Data)
 					lastOutput.WriteString(ev.Data)
 				}
-			case runtui.AgentEventMsg:
+			case events.AgentEventMsg:
 				display.Handle(ev.Event)
-			case runtui.AgentFinishedMsg:
+			case events.AgentFinishedMsg:
 				if ev.Result != nil && ev.Result.ExitCode != 0 {
 					exitCode = ev.Result.ExitCode
 				}
-			case runtui.LoopDoneMsg:
+			case events.LoopDoneMsg:
 				if ev.Err != nil && ev.Reason != "cancelled" {
 					return lastOutput.String(), 1, fmt.Errorf("agent error: %w", ev.Err)
 				}
