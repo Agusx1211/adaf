@@ -25,7 +25,7 @@
       "id": "p3-multi-project",
       "title": "Web Server: Multi-Project Support",
       "description": "Allow a single web server instance to serve multiple ADAF projects simultaneously. Currently the web server binds to a single store via openStoreRequired() at startup. Changes: (1) New command: 'adaf web --multi' or 'adaf web --projects /path/a,/path/b' that registers multiple project stores. (2) API namespace: prefix all project-specific routes with /api/projects/{project-id}/... (keep backward-compat /api/ as alias for a default project). (3) Frontend project switcher - dropdown or sidebar showing all registered projects, switching context without reloading. (4) Project auto-discovery - optionally scan a parent directory for all subdirectories containing .adaf/project.json. (5) Session listing across projects - unified session view showing which project each session belongs to. (6) Global dashboard - aggregate view across all projects (total active sessions, open issues per project, etc.).",
-      "status": "not_started",
+      "status": "complete",
       "priority": 2,
       "depends_on": [
         "p2-web-ui-overhaul"
@@ -35,7 +35,7 @@
       "id": "p4-daemon-websocket",
       "title": "Daemon Transport: WebSocket Unification",
       "description": "Replace the raw Unix socket protocol between session daemons and clients with HTTP/WebSocket (resolves issues #40 and #41). (1) Session daemon: replace net.Listener + handleClient with http.Server + WebSocket upgrade on the existing Unix socket path. Use nhooyr.io/websocket for proper write buffering, ping/pong keepalive, and graceful close frames. (2) TUI client: replace net.Dial + bufio.Scanner with WebSocket dial over Unix socket. (3) Web server: proxy WebSocket connections to daemon Unix sockets. (4) Eliminate the hand-rolled backpressure policy (enqueue/removeClient) - WebSocket library handles buffering. (5) Add reconnection support with snapshot catchup. (6) Fix the race condition where client is registered before writer startup. This is the most architecturally significant change and touches daemon.go, client.go, attach_cmd.go, and ws_handler.go.",
-      "status": "not_started",
+      "status": "complete",
       "priority": 1
     },
     {
@@ -104,5 +104,5 @@
     }
   ],
   "created": "2026-02-14T11:22:27.60226705Z",
-  "updated": "2026-02-14T12:14:20.295956301Z"
+  "updated": "2026-02-14T13:16:17.331667253Z"
 }
