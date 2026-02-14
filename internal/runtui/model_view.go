@@ -506,114 +506,51 @@ func hierarchyPrefix(depth int) string {
 }
 
 func (m Model) appendAgentsList(lines *[]string, cw int, entries []commandEntry) int {
-	*lines = append(*lines, sectionTitleStyle.Render("Agents"))
-	if len(entries) == 0 {
-		*lines = append(*lines, dimStyle.Render("  no active entries"))
-		return -1
-	}
-	cursorLine := -1
-	selected := m.selectedEntry
-	if selected < 0 {
-		selected = 0
-	}
-	if selected >= len(entries) {
-		selected = len(entries) - 1
-	}
-	for i, entry := range entries {
-		prefix := "  "
-		titleStyle := valueStyle
-		if i == selected {
-			prefix = "> "
-			titleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.ColorTeal)
-		}
-		status := statusStyle(entry.status).Render(entry.status)
-		title := entry.title
-		if entry.depth > 0 {
-			title = hierarchyPrefix(entry.depth) + title
-		}
-		line := fmt.Sprintf("%s%s [%s]", prefix, titleStyle.Render(truncate(title, cw-8)), status)
-		*lines = append(*lines, line)
-		if i == selected {
-			cursorLine = len(*lines) - 1
-		}
-		metaPrefix := "   "
-		if entry.depth > 0 {
-			metaPrefix += strings.Repeat("  ", entry.depth)
-		}
-		maxMetaWidth := cw - len(metaPrefix)
-		if maxMetaWidth < 1 {
-			maxMetaWidth = 1
-		}
-		meta := dimStyle.Render(metaPrefix + truncate(entry.duration+" · "+entry.action, maxMetaWidth))
-		*lines = append(*lines, meta)
-	}
-	return cursorLine
+	return m.appendSelectableList(lines, "Agents", "  no active entries", len(entries), m.selectedEntry,
+		func(i int, prefix string, titleStyle lipgloss.Style) (string, string) {
+			entry := entries[i]
+			status := statusStyle(entry.status).Render(entry.status)
+			title := entry.title
+			if entry.depth > 0 {
+				title = hierarchyPrefix(entry.depth) + title
+			}
+			titleLine := fmt.Sprintf("%s%s [%s]", prefix, titleStyle.Render(truncate(title, cw-8)), status)
+
+			metaPrefix := "   "
+			if entry.depth > 0 {
+				metaPrefix += strings.Repeat("  ", entry.depth)
+			}
+			maxMetaWidth := cw - len(metaPrefix)
+			if maxMetaWidth < 1 {
+				maxMetaWidth = 1
+			}
+			metaLine := dimStyle.Render(metaPrefix + truncate(entry.duration+" · "+entry.action, maxMetaWidth))
+			return titleLine, metaLine
+		})
 }
 
 func (m Model) appendIssuesList(lines *[]string, cw int) int {
-	*lines = append(*lines, sectionTitleStyle.Render("Issues"))
-	if len(m.issues) == 0 {
-		*lines = append(*lines, dimStyle.Render("  no issues recorded"))
-		return -1
-	}
-	cursorLine := -1
-	selected := m.selectedIssue
-	if selected < 0 {
-		selected = 0
-	}
-	if selected >= len(m.issues) {
-		selected = len(m.issues) - 1
-	}
-	for i, issue := range m.issues {
-		prefix := "  "
-		titleStyle := valueStyle
-		if i == selected {
-			prefix = "> "
-			titleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.ColorTeal)
-		}
-		title := fmt.Sprintf("#%d %s", issue.ID, truncate(issue.Title, cw-8))
-		*lines = append(*lines, prefix+titleStyle.Render(title))
-		if i == selected {
-			cursorLine = len(*lines) - 1
-		}
-		meta := fmt.Sprintf("   %s · %s",
-			issuePriorityStyle(issue.Priority).Render(issue.Priority),
-			issueStatusStyle(issue.Status).Render(issue.Status))
-		*lines = append(*lines, truncate(meta, cw))
-	}
-	return cursorLine
+	return m.appendSelectableList(lines, "Issues", "  no issues recorded", len(m.issues), m.selectedIssue,
+		func(i int, prefix string, titleStyle lipgloss.Style) (string, string) {
+			issue := m.issues[i]
+			title := fmt.Sprintf("#%d %s", issue.ID, truncate(issue.Title, cw-8))
+			titleLine := prefix + titleStyle.Render(title)
+			metaLine := fmt.Sprintf("   %s · %s",
+				issuePriorityStyle(issue.Priority).Render(issue.Priority),
+				issueStatusStyle(issue.Status).Render(issue.Status))
+			return titleLine, truncate(metaLine, cw)
+		})
 }
 
 func (m Model) appendDocsList(lines *[]string, cw int) int {
-	*lines = append(*lines, sectionTitleStyle.Render("Docs"))
-	if len(m.docs) == 0 {
-		*lines = append(*lines, dimStyle.Render("  no docs recorded"))
-		return -1
-	}
-	cursorLine := -1
-	selected := m.selectedDoc
-	if selected < 0 {
-		selected = 0
-	}
-	if selected >= len(m.docs) {
-		selected = len(m.docs) - 1
-	}
-	for i, doc := range m.docs {
-		prefix := "  "
-		titleStyle := valueStyle
-		if i == selected {
-			prefix = "> "
-			titleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.ColorTeal)
-		}
-		title := fmt.Sprintf("[%s] %s", doc.ID, truncate(doc.Title, cw-8))
-		*lines = append(*lines, prefix+titleStyle.Render(title))
-		if i == selected {
-			cursorLine = len(*lines) - 1
-		}
-		meta := fmt.Sprintf("   %s · %d chars", formatTimeAgoShort(doc.Updated), len(doc.Content))
-		*lines = append(*lines, dimStyle.Render(truncate(meta, cw)))
-	}
-	return cursorLine
+	return m.appendSelectableList(lines, "Docs", "  no docs recorded", len(m.docs), m.selectedDoc,
+		func(i int, prefix string, titleStyle lipgloss.Style) (string, string) {
+			doc := m.docs[i]
+			title := fmt.Sprintf("[%s] %s", doc.ID, truncate(doc.Title, cw-8))
+			titleLine := prefix + titleStyle.Render(title)
+			metaLine := fmt.Sprintf("   %s · %d chars", formatTimeAgoShort(doc.Updated), len(doc.Content))
+			return titleLine, dimStyle.Render(truncate(metaLine, cw))
+		})
 }
 
 func (m Model) appendPlanList(lines *[]string, cw int) int {
@@ -639,78 +576,40 @@ func (m Model) appendPlanList(lines *[]string, cw int) int {
 	}
 
 	*lines = append(*lines, "")
-	*lines = append(*lines, sectionTitleStyle.Render("Phases"))
-	selected := m.selectedPhase
-	if selected < 0 {
-		selected = 0
-	}
-	if selected >= len(m.plan.Phases) {
-		selected = len(m.plan.Phases) - 1
-	}
-	cursorLine := -1
-	for i, phase := range m.plan.Phases {
-		prefix := "  "
-		titleStyle := valueStyle
-		if i == selected {
-			prefix = "> "
-			titleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.ColorTeal)
-		}
-		indicator := theme.PhaseStatusIndicator(phase.Status)
-		name := phase.Title
-		if strings.TrimSpace(name) == "" {
-			name = phase.ID
-		}
-		*lines = append(*lines, prefix+titleStyle.Render(indicator+truncate(name, cw-8)))
-		if i == selected {
-			cursorLine = len(*lines) - 1
-		}
-		metaID := strings.TrimSpace(phase.ID)
-		if metaID == "" {
-			metaID = fmt.Sprintf("phase-%d", i+1)
-		}
-		meta := fmt.Sprintf("   %s · %s", metaID, phase.Status)
-		*lines = append(*lines, dimStyle.Render(truncate(meta, cw)))
-	}
-	return cursorLine
+	return m.appendSelectableList(lines, "Phases", "  no phases", len(m.plan.Phases), m.selectedPhase,
+		func(i int, prefix string, titleStyle lipgloss.Style) (string, string) {
+			phase := m.plan.Phases[i]
+			indicator := theme.PhaseStatusIndicator(phase.Status)
+			name := phase.Title
+			if strings.TrimSpace(name) == "" {
+				name = phase.ID
+			}
+			titleLine := prefix + titleStyle.Render(indicator+truncate(name, cw-8))
+			metaID := strings.TrimSpace(phase.ID)
+			if metaID == "" {
+				metaID = fmt.Sprintf("phase-%d", i+1)
+			}
+			metaLine := fmt.Sprintf("   %s · %s", metaID, phase.Status)
+			return titleLine, dimStyle.Render(truncate(metaLine, cw))
+		})
 }
 
 func (m Model) appendLogsList(lines *[]string, cw int) int {
-	*lines = append(*lines, sectionTitleStyle.Render("Logs"))
-	if len(m.turns) == 0 {
-		*lines = append(*lines, dimStyle.Render("  no turn logs yet"))
-		return -1
-	}
-	selected := m.selectedTurn
-	if selected < 0 {
-		selected = 0
-	}
-	if selected >= len(m.turns) {
-		selected = len(m.turns) - 1
-	}
-	cursorLine := -1
-	for i, turn := range m.turns {
-		prefix := "  "
-		titleStyle := valueStyle
-		if i == selected {
-			prefix = "> "
-			titleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.ColorTeal)
-		}
-		profile := strings.TrimSpace(turn.ProfileName)
-		if profile == "" {
-			profile = strings.TrimSpace(turn.Agent)
-		}
-		if profile == "" {
-			profile = "turn"
-		}
-		title := fmt.Sprintf("#%d %s", turn.ID, profile)
-		*lines = append(*lines, prefix+titleStyle.Render(truncate(title, cw-8)))
-		if i == selected {
-			cursorLine = len(*lines) - 1
-		}
-		meta := fmt.Sprintf("   %s · %s", turn.Date.Format("2006-01-02 15:04"), truncate(compactWhitespace(turn.Objective), cw-26))
-		*lines = append(*lines, dimStyle.Render(truncate(meta, cw)))
-	}
-	return cursorLine
+	return m.appendSelectableList(lines, "Logs", "  no turn logs yet", len(m.turns), m.selectedTurn,
+		func(i int, prefix string, titleStyle lipgloss.Style) (string, string) {
+			turn := m.turns[i]
+			profile := strings.TrimSpace(turn.ProfileName)
+			if profile == "" {
+				profile = strings.TrimSpace(turn.Agent)
+			}
+			if profile == "" {
+				profile = "turn"
+			}
+			title := fmt.Sprintf("#%d %s", turn.ID, profile)
+			titleLine := prefix + titleStyle.Render(truncate(title, cw-8))
+			metaLine := fmt.Sprintf("   %s · %s", turn.Date.Format("2006-01-02 15:04"), truncate(compactWhitespace(turn.Objective), cw-26))
+			return titleLine, dimStyle.Render(truncate(metaLine, cw))
+		})
 }
 
 func fieldLine(label, value string) string {
@@ -795,22 +694,10 @@ func (m Model) detailLines(width int) []string {
 }
 
 func (m Model) issueDetailLines() []string {
-	if len(m.issues) == 0 {
-		return []string{
-			sectionTitleStyle.Render("Issues"),
-			"",
-			dimStyle.Render("No issues available."),
-		}
+	issue, _, ok := selectedItem(m.issues, m.selectedIssue)
+	if !ok {
+		return detailEmptyLines("Issues", "No issues available.")
 	}
-
-	idx := m.selectedIssue
-	if idx < 0 {
-		idx = 0
-	}
-	if idx >= len(m.issues) {
-		idx = len(m.issues) - 1
-	}
-	issue := m.issues[idx]
 
 	lines := []string{
 		sectionTitleStyle.Render(fmt.Sprintf("Issue #%d", issue.ID)),
@@ -841,22 +728,10 @@ func (m Model) issueDetailLines() []string {
 }
 
 func (m Model) docDetailLines() []string {
-	if len(m.docs) == 0 {
-		return []string{
-			sectionTitleStyle.Render("Docs"),
-			"",
-			dimStyle.Render("No documents available."),
-		}
+	doc, _, ok := selectedItem(m.docs, m.selectedDoc)
+	if !ok {
+		return detailEmptyLines("Docs", "No documents available.")
 	}
-
-	idx := m.selectedDoc
-	if idx < 0 {
-		idx = 0
-	}
-	if idx >= len(m.docs) {
-		idx = len(m.docs) - 1
-	}
-	doc := m.docs[idx]
 
 	lines := []string{
 		sectionTitleStyle.Render(fmt.Sprintf("Doc %s", doc.ID)),
@@ -878,11 +753,7 @@ func (m Model) docDetailLines() []string {
 
 func (m Model) planDetailLines() []string {
 	if m.plan == nil {
-		return []string{
-			sectionTitleStyle.Render("Plan"),
-			"",
-			dimStyle.Render("No active plan available."),
-		}
+		return detailEmptyLines("Plan", "No active plan available.")
 	}
 
 	status := strings.TrimSpace(m.plan.Status)
@@ -915,14 +786,7 @@ func (m Model) planDetailLines() []string {
 		return lines
 	}
 
-	idx := m.selectedPhase
-	if idx < 0 {
-		idx = 0
-	}
-	if idx >= len(m.plan.Phases) {
-		idx = len(m.plan.Phases) - 1
-	}
-	phase := m.plan.Phases[idx]
+	phase, idx, _ := selectedItem(m.plan.Phases, m.selectedPhase)
 	phaseID := strings.TrimSpace(phase.ID)
 	if phaseID == "" {
 		phaseID = fmt.Sprintf("phase-%d", idx+1)
@@ -956,22 +820,10 @@ func (m Model) planDetailLines() []string {
 }
 
 func (m Model) logDetailLines() []string {
-	if len(m.turns) == 0 {
-		return []string{
-			sectionTitleStyle.Render("Logs"),
-			"",
-			dimStyle.Render("No turn logs captured yet."),
-		}
+	turn, _, ok := selectedItem(m.turns, m.selectedTurn)
+	if !ok {
+		return detailEmptyLines("Logs", "No turn logs captured yet.")
 	}
-
-	idx := m.selectedTurn
-	if idx < 0 {
-		idx = 0
-	}
-	if idx >= len(m.turns) {
-		idx = len(m.turns) - 1
-	}
-	turn := m.turns[idx]
 
 	profile := strings.TrimSpace(turn.ProfileName)
 	if profile == "" {
