@@ -2,7 +2,7 @@
   "id": "v2",
   "title": "ADAF v2 - Web-Only, System Service, Reference UI",
   "description": "Major pivot: (1) Remove the Bubble Tea TUI entirely - ADAF becomes web-only for its interactive surface. (2) Rebuild the web frontend to precisely match reference-ui.jsx (Catppuccin Mocha palette, two-panel layout, agent tree, stream panel, communication panel, loop bar). (3) Transform ADAF from a per-project instance into a system-wide shared service that manages multiple projects from a single daemon. (4) General cleanup: remove dead code paths exposed by TUI removal, simplify the event protocol, drop charmbracelet dependencies, streamline the CLI to a thin client that talks to the daemon.",
-  "status": "active",
+  "status": "done",
   "phases": [
     {
       "id": "p1-tui-removal",
@@ -104,5 +104,5 @@
     "p9-polish"
   ],
   "created": "2026-02-14T15:37:30.322476305Z",
-  "updated": "2026-02-14T17:18:34.183214396Z"
+  "updated": "2026-02-14T17:19:11.427619426Z"
 }
