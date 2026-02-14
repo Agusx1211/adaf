@@ -65,7 +65,7 @@
       "id": "p7-session-control",
       "title": "Web Frontend: Session Control \u0026 Actions",
       "description": "Implement interactive session control from the web UI — starting, stopping, and interacting with sessions.\n\n**Start new session:**\n- Button/action to start a new session (ask, PM, or loop)\n- Profile picker: dropdown of configured profiles (agent + model + settings)\n- For ask mode: prompt text input with multi-line support\n- For PM mode: project manager agent selection\n- For loop mode: loop definition picker, optional cycle/step overrides\n- Model override option\n- Starts session via existing API endpoints (`/api/projects/{id}/sessions/ask`, `/pm`, `/loop`)\n\n**Stop session:**\n- Stop button on running sessions in the agent tree\n- Confirmation dialog\n- Uses existing stop endpoint\n\n**Send message to running session:**\n- Input box in the right panel when viewing a running session\n- Support sending messages to loop sessions (loop-message equivalent)\n- Support sending messages to spawns (spawn-message equivalent)\n- Uses existing message endpoints\n\n**Terminal integration:**\n- Terminal tab/panel using xterm.js (already implemented with pty_handler.go)\n- Accessible from the UI without being a separate page\n- Terminal runs in the project's working directory\n\n**Config management:**\n- Profile CRUD: create, edit, delete profiles\n- Loop CRUD: create, edit, delete loop definitions\n- Roles and rules management\n- Uses existing config API endpoints\n\n**Toast notifications:**\n- Session completed/failed notifications\n- Error toasts for failed API calls\n- Success confirmations for mutations",
-      "status": "not_started",
+      "status": "complete",
       "priority": 2,
       "depends_on": [
         "p4-agent-tree"
@@ -104,5 +104,5 @@
     "p9-polish"
   ],
   "created": "2026-02-14T15:37:30.322476305Z",
-  "updated": "2026-02-14T17:12:14.245125477Z"
+  "updated": "2026-02-14T17:13:21.102692117Z"
 }
