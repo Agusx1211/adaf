@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -30,6 +31,15 @@ func newTestServer(t *testing.T) (*Server, *store.Store) {
 func performRequest(t *testing.T, srv *Server, method, target string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, target, nil)
+	rec := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+	return rec
+}
+
+func performJSONRequest(t *testing.T, srv *Server, method, target, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(rec, req)
 	return rec
@@ -144,6 +154,155 @@ func TestIssuesEndpoint(t *testing.T) {
 	}
 	if filtered[0].Status != "open" {
 		t.Fatalf("filtered status = %q, want %q", filtered[0].Status, "open")
+	}
+}
+
+func TestCreateAndUpdateIssueEndpoints(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/issues", `{"title":"Fix API","description":"add write handlers","labels":["api"]}`)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
+	}
+
+	created := decodeResponse[store.Issue](t, createRec)
+	if created.Title != "Fix API" {
+		t.Fatalf("created title = %q, want %q", created.Title, "Fix API")
+	}
+	if created.Status != "open" {
+		t.Fatalf("created status = %q, want %q", created.Status, "open")
+	}
+	if created.Priority != "medium" {
+		t.Fatalf("created priority = %q, want %q", created.Priority, "medium")
+	}
+
+	updateRec := performJSONRequest(t, srv, http.MethodPut, "/api/issues/"+strconv.Itoa(created.ID), `{"status":"resolved","priority":"low"}`)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, want %d", updateRec.Code, http.StatusOK)
+	}
+
+	updated := decodeResponse[store.Issue](t, updateRec)
+	if updated.Status != "resolved" {
+		t.Fatalf("updated status = %q, want %q", updated.Status, "resolved")
+	}
+	if updated.Priority != "low" {
+		t.Fatalf("updated priority = %q, want %q", updated.Priority, "low")
+	}
+}
+
+func TestPlanWriteEndpoints(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/plans", `{"id":"web-ui","title":"Web UI","description":"overhaul","phases":[{"id":"phase-1","title":"MVP","status":"not_started","priority":1}]}`)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
+	}
+
+	created := decodeResponse[store.Plan](t, createRec)
+	if created.Status != "active" {
+		t.Fatalf("created status = %q, want %q", created.Status, "active")
+	}
+	if len(created.Phases) != 1 {
+		t.Fatalf("created phase count = %d, want 1", len(created.Phases))
+	}
+
+	updateRec := performJSONRequest(t, srv, http.MethodPut, "/api/plans/web-ui", `{"title":"Web UI v2","status":"frozen"}`)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, want %d", updateRec.Code, http.StatusOK)
+	}
+
+	updated := decodeResponse[store.Plan](t, updateRec)
+	if updated.Title != "Web UI v2" {
+		t.Fatalf("updated title = %q, want %q", updated.Title, "Web UI v2")
+	}
+	if updated.Status != "frozen" {
+		t.Fatalf("updated status = %q, want %q", updated.Status, "frozen")
+	}
+
+	phaseRec := performJSONRequest(t, srv, http.MethodPut, "/api/plans/web-ui/phases/phase-1", `{"status":"in_progress","priority":3,"depends_on":["phase-0"]}`)
+	if phaseRec.Code != http.StatusOK {
+		t.Fatalf("phase update status = %d, want %d", phaseRec.Code, http.StatusOK)
+	}
+
+	phaseUpdated := decodeResponse[store.Plan](t, phaseRec)
+	if phaseUpdated.Phases[0].Status != "in_progress" {
+		t.Fatalf("phase status = %q, want %q", phaseUpdated.Phases[0].Status, "in_progress")
+	}
+	if phaseUpdated.Phases[0].Priority != 3 {
+		t.Fatalf("phase priority = %d, want %d", phaseUpdated.Phases[0].Priority, 3)
+	}
+
+	activateRec := performRequest(t, srv, http.MethodPost, "/api/plans/web-ui/activate")
+	if activateRec.Code != http.StatusOK {
+		t.Fatalf("activate status = %d, want %d", activateRec.Code, http.StatusOK)
+	}
+
+	var activateOut map[string]bool
+	if err := json.NewDecoder(activateRec.Body).Decode(&activateOut); err != nil {
+		t.Fatalf("decode activate response: %v", err)
+	}
+	if !activateOut["ok"] {
+		t.Fatal("activate response missing ok=true")
+	}
+
+	deleteRec := performRequest(t, srv, http.MethodDelete, "/api/plans/web-ui")
+	if deleteRec.Code != http.StatusBadRequest {
+		t.Fatalf("delete status = %d, want %d", deleteRec.Code, http.StatusBadRequest)
+	}
+
+	doneRec := performJSONRequest(t, srv, http.MethodPut, "/api/plans/web-ui", `{"status":"done"}`)
+	if doneRec.Code != http.StatusOK {
+		t.Fatalf("set done status = %d, want %d", doneRec.Code, http.StatusOK)
+	}
+
+	deleteRec = performRequest(t, srv, http.MethodDelete, "/api/plans/web-ui")
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want %d", deleteRec.Code, http.StatusOK)
+	}
+
+	missingRec := performRequest(t, srv, http.MethodGet, "/api/plans/web-ui")
+	if missingRec.Code != http.StatusNotFound {
+		t.Fatalf("plan after delete status = %d, want %d", missingRec.Code, http.StatusNotFound)
+	}
+}
+
+func TestDocEndpoints(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/docs", `{"plan_id":"web-ui","title":"Architecture Draft","content":"v1"}`)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
+	}
+
+	created := decodeResponse[store.Doc](t, createRec)
+	if created.ID != "architecture-draft" {
+		t.Fatalf("created id = %q, want %q", created.ID, "architecture-draft")
+	}
+	if created.PlanID != "web-ui" {
+		t.Fatalf("created plan_id = %q, want %q", created.PlanID, "web-ui")
+	}
+
+	listRec := performRequest(t, srv, http.MethodGet, "/api/docs?plan=web-ui")
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d", listRec.Code, http.StatusOK)
+	}
+	listed := decodeResponse[[]store.Doc](t, listRec)
+	if len(listed) != 1 {
+		t.Fatalf("docs length = %d, want 1", len(listed))
+	}
+
+	getRec := performRequest(t, srv, http.MethodGet, "/api/docs/architecture-draft")
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get status = %d, want %d", getRec.Code, http.StatusOK)
+	}
+
+	updateRec := performJSONRequest(t, srv, http.MethodPut, "/api/docs/architecture-draft", `{"content":"v2"}`)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, want %d", updateRec.Code, http.StatusOK)
+	}
+	updated := decodeResponse[store.Doc](t, updateRec)
+	if updated.Content != "v2" {
+		t.Fatalf("updated content = %q, want %q", updated.Content, "v2")
 	}
 }
 

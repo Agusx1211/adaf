@@ -1,0 +1,527 @@
+package webserver
+
+import (
+	"encoding/json"
+	"net/http"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/agusx1211/adaf/internal/store"
+)
+
+var (
+	issueStatuses = map[string]struct{}{
+		"open":        {},
+		"in_progress": {},
+		"resolved":    {},
+		"wontfix":     {},
+	}
+	issuePriorities = map[string]struct{}{
+		"critical": {},
+		"high":     {},
+		"medium":   {},
+		"low":      {},
+	}
+	planStatuses = map[string]struct{}{
+		"active":    {},
+		"done":      {},
+		"cancelled": {},
+		"frozen":    {},
+	}
+	planPhaseStatuses = map[string]struct{}{
+		"not_started": {},
+		"in_progress": {},
+		"complete":    {},
+		"blocked":     {},
+	}
+
+	docSlugInvalidChars = regexp.MustCompile(`[^a-z0-9-]+`)
+	docSlugMultiDash    = regexp.MustCompile(`-+`)
+)
+
+type issueWriteRequest struct {
+	PlanID      string   `json:"plan_id"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Status      string   `json:"status"`
+	Priority    string   `json:"priority"`
+	Labels      []string `json:"labels"`
+}
+
+type planWriteRequest struct {
+	ID          string            `json:"id"`
+	Title       string            `json:"title"`
+	Description string            `json:"description"`
+	Status      string            `json:"status"`
+	Phases      []store.PlanPhase `json:"phases"`
+}
+
+type planPhaseWriteRequest struct {
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Status      string   `json:"status"`
+	Priority    *int     `json:"priority"`
+	DependsOn   []string `json:"depends_on"`
+}
+
+type docWriteRequest struct {
+	ID      string `json:"id"`
+	PlanID  string `json:"plan_id"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
+}
+
+func (srv *Server) handleCreateIssue(w http.ResponseWriter, r *http.Request) {
+	var req issueWriteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+
+	status := normalizeLower(req.Status)
+	if status == "" {
+		status = "open"
+	}
+	if !isAllowedValue(status, issueStatuses) {
+		writeError(w, http.StatusBadRequest, "invalid issue status")
+		return
+	}
+
+	priority := normalizeLower(req.Priority)
+	if priority == "" {
+		priority = "medium"
+	}
+	if !isAllowedValue(priority, issuePriorities) {
+		writeError(w, http.StatusBadRequest, "invalid issue priority")
+		return
+	}
+
+	now := time.Now().UTC()
+	issue := store.Issue{
+		PlanID:      strings.TrimSpace(req.PlanID),
+		Title:       title,
+		Description: req.Description,
+		Status:      status,
+		Priority:    priority,
+		Labels:      req.Labels,
+		Created:     now,
+		Updated:     now,
+	}
+	if err := srv.store.CreateIssue(&issue); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create issue")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, issue)
+}
+
+func (srv *Server) handleUpdateIssue(w http.ResponseWriter, r *http.Request) {
+	id, err := parsePathID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
+
+	issue, err := srv.store.GetIssue(id)
+	if err != nil {
+		if isNotFoundErr(err) {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to load issue")
+		return
+	}
+
+	var req issueWriteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if title := strings.TrimSpace(req.Title); title != "" {
+		issue.Title = title
+	}
+	if req.Description != "" {
+		issue.Description = req.Description
+	}
+	if planID := strings.TrimSpace(req.PlanID); planID != "" {
+		issue.PlanID = planID
+	}
+	if req.Labels != nil {
+		issue.Labels = req.Labels
+	}
+	if status := normalizeLower(req.Status); status != "" {
+		if !isAllowedValue(status, issueStatuses) {
+			writeError(w, http.StatusBadRequest, "invalid issue status")
+			return
+		}
+		issue.Status = status
+	}
+	if priority := normalizeLower(req.Priority); priority != "" {
+		if !isAllowedValue(priority, issuePriorities) {
+			writeError(w, http.StatusBadRequest, "invalid issue priority")
+			return
+		}
+		issue.Priority = priority
+	}
+
+	issue.Updated = time.Now().UTC()
+	if err := srv.store.UpdateIssue(issue); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update issue")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, issue)
+}
+
+func (srv *Server) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
+	var req planWriteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	id := strings.TrimSpace(req.ID)
+	title := strings.TrimSpace(req.Title)
+	if id == "" || title == "" {
+		writeError(w, http.StatusBadRequest, "id and title are required")
+		return
+	}
+
+	now := time.Now().UTC()
+	plan := store.Plan{
+		ID:          id,
+		Title:       title,
+		Description: req.Description,
+		Status:      "active",
+		Phases:      req.Phases,
+		Created:     now,
+		Updated:     now,
+	}
+	if err := srv.store.CreatePlan(&plan); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "already exists") {
+			writeError(w, http.StatusBadRequest, "plan already exists")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to create plan")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, plan)
+}
+
+func (srv *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
+	planID := strings.TrimSpace(r.PathValue("id"))
+	if planID == "" {
+		writeError(w, http.StatusNotFound, "plan not found")
+		return
+	}
+
+	plan, err := srv.store.GetPlan(planID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load plan")
+		return
+	}
+	if plan == nil {
+		writeError(w, http.StatusNotFound, "plan not found")
+		return
+	}
+
+	var req planWriteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if title := strings.TrimSpace(req.Title); title != "" {
+		plan.Title = title
+	}
+	if req.Description != "" {
+		plan.Description = req.Description
+	}
+	if req.Phases != nil {
+		plan.Phases = req.Phases
+	}
+	if status := normalizeLower(req.Status); status != "" {
+		if !isAllowedValue(status, planStatuses) {
+			writeError(w, http.StatusBadRequest, "invalid plan status")
+			return
+		}
+		plan.Status = status
+	}
+
+	plan.Updated = time.Now().UTC()
+	if err := srv.store.UpdatePlan(plan); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update plan")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, plan)
+}
+
+func (srv *Server) handleUpdatePlanPhase(w http.ResponseWriter, r *http.Request) {
+	planID := strings.TrimSpace(r.PathValue("id"))
+	phaseID := strings.TrimSpace(r.PathValue("phaseId"))
+	if planID == "" || phaseID == "" {
+		writeError(w, http.StatusNotFound, "plan phase not found")
+		return
+	}
+
+	plan, err := srv.store.GetPlan(planID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load plan")
+		return
+	}
+	if plan == nil {
+		writeError(w, http.StatusNotFound, "plan not found")
+		return
+	}
+
+	phaseIndex := -1
+	for i := range plan.Phases {
+		if plan.Phases[i].ID == phaseID {
+			phaseIndex = i
+			break
+		}
+	}
+	if phaseIndex < 0 {
+		writeError(w, http.StatusNotFound, "phase not found")
+		return
+	}
+
+	var req planPhaseWriteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	phase := &plan.Phases[phaseIndex]
+	if title := strings.TrimSpace(req.Title); title != "" {
+		phase.Title = title
+	}
+	if req.Description != "" {
+		phase.Description = req.Description
+	}
+	if status := normalizeLower(req.Status); status != "" {
+		if !isAllowedValue(status, planPhaseStatuses) {
+			writeError(w, http.StatusBadRequest, "invalid phase status")
+			return
+		}
+		phase.Status = status
+	}
+	if req.Priority != nil {
+		phase.Priority = *req.Priority
+	}
+	if req.DependsOn != nil {
+		phase.DependsOn = req.DependsOn
+	}
+
+	plan.Updated = time.Now().UTC()
+	if err := srv.store.UpdatePlan(plan); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update plan")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, plan)
+}
+
+func (srv *Server) handleActivatePlan(w http.ResponseWriter, r *http.Request) {
+	planID := strings.TrimSpace(r.PathValue("id"))
+	if planID == "" {
+		writeError(w, http.StatusNotFound, "plan not found")
+		return
+	}
+
+	if err := srv.store.SetActivePlan(planID); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			writeError(w, http.StatusNotFound, "plan not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to activate plan")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (srv *Server) handleDeletePlan(w http.ResponseWriter, r *http.Request) {
+	planID := strings.TrimSpace(r.PathValue("id"))
+	if planID == "" {
+		writeError(w, http.StatusNotFound, "plan not found")
+		return
+	}
+
+	plan, err := srv.store.GetPlan(planID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load plan")
+		return
+	}
+	if plan == nil {
+		writeError(w, http.StatusNotFound, "plan not found")
+		return
+	}
+
+	if err := srv.store.DeletePlan(planID); err != nil {
+		errText := strings.ToLower(err.Error())
+		if strings.Contains(errText, "active") || strings.Contains(errText, "done/cancelled") || strings.Contains(errText, "status") {
+			writeError(w, http.StatusBadRequest, "plan cannot be deleted")
+			return
+		}
+		if isNotFoundErr(err) || strings.Contains(errText, "not found") {
+			writeError(w, http.StatusNotFound, "plan not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to delete plan")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (srv *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
+	planID := strings.TrimSpace(r.URL.Query().Get("plan"))
+
+	var (
+		docs []store.Doc
+		err  error
+	)
+	if planID == "" {
+		docs, err = srv.store.ListDocs()
+	} else {
+		docs, err = srv.store.ListDocsForPlan(planID)
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list docs")
+		return
+	}
+	if docs == nil {
+		docs = []store.Doc{}
+	}
+
+	writeJSON(w, http.StatusOK, docs)
+}
+
+func (srv *Server) handleDocByID(w http.ResponseWriter, r *http.Request) {
+	docID := strings.TrimSpace(r.PathValue("id"))
+	if docID == "" {
+		writeError(w, http.StatusNotFound, "doc not found")
+		return
+	}
+
+	doc, err := srv.store.GetDoc(docID)
+	if err != nil {
+		if isNotFoundErr(err) {
+			writeError(w, http.StatusNotFound, "doc not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to load doc")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, doc)
+}
+
+func (srv *Server) handleCreateDoc(w http.ResponseWriter, r *http.Request) {
+	var req docWriteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+
+	docID := strings.TrimSpace(req.ID)
+	if docID == "" {
+		docID = slugifyDocID(title)
+	}
+	if docID == "" {
+		writeError(w, http.StatusBadRequest, "unable to derive document id")
+		return
+	}
+
+	now := time.Now().UTC()
+	doc := store.Doc{
+		ID:      docID,
+		PlanID:  strings.TrimSpace(req.PlanID),
+		Title:   title,
+		Content: req.Content,
+		Created: now,
+		Updated: now,
+	}
+	if err := srv.store.CreateDoc(&doc); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create doc")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, doc)
+}
+
+func (srv *Server) handleUpdateDoc(w http.ResponseWriter, r *http.Request) {
+	docID := strings.TrimSpace(r.PathValue("id"))
+	if docID == "" {
+		writeError(w, http.StatusNotFound, "doc not found")
+		return
+	}
+
+	doc, err := srv.store.GetDoc(docID)
+	if err != nil {
+		if isNotFoundErr(err) {
+			writeError(w, http.StatusNotFound, "doc not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to load doc")
+		return
+	}
+
+	var req docWriteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if planID := strings.TrimSpace(req.PlanID); planID != "" {
+		doc.PlanID = planID
+	}
+	if title := strings.TrimSpace(req.Title); title != "" {
+		doc.Title = title
+	}
+	if req.Content != "" {
+		doc.Content = req.Content
+	}
+
+	doc.Updated = time.Now().UTC()
+	if err := srv.store.UpdateDoc(doc); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update doc")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, doc)
+}
+
+func normalizeLower(raw string) string {
+	return strings.ToLower(strings.TrimSpace(raw))
+}
+
+func isAllowedValue(value string, allowed map[string]struct{}) bool {
+	_, ok := allowed[value]
+	return ok
+}
+
+func slugifyDocID(title string) string {
+	slug := normalizeLower(title)
+	slug = strings.Join(strings.Fields(slug), "-")
+	slug = docSlugInvalidChars.ReplaceAllString(slug, "")
+	slug = docSlugMultiDash.ReplaceAllString(slug, "-")
+	return strings.Trim(slug, "-")
+}

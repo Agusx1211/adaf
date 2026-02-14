@@ -158,10 +158,28 @@ func (srv *Server) Scheme() string {
 
 func (srv *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/project", srv.handleProject)
+
 	mux.HandleFunc("GET /api/plans", srv.handlePlans)
 	mux.HandleFunc("GET /api/plans/{id}", srv.handlePlanByID)
+	// Plan write endpoints
+	mux.HandleFunc("POST /api/plans", srv.handleCreatePlan)
+	mux.HandleFunc("PUT /api/plans/{id}", srv.handleUpdatePlan)
+	mux.HandleFunc("PUT /api/plans/{id}/phases/{phaseId}", srv.handleUpdatePlanPhase)
+	mux.HandleFunc("POST /api/plans/{id}/activate", srv.handleActivatePlan)
+	mux.HandleFunc("DELETE /api/plans/{id}", srv.handleDeletePlan)
+
 	mux.HandleFunc("GET /api/issues", srv.handleIssues)
 	mux.HandleFunc("GET /api/issues/{id}", srv.handleIssueByID)
+	// Issue write endpoints
+	mux.HandleFunc("POST /api/issues", srv.handleCreateIssue)
+	mux.HandleFunc("PUT /api/issues/{id}", srv.handleUpdateIssue)
+
+	// Doc endpoints (read + write)
+	mux.HandleFunc("GET /api/docs", srv.handleDocs)
+	mux.HandleFunc("GET /api/docs/{id}", srv.handleDocByID)
+	mux.HandleFunc("POST /api/docs", srv.handleCreateDoc)
+	mux.HandleFunc("PUT /api/docs/{id}", srv.handleUpdateDoc)
+
 	mux.HandleFunc("GET /api/turns", srv.handleTurns)
 	mux.HandleFunc("GET /api/turns/{id}", srv.handleTurnByID)
 	mux.HandleFunc("GET /api/spawns", srv.handleSpawns)
