@@ -1,0 +1,15 @@
+{
+  "id": 25,
+  "title": "Replace full event replay with store-based history + snapshot reconnect",
+  "description": "## Location\n- internal/session/daemon.go:290-336 (handleClient, replay phases)\n- internal/session/daemon.go:460-520 (replayFromFileRange)\n- internal/session/client.go (event consumption loop)\n- internal/runtui/model.go (Model.Update processing)\n\n## Problem\nWhen a TUI client connects (or reconnects) to the session daemon, the daemon replays ALL events from events.jsonl through the unix socket. With long sessions (2,665+ events), the socket write buffer fills up faster than the TUI can consume, hitting the 5-second clientWriteTimeout and disconnecting the client with \"connection to session daemon lost\".\n\nThe backpressure fix (b12bf94) only addressed the live broadcast path (enqueue()), not the replay path which still uses synchronous writeImmediate() in a tight loop.\n\n## Root cause\nThe event stream is doing three jobs:\n1. Live updates (what's happening now) — correct use\n2. State reconstruction (rebuild TUI model on connect) — should be a snapshot\n3. History browsing (what happened while detached) — should come from the store\n\nReplaying everything from event #1 conflates all three.\n\n## Proposed fix\nSeparate these concerns:\n\n1. **History** — TUI reads from the store on startup (turns/*.json, notes/*.json, loopruns/*.json). This data is already on disk and structured. The TUI already has list views (Agents, Issues, Logs) that should be populated from the store, not from replaying raw events.\n\n2. **Current state** — On connect, daemon sends a snapshot message containing: current loop run, step, turn, agent status, recent output lines. This is a single message, not 2,665 replayed events.\n\n3. **Live** — Stream events from current turn/step only. The events.jsonl file remains on disk for forensics and adaf log, but the TUI never reads the full file through the socket.\n\nThis eliminates the replay timeout entirely, simplifies the three-phase replay handshake in handleClient, and removes ~100 lines of replay/catchup code from the daemon.\n\n## Simplification targets\n- Remove replayFromFileRange() entirely\n- Remove the three-phase replay handshake (seq1/seq2/seq3)\n- Remove defaultMaxReplayEvents / buffered event ring\n- Add a MsgSnapshot wire message type with current state\n- TUI Init() loads history from store directly (file reads, no socket)\n- Daemon only streams events for the current turn after snapshot",
+  "status": "open",
+  "priority": "high",
+  "labels": [
+    "bug",
+    "simplification",
+    "session",
+    "daemon"
+  ],
+  "created": "2026-02-14T03:42:22.31791759Z",
+  "updated": "2026-02-14T03:42:22.31791759Z"
+}
