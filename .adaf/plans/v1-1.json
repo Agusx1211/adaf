@@ -86,7 +86,7 @@
       "id": "p10-web-launch",
       "title": "Web Server: Launch \u0026 Discovery UX",
       "description": "Improve how the web server is started and discovered. (1) Auto-start option - 'adaf web --daemon' to start in background, write PID file. 'adaf web --stop' to stop a running daemon. (2) TUI integration - add a 'w' hotkey in TUI selector to launch/open web UI. Show web server status in TUI header if running. (3) Project registration for multi-project - 'adaf web register' to add current project to a central registry (~/.adaf/web-projects.json). 'adaf web serve' reads the registry and serves all registered projects. (4) mDNS/Bonjour discovery - optionally advertise the web server on the local network so other machines can find it. (5) QR code - when starting with --expose, print a QR code to terminal for easy mobile access.",
-      "status": "not_started",
+      "status": "complete",
       "priority": 3,
       "depends_on": [
         "p3-multi-project"
@@ -104,5 +104,5 @@
     }
   ],
   "created": "2026-02-14T11:22:27.60226705Z",
-  "updated": "2026-02-14T14:32:19.618572555Z"
+  "updated": "2026-02-14T15:15:34.940743985Z"
 }
