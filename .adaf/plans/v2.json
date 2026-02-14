@@ -35,7 +35,7 @@
       "id": "p4-agent-tree",
       "title": "Web Frontend: Agent Tree \u0026 Scope Selection",
       "description": "Implement the AgentTree component from `reference-ui.jsx` — this is the primary navigation element showing the hierarchy of sessions and spawns.\n\n**Sessions as top-level nodes:**\n- Show turn number (e.g. `turn #5`), profile name (colored with C.mauve), agent name\n- Status badge (StatusBadge component with color and icon)\n- Model name, elapsed time, current action in subtitle\n- Pulsing status dot when running\n- Expand/collapse chevron if session has spawns\n- Fork icon + spawn count badge if has children\n- Click to select scope (filters the right panel stream)\n\n**Spawns as nested tree nodes (recursive TreeNode):**\n- Depth-based indentation (20px per level)\n- Tree connector lines (vertical line + corner-down-right icon)\n- Spawn ID badge (#1, #2, etc.) in monospace\n- Profile + role display (e.g. `builder as developer`)\n- Status badge, elapsed time\n- Message count badge (if has parent/child messages)\n- Task description in subtitle\n- Git branch name with branch icon\n- Pending question alert block when status is `awaiting_input` and has a question\n- Recursive children rendering (spawns can spawn spawns)\n\n**Tree state management:**\n- `expandedNodes` set: tracks which nodes are expanded\n- `selectedScope` string: tracks which node is selected for scope filtering\n- Click handlers for expand/collapse and scope selection\n- Tree connectors calculated from depth and sibling position\n\n**Data flow:**\n- Fetch sessions from `/api/projects/{id}/sessions`\n- Fetch spawns from `/api/projects/{id}/spawns` (or dedicated endpoint)\n- Build parent-child hierarchy: spawns with `parent_spawn_id \u003e 0` nest under that spawn, others nest under session via `parent_turn_id`\n- Real-time updates via WebSocket events (SpawnStatusMsg, AgentStartedMsg, AgentFinishedMsg)\n\n**Interaction with right panel:**\n- Selecting a session sets scope to `session-{id}` which maps to `main` in stream events\n- Selecting a spawn sets scope to `spawn-{id}` which filters stream events to that spawn's output\n- Scope filter pill in right panel header shows the selected scope",
-      "status": "not_started",
+      "status": "complete",
       "priority": 1,
       "depends_on": [
         "p3-web-layout"
@@ -104,5 +104,5 @@
     "p9-polish"
   ],
   "created": "2026-02-14T15:37:30.322476305Z",
-  "updated": "2026-02-14T17:02:56.314120458Z"
+  "updated": "2026-02-14T17:04:14.347385206Z"
 }
