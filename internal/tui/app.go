@@ -27,6 +27,8 @@ const (
 	stateRunning
 	stateAskPrompt                // standalone ask: compose prompt
 	stateAskConfig                // standalone ask: profile/count/model config
+	statePMPrompt                 // standalone pm: compose message
+	statePMConfig                 // standalone pm: profile/model config
 	statePlanMenu                 // manage plans (switch/create/status/delete)
 	statePlanCreateID             // text input for new plan ID
 	statePlanCreateTitle          // text input for new plan title
@@ -103,6 +105,9 @@ type AppModel struct {
 
 	// Standalone ask wizard state.
 	askWiz AskWizardState
+
+	// Standalone PM wizard state.
+	pmWiz PMWizardState
 
 	// Confirm delete state.
 	confirmDeleteIdx int // index of profile/loop pending deletion
@@ -272,6 +277,10 @@ func (m AppModel) updateByState(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateAskPrompt(msg)
 	case stateAskConfig:
 		return m.updateAskConfig(msg)
+	case statePMPrompt:
+		return m.updatePMPrompt(msg)
+	case statePMConfig:
+		return m.updatePMConfig(msg)
 	case statePlanMenu:
 		return m.updatePlanMenu(msg)
 	case statePlanCreateID:
@@ -400,6 +409,8 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "a":
 			return m.startAskWizard()
+		case "m":
+			return m.startPMWizard()
 		case "l":
 			// Start new loop creation.
 			m.loopWiz.Editing = false
@@ -926,6 +937,10 @@ func (m AppModel) View() string {
 		return m.viewAskPrompt()
 	case stateAskConfig:
 		return m.viewAskConfig()
+	case statePMPrompt:
+		return m.viewPMPrompt()
+	case statePMConfig:
+		return m.viewPMConfig()
 	case stateRunning:
 		return m.runModel.View()
 	case statePlanMenu:
@@ -1122,6 +1137,7 @@ func (m AppModel) renderStatusBar() string {
 		}
 		add("n", "new profile")
 		add("a", "ask")
+		add("m", "pm")
 		add("l", "new loop")
 		add("p", "plans")
 		add("[/]", "cycle plan")
@@ -1149,6 +1165,17 @@ func (m AppModel) renderStatusBar() string {
 		add("ctrl+s", "next")
 		add("esc", "cancel")
 	case stateAskConfig:
+		add("up/down", "field")
+		add("tab", "next")
+		add("left/right", "adjust")
+		add("enter", "run/select")
+		add("esc", "back")
+	case statePMPrompt:
+		add("type", "message")
+		add("enter", "newline")
+		add("ctrl+s", "next")
+		add("esc", "cancel")
+	case statePMConfig:
 		add("up/down", "field")
 		add("tab", "next")
 		add("left/right", "adjust")

@@ -184,6 +184,12 @@ func (m *AppModel) initInputEditorForState() tea.Cmd {
 		if m.askWiz.ConfigSel == askConfigFieldModel {
 			return m.ensureTextInput("ask-model-override", m.askWiz.ModelOverride, 0)
 		}
+	case statePMPrompt:
+		return m.ensureTextarea("pm-message", m.pmWiz.MessageText)
+	case statePMConfig:
+		if m.pmWiz.ConfigSel == pmConfigFieldModel {
+			return m.ensureTextInput("pm-model-override", m.pmWiz.ModelOverride, 0)
+		}
 	}
 	return nil
 }

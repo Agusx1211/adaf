@@ -30,6 +30,8 @@ func TestUpdateByStateDispatch(t *testing.T) {
 		stateSelector,
 		stateAskPrompt,
 		stateAskConfig,
+		statePMPrompt,
+		statePMConfig,
 		statePlanMenu,
 		statePlanCreateID,
 		statePlanCreateTitle,
@@ -103,6 +105,7 @@ func TestStateTransitions(t *testing.T) {
 		// Selector transitions
 		{"selector n opens profile name", stateSelector, "n", nil, stateProfileName},
 		{"selector a opens ask prompt", stateSelector, "a", nil, stateAskPrompt},
+		{"selector m opens pm prompt", stateSelector, "m", nil, statePMPrompt},
 		{"selector l opens loop name", stateSelector, "l", nil, stateLoopName},
 		{"selector S opens settings", stateSelector, "S", nil, stateSettings},
 		{"selector p opens plan menu", stateSelector, "p", nil, statePlanMenu},
@@ -113,6 +116,11 @@ func TestStateTransitions(t *testing.T) {
 		}, stateAskConfig},
 		{"ask prompt esc returns to selector", stateAskPrompt, "esc", nil, stateSelector},
 		{"ask config esc returns to prompt", stateAskConfig, "esc", nil, stateAskPrompt},
+		{"pm prompt ctrl+s goes to config", statePMPrompt, "ctrl+s", func(m *AppModel) {
+			m.pmWiz.MessageText = "Review progress and reprioritize open issues"
+		}, statePMConfig},
+		{"pm prompt esc returns to selector", statePMPrompt, "esc", nil, stateSelector},
+		{"pm config esc returns to prompt", statePMConfig, "esc", nil, statePMPrompt},
 
 		// Profile wizard forward navigation
 		{"profile name enter goes to agent", stateProfileName, "enter", func(m *AppModel) { m.profileWiz.NameInput = "test" }, stateProfileAgent},
@@ -272,6 +280,40 @@ func TestStartAskWizardInitializesState(t *testing.T) {
 	}
 	if got.askWiz.Msg != "" {
 		t.Fatalf("ask message = %q, want empty", got.askWiz.Msg)
+	}
+}
+
+func TestStartPMWizardInitializesState(t *testing.T) {
+	t.Setenv("ADAF_TURN_ID", "")
+	t.Setenv("ADAF_SESSION_ID", "")
+	t.Setenv("ADAF_AGENT", "")
+	t.Setenv("HOME", t.TempDir())
+
+	tmp := t.TempDir()
+	s, err := store.New(tmp)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+
+	m := NewApp(s)
+	m.pmWiz.ProfileSel = 42
+	m.pmWiz.Profiles = nil
+	m.pmWiz.Msg = "stale"
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	got := updated.(AppModel)
+
+	if got.state != statePMPrompt {
+		t.Fatalf("state = %v, want %v", got.state, statePMPrompt)
+	}
+	if len(got.pmWiz.Profiles) == 0 {
+		t.Fatalf("pm profiles is empty; expected at least one profile")
+	}
+	if got.pmWiz.ProfileSel < 0 || got.pmWiz.ProfileSel >= len(got.pmWiz.Profiles) {
+		t.Fatalf("pm profile selection = %d out of bounds for len=%d", got.pmWiz.ProfileSel, len(got.pmWiz.Profiles))
+	}
+	if got.pmWiz.Msg != "" {
+		t.Fatalf("pm message = %q, want empty", got.pmWiz.Msg)
 	}
 }
 
