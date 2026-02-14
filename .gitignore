@@ -32,3 +32,5 @@ Thumbs.db
 # Users' project .adaf dirs are in their target repos, not here
 ~/.adaf
 .adaf-worktrees/
+
+reference-ui.jsx
