@@ -42,7 +42,7 @@
       "id": "p5-session-rendering",
       "title": "Web UI: Rich Session Output Rendering",
       "description": "Transform the session viewer from plain text into a rich, structured display matching what agent output actually contains. (1) Markdown rendering - agent text output contains markdown; render it with proper headings, lists, code blocks, inline formatting. Use a lightweight markdown library (marked.js or similar, embedded not CDN). (2) Syntax highlighting - code blocks in agent output should be syntax-highlighted. Use highlight.js or Prism (embedded). (3) Tool use visualization - show tool calls as collapsible cards with tool name, input parameters (formatted JSON), and output. Distinguish Read, Write, Edit, Bash, Grep, Glob tools with icons or color coding. (4) Diff rendering - when agents show diffs (Edit tool, git diff), render them with proper diff coloring (red/green). (5) Cost/token tracking - show per-turn and cumulative token counts and cost in a sidebar or header. (6) Spawn tree visualization - show the hierarchy of spawned sub-agents as a tree, with status indicators and expandable output. (7) Turn boundaries - clearly delineate turns with separator bars showing turn number, agent, duration.",
-      "status": "not_started",
+      "status": "complete",
       "priority": 2,
       "depends_on": [
         "p2-web-ui-overhaul"
@@ -52,14 +52,14 @@
       "id": "p6-tui-dedup",
       "title": "TUI \u0026 CLI: Code Deduplication",
       "description": "Address the structural duplication identified in issues #42, #43, and #29. (1) CLI profile resolution - extract shared resolveProfile() function from resolveAskProfile() and resolvePMProfile() (issue #42). Fix double config.Load() in PM path. Remove unused store parameter from resolveAskProfile. (2) TUI wizard dedup - extract generic wizard component from ask.go and pm.go (issue #43). The 9 nearly-identical function pairs should become a single parameterized wizard with field definitions. Target: 820 combined lines to ~350 + two small wrappers. (3) CLI file splitting - split stats_cmd.go (773 LOC), spawn.go (769 LOC), plan.go (740 LOC) into per-subcommand files (issue #29). Extract shared helpers (formatTimeAgo, formatDuration) to helpers.go.",
-      "status": "not_started",
+      "status": "complete",
       "priority": 2
     },
     {
       "id": "p7-test-coverage",
       "title": "Test Coverage: Critical Gaps",
       "description": "Address the test coverage gaps identified in issue #44 and the audit. (1) Profile resolution tests - add tests for resolveAskProfile/resolvePMProfile (or the shared function after p6) covering: profile flag lookup with valid/invalid names, agent flag with model override, missing agent binary, default fallback behavior. (2) Orchestrator tests - spawn lifecycle, concurrent spawn limits, merge/reject operations, cleanup on context cancellation. (3) Recording package tests - currently zero test coverage for the entire recording package. (4) LoopRun tests - runner.go is 850 LOC with only 2 tests; add tests for multi-step execution, wait-for-spawns flow, error handling, context cancellation. (5) Add 'go test -race' to Makefile. (6) Integration test improvements - process crash simulation, orphan process detection.",
-      "status": "not_started",
+      "status": "complete",
       "priority": 2,
       "depends_on": [
         "p6-tui-dedup"
@@ -69,7 +69,7 @@
       "id": "p8-cli-improvements",
       "title": "CLI: Operational Improvements",
       "description": "Address remaining CLI issues. (1) Session stop command - add 'adaf sessions stop \u003csession-id\u003e' for non-interactive session termination (issue #33). Support --force flag and batch forms (--all, --agent \u003cname\u003e). Return clear exit codes and status text. (2) Description file flag - add --description-file \u003cpath\u003e to issue create, plan create, doc create commands (issue #37). Also support --description - for stdin input. Apply the pattern consistently across all commands accepting long-form text. (3) Web server startup improvements - better error messages when port is in use, show clickable URL in terminal output, add --open flag to auto-open browser.",
-      "status": "not_started",
+      "status": "complete",
       "priority": 2
     },
     {
@@ -104,5 +104,5 @@
     }
   ],
   "created": "2026-02-14T11:22:27.60226705Z",
-  "updated": "2026-02-14T13:16:17.331667253Z"
+  "updated": "2026-02-14T14:14:11.423335893Z"
 }
