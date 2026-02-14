@@ -54,8 +54,8 @@ func TestUpdateSettingsRulesListJScrollsRightPaneWhenFocused(t *testing.T) {
 
 	updated, _ := m.updateSettingsRulesList(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	got := updated.(AppModel)
-	if got.settingsRulesSel != 0 {
-		t.Fatalf("settingsRulesSel = %d, want 0", got.settingsRulesSel)
+	if got.settings.RulesSel != 0 {
+		t.Fatalf("settingsRulesSel = %d, want 0", got.settings.RulesSel)
 	}
 	if got.stateScrollOffset() <= 0 {
 		t.Fatalf("scroll offset = %d, want > 0", got.stateScrollOffset())
@@ -67,20 +67,22 @@ func TestUpdateLoopStepRoleJScrollsPromptWhenRightFocused(t *testing.T) {
 	config.EnsureDefaultRoleCatalog(cfg)
 
 	m := AppModel{
-		state:           stateLoopStepRole,
-		width:           120,
-		height:          30,
-		globalCfg:       cfg,
-		viewScroll:      map[appState]int{},
-		viewPaneFocus:   map[appState]bool{},
-		loopStepRoleSel: 0,
+		state:         stateLoopStepRole,
+		width:         120,
+		height:        30,
+		globalCfg:     cfg,
+		viewScroll:    map[appState]int{},
+		viewPaneFocus: map[appState]bool{},
+		loopWiz: LoopWizardState{
+			StepRoleSel: 0,
+		},
 	}
 	m.setRightPaneFocused(true)
 
 	updated, _ := m.updateLoopStepRole(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	got := updated.(AppModel)
-	if got.loopStepRoleSel != 0 {
-		t.Fatalf("loopStepRoleSel = %d, want 0", got.loopStepRoleSel)
+	if got.loopWiz.StepRoleSel != 0 {
+		t.Fatalf("loopStepRoleSel = %d, want 0", got.loopWiz.StepRoleSel)
 	}
 	if got.stateScrollOffset() <= 0 {
 		t.Fatalf("scroll offset = %d, want > 0", got.stateScrollOffset())
@@ -92,26 +94,28 @@ func TestUpdateLoopStepSpawnRolesJScrollsPromptWhenRightFocused(t *testing.T) {
 	config.EnsureDefaultRoleCatalog(cfg)
 
 	m := AppModel{
-		state:     stateLoopStepSpawnRoles,
-		width:     120,
-		height:    30,
-		globalCfg: cfg,
-		loopStepDelegRoots: []*loopDelegationNode{
-			{
-				Profile: "worker",
-				Roles:   []string{config.RoleDeveloper},
+		state:         stateLoopStepSpawnRoles,
+		width:         120,
+		height:        30,
+		globalCfg:     cfg,
+		viewScroll:    map[appState]int{},
+		viewPaneFocus: map[appState]bool{},
+		loopWiz: LoopWizardState{
+			StepDelegRoots: []*loopDelegationNode{
+				{
+					Profile: "worker",
+					Roles:   []string{config.RoleDeveloper},
+				},
 			},
+			StepSpawnRoleSel: 0,
 		},
-		viewScroll:           map[appState]int{},
-		viewPaneFocus:        map[appState]bool{},
-		loopStepSpawnRoleSel: 0,
 	}
 	m.setRightPaneFocused(true)
 
 	updated, _ := m.updateLoopStepSpawnRoles(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	got := updated.(AppModel)
-	if got.loopStepSpawnRoleSel != 0 {
-		t.Fatalf("loopStepSpawnRoleSel = %d, want 0", got.loopStepSpawnRoleSel)
+	if got.loopWiz.StepSpawnRoleSel != 0 {
+		t.Fatalf("loopStepSpawnRoleSel = %d, want 0", got.loopWiz.StepSpawnRoleSel)
 	}
 	if got.stateScrollOffset() <= 0 {
 		t.Fatalf("scroll offset = %d, want > 0", got.stateScrollOffset())
@@ -134,8 +138,8 @@ func TestUpdateSelectorJScrollsDetailsWhenRightFocused(t *testing.T) {
 
 	updated, _ := m.updateSelector(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	got := updated.(AppModel)
-	if got.selected != 0 {
-		t.Fatalf("selected = %d, want 0", got.selected)
+	if got.selector.Selected != 0 {
+		t.Fatalf("selected = %d, want 0", got.selector.Selected)
 	}
 	if got.stateScrollOffset() <= 0 {
 		t.Fatalf("scroll offset = %d, want > 0", got.stateScrollOffset())

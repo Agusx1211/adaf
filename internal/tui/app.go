@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/agusx1211/adaf/internal/agent"
-	"github.com/agusx1211/adaf/internal/agentmeta"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/session"
@@ -89,77 +88,22 @@ type AppModel struct {
 
 	// Selector state.
 	profiles []profileEntry
-	selected int
-	plans    []store.Plan
-	planSel  int
+	selector SelectorState
 
 	// Plan creation state.
-	planCreateIDInput    string
-	planCreateTitleInput string
-	planActionMsg        string
-	selectorMsg          string
-	sessionPickSel       int
+	planWiz PlanWizardState
 
 	// Profile creation/editing wizard state.
-	profileEditing           bool   // true = editing existing, false = creating new
-	profileEditName          string // original name of profile being edited
-	profileNameInput         string
-	profileAgents            []string
-	profileAgentSel          int
-	profileModels            []string
-	profileModelSel          int
-	profileCustomModel       string
-	profileCustomModelMode   bool
-	profileSelectedModel     string
-	profileReasoningLevels   []agentmeta.ReasoningLevel
-	profileReasoningLevelSel int
-	profileSelectedReasoning string
-	profileIntelInput        string
-	profileDescInput         string
-	profileMenuSel           int
-	profileMaxInstInput      string
-	profileSpeedSel          int
+	profileWiz ProfileWizardState
 
 	// Loop creation/editing wizard state.
-	loopEditing          bool
-	loopEditName         string
-	loopNameInput        string
-	loopSteps            []config.LoopStep
-	loopStepSel          int
-	loopStepEditIdx      int // which step is being edited (-1 = adding new)
-	loopStepProfileOpts  []string
-	loopStepProfileSel   int
-	loopStepRoleSel      int
-	loopStepTurnsInput   string
-	loopStepInstrInput   string
-	loopStepCanStop      bool
-	loopStepCanMsg       bool
-	loopStepCanPushover  bool
-	loopStepToolsSel     int // cursor position in the tools multi-select
-	loopStepSpawnOpts    []string
-	loopStepSpawnSel     int // selection in current delegation level
-	loopStepSpawnCfgSel  int // selection in add-profile picker
-	loopStepSpawnRoleSel int // selection in role picker for current rule
-	loopStepDelegRoots   []*loopDelegationNode
-	loopStepDelegPath    []int // path of indices to current delegation level
-	loopMenuSel          int
+	loopWiz LoopWizardState
 
 	// Confirm delete state.
 	confirmDeleteIdx int // index of profile/loop pending deletion
 
 	// Settings screen state.
-	settingsSel              int    // cursor in settings menu
-	settingsPushoverUserKey  string // input buffer for pushover user key
-	settingsPushoverAppToken string // input buffer for pushover app token
-	settingsRolesRulesSel    int    // cursor in Roles/Rules menu
-	settingsRolesSel         int    // cursor in role list
-	settingsRoleRuleSel      int    // cursor in rule list when editing a role
-	settingsRulesSel         int    // cursor in prompt rule list
-	settingsEditRoleIdx      int    // edited role index (-1 = creating)
-	settingsEditRuleIdx      int    // edited prompt rule index (-1 = creating)
-	settingsRoleNameInput    string // role name input buffer
-	settingsRuleIDInput      string // prompt rule ID input buffer
-	settingsRuleBodyInput    string // prompt rule body editor buffer
+	settings SettingsState
 
 	// Cached project data for the selector.
 	project        *store.ProjectConfig
@@ -218,7 +162,7 @@ func NewApp(s *store.Store) AppModel {
 
 func (m *AppModel) loadProjectData() {
 	m.project, _ = m.store.LoadProject()
-	m.plans, _ = m.store.ListPlans()
+	m.selector.Plans, _ = m.store.ListPlans()
 	m.project, _ = m.store.LoadProject() // refresh after potential lazy migration
 	m.plan, _ = m.store.ActivePlan()
 	activePlanID := ""
@@ -411,10 +355,10 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if len(m.profiles) > 0 {
-				m.selected = (m.selected + 1) % len(m.profiles)
+				m.selector.Selected = (m.selector.Selected + 1) % len(m.profiles)
 				// Skip separators.
-				if m.profiles[m.selected].IsSeparator {
-					m.selected = (m.selected + 1) % len(m.profiles)
+				if m.profiles[m.selector.Selected].IsSeparator {
+					m.selector.Selected = (m.selector.Selected + 1) % len(m.profiles)
 				}
 				m.resetStateScroll()
 			}
@@ -424,10 +368,10 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if len(m.profiles) > 0 {
-				m.selected = (m.selected - 1 + len(m.profiles)) % len(m.profiles)
+				m.selector.Selected = (m.selector.Selected - 1 + len(m.profiles)) % len(m.profiles)
 				// Skip separators.
-				if m.profiles[m.selected].IsSeparator {
-					m.selected = (m.selected - 1 + len(m.profiles)) % len(m.profiles)
+				if m.profiles[m.selector.Selected].IsSeparator {
+					m.selector.Selected = (m.selector.Selected - 1 + len(m.profiles)) % len(m.profiles)
 				}
 				m.resetStateScroll()
 			}
@@ -440,23 +384,23 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "n":
 			// Start new profile creation.
-			m.profileEditing = false
-			m.profileEditName = ""
-			m.profileNameInput = ""
+			m.profileWiz.Editing = false
+			m.profileWiz.EditName = ""
+			m.profileWiz.NameInput = ""
 			m.state = stateProfileName
 			return m, nil
 		case "l":
 			// Start new loop creation.
-			m.loopEditing = false
-			m.loopEditName = ""
-			m.loopNameInput = ""
-			m.loopSteps = nil
+			m.loopWiz.Editing = false
+			m.loopWiz.EditName = ""
+			m.loopWiz.NameInput = ""
+			m.loopWiz.Steps = nil
 			m.state = stateLoopName
 			return m, nil
 		case "e":
 			// Edit selected profile or loop.
-			if m.selected >= 0 && m.selected < len(m.profiles) {
-				p := m.profiles[m.selected]
+			if m.selector.Selected >= 0 && m.selector.Selected < len(m.profiles) {
+				p := m.profiles[m.selector.Selected]
 				if p.IsLoop {
 					return m.startEditLoop()
 				}
@@ -467,10 +411,10 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "d":
 			// Delete selected profile or loop (unless sentinel/separator).
-			if m.selected >= 0 && m.selected < len(m.profiles) {
-				p := m.profiles[m.selected]
+			if m.selector.Selected >= 0 && m.selector.Selected < len(m.profiles) {
+				p := m.profiles[m.selector.Selected]
 				if p.IsLoop || (!p.IsNew && !p.IsNewLoop && !p.IsSeparator) {
-					m.confirmDeleteIdx = m.selected
+					m.confirmDeleteIdx = m.selector.Selected
 					m.state = stateConfirmDelete
 				}
 			}
@@ -481,18 +425,18 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "S":
 			// Open settings.
 			config.EnsureDefaultRoleCatalog(m.globalCfg)
-			m.settingsSel = 0
-			m.settingsPushoverUserKey = m.globalCfg.Pushover.UserKey
-			m.settingsPushoverAppToken = m.globalCfg.Pushover.AppToken
-			m.settingsRolesRulesSel = 0
-			m.settingsRolesSel = 0
-			m.settingsRoleRuleSel = 0
-			m.settingsRulesSel = 0
-			m.settingsEditRoleIdx = -1
-			m.settingsEditRuleIdx = -1
-			m.settingsRoleNameInput = ""
-			m.settingsRuleIDInput = ""
-			m.settingsRuleBodyInput = ""
+			m.settings.Sel = 0
+			m.settings.PushoverUserKey = m.globalCfg.Pushover.UserKey
+			m.settings.PushoverAppToken = m.globalCfg.Pushover.AppToken
+			m.settings.RolesRulesSel = 0
+			m.settings.RolesSel = 0
+			m.settings.RoleRuleSel = 0
+			m.settings.RulesSel = 0
+			m.settings.EditRoleIdx = -1
+			m.settings.EditRuleIdx = -1
+			m.settings.RoleNameInput = ""
+			m.settings.RuleIDInput = ""
+			m.settings.RuleBodyInput = ""
 			m.state = stateSettings
 			return m, nil
 		case "p":
@@ -514,18 +458,18 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // clampSelected ensures the selected index is valid after list changes.
 func (m *AppModel) clampSelected() {
-	if m.selected >= len(m.profiles) {
-		m.selected = len(m.profiles) - 1
+	if m.selector.Selected >= len(m.profiles) {
+		m.selector.Selected = len(m.profiles) - 1
 	}
-	if m.selected < 0 {
-		m.selected = 0
+	if m.selector.Selected < 0 {
+		m.selector.Selected = 0
 	}
 	// Skip separators.
-	if m.selected < len(m.profiles) && m.profiles[m.selected].IsSeparator {
-		if m.selected > 0 {
-			m.selected--
+	if m.selector.Selected < len(m.profiles) && m.profiles[m.selector.Selected].IsSeparator {
+		if m.selector.Selected > 0 {
+			m.selector.Selected--
 		} else {
-			m.selected++
+			m.selector.Selected++
 		}
 	}
 }
@@ -654,7 +598,7 @@ func (m AppModel) profilesForLoop(steps []config.LoopStep) ([]config.Profile, bo
 
 func (m AppModel) startLoopSession(loopDef config.LoopDef, profiles []config.Profile, displayProfile, displayAgent string, cmdOverrides map[string]string, maxCycles int) (tea.Model, tea.Cmd) {
 	if err := m.store.EnsureDirs(); err != nil {
-		m.selectorMsg = "Start failed: " + err.Error()
+		m.selector.Msg = "Start failed: " + err.Error()
 		return m, nil
 	}
 
@@ -687,19 +631,19 @@ func (m AppModel) startLoopSession(loopDef config.LoopDef, profiles []config.Pro
 
 	sessionID, err := session.CreateSession(dcfg)
 	if err != nil {
-		m.selectorMsg = "Start failed: " + err.Error()
+		m.selector.Msg = "Start failed: " + err.Error()
 		return m, nil
 	}
 	if err := session.StartDaemon(sessionID); err != nil {
 		session.AbortSessionStartup(sessionID, "tui start daemon failed: "+err.Error())
-		m.selectorMsg = "Start failed: " + err.Error()
+		m.selector.Msg = "Start failed: " + err.Error()
 		return m, nil
 	}
 
 	client, err := session.ConnectToSession(sessionID)
 	if err != nil {
 		session.AbortSessionStartup(sessionID, "tui attach failed: "+err.Error())
-		m.selectorMsg = "Start failed: " + err.Error()
+		m.selector.Msg = "Start failed: " + err.Error()
 		return m, nil
 	}
 
@@ -712,7 +656,7 @@ func (m AppModel) startLoopSession(loopDef config.LoopDef, profiles []config.Pro
 		client.StreamEvents(eventCh, nil)
 	}()
 
-	m.selectorMsg = ""
+	m.selector.Msg = ""
 	m.state = stateRunning
 	m.runCancel = cancelFunc
 	m.runEventCh = eventCh
@@ -730,19 +674,19 @@ func (m AppModel) startLoopSession(loopDef config.LoopDef, profiles []config.Pro
 // startEditLoop pre-populates the loop wizard fields from an existing loop
 // and opens the loop edit menu.
 func (m AppModel) startEditLoop() (tea.Model, tea.Cmd) {
-	p := m.profiles[m.selected]
+	p := m.profiles[m.selector.Selected]
 	loopDef := m.globalCfg.FindLoop(p.LoopName)
 	if loopDef == nil {
 		return m, nil
 	}
 
-	m.loopEditing = true
-	m.loopEditName = loopDef.Name
-	m.loopNameInput = loopDef.Name
-	m.loopSteps = make([]config.LoopStep, len(loopDef.Steps))
-	copy(m.loopSteps, loopDef.Steps)
-	m.loopStepSel = 0
-	m.loopMenuSel = 0
+	m.loopWiz.Editing = true
+	m.loopWiz.EditName = loopDef.Name
+	m.loopWiz.NameInput = loopDef.Name
+	m.loopWiz.Steps = make([]config.LoopStep, len(loopDef.Steps))
+	copy(m.loopWiz.Steps, loopDef.Steps)
+	m.loopWiz.StepSel = 0
+	m.loopWiz.MenuSel = 0
 	m.state = stateLoopMenu
 	return m, nil
 }
@@ -750,7 +694,7 @@ func (m AppModel) startEditLoop() (tea.Model, tea.Cmd) {
 func (m AppModel) attachToSession(target session.SessionMeta) (tea.Model, tea.Cmd) {
 	client, err := session.ConnectToSession(target.ID)
 	if err != nil {
-		m.selectorMsg = "Attach failed: " + err.Error()
+		m.selector.Msg = "Attach failed: " + err.Error()
 		m.state = stateSelector
 		return m, nil
 	}
@@ -764,7 +708,7 @@ func (m AppModel) attachToSession(target session.SessionMeta) (tea.Model, tea.Cm
 		client.StreamEvents(eventCh, nil)
 	}()
 
-	m.selectorMsg = ""
+	m.selector.Msg = ""
 	m.state = stateRunning
 	m.runCancel = cancelFunc
 	m.runEventCh = eventCh
@@ -789,11 +733,11 @@ func (m AppModel) showSessions() (tea.Model, tea.Cmd) {
 
 	active, err := session.ListActiveSessions()
 	if err != nil {
-		m.selectorMsg = "Load sessions failed: " + err.Error()
+		m.selector.Msg = "Load sessions failed: " + err.Error()
 		return m, nil
 	}
 	if len(active) == 0 {
-		m.selectorMsg = "No active sessions."
+		m.selector.Msg = "No active sessions."
 		return m, nil
 	}
 
@@ -802,8 +746,8 @@ func (m AppModel) showSessions() (tea.Model, tea.Cmd) {
 	}
 
 	m.activeSessions = active
-	if m.sessionPickSel < 0 || m.sessionPickSel >= len(active) {
-		m.sessionPickSel = 0
+	if m.selector.SessionPickSel < 0 || m.selector.SessionPickSel >= len(active) {
+		m.selector.SessionPickSel = 0
 	}
 	m.state = stateSessionPicker
 	return m, nil
@@ -819,39 +763,39 @@ func (m AppModel) updateSessionPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			active, err := session.ListActiveSessions()
 			if err != nil {
-				m.selectorMsg = "Refresh failed: " + err.Error()
+				m.selector.Msg = "Refresh failed: " + err.Error()
 				return m, nil
 			}
 			if len(active) == 0 {
-				m.selectorMsg = "No active sessions."
+				m.selector.Msg = "No active sessions."
 				m.state = stateSelector
 				return m, nil
 			}
 			m.activeSessions = active
-			if m.sessionPickSel >= len(m.activeSessions) {
-				m.sessionPickSel = len(m.activeSessions) - 1
+			if m.selector.SessionPickSel >= len(m.activeSessions) {
+				m.selector.SessionPickSel = len(m.activeSessions) - 1
 			}
-			if m.sessionPickSel < 0 {
-				m.sessionPickSel = 0
+			if m.selector.SessionPickSel < 0 {
+				m.selector.SessionPickSel = 0
 			}
 			return m, nil
 		case "j", "down":
 			if len(m.activeSessions) > 0 {
-				m.sessionPickSel = (m.sessionPickSel + 1) % len(m.activeSessions)
+				m.selector.SessionPickSel = (m.selector.SessionPickSel + 1) % len(m.activeSessions)
 			}
 			return m, nil
 		case "k", "up":
 			if len(m.activeSessions) > 0 {
-				m.sessionPickSel = (m.sessionPickSel - 1 + len(m.activeSessions)) % len(m.activeSessions)
+				m.selector.SessionPickSel = (m.selector.SessionPickSel - 1 + len(m.activeSessions)) % len(m.activeSessions)
 			}
 			return m, nil
 		case "enter":
 			if len(m.activeSessions) == 0 {
-				m.selectorMsg = "No active sessions."
+				m.selector.Msg = "No active sessions."
 				m.state = stateSelector
 				return m, nil
 			}
-			target := m.activeSessions[m.sessionPickSel]
+			target := m.activeSessions[m.selector.SessionPickSel]
 			return m.attachToSession(target)
 		}
 	}
@@ -913,7 +857,7 @@ func startBackgroundEventDrain(ch <-chan any) {
 // startAgent transitions from selector to running state.
 // Everything now runs through loop sessions (single-profile runs are a 1-step loop).
 func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
-	p := m.profiles[m.selected]
+	p := m.profiles[m.selector.Selected]
 
 	// Skip separators.
 	if p.IsSeparator {
@@ -922,17 +866,17 @@ func (m AppModel) startAgent() (tea.Model, tea.Cmd) {
 
 	// If it's the "new loop" sentinel, start loop creation.
 	if p.IsNewLoop {
-		m.loopEditing = false
-		m.loopEditName = ""
-		m.loopNameInput = ""
-		m.loopSteps = nil
+		m.loopWiz.Editing = false
+		m.loopWiz.EditName = ""
+		m.loopWiz.NameInput = ""
+		m.loopWiz.Steps = nil
 		m.state = stateLoopName
 		return m, nil
 	}
 
 	// If it's the sentinel entry, start profile creation.
 	if p.IsNew {
-		m.profileNameInput = ""
+		m.profileWiz.NameInput = ""
 		m.state = stateProfileName
 		return m, nil
 	}
@@ -1055,10 +999,10 @@ func (m AppModel) viewSelector() string {
 
 	panels := renderSelector(
 		m.profiles,
-		m.selected,
+		m.selector.Selected,
 		m.project,
 		m.plan,
-		m.plans,
+		m.selector.Plans,
 		m.issues,
 		m.docs,
 		m.turns,
@@ -1095,13 +1039,13 @@ func (m AppModel) viewSessionPicker() string {
 	} else {
 		for i, s := range m.activeSessions {
 			prefix := "  "
-			if i == m.sessionPickSel {
+			if i == m.selector.SessionPickSel {
 				prefix = "> "
 			}
 			title := fmt.Sprintf("#%d %s/%s", s.ID, s.ProfileName, s.AgentName)
 			status := selectorRuntimeStatusStyle(s.Status).Render("[" + s.Status + "]")
 			lines = append(lines, prefix+valueStyle.Render(truncateInputForDisplay(title, cw-18))+" "+status)
-			if i == m.sessionPickSel {
+			if i == m.selector.SessionPickSel {
 				cursorLine = len(lines) - 1
 			}
 
@@ -1169,7 +1113,7 @@ func (m AppModel) renderStatusBar() string {
 		add("d", "delete")
 		add("s", "sessions")
 		add("S", "settings")
-		if msg := strings.TrimSpace(m.selectorMsg); msg != "" {
+		if msg := strings.TrimSpace(m.selector.Msg); msg != "" {
 			maxW := m.width / 3
 			if maxW < 20 {
 				maxW = 20

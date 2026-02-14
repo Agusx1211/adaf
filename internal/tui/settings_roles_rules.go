@@ -11,6 +11,21 @@ import (
 	"github.com/agusx1211/adaf/internal/prompt"
 )
 
+type SettingsState struct {
+	Sel              int
+	PushoverUserKey  string
+	PushoverAppToken string
+	RolesRulesSel    int
+	RolesSel         int
+	RoleRuleSel      int
+	RulesSel         int
+	EditRoleIdx      int
+	EditRuleIdx      int
+	RoleNameInput    string
+	RuleIDInput      string
+	RuleBodyInput    string
+}
+
 const settingsRolesRulesMenuItemCount = 3 // Roles, Prompt Rules, Back
 
 func normalizeRoleNameInput(in string) string {
@@ -22,14 +37,14 @@ func normalizeRuleIDInput(in string) string {
 }
 
 func (m AppModel) ruleBodyEditorContext() (editorKey string, editingRoleIdentity bool, ok bool) {
-	editingRoleIdentity = m.settingsEditRuleIdx < 0 &&
-		m.settingsEditRoleIdx >= 0 &&
-		m.settingsEditRoleIdx < len(m.globalCfg.Roles)
+	editingRoleIdentity = m.settings.EditRuleIdx < 0 &&
+		m.settings.EditRoleIdx >= 0 &&
+		m.settings.EditRoleIdx < len(m.globalCfg.Roles)
 	if editingRoleIdentity {
-		return fmt.Sprintf("settings-role-identity-%d", m.settingsEditRoleIdx), true, true
+		return fmt.Sprintf("settings-role-identity-%d", m.settings.EditRoleIdx), true, true
 	}
-	if m.settingsEditRuleIdx >= 0 && m.settingsEditRuleIdx < len(m.globalCfg.PromptRules) {
-		return fmt.Sprintf("settings-rule-body-%d", m.settingsEditRuleIdx), false, true
+	if m.settings.EditRuleIdx >= 0 && m.settings.EditRuleIdx < len(m.globalCfg.PromptRules) {
+		return fmt.Sprintf("settings-rule-body-%d", m.settings.EditRuleIdx), false, true
 	}
 	return "", false, false
 }
@@ -170,40 +185,40 @@ func (m AppModel) renderSettingsSplitView(leftLines, rightLines []string, leftCu
 
 func (m *AppModel) clampSettingsRolesSel() {
 	if len(m.globalCfg.Roles) == 0 {
-		m.settingsRolesSel = 0
+		m.settings.RolesSel = 0
 		return
 	}
-	if m.settingsRolesSel < 0 {
-		m.settingsRolesSel = 0
+	if m.settings.RolesSel < 0 {
+		m.settings.RolesSel = 0
 	}
-	if m.settingsRolesSel >= len(m.globalCfg.Roles) {
-		m.settingsRolesSel = len(m.globalCfg.Roles) - 1
+	if m.settings.RolesSel >= len(m.globalCfg.Roles) {
+		m.settings.RolesSel = len(m.globalCfg.Roles) - 1
 	}
 }
 
 func (m *AppModel) clampSettingsRulesSel() {
 	if len(m.globalCfg.PromptRules) == 0 {
-		m.settingsRulesSel = 0
+		m.settings.RulesSel = 0
 		return
 	}
-	if m.settingsRulesSel < 0 {
-		m.settingsRulesSel = 0
+	if m.settings.RulesSel < 0 {
+		m.settings.RulesSel = 0
 	}
-	if m.settingsRulesSel >= len(m.globalCfg.PromptRules) {
-		m.settingsRulesSel = len(m.globalCfg.PromptRules) - 1
+	if m.settings.RulesSel >= len(m.globalCfg.PromptRules) {
+		m.settings.RulesSel = len(m.globalCfg.PromptRules) - 1
 	}
 }
 
 func (m *AppModel) clampSettingsRoleRuleSel() {
 	if len(m.globalCfg.PromptRules) == 0 {
-		m.settingsRoleRuleSel = 0
+		m.settings.RoleRuleSel = 0
 		return
 	}
-	if m.settingsRoleRuleSel < 0 {
-		m.settingsRoleRuleSel = 0
+	if m.settings.RoleRuleSel < 0 {
+		m.settings.RoleRuleSel = 0
 	}
-	if m.settingsRoleRuleSel >= len(m.globalCfg.PromptRules) {
-		m.settingsRoleRuleSel = len(m.globalCfg.PromptRules) - 1
+	if m.settings.RoleRuleSel >= len(m.globalCfg.PromptRules) {
+		m.settings.RoleRuleSel = len(m.globalCfg.PromptRules) - 1
 	}
 }
 
@@ -287,16 +302,16 @@ func (m AppModel) updateSettingsRolesRulesMenu(msg tea.Msg) (tea.Model, tea.Cmd)
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
-			m.settingsRolesRulesSel = (m.settingsRolesRulesSel + 1) % settingsRolesRulesMenuItemCount
+			m.settings.RolesRulesSel = (m.settings.RolesRulesSel + 1) % settingsRolesRulesMenuItemCount
 		case "k", "up":
-			m.settingsRolesRulesSel = (m.settingsRolesRulesSel - 1 + settingsRolesRulesMenuItemCount) % settingsRolesRulesMenuItemCount
+			m.settings.RolesRulesSel = (m.settings.RolesRulesSel - 1 + settingsRolesRulesMenuItemCount) % settingsRolesRulesMenuItemCount
 		case "enter":
-			switch m.settingsRolesRulesSel {
+			switch m.settings.RolesRulesSel {
 			case 0:
-				m.settingsRolesSel = 0
+				m.settings.RolesSel = 0
 				m.state = stateSettingsRolesList
 			case 1:
-				m.settingsRulesSel = 0
+				m.settings.RulesSel = 0
 				m.state = stateSettingsRulesList
 			default:
 				m.state = stateSettings
@@ -331,7 +346,7 @@ func (m AppModel) viewSettingsRolesRulesMenu() string {
 	lines = append(lines, dimStyle.Render("Manage role definitions and reusable prompt rule sections."))
 	lines = append(lines, "")
 	for i, opt := range options {
-		if i == m.settingsRolesRulesSel {
+		if i == m.settings.RolesRulesSel {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(opt)
 			lines = append(lines, cursor+styled)
@@ -369,7 +384,7 @@ func (m AppModel) updateSettingsRolesList(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if len(m.globalCfg.Roles) > 0 {
-				m.settingsRolesSel = (m.settingsRolesSel + 1) % len(m.globalCfg.Roles)
+				m.settings.RolesSel = (m.settings.RolesSel + 1) % len(m.globalCfg.Roles)
 				m.resetStateScroll()
 			}
 		case "k", "up":
@@ -378,27 +393,27 @@ func (m AppModel) updateSettingsRolesList(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if len(m.globalCfg.Roles) > 0 {
-				m.settingsRolesSel = (m.settingsRolesSel - 1 + len(m.globalCfg.Roles)) % len(m.globalCfg.Roles)
+				m.settings.RolesSel = (m.settings.RolesSel - 1 + len(m.globalCfg.Roles)) % len(m.globalCfg.Roles)
 				m.resetStateScroll()
 			}
 		case "a":
-			m.settingsEditRoleIdx = -1
-			m.settingsRoleNameInput = ""
+			m.settings.EditRoleIdx = -1
+			m.settings.RoleNameInput = ""
 			m.state = stateSettingsRoleName
 			return m, nil
 		case "r":
 			if len(m.globalCfg.Roles) == 0 {
 				return m, nil
 			}
-			m.settingsEditRoleIdx = m.settingsRolesSel
-			m.settingsRoleNameInput = m.globalCfg.Roles[m.settingsRolesSel].Name
+			m.settings.EditRoleIdx = m.settings.RolesSel
+			m.settings.RoleNameInput = m.globalCfg.Roles[m.settings.RolesSel].Name
 			m.state = stateSettingsRoleName
 			return m, nil
 		case "d":
 			if len(m.globalCfg.Roles) <= 1 {
 				return m, nil
 			}
-			toDelete := m.globalCfg.Roles[m.settingsRolesSel].Name
+			toDelete := m.globalCfg.Roles[m.settings.RolesSel].Name
 			m.globalCfg.RemoveRoleDefinition(toDelete)
 			m.clampSettingsRolesSel()
 			m.resetStateScroll()
@@ -408,8 +423,8 @@ func (m AppModel) updateSettingsRolesList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.globalCfg.Roles) == 0 {
 				return m, nil
 			}
-			m.settingsEditRoleIdx = m.settingsRolesSel
-			m.settingsRoleRuleSel = 0
+			m.settings.EditRoleIdx = m.settings.RolesSel
+			m.settings.RoleRuleSel = 0
 			m.state = stateSettingsRoleEdit
 			return m, nil
 		case "esc":
@@ -445,7 +460,7 @@ func (m AppModel) viewSettingsRolesList() string {
 				defaultTag = " [default]"
 			}
 			label := fmt.Sprintf("%s%s  (%s, rules:%d)", role.Name, defaultTag, writeMode, len(role.RuleIDs))
-			if i == m.settingsRolesSel {
+			if i == m.settings.RolesSel {
 				cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 				styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
 				left = append(left, cursor+styled)
@@ -471,7 +486,7 @@ func (m AppModel) viewSettingsRolesList() string {
 		right = append(right, dimStyle.Render("No role selected."))
 	} else {
 		m.clampSettingsRolesSel()
-		role := m.globalCfg.Roles[m.settingsRolesSel]
+		role := m.globalCfg.Roles[m.settings.RolesSel]
 		mode := "read-only"
 		if role.CanWriteCode {
 			mode = "can-write"
@@ -514,18 +529,18 @@ func (m AppModel) viewSettingsRolesList() string {
 
 func (m AppModel) updateSettingsRoleName(msg tea.Msg) (tea.Model, tea.Cmd) {
 	ensureSettingsRoleCatalog(m.globalCfg)
-	initCmd := m.ensureTextInput("settings-role-name", m.settingsRoleNameInput, 0)
-	m.syncTextInput(m.settingsRoleNameInput)
+	initCmd := m.ensureTextInput("settings-role-name", m.settings.RoleNameInput, 0)
+	m.syncTextInput(m.settings.RoleNameInput)
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.Type {
 		case tea.KeyEnter:
-			name := normalizeRoleNameInput(m.settingsRoleNameInput)
+			name := normalizeRoleNameInput(m.settings.RoleNameInput)
 			if name == "" {
 				return m, nil
 			}
 
 			for i := range m.globalCfg.Roles {
-				if i == m.settingsEditRoleIdx {
+				if i == m.settings.EditRoleIdx {
 					continue
 				}
 				if strings.EqualFold(m.globalCfg.Roles[i].Name, name) {
@@ -533,14 +548,14 @@ func (m AppModel) updateSettingsRoleName(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-			if m.settingsEditRoleIdx >= 0 && m.settingsEditRoleIdx < len(m.globalCfg.Roles) {
-				old := m.globalCfg.Roles[m.settingsEditRoleIdx].Name
-				m.globalCfg.Roles[m.settingsEditRoleIdx].Name = name
+			if m.settings.EditRoleIdx >= 0 && m.settings.EditRoleIdx < len(m.globalCfg.Roles) {
+				old := m.globalCfg.Roles[m.settings.EditRoleIdx].Name
+				m.globalCfg.Roles[m.settings.EditRoleIdx].Name = name
 				if strings.EqualFold(m.globalCfg.DefaultRole, old) {
 					m.globalCfg.DefaultRole = name
 				}
 				m.rewriteRoleReferences(old, name)
-				m.settingsRolesSel = m.settingsEditRoleIdx
+				m.settings.RolesSel = m.settings.EditRoleIdx
 			} else {
 				m.globalCfg.Roles = append(m.globalCfg.Roles, config.RoleDefinition{
 					Name:         name,
@@ -548,7 +563,7 @@ func (m AppModel) updateSettingsRoleName(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Identity:     fmt.Sprintf("You are a %s role.", strings.ToUpper(strings.ReplaceAll(name, "-", " "))),
 					CanWriteCode: true,
 				})
-				m.settingsRolesSel = len(m.globalCfg.Roles) - 1
+				m.settings.RolesSel = len(m.globalCfg.Roles) - 1
 			}
 			saveSettingsRoleCatalog(m.globalCfg)
 			m.state = stateSettingsRolesList
@@ -559,7 +574,7 @@ func (m AppModel) updateSettingsRoleName(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	cmd := m.updateTextInput(msg)
-	m.settingsRoleNameInput = m.textInput.Value()
+	m.settings.RoleNameInput = m.textInput.Value()
 	return m, tea.Batch(initCmd, cmd)
 }
 
@@ -570,11 +585,11 @@ func (m AppModel) viewSettingsRoleName() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-	m.ensureTextInput("settings-role-name", m.settingsRoleNameInput, 0)
-	m.syncTextInput(m.settingsRoleNameInput)
+	m.ensureTextInput("settings-role-name", m.settings.RoleNameInput, 0)
+	m.syncTextInput(m.settings.RoleNameInput)
 
 	title := "Settings — New Role Name"
-	if m.settingsEditRoleIdx >= 0 {
+	if m.settings.EditRoleIdx >= 0 {
 		title = "Settings — Rename Role"
 	}
 
@@ -598,10 +613,10 @@ func (m AppModel) viewSettingsRoleName() string {
 func (m AppModel) updateSettingsRoleEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 	ensureSettingsRoleCatalog(m.globalCfg)
 	m.clampSettingsRolesSel()
-	if m.settingsEditRoleIdx < 0 || m.settingsEditRoleIdx >= len(m.globalCfg.Roles) {
-		m.settingsEditRoleIdx = m.settingsRolesSel
+	if m.settings.EditRoleIdx < 0 || m.settings.EditRoleIdx >= len(m.globalCfg.Roles) {
+		m.settings.EditRoleIdx = m.settings.RolesSel
 	}
-	if m.settingsEditRoleIdx < 0 || m.settingsEditRoleIdx >= len(m.globalCfg.Roles) {
+	if m.settings.EditRoleIdx < 0 || m.settings.EditRoleIdx >= len(m.globalCfg.Roles) {
 		m.state = stateSettingsRolesList
 		return m, nil
 	}
@@ -609,7 +624,7 @@ func (m AppModel) updateSettingsRoleEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		role := &m.globalCfg.Roles[m.settingsEditRoleIdx]
+		role := &m.globalCfg.Roles[m.settings.EditRoleIdx]
 		switch msg.String() {
 		case "tab", "l", "right":
 			m.setRightPaneFocused(true)
@@ -623,7 +638,7 @@ func (m AppModel) updateSettingsRoleEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if len(m.globalCfg.PromptRules) > 0 {
-				m.settingsRoleRuleSel = (m.settingsRoleRuleSel + 1) % len(m.globalCfg.PromptRules)
+				m.settings.RoleRuleSel = (m.settings.RoleRuleSel + 1) % len(m.globalCfg.PromptRules)
 				m.resetStateScroll()
 			}
 		case "k", "up":
@@ -632,14 +647,14 @@ func (m AppModel) updateSettingsRoleEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if len(m.globalCfg.PromptRules) > 0 {
-				m.settingsRoleRuleSel = (m.settingsRoleRuleSel - 1 + len(m.globalCfg.PromptRules)) % len(m.globalCfg.PromptRules)
+				m.settings.RoleRuleSel = (m.settings.RoleRuleSel - 1 + len(m.globalCfg.PromptRules)) % len(m.globalCfg.PromptRules)
 				m.resetStateScroll()
 			}
 		case " ":
 			if len(m.globalCfg.PromptRules) == 0 {
 				return m, nil
 			}
-			ruleID := m.globalCfg.PromptRules[m.settingsRoleRuleSel].ID
+			ruleID := m.globalCfg.PromptRules[m.settings.RoleRuleSel].ID
 			toggleRoleRule(role, ruleID)
 			saveSettingsRoleCatalog(m.globalCfg)
 			return m, nil
@@ -652,30 +667,30 @@ func (m AppModel) updateSettingsRoleEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 			saveSettingsRoleCatalog(m.globalCfg)
 			return m, nil
 		case "r":
-			m.settingsEditRoleIdx = m.settingsRolesSel
-			m.settingsRoleNameInput = role.Name
+			m.settings.EditRoleIdx = m.settings.RolesSel
+			m.settings.RoleNameInput = role.Name
 			m.state = stateSettingsRoleName
 			return m, nil
 		case "e", "enter":
 			if len(m.globalCfg.PromptRules) == 0 {
 				return m, nil
 			}
-			m.settingsEditRuleIdx = m.settingsRoleRuleSel
-			m.settingsRuleBodyInput = m.globalCfg.PromptRules[m.settingsEditRuleIdx].Body
+			m.settings.EditRuleIdx = m.settings.RoleRuleSel
+			m.settings.RuleBodyInput = m.globalCfg.PromptRules[m.settings.EditRuleIdx].Body
 			m.state = stateSettingsRuleBody
 			return m, nil
 		case "a":
-			m.settingsEditRuleIdx = -1
-			m.settingsRuleIDInput = ""
+			m.settings.EditRuleIdx = -1
+			m.settings.RuleIDInput = ""
 			m.state = stateSettingsRuleID
 			return m, nil
 		case "i":
-			m.settingsEditRuleIdx = -1
-			m.settingsRuleBodyInput = role.Identity
+			m.settings.EditRuleIdx = -1
+			m.settings.RuleBodyInput = role.Identity
 			m.state = stateSettingsRuleBody
 			return m, nil
 		case "esc":
-			m.settingsRolesSel = m.settingsEditRoleIdx
+			m.settings.RolesSel = m.settings.EditRoleIdx
 			m.state = stateSettingsRolesList
 			return m, nil
 		}
@@ -688,7 +703,7 @@ func (m AppModel) viewSettingsRoleEdit() string {
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
 	textStyle := lipgloss.NewStyle().Foreground(ColorText)
 
-	if m.settingsEditRoleIdx < 0 || m.settingsEditRoleIdx >= len(m.globalCfg.Roles) {
+	if m.settings.EditRoleIdx < 0 || m.settings.EditRoleIdx >= len(m.globalCfg.Roles) {
 		left := []string{
 			sectionStyle.Render("Settings — Role Edit"),
 			"",
@@ -702,7 +717,7 @@ func (m AppModel) viewSettingsRoleEdit() string {
 		return m.renderSettingsSplitView(left, right, -1)
 	}
 
-	role := m.globalCfg.Roles[m.settingsEditRoleIdx]
+	role := m.globalCfg.Roles[m.settings.EditRoleIdx]
 	mode := "read-only"
 	if role.CanWriteCode {
 		mode = "can-write"
@@ -726,7 +741,7 @@ func (m AppModel) viewSettingsRoleEdit() string {
 			check = lipgloss.NewStyle().Foreground(ColorGreen).Render("[x]")
 		}
 		label := fmt.Sprintf("%s %s", check, rule.ID)
-		if i == m.settingsRoleRuleSel {
+		if i == m.settings.RoleRuleSel {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
 			left = append(left, cursor+styled)
@@ -751,7 +766,7 @@ func (m AppModel) viewSettingsRoleEdit() string {
 	if len(m.globalCfg.PromptRules) == 0 {
 		right = append(right, dimStyle.Render("No prompt rules configured."))
 	} else {
-		rule := m.globalCfg.PromptRules[m.settingsRoleRuleSel]
+		rule := m.globalCfg.PromptRules[m.settings.RoleRuleSel]
 		right = append(right, textStyle.Render("Rule: "+rule.ID))
 		if roleHasRule(&role, rule.ID) {
 			right = append(right, textStyle.Render("Assigned: yes"))
@@ -790,7 +805,7 @@ func (m AppModel) updateSettingsRulesList(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if len(m.globalCfg.PromptRules) > 0 {
-				m.settingsRulesSel = (m.settingsRulesSel + 1) % len(m.globalCfg.PromptRules)
+				m.settings.RulesSel = (m.settings.RulesSel + 1) % len(m.globalCfg.PromptRules)
 				m.resetStateScroll()
 			}
 		case "k", "up":
@@ -799,27 +814,27 @@ func (m AppModel) updateSettingsRulesList(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if len(m.globalCfg.PromptRules) > 0 {
-				m.settingsRulesSel = (m.settingsRulesSel - 1 + len(m.globalCfg.PromptRules)) % len(m.globalCfg.PromptRules)
+				m.settings.RulesSel = (m.settings.RulesSel - 1 + len(m.globalCfg.PromptRules)) % len(m.globalCfg.PromptRules)
 				m.resetStateScroll()
 			}
 		case "a":
-			m.settingsEditRuleIdx = -1
-			m.settingsRuleIDInput = ""
+			m.settings.EditRuleIdx = -1
+			m.settings.RuleIDInput = ""
 			m.state = stateSettingsRuleID
 			return m, nil
 		case "r":
 			if len(m.globalCfg.PromptRules) == 0 {
 				return m, nil
 			}
-			m.settingsEditRuleIdx = m.settingsRulesSel
-			m.settingsRuleIDInput = m.globalCfg.PromptRules[m.settingsRulesSel].ID
+			m.settings.EditRuleIdx = m.settings.RulesSel
+			m.settings.RuleIDInput = m.globalCfg.PromptRules[m.settings.RulesSel].ID
 			m.state = stateSettingsRuleID
 			return m, nil
 		case "d":
 			if len(m.globalCfg.PromptRules) <= 1 {
 				return m, nil
 			}
-			ruleID := m.globalCfg.PromptRules[m.settingsRulesSel].ID
+			ruleID := m.globalCfg.PromptRules[m.settings.RulesSel].ID
 			m.globalCfg.RemovePromptRule(ruleID)
 			m.clampSettingsRulesSel()
 			m.resetStateScroll()
@@ -829,8 +844,8 @@ func (m AppModel) updateSettingsRulesList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.globalCfg.PromptRules) == 0 {
 				return m, nil
 			}
-			m.settingsEditRuleIdx = m.settingsRulesSel
-			m.settingsRuleBodyInput = m.globalCfg.PromptRules[m.settingsEditRuleIdx].Body
+			m.settings.EditRuleIdx = m.settings.RulesSel
+			m.settings.RuleBodyInput = m.globalCfg.PromptRules[m.settings.EditRuleIdx].Body
 			m.state = stateSettingsRuleBody
 			return m, nil
 		case "esc":
@@ -858,7 +873,7 @@ func (m AppModel) viewSettingsRulesList() string {
 	} else {
 		for i, rule := range m.globalCfg.PromptRules {
 			label := rule.ID
-			if i == m.settingsRulesSel {
+			if i == m.settings.RulesSel {
 				cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 				styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
 				left = append(left, cursor+styled)
@@ -884,7 +899,7 @@ func (m AppModel) viewSettingsRulesList() string {
 		right = append(right, dimStyle.Render("No rule selected."))
 	} else {
 		m.clampSettingsRulesSel()
-		rule := m.globalCfg.PromptRules[m.settingsRulesSel]
+		rule := m.globalCfg.PromptRules[m.settings.RulesSel]
 		right = append(right, textStyle.Render("Rule: "+rule.ID))
 		right = append(right, "")
 		if strings.TrimSpace(rule.Body) == "" {
@@ -901,17 +916,17 @@ func (m AppModel) viewSettingsRulesList() string {
 
 func (m AppModel) updateSettingsRuleID(msg tea.Msg) (tea.Model, tea.Cmd) {
 	ensureSettingsRoleCatalog(m.globalCfg)
-	initCmd := m.ensureTextInput("settings-rule-id", m.settingsRuleIDInput, 0)
-	m.syncTextInput(m.settingsRuleIDInput)
+	initCmd := m.ensureTextInput("settings-rule-id", m.settings.RuleIDInput, 0)
+	m.syncTextInput(m.settings.RuleIDInput)
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.Type {
 		case tea.KeyEnter:
-			id := normalizeRuleIDInput(m.settingsRuleIDInput)
+			id := normalizeRuleIDInput(m.settings.RuleIDInput)
 			if id == "" {
 				return m, nil
 			}
 			for i := range m.globalCfg.PromptRules {
-				if i == m.settingsEditRuleIdx {
+				if i == m.settings.EditRuleIdx {
 					continue
 				}
 				if strings.EqualFold(m.globalCfg.PromptRules[i].ID, id) {
@@ -919,20 +934,20 @@ func (m AppModel) updateSettingsRuleID(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-			if m.settingsEditRuleIdx >= 0 && m.settingsEditRuleIdx < len(m.globalCfg.PromptRules) {
-				oldID := m.globalCfg.PromptRules[m.settingsEditRuleIdx].ID
-				m.globalCfg.PromptRules[m.settingsEditRuleIdx].ID = id
+			if m.settings.EditRuleIdx >= 0 && m.settings.EditRuleIdx < len(m.globalCfg.PromptRules) {
+				oldID := m.globalCfg.PromptRules[m.settings.EditRuleIdx].ID
+				m.globalCfg.PromptRules[m.settings.EditRuleIdx].ID = id
 				m.rewriteRuleReferences(oldID, id)
-				m.settingsRulesSel = m.settingsEditRuleIdx
+				m.settings.RulesSel = m.settings.EditRuleIdx
 				saveSettingsRoleCatalog(m.globalCfg)
 				m.state = stateSettingsRulesList
 				return m, nil
 			}
 
 			m.globalCfg.PromptRules = append(m.globalCfg.PromptRules, config.PromptRule{ID: id})
-			m.settingsRulesSel = len(m.globalCfg.PromptRules) - 1
-			m.settingsEditRuleIdx = m.settingsRulesSel
-			m.settingsRuleBodyInput = ""
+			m.settings.RulesSel = len(m.globalCfg.PromptRules) - 1
+			m.settings.EditRuleIdx = m.settings.RulesSel
+			m.settings.RuleBodyInput = ""
 			saveSettingsRoleCatalog(m.globalCfg)
 			m.state = stateSettingsRuleBody
 			return m, nil
@@ -942,7 +957,7 @@ func (m AppModel) updateSettingsRuleID(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	cmd := m.updateTextInput(msg)
-	m.settingsRuleIDInput = m.textInput.Value()
+	m.settings.RuleIDInput = m.textInput.Value()
 	return m, tea.Batch(initCmd, cmd)
 }
 
@@ -953,11 +968,11 @@ func (m AppModel) viewSettingsRuleID() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-	m.ensureTextInput("settings-rule-id", m.settingsRuleIDInput, 0)
-	m.syncTextInput(m.settingsRuleIDInput)
+	m.ensureTextInput("settings-rule-id", m.settings.RuleIDInput, 0)
+	m.syncTextInput(m.settings.RuleIDInput)
 
 	title := "Settings — New Rule ID"
-	if m.settingsEditRuleIdx >= 0 {
+	if m.settings.EditRuleIdx >= 0 {
 		title = "Settings — Rename Rule ID"
 	}
 
@@ -985,21 +1000,21 @@ func (m AppModel) updateSettingsRuleBody(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateSettingsRulesList
 		return m, nil
 	}
-	initCmd := m.ensureTextarea(editorKey, m.settingsRuleBodyInput)
-	m.syncTextarea(m.settingsRuleBodyInput)
+	initCmd := m.ensureTextarea(editorKey, m.settings.RuleBodyInput)
+	m.syncTextarea(m.settings.RuleBodyInput)
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.Type {
 		case tea.KeyCtrlS:
 			if editingRoleIdentity {
-				m.globalCfg.Roles[m.settingsEditRoleIdx].Identity = m.settingsRuleBodyInput
+				m.globalCfg.Roles[m.settings.EditRoleIdx].Identity = m.settings.RuleBodyInput
 			} else {
-				m.globalCfg.PromptRules[m.settingsEditRuleIdx].Body = m.settingsRuleBodyInput
+				m.globalCfg.PromptRules[m.settings.EditRuleIdx].Body = m.settings.RuleBodyInput
 			}
 			saveSettingsRoleCatalog(m.globalCfg)
 			if editingRoleIdentity {
 				m.state = stateSettingsRoleEdit
 			} else {
-				m.settingsRulesSel = m.settingsEditRuleIdx
+				m.settings.RulesSel = m.settings.EditRuleIdx
 				m.state = stateSettingsRulesList
 			}
 			return m, nil
@@ -1013,7 +1028,7 @@ func (m AppModel) updateSettingsRuleBody(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	cmd := m.updateTextarea(msg)
-	m.settingsRuleBodyInput = m.textArea.Value()
+	m.settings.RuleBodyInput = m.textArea.Value()
 	return m, tea.Batch(initCmd, cmd)
 }
 
@@ -1029,9 +1044,9 @@ func (m AppModel) viewSettingsRuleBody() string {
 	ruleID := ""
 	roleName := ""
 	if editingRoleIdentity {
-		roleName = m.globalCfg.Roles[m.settingsEditRoleIdx].Name
+		roleName = m.globalCfg.Roles[m.settings.EditRoleIdx].Name
 	} else if ok {
-		ruleID = m.globalCfg.PromptRules[m.settingsEditRuleIdx].ID
+		ruleID = m.globalCfg.PromptRules[m.settings.EditRuleIdx].ID
 	}
 
 	var lines []string
@@ -1055,8 +1070,8 @@ func (m AppModel) viewSettingsRuleBody() string {
 	lines = append(lines, "")
 
 	if ok {
-		m.ensureTextarea(editorKey, m.settingsRuleBodyInput)
-		m.syncTextarea(m.settingsRuleBodyInput)
+		m.ensureTextarea(editorKey, m.settings.RuleBodyInput)
+		m.syncTextarea(m.settings.RuleBodyInput)
 
 		prefixLines := wrapRenderableLines(lines, cw)
 		editorHeight := ch - len(prefixLines)

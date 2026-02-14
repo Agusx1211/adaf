@@ -12,6 +12,27 @@ import (
 	"github.com/agusx1211/adaf/internal/config"
 )
 
+type ProfileWizardState struct {
+	Editing           bool
+	EditName          string
+	NameInput         string
+	Agents            []string
+	AgentSel          int
+	Models            []string
+	ModelSel          int
+	CustomModel       string
+	CustomModelMode   bool
+	SelectedModel     string
+	ReasoningLevels   []agentmeta.ReasoningLevel
+	ReasoningLevelSel int
+	SelectedReasoning string
+	IntelInput        string
+	DescInput         string
+	MenuSel           int
+	MaxInstInput      string
+	SpeedSel          int
+}
+
 // customModelSentinel is shown in the model list to let users type a custom model.
 const customModelSentinel = "(custom)"
 
@@ -85,57 +106,57 @@ func buildReasoningChoices(agentName string, agentsCfg *agent.AgentsConfig) []ag
 // startEditProfile pre-populates the wizard fields from an existing profile
 // and opens the edit menu.
 func (m AppModel) startEditProfile() (tea.Model, tea.Cmd) {
-	p := m.profiles[m.selected]
+	p := m.profiles[m.selector.Selected]
 	prof := m.globalCfg.FindProfile(p.Name)
 	if prof == nil {
 		return m, nil
 	}
 
-	m.profileEditing = true
-	m.profileEditName = prof.Name
-	m.profileNameInput = prof.Name
+	m.profileWiz.Editing = true
+	m.profileWiz.EditName = prof.Name
+	m.profileWiz.NameInput = prof.Name
 
 	// Pre-populate agent list and selection.
-	m.profileAgents = agentmeta.Names()
-	m.profileAgentSel = 0
-	for i, name := range m.profileAgents {
+	m.profileWiz.Agents = agentmeta.Names()
+	m.profileWiz.AgentSel = 0
+	for i, name := range m.profileWiz.Agents {
 		if name == prof.Agent {
-			m.profileAgentSel = i
+			m.profileWiz.AgentSel = i
 			break
 		}
 	}
 
 	// Store model/reasoning.
-	m.profileSelectedModel = prof.Model
-	m.profileSelectedReasoning = prof.ReasoningLevel
+	m.profileWiz.SelectedModel = prof.Model
+	m.profileWiz.SelectedReasoning = prof.ReasoningLevel
 
 	// Pre-populate text inputs.
-	m.profileDescInput = prof.Description
-	m.profileIntelInput = ""
+	m.profileWiz.DescInput = prof.Description
+	m.profileWiz.IntelInput = ""
 	if prof.Intelligence > 0 {
-		m.profileIntelInput = strconv.Itoa(prof.Intelligence)
+		m.profileWiz.IntelInput = strconv.Itoa(prof.Intelligence)
 	}
-	m.profileMaxInstInput = ""
+	m.profileWiz.MaxInstInput = ""
 	if prof.MaxInstances > 0 {
-		m.profileMaxInstInput = strconv.Itoa(prof.MaxInstances)
+		m.profileWiz.MaxInstInput = strconv.Itoa(prof.MaxInstances)
 	}
 
-	m.profileSpeedSel = 0
+	m.profileWiz.SpeedSel = 0
 	for i, opt := range profileSpeedOptions {
 		if opt == prof.Speed {
-			m.profileSpeedSel = i
+			m.profileWiz.SpeedSel = i
 			break
 		}
 	}
 
-	m.profileMenuSel = 0
+	m.profileWiz.MenuSel = 0
 	m.state = stateProfileMenu
 	return m, nil
 }
 
 // wizardTitle returns "Edit Profile" or "New Profile" depending on mode.
 func (m AppModel) wizardTitle() string {
-	if m.profileEditing {
+	if m.profileWiz.Editing {
 		return "Edit Profile"
 	}
 	return "New Profile"
@@ -153,47 +174,47 @@ func (m AppModel) updateProfileMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
-			m.profileMenuSel = (m.profileMenuSel + 1) % editMenuItemCount
+			m.profileWiz.MenuSel = (m.profileWiz.MenuSel + 1) % editMenuItemCount
 		case "k", "up":
-			m.profileMenuSel = (m.profileMenuSel - 1 + editMenuItemCount) % editMenuItemCount
+			m.profileWiz.MenuSel = (m.profileWiz.MenuSel - 1 + editMenuItemCount) % editMenuItemCount
 		case "esc":
-			m.profileEditing = false
+			m.profileWiz.Editing = false
 			m.state = stateSelector
 		case "enter":
-			switch m.profileMenuSel {
+			switch m.profileWiz.MenuSel {
 			case 0: // Name
 				m.state = stateProfileName
 			case 1: // Agent
-				m.profileAgents = agentmeta.Names()
+				m.profileWiz.Agents = agentmeta.Names()
 				m.state = stateProfileAgent
 			case 2: // Model
-				selectedAgent := m.profileAgents[m.profileAgentSel]
+				selectedAgent := m.profileWiz.Agents[m.profileWiz.AgentSel]
 				agentsCfg, _ := agent.LoadAgentsConfig()
-				m.profileModels = buildModelChoices(selectedAgent, agentsCfg)
-				m.profileModelSel = 0
-				if m.profileSelectedModel != "" {
-					for i, model := range m.profileModels {
-						if model == m.profileSelectedModel {
-							m.profileModelSel = i
+				m.profileWiz.Models = buildModelChoices(selectedAgent, agentsCfg)
+				m.profileWiz.ModelSel = 0
+				if m.profileWiz.SelectedModel != "" {
+					for i, model := range m.profileWiz.Models {
+						if model == m.profileWiz.SelectedModel {
+							m.profileWiz.ModelSel = i
 							break
 						}
 					}
 				}
-				m.profileCustomModelMode = false
+				m.profileWiz.CustomModelMode = false
 				m.state = stateProfileModel
 			case 3: // Reasoning
-				selectedAgent := m.profileAgents[m.profileAgentSel]
+				selectedAgent := m.profileWiz.Agents[m.profileWiz.AgentSel]
 				agentsCfg, _ := agent.LoadAgentsConfig()
 				levels := buildReasoningChoices(selectedAgent, agentsCfg)
 				if len(levels) == 0 {
 					return m, nil // no reasoning levels for this agent
 				}
-				m.profileReasoningLevels = levels
-				m.profileReasoningLevelSel = 0
-				if m.profileSelectedReasoning != "" {
+				m.profileWiz.ReasoningLevels = levels
+				m.profileWiz.ReasoningLevelSel = 0
+				if m.profileWiz.SelectedReasoning != "" {
 					for i, l := range levels {
-						if l.Name == m.profileSelectedReasoning {
-							m.profileReasoningLevelSel = i
+						if l.Name == m.profileWiz.SelectedReasoning {
+							m.profileWiz.ReasoningLevelSel = i
 							break
 						}
 					}
@@ -233,22 +254,22 @@ func (m AppModel) viewProfileMenu() string {
 
 	// Build field values for display.
 	agentName := ""
-	if m.profileAgentSel < len(m.profileAgents) {
-		agentName = m.profileAgents[m.profileAgentSel]
+	if m.profileWiz.AgentSel < len(m.profileWiz.Agents) {
+		agentName = m.profileWiz.Agents[m.profileWiz.AgentSel]
 	}
-	model := m.profileSelectedModel
+	model := m.profileWiz.SelectedModel
 	if model == "" {
 		model = "(default)"
 	}
-	reasoning := m.profileSelectedReasoning
+	reasoning := m.profileWiz.SelectedReasoning
 	if reasoning == "" {
 		reasoning = "(none)"
 	}
-	intel := m.profileIntelInput
+	intel := m.profileWiz.IntelInput
 	if intel == "" {
 		intel = "-"
 	}
-	desc := m.profileDescInput
+	desc := m.profileWiz.DescInput
 	if desc == "" {
 		desc = "-"
 	}
@@ -256,20 +277,20 @@ func (m AppModel) viewProfileMenu() string {
 	if maxDescW > 0 && len(desc) > maxDescW {
 		desc = desc[:maxDescW-3] + "..."
 	}
-	maxInst := m.profileMaxInstInput
+	maxInst := m.profileWiz.MaxInstInput
 	if maxInst == "" {
 		maxInst = "unlimited"
 	}
 	speed := "(none)"
-	if m.profileSpeedSel > 0 && m.profileSpeedSel < len(profileSpeedOptions) {
-		speed = profileSpeedOptions[m.profileSpeedSel]
+	if m.profileWiz.SpeedSel > 0 && m.profileWiz.SpeedSel < len(profileSpeedOptions) {
+		speed = profileSpeedOptions[m.profileWiz.SpeedSel]
 	}
 
 	type menuItem struct {
 		label, value string
 	}
 	items := []menuItem{
-		{"Name", m.profileNameInput},
+		{"Name", m.profileWiz.NameInput},
 		{"Agent", agentName},
 		{"Model", model},
 		{"Reasoning", reasoning},
@@ -281,7 +302,7 @@ func (m AppModel) viewProfileMenu() string {
 
 	for i, item := range items {
 		line := labelStyle.Render(item.label) + valueStyle.Render(item.value)
-		if i == m.profileMenuSel {
+		if i == m.profileWiz.MenuSel {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			lines = append(lines, cursor+line)
 			cursorLine = len(lines) - 1
@@ -293,7 +314,7 @@ func (m AppModel) viewProfileMenu() string {
 	// Save item
 	lines = append(lines, "")
 	saveLabel := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render("Save")
-	if m.profileMenuSel == 8 {
+	if m.profileWiz.MenuSel == 8 {
 		cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render("> ")
 		lines = append(lines, cursor+saveLabel)
 		cursorLine = len(lines) - 1
@@ -311,42 +332,42 @@ func (m AppModel) viewProfileMenu() string {
 
 // updateProfileName handles input in the profile name state.
 func (m AppModel) updateProfileName(msg tea.Msg) (tea.Model, tea.Cmd) {
-	initCmd := m.ensureTextInput("profile-name", m.profileNameInput, 0)
-	m.syncTextInput(m.profileNameInput)
+	initCmd := m.ensureTextInput("profile-name", m.profileWiz.NameInput, 0)
+	m.syncTextInput(m.profileWiz.NameInput)
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.Type {
 		case tea.KeyEnter:
-			name := strings.TrimSpace(m.profileNameInput)
+			name := strings.TrimSpace(m.profileWiz.NameInput)
 			if name == "" {
 				return m, nil
 			}
 			// Allow same name when editing the same profile.
 			if existing := m.globalCfg.FindProfile(name); existing != nil {
-				if !m.profileEditing || !strings.EqualFold(name, m.profileEditName) {
+				if !m.profileWiz.Editing || !strings.EqualFold(name, m.profileWiz.EditName) {
 					return m, nil // duplicate
 				}
 			}
-			m.profileNameInput = name
-			if m.profileEditing {
+			m.profileWiz.NameInput = name
+			if m.profileWiz.Editing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
-			m.profileAgents = agentmeta.Names()
-			m.profileAgentSel = 0
+			m.profileWiz.Agents = agentmeta.Names()
+			m.profileWiz.AgentSel = 0
 			m.state = stateProfileAgent
 			return m, nil
 		case tea.KeyEsc:
-			if m.profileEditing {
+			if m.profileWiz.Editing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
-			m.profileNameInput = ""
+			m.profileWiz.NameInput = ""
 			m.state = stateSelector
 			return m, nil
 		}
 	}
 	cmd := m.updateTextInput(msg)
-	m.profileNameInput = m.textInput.Value()
+	m.profileWiz.NameInput = m.textInput.Value()
 	return m, tea.Batch(initCmd, cmd)
 }
 
@@ -356,29 +377,29 @@ func (m AppModel) updateProfileAgent(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
-			if len(m.profileAgents) > 0 {
-				m.profileAgentSel = (m.profileAgentSel + 1) % len(m.profileAgents)
+			if len(m.profileWiz.Agents) > 0 {
+				m.profileWiz.AgentSel = (m.profileWiz.AgentSel + 1) % len(m.profileWiz.Agents)
 			}
 		case "k", "up":
-			if len(m.profileAgents) > 0 {
-				m.profileAgentSel = (m.profileAgentSel - 1 + len(m.profileAgents)) % len(m.profileAgents)
+			if len(m.profileWiz.Agents) > 0 {
+				m.profileWiz.AgentSel = (m.profileWiz.AgentSel - 1 + len(m.profileWiz.Agents)) % len(m.profileWiz.Agents)
 			}
 		case "enter":
-			if len(m.profileAgents) > 0 {
-				if m.profileEditing {
+			if len(m.profileWiz.Agents) > 0 {
+				if m.profileWiz.Editing {
 					m.state = stateProfileMenu
 					return m, nil
 				}
-				selectedAgent := m.profileAgents[m.profileAgentSel]
+				selectedAgent := m.profileWiz.Agents[m.profileWiz.AgentSel]
 				agentsCfg, _ := agent.LoadAgentsConfig()
-				m.profileModels = buildModelChoices(selectedAgent, agentsCfg)
-				m.profileModelSel = 0
-				m.profileCustomModel = ""
-				m.profileCustomModelMode = false
+				m.profileWiz.Models = buildModelChoices(selectedAgent, agentsCfg)
+				m.profileWiz.ModelSel = 0
+				m.profileWiz.CustomModel = ""
+				m.profileWiz.CustomModelMode = false
 				m.state = stateProfileModel
 			}
 		case "esc":
-			if m.profileEditing {
+			if m.profileWiz.Editing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
@@ -391,7 +412,7 @@ func (m AppModel) updateProfileAgent(msg tea.Msg) (tea.Model, tea.Cmd) {
 // updateProfileModel handles model selection in the profile wizard.
 func (m AppModel) updateProfileModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Custom model text input mode.
-	if m.profileCustomModelMode {
+	if m.profileWiz.CustomModelMode {
 		return m.updateCustomModelInput(msg)
 	}
 
@@ -399,34 +420,34 @@ func (m AppModel) updateProfileModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
-			if len(m.profileModels) > 0 {
-				m.profileModelSel = (m.profileModelSel + 1) % len(m.profileModels)
+			if len(m.profileWiz.Models) > 0 {
+				m.profileWiz.ModelSel = (m.profileWiz.ModelSel + 1) % len(m.profileWiz.Models)
 			}
 		case "k", "up":
-			if len(m.profileModels) > 0 {
-				m.profileModelSel = (m.profileModelSel - 1 + len(m.profileModels)) % len(m.profileModels)
+			if len(m.profileWiz.Models) > 0 {
+				m.profileWiz.ModelSel = (m.profileWiz.ModelSel - 1 + len(m.profileWiz.Models)) % len(m.profileWiz.Models)
 			}
 		case "enter":
-			if len(m.profileModels) > 0 {
-				model := m.profileModels[m.profileModelSel]
+			if len(m.profileWiz.Models) > 0 {
+				model := m.profileWiz.Models[m.profileWiz.ModelSel]
 				if model == customModelSentinel {
-					m.profileCustomModelMode = true
-					m.profileCustomModel = ""
+					m.profileWiz.CustomModelMode = true
+					m.profileWiz.CustomModel = ""
 					m.textInputKey = ""
 					return m, nil
 				}
 				if model == "(default)" {
 					model = ""
 				}
-				m.profileSelectedModel = model
-				if m.profileEditing {
+				m.profileWiz.SelectedModel = model
+				if m.profileWiz.Editing {
 					m.state = stateProfileMenu
 					return m, nil
 				}
 				return m.transitionToReasoningOrFinish()
 			}
 		case "esc":
-			if m.profileEditing {
+			if m.profileWiz.Editing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
@@ -438,46 +459,46 @@ func (m AppModel) updateProfileModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // updateCustomModelInput handles free-text model input.
 func (m AppModel) updateCustomModelInput(msg tea.Msg) (tea.Model, tea.Cmd) {
-	initCmd := m.ensureTextInput("profile-custom-model", m.profileCustomModel, 0)
-	m.syncTextInput(m.profileCustomModel)
+	initCmd := m.ensureTextInput("profile-custom-model", m.profileWiz.CustomModel, 0)
+	m.syncTextInput(m.profileWiz.CustomModel)
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.Type {
 		case tea.KeyEnter:
-			model := strings.TrimSpace(m.profileCustomModel)
+			model := strings.TrimSpace(m.profileWiz.CustomModel)
 			if model == "" {
 				return m, nil
 			}
-			m.profileSelectedModel = model
-			m.profileCustomModelMode = false
-			if m.profileEditing {
+			m.profileWiz.SelectedModel = model
+			m.profileWiz.CustomModelMode = false
+			if m.profileWiz.Editing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
 			return m.transitionToReasoningOrFinish()
 		case tea.KeyEsc:
-			m.profileCustomModelMode = false
+			m.profileWiz.CustomModelMode = false
 			return m, nil
 		}
 	}
 	cmd := m.updateTextInput(msg)
-	m.profileCustomModel = m.textInput.Value()
+	m.profileWiz.CustomModel = m.textInput.Value()
 	return m, tea.Batch(initCmd, cmd)
 }
 
 // transitionToReasoningOrFinish moves to reasoning level selection if the agent
 // supports it, otherwise skips directly to intelligence input.
 func (m AppModel) transitionToReasoningOrFinish() (tea.Model, tea.Cmd) {
-	selectedAgent := m.profileAgents[m.profileAgentSel]
+	selectedAgent := m.profileWiz.Agents[m.profileWiz.AgentSel]
 	agentsCfg, _ := agent.LoadAgentsConfig()
 	levels := buildReasoningChoices(selectedAgent, agentsCfg)
 	if len(levels) > 0 {
-		m.profileReasoningLevels = levels
-		m.profileReasoningLevelSel = 0
+		m.profileWiz.ReasoningLevels = levels
+		m.profileWiz.ReasoningLevelSel = 0
 		// When editing, pre-select existing reasoning level.
-		if m.profileEditing && m.profileSelectedReasoning != "" {
+		if m.profileWiz.Editing && m.profileWiz.SelectedReasoning != "" {
 			for i, l := range levels {
-				if l.Name == m.profileSelectedReasoning {
-					m.profileReasoningLevelSel = i
+				if l.Name == m.profileWiz.SelectedReasoning {
+					m.profileWiz.ReasoningLevelSel = i
 					break
 				}
 			}
@@ -485,8 +506,8 @@ func (m AppModel) transitionToReasoningOrFinish() (tea.Model, tea.Cmd) {
 		m.state = stateProfileReasoning
 		return m, nil
 	}
-	m.profileSelectedReasoning = ""
-	m.profileIntelInput = ""
+	m.profileWiz.SelectedReasoning = ""
+	m.profileWiz.IntelInput = ""
 	m.state = stateProfileIntel
 	return m, nil
 }
@@ -497,27 +518,27 @@ func (m AppModel) updateProfileReasoning(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
-			if len(m.profileReasoningLevels) > 0 {
-				m.profileReasoningLevelSel = (m.profileReasoningLevelSel + 1) % len(m.profileReasoningLevels)
+			if len(m.profileWiz.ReasoningLevels) > 0 {
+				m.profileWiz.ReasoningLevelSel = (m.profileWiz.ReasoningLevelSel + 1) % len(m.profileWiz.ReasoningLevels)
 			}
 		case "k", "up":
-			if len(m.profileReasoningLevels) > 0 {
-				m.profileReasoningLevelSel = (m.profileReasoningLevelSel - 1 + len(m.profileReasoningLevels)) % len(m.profileReasoningLevels)
+			if len(m.profileWiz.ReasoningLevels) > 0 {
+				m.profileWiz.ReasoningLevelSel = (m.profileWiz.ReasoningLevelSel - 1 + len(m.profileWiz.ReasoningLevels)) % len(m.profileWiz.ReasoningLevels)
 			}
 		case "enter":
-			if len(m.profileReasoningLevels) > 0 {
-				level := m.profileReasoningLevels[m.profileReasoningLevelSel]
-				m.profileSelectedReasoning = level.Name
-				if m.profileEditing {
+			if len(m.profileWiz.ReasoningLevels) > 0 {
+				level := m.profileWiz.ReasoningLevels[m.profileWiz.ReasoningLevelSel]
+				m.profileWiz.SelectedReasoning = level.Name
+				if m.profileWiz.Editing {
 					m.state = stateProfileMenu
 					return m, nil
 				}
-				m.profileIntelInput = ""
+				m.profileWiz.IntelInput = ""
 				m.state = stateProfileIntel
 				return m, nil
 			}
 		case "esc":
-			if m.profileEditing {
+			if m.profileWiz.Editing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
@@ -529,25 +550,25 @@ func (m AppModel) updateProfileReasoning(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // updateProfileIntel handles intelligence rating input.
 func (m AppModel) updateProfileIntel(msg tea.Msg) (tea.Model, tea.Cmd) {
-	initCmd := m.ensureTextInput("profile-intel", m.profileIntelInput, 2)
-	m.syncTextInput(m.profileIntelInput)
+	initCmd := m.ensureTextInput("profile-intel", m.profileWiz.IntelInput, 2)
+	m.syncTextInput(m.profileWiz.IntelInput)
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.Type {
 		case tea.KeyEnter:
-			if m.profileEditing {
+			if m.profileWiz.Editing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
 			// Move to description.
-			m.profileDescInput = ""
+			m.profileWiz.DescInput = ""
 			m.state = stateProfileDesc
 			return m, nil
 		case tea.KeyEsc:
-			if m.profileEditing {
+			if m.profileWiz.Editing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
-			if len(m.profileReasoningLevels) > 0 {
+			if len(m.profileWiz.ReasoningLevels) > 0 {
 				m.state = stateProfileReasoning
 			} else {
 				m.state = stateProfileModel
@@ -565,26 +586,26 @@ func (m AppModel) updateProfileIntel(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textInput.SetValue(filtered)
 		m.textInput.CursorEnd()
 	}
-	m.profileIntelInput = filtered
+	m.profileWiz.IntelInput = filtered
 	return m, tea.Batch(initCmd, cmd)
 }
 
 // updateProfileDesc handles description text input.
 func (m AppModel) updateProfileDesc(msg tea.Msg) (tea.Model, tea.Cmd) {
-	initCmd := m.ensureTextInput("profile-desc", m.profileDescInput, 0)
-	m.syncTextInput(m.profileDescInput)
+	initCmd := m.ensureTextInput("profile-desc", m.profileWiz.DescInput, 0)
+	m.syncTextInput(m.profileWiz.DescInput)
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.Type {
 		case tea.KeyEnter:
-			if m.profileEditing {
+			if m.profileWiz.Editing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
-			m.profileMaxInstInput = ""
+			m.profileWiz.MaxInstInput = ""
 			m.state = stateProfileMaxInst
 			return m, nil
 		case tea.KeyEsc:
-			if m.profileEditing {
+			if m.profileWiz.Editing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
@@ -593,26 +614,26 @@ func (m AppModel) updateProfileDesc(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	cmd := m.updateTextInput(msg)
-	m.profileDescInput = m.textInput.Value()
+	m.profileWiz.DescInput = m.textInput.Value()
 	return m, tea.Batch(initCmd, cmd)
 }
 
 // updateProfileMaxInst handles max instances input.
 func (m AppModel) updateProfileMaxInst(msg tea.Msg) (tea.Model, tea.Cmd) {
-	initCmd := m.ensureTextInput("profile-max-inst", m.profileMaxInstInput, 2)
-	m.syncTextInput(m.profileMaxInstInput)
+	initCmd := m.ensureTextInput("profile-max-inst", m.profileWiz.MaxInstInput, 2)
+	m.syncTextInput(m.profileWiz.MaxInstInput)
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.Type {
 		case tea.KeyEnter:
-			if m.profileEditing {
+			if m.profileWiz.Editing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
-			m.profileSpeedSel = 0
+			m.profileWiz.SpeedSel = 0
 			m.state = stateProfileSpeed
 			return m, nil
 		case tea.KeyEsc:
-			if m.profileEditing {
+			if m.profileWiz.Editing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
@@ -630,78 +651,78 @@ func (m AppModel) updateProfileMaxInst(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textInput.SetValue(filtered)
 		m.textInput.CursorEnd()
 	}
-	m.profileMaxInstInput = filtered
+	m.profileWiz.MaxInstInput = filtered
 	return m, tea.Batch(initCmd, cmd)
 }
 
 // finishProfileCreation creates the profile, saves config, and returns to selector.
 func (m AppModel) finishProfileCreation() (tea.Model, tea.Cmd) {
-	selectedAgent := m.profileAgents[m.profileAgentSel]
+	selectedAgent := m.profileWiz.Agents[m.profileWiz.AgentSel]
 
 	intel := 0
-	if m.profileIntelInput != "" {
-		if v, err := strconv.Atoi(m.profileIntelInput); err == nil && v >= 1 && v <= 10 {
+	if m.profileWiz.IntelInput != "" {
+		if v, err := strconv.Atoi(m.profileWiz.IntelInput); err == nil && v >= 1 && v <= 10 {
 			intel = v
 		}
 	}
 
 	maxInst := 0
-	if m.profileMaxInstInput != "" {
-		if v, err := strconv.Atoi(m.profileMaxInstInput); err == nil && v > 0 {
+	if m.profileWiz.MaxInstInput != "" {
+		if v, err := strconv.Atoi(m.profileWiz.MaxInstInput); err == nil && v > 0 {
 			maxInst = v
 		}
 	}
 
 	speed := ""
-	if m.profileSpeedSel > 0 && m.profileSpeedSel < len(profileSpeedOptions) {
-		speed = profileSpeedOptions[m.profileSpeedSel]
+	if m.profileWiz.SpeedSel > 0 && m.profileWiz.SpeedSel < len(profileSpeedOptions) {
+		speed = profileSpeedOptions[m.profileWiz.SpeedSel]
 	}
 
 	p := config.Profile{
-		Name:           m.profileNameInput,
+		Name:           m.profileWiz.NameInput,
 		Agent:          selectedAgent,
-		Model:          m.profileSelectedModel,
-		ReasoningLevel: m.profileSelectedReasoning,
+		Model:          m.profileWiz.SelectedModel,
+		ReasoningLevel: m.profileWiz.SelectedReasoning,
 		Intelligence:   intel,
-		Description:    strings.TrimSpace(m.profileDescInput),
+		Description:    strings.TrimSpace(m.profileWiz.DescInput),
 		MaxInstances:   maxInst,
 		Speed:          speed,
 	}
 
-	if m.profileEditing {
+	if m.profileWiz.Editing {
 		// Remove old profile, then add updated one.
-		m.globalCfg.RemoveProfile(m.profileEditName)
+		m.globalCfg.RemoveProfile(m.profileWiz.EditName)
 	}
 
 	m.globalCfg.AddProfile(p)
 	config.Save(m.globalCfg)
 	m.rebuildProfiles()
 
-	if m.profileEditing {
+	if m.profileWiz.Editing {
 		// Select the edited profile by name.
 		for i, pe := range m.profiles {
 			if strings.EqualFold(pe.Name, p.Name) {
-				m.selected = i
+				m.selector.Selected = i
 				break
 			}
 		}
 	} else {
 		// Select the new profile (last before sentinel).
-		m.selected = len(m.profiles) - 2
-		if m.selected < 0 {
-			m.selected = 0
+		m.selector.Selected = len(m.profiles) - 2
+		if m.selector.Selected < 0 {
+			m.selector.Selected = 0
 		}
 	}
 
-	m.profileEditing = false
-	m.profileEditName = ""
-	m.profileNameInput = ""
-	m.profileSelectedModel = ""
-	m.profileSelectedReasoning = ""
-	m.profileDescInput = ""
-	m.profileIntelInput = ""
-	m.profileMaxInstInput = ""
-	m.profileSpeedSel = 0
+	m.profileWiz.Editing = false
+	m.profileWiz.EditName = ""
+	m.profileWiz.NameInput = ""
+	m.profileWiz.SelectedModel = ""
+	m.profileWiz.SelectedReasoning = ""
+	m.profileWiz.DescInput = ""
+	m.profileWiz.IntelInput = ""
+	m.profileWiz.MaxInstInput = ""
+	m.profileWiz.SpeedSel = 0
 	m.state = stateSelector
 	return m, nil
 }
@@ -712,17 +733,17 @@ func (m AppModel) updateProfileSpeed(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
-			m.profileSpeedSel = (m.profileSpeedSel + 1) % len(profileSpeedOptions)
+			m.profileWiz.SpeedSel = (m.profileWiz.SpeedSel + 1) % len(profileSpeedOptions)
 		case "k", "up":
-			m.profileSpeedSel = (m.profileSpeedSel - 1 + len(profileSpeedOptions)) % len(profileSpeedOptions)
+			m.profileWiz.SpeedSel = (m.profileWiz.SpeedSel - 1 + len(profileSpeedOptions)) % len(profileSpeedOptions)
 		case "enter":
-			if m.profileEditing {
+			if m.profileWiz.Editing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
 			return m.finishProfileCreation()
 		case "esc":
-			if m.profileEditing {
+			if m.profileWiz.Editing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
@@ -749,7 +770,7 @@ func (m AppModel) viewProfileSpeed() string {
 	lines = append(lines, "")
 
 	for i, opt := range profileSpeedOptions {
-		if i == m.profileSpeedSel {
+		if i == m.profileWiz.SpeedSel {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(opt)
 			lines = append(lines, cursor+styled)
@@ -759,7 +780,7 @@ func (m AppModel) viewProfileSpeed() string {
 		}
 	}
 	lines = append(lines, "")
-	if m.profileEditing {
+	if m.profileWiz.Editing {
 		lines = append(lines, dimStyle.Render("j/k: navigate  enter: save  esc: back"))
 	} else {
 		lines = append(lines, dimStyle.Render("j/k: navigate  enter: create profile  esc: back"))
@@ -801,8 +822,8 @@ func (m AppModel) viewProfileName() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-	m.ensureTextInput("profile-name", m.profileNameInput, 0)
-	m.syncTextInput(m.profileNameInput)
+	m.ensureTextInput("profile-name", m.profileWiz.NameInput, 0)
+	m.syncTextInput(m.profileWiz.NameInput)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Name"))
@@ -833,8 +854,8 @@ func (m AppModel) viewProfileAgent() string {
 	lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Select Agent"))
 	lines = append(lines, "")
 
-	for i, name := range m.profileAgents {
-		if i == m.profileAgentSel {
+	for i, name := range m.profileWiz.Agents {
+		if i == m.profileWiz.AgentSel {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			nameStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(name)
 			lines = append(lines, cursor+nameStyled)
@@ -861,16 +882,16 @@ func (m AppModel) viewProfileModel() string {
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
 
 	agentName := ""
-	if m.profileAgentSel < len(m.profileAgents) {
-		agentName = m.profileAgents[m.profileAgentSel]
+	if m.profileWiz.AgentSel < len(m.profileWiz.Agents) {
+		agentName = m.profileWiz.Agents[m.profileWiz.AgentSel]
 	}
 
 	var lines []string
 	cursorLine := -1
 
-	if m.profileCustomModelMode {
-		m.ensureTextInput("profile-custom-model", m.profileCustomModel, 0)
-		m.syncTextInput(m.profileCustomModel)
+	if m.profileWiz.CustomModelMode {
+		m.ensureTextInput("profile-custom-model", m.profileWiz.CustomModel, 0)
+		m.syncTextInput(m.profileWiz.CustomModel)
 		lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Custom Model"))
 		lines = append(lines, dimStyle.Render("Agent: "+agentName))
 		lines = append(lines, "")
@@ -884,10 +905,10 @@ func (m AppModel) viewProfileModel() string {
 		lines = append(lines, dimStyle.Render("Agent: "+agentName))
 		lines = append(lines, "")
 
-		for i, model := range m.profileModels {
+		for i, model := range m.profileWiz.Models {
 			styled := model
 			if model == customModelSentinel {
-				if i == m.profileModelSel {
+				if i == m.profileWiz.ModelSel {
 					cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render("> ")
 					nameStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render(styled)
 					lines = append(lines, cursor+nameStyled)
@@ -895,7 +916,7 @@ func (m AppModel) viewProfileModel() string {
 				} else {
 					lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ColorOverlay0).Render(styled))
 				}
-			} else if i == m.profileModelSel {
+			} else if i == m.profileWiz.ModelSel {
 				cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 				modelStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(styled)
 				lines = append(lines, cursor+modelStyled)
@@ -923,19 +944,19 @@ func (m AppModel) viewProfileReasoning() string {
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
 
 	agentName := ""
-	if m.profileAgentSel < len(m.profileAgents) {
-		agentName = m.profileAgents[m.profileAgentSel]
+	if m.profileWiz.AgentSel < len(m.profileWiz.Agents) {
+		agentName = m.profileWiz.Agents[m.profileWiz.AgentSel]
 	}
 
 	var lines []string
 	cursorLine := -1
 	lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Reasoning Level"))
-	lines = append(lines, dimStyle.Render("Agent: "+agentName+"  Model: "+m.profileSelectedModel))
+	lines = append(lines, dimStyle.Render("Agent: "+agentName+"  Model: "+m.profileWiz.SelectedModel))
 	lines = append(lines, "")
 
-	for i, level := range m.profileReasoningLevels {
+	for i, level := range m.profileWiz.ReasoningLevels {
 		label := level.Name
-		if i == m.profileReasoningLevelSel {
+		if i == m.profileWiz.ReasoningLevelSel {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
 			lines = append(lines, cursor+styled)
@@ -960,8 +981,8 @@ func (m AppModel) viewProfileIntel() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-	m.ensureTextInput("profile-intel", m.profileIntelInput, 2)
-	m.syncTextInput(m.profileIntelInput)
+	m.ensureTextInput("profile-intel", m.profileWiz.IntelInput, 2)
+	m.syncTextInput(m.profileWiz.IntelInput)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Intelligence"))
@@ -986,8 +1007,8 @@ func (m AppModel) viewProfileDesc() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-	m.ensureTextInput("profile-desc", m.profileDescInput, 0)
-	m.syncTextInput(m.profileDescInput)
+	m.ensureTextInput("profile-desc", m.profileWiz.DescInput, 0)
+	m.syncTextInput(m.profileWiz.DescInput)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Description"))
@@ -1012,8 +1033,8 @@ func (m AppModel) viewProfileMaxInst() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-	m.ensureTextInput("profile-max-inst", m.profileMaxInstInput, 2)
-	m.syncTextInput(m.profileMaxInstInput)
+	m.ensureTextInput("profile-max-inst", m.profileWiz.MaxInstInput, 2)
+	m.syncTextInput(m.profileWiz.MaxInstInput)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Max Instances"))

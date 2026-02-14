@@ -19,9 +19,34 @@ type loopDelegationNode struct {
 	Children []*loopDelegationNode
 }
 
+type LoopWizardState struct {
+	Editing          bool
+	EditName         string
+	NameInput        string
+	Steps            []config.LoopStep
+	StepSel          int
+	StepEditIdx      int
+	StepProfileOpts  []string
+	StepProfileSel   int
+	StepRoleSel      int
+	StepTurnsInput   string
+	StepInstrInput   string
+	StepCanStop      bool
+	StepCanMsg       bool
+	StepCanPushover  bool
+	StepToolsSel     int
+	StepSpawnOpts    []string
+	StepSpawnSel     int
+	StepSpawnCfgSel  int
+	StepSpawnRoleSel int
+	StepDelegRoots   []*loopDelegationNode
+	StepDelegPath    []int
+	MenuSel          int
+}
+
 // loopWizardTitle returns "Edit Loop" or "New Loop" depending on mode.
 func (m AppModel) loopWizardTitle() string {
-	if m.loopEditing {
+	if m.loopWiz.Editing {
 		return "Edit Loop"
 	}
 	return "New Loop"
@@ -38,21 +63,21 @@ func (m AppModel) effectiveLoopStepRole(step config.LoopStep) string {
 }
 
 func (m *AppModel) resetLoopStepSpawnOptions() {
-	m.loopStepSpawnOpts = nil
-	m.loopStepSpawnSel = 0
-	m.loopStepSpawnCfgSel = 0
-	m.loopStepDelegRoots = nil
-	m.loopStepDelegPath = nil
+	m.loopWiz.StepSpawnOpts = nil
+	m.loopWiz.StepSpawnSel = 0
+	m.loopWiz.StepSpawnCfgSel = 0
+	m.loopWiz.StepDelegRoots = nil
+	m.loopWiz.StepDelegPath = nil
 	for _, p := range m.globalCfg.Profiles {
-		m.loopStepSpawnOpts = append(m.loopStepSpawnOpts, p.Name)
+		m.loopWiz.StepSpawnOpts = append(m.loopWiz.StepSpawnOpts, p.Name)
 	}
 }
 
 func (m *AppModel) preselectLoopStepSpawn(step config.LoopStep) {
-	m.loopStepDelegRoots = delegationConfigToNodes(step.Delegation, m.globalCfg)
-	m.loopStepDelegPath = nil
-	m.loopStepSpawnSel = 0
-	m.loopStepSpawnRoleSel = 0
+	m.loopWiz.StepDelegRoots = delegationConfigToNodes(step.Delegation, m.globalCfg)
+	m.loopWiz.StepDelegPath = nil
+	m.loopWiz.StepSpawnSel = 0
+	m.loopWiz.StepSpawnRoleSel = 0
 }
 
 func countDelegationProfiles(deleg *config.DelegationConfig) int {
@@ -212,8 +237,8 @@ func nodesToDelegationConfig(nodes []*loopDelegationNode, globalCfg *config.Glob
 }
 
 func (m *AppModel) currentDelegationLevel() *[]*loopDelegationNode {
-	level := &m.loopStepDelegRoots
-	for _, idx := range m.loopStepDelegPath {
+	level := &m.loopWiz.StepDelegRoots
+	for _, idx := range m.loopWiz.StepDelegPath {
 		if idx < 0 || idx >= len(*level) {
 			break
 		}
@@ -229,14 +254,14 @@ func (m *AppModel) currentDelegationLevel() *[]*loopDelegationNode {
 func (m *AppModel) clampDelegationSelection() {
 	level := m.currentDelegationLevel()
 	if len(*level) == 0 {
-		m.loopStepSpawnSel = 0
+		m.loopWiz.StepSpawnSel = 0
 		return
 	}
-	if m.loopStepSpawnSel < 0 {
-		m.loopStepSpawnSel = 0
+	if m.loopWiz.StepSpawnSel < 0 {
+		m.loopWiz.StepSpawnSel = 0
 	}
-	if m.loopStepSpawnSel >= len(*level) {
-		m.loopStepSpawnSel = len(*level) - 1
+	if m.loopWiz.StepSpawnSel >= len(*level) {
+		m.loopWiz.StepSpawnSel = len(*level) - 1
 	}
 }
 
@@ -253,10 +278,10 @@ func defaultLoopStepRoleSel(globalCfg *config.GlobalConfig) int {
 
 func (m *AppModel) setLoopStepRoleSelection(role string) {
 	role = config.EffectiveRole(role, m.globalCfg)
-	m.loopStepRoleSel = defaultLoopStepRoleSel(m.globalCfg)
+	m.loopWiz.StepRoleSel = defaultLoopStepRoleSel(m.globalCfg)
 	for i, candidate := range config.AllRoles(m.globalCfg) {
 		if candidate == role {
-			m.loopStepRoleSel = i
+			m.loopWiz.StepRoleSel = i
 			return
 		}
 	}
@@ -265,32 +290,32 @@ func (m *AppModel) setLoopStepRoleSelection(role string) {
 // --- Loop Name ---
 
 func (m AppModel) updateLoopName(msg tea.Msg) (tea.Model, tea.Cmd) {
-	initCmd := m.ensureTextInput("loop-name", m.loopNameInput, 0)
-	m.syncTextInput(m.loopNameInput)
+	initCmd := m.ensureTextInput("loop-name", m.loopWiz.NameInput, 0)
+	m.syncTextInput(m.loopWiz.NameInput)
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.Type {
 		case tea.KeyEnter:
-			name := strings.TrimSpace(m.loopNameInput)
+			name := strings.TrimSpace(m.loopWiz.NameInput)
 			if name == "" {
 				return m, nil
 			}
 			if existing := m.globalCfg.FindLoop(name); existing != nil {
-				if !m.loopEditing || !strings.EqualFold(name, m.loopEditName) {
+				if !m.loopWiz.Editing || !strings.EqualFold(name, m.loopWiz.EditName) {
 					return m, nil // duplicate
 				}
 			}
-			m.loopNameInput = name
-			if m.loopEditing {
+			m.loopWiz.NameInput = name
+			if m.loopWiz.Editing {
 				m.state = stateLoopMenu
 				return m, nil
 			}
 			// New loop: go to step list.
-			m.loopSteps = nil
-			m.loopStepSel = 0
+			m.loopWiz.Steps = nil
+			m.loopWiz.StepSel = 0
 			m.state = stateLoopStepList
 			return m, nil
 		case tea.KeyEsc:
-			if m.loopEditing {
+			if m.loopWiz.Editing {
 				m.state = stateLoopMenu
 				return m, nil
 			}
@@ -299,7 +324,7 @@ func (m AppModel) updateLoopName(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	cmd := m.updateTextInput(msg)
-	m.loopNameInput = m.textInput.Value()
+	m.loopWiz.NameInput = m.textInput.Value()
 	return m, tea.Batch(initCmd, cmd)
 }
 
@@ -310,8 +335,8 @@ func (m AppModel) viewLoopName() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-	m.ensureTextInput("loop-name", m.loopNameInput, 0)
-	m.syncTextInput(m.loopNameInput)
+	m.ensureTextInput("loop-name", m.loopWiz.NameInput, 0)
+	m.syncTextInput(m.loopWiz.NameInput)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Name"))
@@ -335,44 +360,44 @@ func (m AppModel) updateLoopStepList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
-			if len(m.loopSteps) > 0 {
-				m.loopStepSel = (m.loopStepSel + 1) % len(m.loopSteps)
+			if len(m.loopWiz.Steps) > 0 {
+				m.loopWiz.StepSel = (m.loopWiz.StepSel + 1) % len(m.loopWiz.Steps)
 			}
 		case "k", "up":
-			if len(m.loopSteps) > 0 {
-				m.loopStepSel = (m.loopStepSel - 1 + len(m.loopSteps)) % len(m.loopSteps)
+			if len(m.loopWiz.Steps) > 0 {
+				m.loopWiz.StepSel = (m.loopWiz.StepSel - 1 + len(m.loopWiz.Steps)) % len(m.loopWiz.Steps)
 			}
 		case "a":
 			// Add new step.
-			m.loopStepEditIdx = -1
-			m.loopStepProfileOpts = nil
+			m.loopWiz.StepEditIdx = -1
+			m.loopWiz.StepProfileOpts = nil
 			for _, p := range m.globalCfg.Profiles {
-				m.loopStepProfileOpts = append(m.loopStepProfileOpts, p.Name)
+				m.loopWiz.StepProfileOpts = append(m.loopWiz.StepProfileOpts, p.Name)
 			}
-			m.loopStepProfileSel = 0
-			m.loopStepTurnsInput = "1"
-			m.loopStepInstrInput = ""
-			m.loopStepCanStop = false
-			m.loopStepCanMsg = false
-			m.loopStepCanPushover = false
+			m.loopWiz.StepProfileSel = 0
+			m.loopWiz.StepTurnsInput = "1"
+			m.loopWiz.StepInstrInput = ""
+			m.loopWiz.StepCanStop = false
+			m.loopWiz.StepCanMsg = false
+			m.loopWiz.StepCanPushover = false
 			m.setLoopStepRoleSelection(config.EffectiveStepRole("", m.globalCfg))
 			m.resetLoopStepSpawnOptions()
-			m.loopStepToolsSel = 0
+			m.loopWiz.StepToolsSel = 0
 			m.state = stateLoopStepProfile
 			return m, nil
 		case "enter":
 			// Edit selected step.
-			if len(m.loopSteps) > 0 && m.loopStepSel < len(m.loopSteps) {
-				m.loopStepEditIdx = m.loopStepSel
-				step := m.loopSteps[m.loopStepSel]
-				m.loopStepProfileOpts = nil
+			if len(m.loopWiz.Steps) > 0 && m.loopWiz.StepSel < len(m.loopWiz.Steps) {
+				m.loopWiz.StepEditIdx = m.loopWiz.StepSel
+				step := m.loopWiz.Steps[m.loopWiz.StepSel]
+				m.loopWiz.StepProfileOpts = nil
 				for _, p := range m.globalCfg.Profiles {
-					m.loopStepProfileOpts = append(m.loopStepProfileOpts, p.Name)
+					m.loopWiz.StepProfileOpts = append(m.loopWiz.StepProfileOpts, p.Name)
 				}
-				m.loopStepProfileSel = 0
-				for i, name := range m.loopStepProfileOpts {
+				m.loopWiz.StepProfileSel = 0
+				for i, name := range m.loopWiz.StepProfileOpts {
 					if strings.EqualFold(name, step.Profile) {
-						m.loopStepProfileSel = i
+						m.loopWiz.StepProfileSel = i
 						break
 					}
 				}
@@ -382,43 +407,43 @@ func (m AppModel) updateLoopStepList(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if turns <= 0 {
 					turns = 1
 				}
-				m.loopStepTurnsInput = strconv.Itoa(turns)
-				m.loopStepInstrInput = step.Instructions
-				m.loopStepCanStop = step.CanStop
-				m.loopStepCanMsg = step.CanMessage
-				m.loopStepCanPushover = step.CanPushover
+				m.loopWiz.StepTurnsInput = strconv.Itoa(turns)
+				m.loopWiz.StepInstrInput = step.Instructions
+				m.loopWiz.StepCanStop = step.CanStop
+				m.loopWiz.StepCanMsg = step.CanMessage
+				m.loopWiz.StepCanPushover = step.CanPushover
 				m.resetLoopStepSpawnOptions()
 				m.preselectLoopStepSpawn(step)
-				m.loopStepToolsSel = 0
+				m.loopWiz.StepToolsSel = 0
 				m.state = stateLoopStepProfile
 			}
 			return m, nil
 		case "d":
 			// Delete selected step.
-			if len(m.loopSteps) > 0 && m.loopStepSel < len(m.loopSteps) {
-				m.loopSteps = append(m.loopSteps[:m.loopStepSel], m.loopSteps[m.loopStepSel+1:]...)
-				if m.loopStepSel >= len(m.loopSteps) && m.loopStepSel > 0 {
-					m.loopStepSel--
+			if len(m.loopWiz.Steps) > 0 && m.loopWiz.StepSel < len(m.loopWiz.Steps) {
+				m.loopWiz.Steps = append(m.loopWiz.Steps[:m.loopWiz.StepSel], m.loopWiz.Steps[m.loopWiz.StepSel+1:]...)
+				if m.loopWiz.StepSel >= len(m.loopWiz.Steps) && m.loopWiz.StepSel > 0 {
+					m.loopWiz.StepSel--
 				}
 			}
 			return m, nil
 		case "J": // Shift+J: move step down
-			if len(m.loopSteps) > 1 && m.loopStepSel < len(m.loopSteps)-1 {
-				m.loopSteps[m.loopStepSel], m.loopSteps[m.loopStepSel+1] = m.loopSteps[m.loopStepSel+1], m.loopSteps[m.loopStepSel]
-				m.loopStepSel++
+			if len(m.loopWiz.Steps) > 1 && m.loopWiz.StepSel < len(m.loopWiz.Steps)-1 {
+				m.loopWiz.Steps[m.loopWiz.StepSel], m.loopWiz.Steps[m.loopWiz.StepSel+1] = m.loopWiz.Steps[m.loopWiz.StepSel+1], m.loopWiz.Steps[m.loopWiz.StepSel]
+				m.loopWiz.StepSel++
 			}
 			return m, nil
 		case "K": // Shift+K: move step up
-			if len(m.loopSteps) > 1 && m.loopStepSel > 0 {
-				m.loopSteps[m.loopStepSel], m.loopSteps[m.loopStepSel-1] = m.loopSteps[m.loopStepSel-1], m.loopSteps[m.loopStepSel]
-				m.loopStepSel--
+			if len(m.loopWiz.Steps) > 1 && m.loopWiz.StepSel > 0 {
+				m.loopWiz.Steps[m.loopWiz.StepSel], m.loopWiz.Steps[m.loopWiz.StepSel-1] = m.loopWiz.Steps[m.loopWiz.StepSel-1], m.loopWiz.Steps[m.loopWiz.StepSel]
+				m.loopWiz.StepSel--
 			}
 			return m, nil
 		case "s":
 			// Save.
 			return m.finishLoopCreation()
 		case "esc":
-			if m.loopEditing {
+			if m.loopWiz.Editing {
 				m.state = stateLoopMenu
 			} else {
 				m.state = stateLoopName
@@ -440,13 +465,13 @@ func (m AppModel) viewLoopStepList() string {
 	var lines []string
 	cursorLine := -1
 	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Steps"))
-	lines = append(lines, dimStyle.Render("Loop: "+m.loopNameInput))
+	lines = append(lines, dimStyle.Render("Loop: "+m.loopWiz.NameInput))
 	lines = append(lines, "")
 
-	if len(m.loopSteps) == 0 {
+	if len(m.loopWiz.Steps) == 0 {
 		lines = append(lines, dimStyle.Render("No steps yet. Press 'a' to add one."))
 	}
-	for i, step := range m.loopSteps {
+	for i, step := range m.loopWiz.Steps {
 		turns := step.Turns
 		if turns <= 0 {
 			turns = 1
@@ -468,7 +493,7 @@ func (m AppModel) viewLoopStepList() string {
 			spawnTag = fmt.Sprintf(" [spawn:%d]", spawnCount)
 		}
 		label := fmt.Sprintf("%d. %s %s x%d%s%s", i+1, step.Profile, roleBadge(role), turns, spawnTag, flags)
-		if i == m.loopStepSel {
+		if i == m.loopWiz.StepSel {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorTeal).Render("> ")
 			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorTeal).Render(label)
 			lines = append(lines, cursor+styled)
@@ -493,19 +518,19 @@ func (m AppModel) updateLoopStepProfile(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
-			if len(m.loopStepProfileOpts) > 0 {
-				m.loopStepProfileSel = (m.loopStepProfileSel + 1) % len(m.loopStepProfileOpts)
+			if len(m.loopWiz.StepProfileOpts) > 0 {
+				m.loopWiz.StepProfileSel = (m.loopWiz.StepProfileSel + 1) % len(m.loopWiz.StepProfileOpts)
 				m.resetLoopStepSpawnOptions()
 				m.setLoopStepRoleSelection(config.EffectiveStepRole("", m.globalCfg))
 			}
 		case "k", "up":
-			if len(m.loopStepProfileOpts) > 0 {
-				m.loopStepProfileSel = (m.loopStepProfileSel - 1 + len(m.loopStepProfileOpts)) % len(m.loopStepProfileOpts)
+			if len(m.loopWiz.StepProfileOpts) > 0 {
+				m.loopWiz.StepProfileSel = (m.loopWiz.StepProfileSel - 1 + len(m.loopWiz.StepProfileOpts)) % len(m.loopWiz.StepProfileOpts)
 				m.resetLoopStepSpawnOptions()
 				m.setLoopStepRoleSelection(config.EffectiveStepRole("", m.globalCfg))
 			}
 		case "enter":
-			if len(m.loopStepProfileOpts) > 0 {
+			if len(m.loopWiz.StepProfileOpts) > 0 {
 				m.state = stateLoopStepRole
 			}
 		case "esc":
@@ -528,11 +553,11 @@ func (m AppModel) viewLoopStepProfile() string {
 	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Step Profile"))
 	lines = append(lines, "")
 
-	if len(m.loopStepProfileOpts) == 0 {
+	if len(m.loopWiz.StepProfileOpts) == 0 {
 		lines = append(lines, dimStyle.Render("No profiles available. Create a profile first."))
 	}
-	for i, name := range m.loopStepProfileOpts {
-		if i == m.loopStepProfileSel {
+	for i, name := range m.loopWiz.StepProfileOpts {
+		if i == m.loopWiz.StepProfileSel {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(name)
 			lines = append(lines, cursor+styled)
@@ -570,14 +595,14 @@ func (m AppModel) updateLoopStepRole(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.adjustStateScroll(1)
 				return m, nil
 			}
-			m.loopStepRoleSel = (m.loopStepRoleSel + 1) % len(roles)
+			m.loopWiz.StepRoleSel = (m.loopWiz.StepRoleSel + 1) % len(roles)
 			m.resetStateScroll()
 		case "k", "up":
 			if m.isRightPaneFocused() {
 				m.adjustStateScroll(-1)
 				return m, nil
 			}
-			m.loopStepRoleSel = (m.loopStepRoleSel - 1 + len(roles)) % len(roles)
+			m.loopWiz.StepRoleSel = (m.loopWiz.StepRoleSel - 1 + len(roles)) % len(roles)
 			m.resetStateScroll()
 		case "enter":
 			m.state = stateLoopStepTurns
@@ -667,7 +692,7 @@ func (m AppModel) viewLoopStepRole() string {
 	textStyle := lipgloss.NewStyle().Foreground(ColorText)
 
 	roles := config.AllRoles(m.globalCfg)
-	selectedRole := selectedRoleAt(roles, m.loopStepRoleSel)
+	selectedRole := selectedRoleAt(roles, m.loopWiz.StepRoleSel)
 
 	if m.width < 90 {
 		style, cw, ch := profileWizardPanel(m)
@@ -676,7 +701,7 @@ func (m AppModel) viewLoopStepRole() string {
 		lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Step Role"))
 		lines = append(lines, "")
 		for i, role := range roles {
-			if i == m.loopStepRoleSel {
+			if i == m.loopWiz.StepRoleSel {
 				cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 				styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(role)
 				lines = append(lines, cursor+styled)
@@ -713,7 +738,7 @@ func (m AppModel) viewLoopStepRole() string {
 	left = append(left, sectionStyle.Render(leftTitle))
 	left = append(left, "")
 	for i, role := range roles {
-		if i == m.loopStepRoleSel {
+		if i == m.loopWiz.StepRoleSel {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(role)
 			left = append(left, cursor+styled)
@@ -741,8 +766,8 @@ func (m AppModel) viewLoopStepRole() string {
 // --- Loop Step Turns ---
 
 func (m AppModel) updateLoopStepTurns(msg tea.Msg) (tea.Model, tea.Cmd) {
-	initCmd := m.ensureTextInput("loop-step-turns", m.loopStepTurnsInput, 3)
-	m.syncTextInput(m.loopStepTurnsInput)
+	initCmd := m.ensureTextInput("loop-step-turns", m.loopWiz.StepTurnsInput, 3)
+	m.syncTextInput(m.loopWiz.StepTurnsInput)
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.Type {
 		case tea.KeyEnter:
@@ -763,7 +788,7 @@ func (m AppModel) updateLoopStepTurns(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textInput.SetValue(filtered)
 		m.textInput.CursorEnd()
 	}
-	m.loopStepTurnsInput = filtered
+	m.loopWiz.StepTurnsInput = filtered
 	return m, tea.Batch(initCmd, cmd)
 }
 
@@ -774,8 +799,8 @@ func (m AppModel) viewLoopStepTurns() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-	m.ensureTextInput("loop-step-turns", m.loopStepTurnsInput, 3)
-	m.syncTextInput(m.loopStepTurnsInput)
+	m.ensureTextInput("loop-step-turns", m.loopWiz.StepTurnsInput, 3)
+	m.syncTextInput(m.loopWiz.StepTurnsInput)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Step Turns"))
@@ -795,12 +820,12 @@ func (m AppModel) viewLoopStepTurns() string {
 // --- Loop Step Instructions ---
 
 func (m AppModel) updateLoopStepInstr(msg tea.Msg) (tea.Model, tea.Cmd) {
-	initCmd := m.ensureTextInput("loop-step-instr", m.loopStepInstrInput, 0)
-	m.syncTextInput(m.loopStepInstrInput)
+	initCmd := m.ensureTextInput("loop-step-instr", m.loopWiz.StepInstrInput, 0)
+	m.syncTextInput(m.loopWiz.StepInstrInput)
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.Type {
 		case tea.KeyEnter:
-			m.loopStepToolsSel = 0
+			m.loopWiz.StepToolsSel = 0
 			m.state = stateLoopStepTools
 			return m, nil
 		case tea.KeyEsc:
@@ -809,7 +834,7 @@ func (m AppModel) updateLoopStepInstr(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	cmd := m.updateTextInput(msg)
-	m.loopStepInstrInput = m.textInput.Value()
+	m.loopWiz.StepInstrInput = m.textInput.Value()
 	return m, tea.Batch(initCmd, cmd)
 }
 
@@ -820,8 +845,8 @@ func (m AppModel) viewLoopStepInstr() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-	m.ensureTextInput("loop-step-instr", m.loopStepInstrInput, 0)
-	m.syncTextInput(m.loopStepInstrInput)
+	m.ensureTextInput("loop-step-instr", m.loopWiz.StepInstrInput, 0)
+	m.syncTextInput(m.loopWiz.StepInstrInput)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Step Instructions"))
@@ -845,17 +870,17 @@ func (m AppModel) updateLoopStepTools(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
-			m.loopStepToolsSel = (m.loopStepToolsSel + 1) % loopStepToolCount
+			m.loopWiz.StepToolsSel = (m.loopWiz.StepToolsSel + 1) % loopStepToolCount
 		case "k", "up":
-			m.loopStepToolsSel = (m.loopStepToolsSel - 1 + loopStepToolCount) % loopStepToolCount
+			m.loopWiz.StepToolsSel = (m.loopWiz.StepToolsSel - 1 + loopStepToolCount) % loopStepToolCount
 		case " ":
-			switch m.loopStepToolsSel {
+			switch m.loopWiz.StepToolsSel {
 			case 0:
-				m.loopStepCanStop = !m.loopStepCanStop
+				m.loopWiz.StepCanStop = !m.loopWiz.StepCanStop
 			case 1:
-				m.loopStepCanMsg = !m.loopStepCanMsg
+				m.loopWiz.StepCanMsg = !m.loopWiz.StepCanMsg
 			case 2:
-				m.loopStepCanPushover = !m.loopStepCanPushover
+				m.loopWiz.StepCanPushover = !m.loopWiz.StepCanPushover
 			}
 			return m, nil
 		case "enter":
@@ -889,9 +914,9 @@ func (m AppModel) viewLoopStepTools() string {
 		enabled bool
 	}
 	tools := []toolOption{
-		{"Stop Loop", "Can signal the loop to stop", m.loopStepCanStop},
-		{"Send Messages", "Can send messages to subsequent steps", m.loopStepCanMsg},
-		{"Pushover Notify", "Can send push notifications to your device", m.loopStepCanPushover},
+		{"Stop Loop", "Can signal the loop to stop", m.loopWiz.StepCanStop},
+		{"Send Messages", "Can send messages to subsequent steps", m.loopWiz.StepCanMsg},
+		{"Pushover Notify", "Can send push notifications to your device", m.loopWiz.StepCanPushover},
 	}
 
 	for i, tool := range tools {
@@ -901,7 +926,7 @@ func (m AppModel) viewLoopStepTools() string {
 		}
 		label := tool.label
 		desc := dimStyle.Render(" — " + tool.desc)
-		if i == m.loopStepToolsSel {
+		if i == m.loopWiz.StepToolsSel {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			nameStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
 			lines = append(lines, cursor+check+" "+nameStyled+desc)
@@ -928,18 +953,18 @@ func (m AppModel) updateLoopStepSpawn(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "j", "down":
 			level := m.currentDelegationLevel()
 			if len(*level) > 0 {
-				m.loopStepSpawnSel = (m.loopStepSpawnSel + 1) % len(*level)
+				m.loopWiz.StepSpawnSel = (m.loopWiz.StepSpawnSel + 1) % len(*level)
 			}
 		case "k", "up":
 			level := m.currentDelegationLevel()
 			if len(*level) > 0 {
-				m.loopStepSpawnSel = (m.loopStepSpawnSel - 1 + len(*level)) % len(*level)
+				m.loopWiz.StepSpawnSel = (m.loopWiz.StepSpawnSel - 1 + len(*level)) % len(*level)
 			}
 		case "a":
-			if len(m.loopStepSpawnOpts) == 0 {
+			if len(m.loopWiz.StepSpawnOpts) == 0 {
 				return m, nil
 			}
-			m.loopStepSpawnCfgSel = 0
+			m.loopWiz.StepSpawnCfgSel = 0
 			m.state = stateLoopStepSpawnCfg
 			return m, nil
 		case "d":
@@ -948,7 +973,7 @@ func (m AppModel) updateLoopStepSpawn(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(*level) == 0 {
 				return m, nil
 			}
-			idx := m.loopStepSpawnSel
+			idx := m.loopWiz.StepSpawnSel
 			*level = append((*level)[:idx], (*level)[idx+1:]...)
 			m.clampDelegationSelection()
 			return m, nil
@@ -959,11 +984,11 @@ func (m AppModel) updateLoopStepSpawn(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			node.Roles = ensureDelegationRoles(node.Roles, m.globalCfg)
 			roles := config.AllRoles(m.globalCfg)
-			m.loopStepSpawnRoleSel = 0
+			m.loopWiz.StepSpawnRoleSel = 0
 			if len(roles) > 0 {
 				for i, role := range roles {
 					if role == node.Roles[0] {
-						m.loopStepSpawnRoleSel = i
+						m.loopWiz.StepSpawnRoleSel = i
 						break
 					}
 				}
@@ -996,22 +1021,22 @@ func (m AppModel) updateLoopStepSpawn(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			node := m.currentDelegationNode()
 			if node == nil {
-				if len(m.loopStepSpawnOpts) > 0 {
-					m.loopStepSpawnCfgSel = 0
+				if len(m.loopWiz.StepSpawnOpts) > 0 {
+					m.loopWiz.StepSpawnCfgSel = 0
 					m.state = stateLoopStepSpawnCfg
 				}
 				return m, nil
 			}
-			m.loopStepDelegPath = append(m.loopStepDelegPath, m.loopStepSpawnSel)
-			m.loopStepSpawnSel = 0
+			m.loopWiz.StepDelegPath = append(m.loopWiz.StepDelegPath, m.loopWiz.StepSpawnSel)
+			m.loopWiz.StepSpawnSel = 0
 			return m, nil
 		case "S", "ctrl+s":
 			return m.finishLoopStep()
 		case "esc":
-			if len(m.loopStepDelegPath) > 0 {
-				parentSel := m.loopStepDelegPath[len(m.loopStepDelegPath)-1]
-				m.loopStepDelegPath = m.loopStepDelegPath[:len(m.loopStepDelegPath)-1]
-				m.loopStepSpawnSel = parentSel
+			if len(m.loopWiz.StepDelegPath) > 0 {
+				parentSel := m.loopWiz.StepDelegPath[len(m.loopWiz.StepDelegPath)-1]
+				m.loopWiz.StepDelegPath = m.loopWiz.StepDelegPath[:len(m.loopWiz.StepDelegPath)-1]
+				m.loopWiz.StepSpawnSel = parentSel
 				m.clampDelegationSelection()
 				return m, nil
 			}
@@ -1024,8 +1049,8 @@ func (m AppModel) updateLoopStepSpawn(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m AppModel) delegationPathLabel() string {
 	parts := []string{"root"}
-	level := m.loopStepDelegRoots
-	for _, idx := range m.loopStepDelegPath {
+	level := m.loopWiz.StepDelegRoots
+	for _, idx := range m.loopWiz.StepDelegPath {
 		if idx < 0 || idx >= len(level) {
 			break
 		}
@@ -1045,7 +1070,7 @@ func (m *AppModel) currentDelegationNode() *loopDelegationNode {
 	if len(*level) == 0 {
 		return nil
 	}
-	return (*level)[m.loopStepSpawnSel]
+	return (*level)[m.loopWiz.StepSpawnSel]
 }
 
 func (m AppModel) viewLoopStepSpawn() string {
@@ -1066,7 +1091,7 @@ func (m AppModel) viewLoopStepSpawn() string {
 
 	level := m.currentDelegationLevel()
 	m.clampDelegationSelection()
-	if len(m.loopStepSpawnOpts) == 0 {
+	if len(m.loopWiz.StepSpawnOpts) == 0 {
 		lines = append(lines, dimStyle.Render("No profiles available. Create a profile first."))
 		lines = append(lines, "")
 		lines = append(lines, dimStyle.Render("esc: back"))
@@ -1091,7 +1116,7 @@ func (m AppModel) viewLoopStepSpawn() string {
 		if len(node.Children) > 0 {
 			label += fmt.Sprintf(" children=%d", len(node.Children))
 		}
-		if i == m.loopStepSpawnSel {
+		if i == m.loopWiz.StepSpawnSel {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			nameStyled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
 			lines = append(lines, cursor+nameStyled)
@@ -1117,11 +1142,11 @@ func (m AppModel) updateLoopStepSpawnRoles(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	node.Roles = ensureDelegationRoles(node.Roles, m.globalCfg)
-	if m.loopStepSpawnRoleSel < 0 {
-		m.loopStepSpawnRoleSel = 0
+	if m.loopWiz.StepSpawnRoleSel < 0 {
+		m.loopWiz.StepSpawnRoleSel = 0
 	}
-	if m.loopStepSpawnRoleSel >= len(roles) {
-		m.loopStepSpawnRoleSel = len(roles) - 1
+	if m.loopWiz.StepSpawnRoleSel >= len(roles) {
+		m.loopWiz.StepSpawnRoleSel = len(roles) - 1
 	}
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -1137,17 +1162,17 @@ func (m AppModel) updateLoopStepSpawnRoles(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.adjustStateScroll(1)
 				return m, nil
 			}
-			m.loopStepSpawnRoleSel = (m.loopStepSpawnRoleSel + 1) % len(roles)
+			m.loopWiz.StepSpawnRoleSel = (m.loopWiz.StepSpawnRoleSel + 1) % len(roles)
 			m.resetStateScroll()
 		case "k", "up":
 			if m.isRightPaneFocused() {
 				m.adjustStateScroll(-1)
 				return m, nil
 			}
-			m.loopStepSpawnRoleSel = (m.loopStepSpawnRoleSel - 1 + len(roles)) % len(roles)
+			m.loopWiz.StepSpawnRoleSel = (m.loopWiz.StepSpawnRoleSel - 1 + len(roles)) % len(roles)
 			m.resetStateScroll()
 		case " ":
-			selectedRole := roles[m.loopStepSpawnRoleSel]
+			selectedRole := roles[m.loopWiz.StepSpawnRoleSel]
 			node.Roles = toggleDelegationRole(node.Roles, selectedRole, m.globalCfg)
 			return m, nil
 		case "enter", "esc":
@@ -1183,7 +1208,7 @@ func (m AppModel) viewLoopStepSpawnRoles() string {
 	}
 
 	node.Roles = ensureDelegationRoles(node.Roles, m.globalCfg)
-	selectedRole := selectedRoleAt(roles, m.loopStepSpawnRoleSel)
+	selectedRole := selectedRoleAt(roles, m.loopWiz.StepSpawnRoleSel)
 
 	if m.width < 90 {
 		style, cw, ch := profileWizardPanel(m)
@@ -1202,7 +1227,7 @@ func (m AppModel) viewLoopStepSpawnRoles() string {
 				marker = "[x]"
 			}
 			label := fmt.Sprintf("%s %s", marker, role)
-			if i == m.loopStepSpawnRoleSel {
+			if i == m.loopWiz.StepSpawnRoleSel {
 				cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 				styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
 				lines = append(lines, cursor+styled)
@@ -1244,7 +1269,7 @@ func (m AppModel) viewLoopStepSpawnRoles() string {
 			marker = "[x]"
 		}
 		label := fmt.Sprintf("%s %s", marker, role)
-		if i == m.loopStepSpawnRoleSel {
+		if i == m.loopWiz.StepSpawnRoleSel {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
 			left = append(left, cursor+styled)
@@ -1279,26 +1304,26 @@ func (m AppModel) updateLoopStepSpawnCfg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
-			if len(m.loopStepSpawnOpts) > 0 {
-				m.loopStepSpawnCfgSel = (m.loopStepSpawnCfgSel + 1) % len(m.loopStepSpawnOpts)
+			if len(m.loopWiz.StepSpawnOpts) > 0 {
+				m.loopWiz.StepSpawnCfgSel = (m.loopWiz.StepSpawnCfgSel + 1) % len(m.loopWiz.StepSpawnOpts)
 			}
 		case "k", "up":
-			if len(m.loopStepSpawnOpts) > 0 {
-				m.loopStepSpawnCfgSel = (m.loopStepSpawnCfgSel - 1 + len(m.loopStepSpawnOpts)) % len(m.loopStepSpawnOpts)
+			if len(m.loopWiz.StepSpawnOpts) > 0 {
+				m.loopWiz.StepSpawnCfgSel = (m.loopWiz.StepSpawnCfgSel - 1 + len(m.loopWiz.StepSpawnOpts)) % len(m.loopWiz.StepSpawnOpts)
 			}
 		case "enter":
-			if len(m.loopStepSpawnOpts) == 0 {
+			if len(m.loopWiz.StepSpawnOpts) == 0 {
 				m.state = stateLoopStepSpawn
 				return m, nil
 			}
-			profile := m.loopStepSpawnOpts[m.loopStepSpawnCfgSel]
+			profile := m.loopWiz.StepSpawnOpts[m.loopWiz.StepSpawnCfgSel]
 			level := m.currentDelegationLevel()
 			defaultRole := config.DefaultRole(m.globalCfg)
 			*level = append(*level, &loopDelegationNode{
 				Profile: profile,
 				Roles:   []string{defaultRole},
 			})
-			m.loopStepSpawnSel = len(*level) - 1
+			m.loopWiz.StepSpawnSel = len(*level) - 1
 			m.state = stateLoopStepSpawn
 			return m, nil
 		case "esc":
@@ -1323,13 +1348,13 @@ func (m AppModel) viewLoopStepSpawnCfg() string {
 	lines = append(lines, dimStyle.Render("Level: "+m.delegationPathLabel()))
 	lines = append(lines, "")
 
-	if len(m.loopStepSpawnOpts) == 0 {
+	if len(m.loopWiz.StepSpawnOpts) == 0 {
 		lines = append(lines, dimStyle.Render("No profiles available. Create a profile first."))
 	} else {
 		defaultRole := config.DefaultRole(m.globalCfg)
-		for i, name := range m.loopStepSpawnOpts {
+		for i, name := range m.loopWiz.StepSpawnOpts {
 			label := fmt.Sprintf("%s (default role: %s)", name, defaultRole)
-			if i == m.loopStepSpawnCfgSel {
+			if i == m.loopWiz.StepSpawnCfgSel {
 				cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 				styled := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render(label)
 				lines = append(lines, cursor+styled)
@@ -1351,8 +1376,8 @@ func (m AppModel) viewLoopStepSpawnCfg() string {
 // finishLoopStep saves the current step being edited and returns to step list.
 func (m AppModel) finishLoopStep() (tea.Model, tea.Cmd) {
 	profileName := ""
-	if m.loopStepProfileSel < len(m.loopStepProfileOpts) {
-		profileName = m.loopStepProfileOpts[m.loopStepProfileSel]
+	if m.loopWiz.StepProfileSel < len(m.loopWiz.StepProfileOpts) {
+		profileName = m.loopWiz.StepProfileOpts[m.loopWiz.StepProfileSel]
 	}
 	if profileName == "" {
 		m.state = stateLoopStepProfile
@@ -1360,36 +1385,36 @@ func (m AppModel) finishLoopStep() (tea.Model, tea.Cmd) {
 	}
 
 	turns := 1
-	if m.loopStepTurnsInput != "" {
-		if v, err := strconv.Atoi(m.loopStepTurnsInput); err == nil && v > 0 {
+	if m.loopWiz.StepTurnsInput != "" {
+		if v, err := strconv.Atoi(m.loopWiz.StepTurnsInput); err == nil && v > 0 {
 			turns = v
 		}
 	}
 
 	role := config.DefaultRole(m.globalCfg)
 	roles := config.AllRoles(m.globalCfg)
-	if m.loopStepRoleSel >= 0 && m.loopStepRoleSel < len(roles) {
-		role = roles[m.loopStepRoleSel]
+	if m.loopWiz.StepRoleSel >= 0 && m.loopWiz.StepRoleSel < len(roles) {
+		role = roles[m.loopWiz.StepRoleSel]
 	}
 
-	delegation := nodesToDelegationConfig(cloneDelegationNodes(m.loopStepDelegRoots), m.globalCfg)
+	delegation := nodesToDelegationConfig(cloneDelegationNodes(m.loopWiz.StepDelegRoots), m.globalCfg)
 
 	step := config.LoopStep{
 		Profile:      profileName,
 		Role:         role,
 		Turns:        turns,
-		Instructions: strings.TrimSpace(m.loopStepInstrInput),
-		CanStop:      m.loopStepCanStop,
-		CanMessage:   m.loopStepCanMsg,
-		CanPushover:  m.loopStepCanPushover,
+		Instructions: strings.TrimSpace(m.loopWiz.StepInstrInput),
+		CanStop:      m.loopWiz.StepCanStop,
+		CanMessage:   m.loopWiz.StepCanMsg,
+		CanPushover:  m.loopWiz.StepCanPushover,
 		Delegation:   delegation,
 	}
 
-	if m.loopStepEditIdx >= 0 && m.loopStepEditIdx < len(m.loopSteps) {
-		m.loopSteps[m.loopStepEditIdx] = step
+	if m.loopWiz.StepEditIdx >= 0 && m.loopWiz.StepEditIdx < len(m.loopWiz.Steps) {
+		m.loopWiz.Steps[m.loopWiz.StepEditIdx] = step
 	} else {
-		m.loopSteps = append(m.loopSteps, step)
-		m.loopStepSel = len(m.loopSteps) - 1
+		m.loopWiz.Steps = append(m.loopWiz.Steps, step)
+		m.loopWiz.StepSel = len(m.loopWiz.Steps) - 1
 	}
 
 	m.state = stateLoopStepList
@@ -1403,18 +1428,18 @@ func (m AppModel) updateLoopMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
-			m.loopMenuSel = (m.loopMenuSel + 1) % loopMenuItemCount
+			m.loopWiz.MenuSel = (m.loopWiz.MenuSel + 1) % loopMenuItemCount
 		case "k", "up":
-			m.loopMenuSel = (m.loopMenuSel - 1 + loopMenuItemCount) % loopMenuItemCount
+			m.loopWiz.MenuSel = (m.loopWiz.MenuSel - 1 + loopMenuItemCount) % loopMenuItemCount
 		case "esc":
-			m.loopEditing = false
+			m.loopWiz.Editing = false
 			m.state = stateSelector
 		case "enter":
-			switch m.loopMenuSel {
+			switch m.loopWiz.MenuSel {
 			case 0: // Name
 				m.state = stateLoopName
 			case 1: // Steps
-				m.loopStepSel = 0
+				m.loopWiz.StepSel = 0
 				m.state = stateLoopStepList
 			case 2: // Save
 				return m.finishLoopCreation()
@@ -1443,13 +1468,13 @@ func (m AppModel) viewLoopMenu() string {
 		label, value string
 	}
 	items := []menuItem{
-		{"Name", m.loopNameInput},
-		{"Steps", fmt.Sprintf("%d steps", len(m.loopSteps))},
+		{"Name", m.loopWiz.NameInput},
+		{"Steps", fmt.Sprintf("%d steps", len(m.loopWiz.Steps))},
 	}
 
 	for i, item := range items {
 		line := labelStyle.Render(item.label) + valueStyle.Render(item.value)
-		if i == m.loopMenuSel {
+		if i == m.loopWiz.MenuSel {
 			cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve).Render("> ")
 			lines = append(lines, cursor+line)
 			cursorLine = len(lines) - 1
@@ -1461,7 +1486,7 @@ func (m AppModel) viewLoopMenu() string {
 	// Save item
 	lines = append(lines, "")
 	saveLabel := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render("Save")
-	if m.loopMenuSel == 2 {
+	if m.loopWiz.MenuSel == 2 {
 		cursor := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen).Render("> ")
 		lines = append(lines, cursor+saveLabel)
 		cursorLine = len(lines) - 1
@@ -1479,19 +1504,19 @@ func (m AppModel) viewLoopMenu() string {
 
 // finishLoopCreation saves the loop definition and returns to the selector.
 func (m AppModel) finishLoopCreation() (tea.Model, tea.Cmd) {
-	name := strings.TrimSpace(m.loopNameInput)
-	if name == "" || len(m.loopSteps) == 0 {
+	name := strings.TrimSpace(m.loopWiz.NameInput)
+	if name == "" || len(m.loopWiz.Steps) == 0 {
 		return m, nil
 	}
 
 	loopDef := config.LoopDef{
 		Name:  name,
-		Steps: make([]config.LoopStep, len(m.loopSteps)),
+		Steps: make([]config.LoopStep, len(m.loopWiz.Steps)),
 	}
-	copy(loopDef.Steps, m.loopSteps)
+	copy(loopDef.Steps, m.loopWiz.Steps)
 
-	if m.loopEditing {
-		m.globalCfg.RemoveLoop(m.loopEditName)
+	if m.loopWiz.Editing {
+		m.globalCfg.RemoveLoop(m.loopWiz.EditName)
 	}
 
 	m.globalCfg.AddLoop(loopDef)
@@ -1501,15 +1526,15 @@ func (m AppModel) finishLoopCreation() (tea.Model, tea.Cmd) {
 	// Select the loop in the list.
 	for i, pe := range m.profiles {
 		if pe.IsLoop && strings.EqualFold(pe.LoopName, name) {
-			m.selected = i
+			m.selector.Selected = i
 			break
 		}
 	}
 
-	m.loopEditing = false
-	m.loopEditName = ""
-	m.loopNameInput = ""
-	m.loopSteps = nil
+	m.loopWiz.Editing = false
+	m.loopWiz.EditName = ""
+	m.loopWiz.NameInput = ""
+	m.loopWiz.Steps = nil
 	m.state = stateSelector
 	return m, nil
 }

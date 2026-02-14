@@ -180,7 +180,7 @@ func TestStartLoopSessionFailureSetsSelectorMessage(t *testing.T) {
 	if !ok {
 		t.Fatalf("updated model type = %T, want tui.AppModel", updated)
 	}
-	if got.selectorMsg == "" {
+	if got.selector.Msg == "" {
 		t.Fatal("selectorMsg = empty, want non-empty start failure message")
 	}
 	if got.state != stateSelector {
@@ -189,6 +189,9 @@ func TestStartLoopSessionFailureSetsSelectorMessage(t *testing.T) {
 }
 
 func TestShowSessionsMultipleOpensPicker(t *testing.T) {
+	t.Setenv("ADAF_TURN_ID", "")
+	t.Setenv("ADAF_SESSION_ID", "")
+	t.Setenv("ADAF_AGENT", "")
 	t.Setenv("HOME", t.TempDir())
 
 	projectDir := t.TempDir()
@@ -224,19 +227,21 @@ func TestUpdateSessionPickerNavigationAndCancel(t *testing.T) {
 			{ID: 1, ProfileName: "a", AgentName: "generic", Status: "running"},
 			{ID: 2, ProfileName: "b", AgentName: "generic", Status: "running"},
 		},
-		sessionPickSel: 0,
+		selector: SelectorState{
+			SessionPickSel: 0,
+		},
 	}
 
 	updated, _ := m.updateSessionPicker(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	got := updated.(AppModel)
-	if got.sessionPickSel != 1 {
-		t.Fatalf("sessionPickSel after j = %d, want 1", got.sessionPickSel)
+	if got.selector.SessionPickSel != 1 {
+		t.Fatalf("sessionPickSel after j = %d, want 1", got.selector.SessionPickSel)
 	}
 
 	updated, _ = got.updateSessionPicker(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 	got = updated.(AppModel)
-	if got.sessionPickSel != 0 {
-		t.Fatalf("sessionPickSel after k = %d, want 0", got.sessionPickSel)
+	if got.selector.SessionPickSel != 0 {
+		t.Fatalf("sessionPickSel after k = %d, want 0", got.selector.SessionPickSel)
 	}
 
 	updated, _ = got.updateSessionPicker(tea.KeyMsg{Type: tea.KeyEsc})

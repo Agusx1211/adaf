@@ -17,6 +17,14 @@ import (
 
 const selectorLeftWidth = 28
 
+type SelectorState struct {
+	Selected       int
+	Plans          []store.Plan
+	PlanSel        int
+	Msg            string
+	SessionPickSel int
+}
+
 // profileEntry holds display info for a profile or loop in the selector list.
 type profileEntry struct {
 	Name            string

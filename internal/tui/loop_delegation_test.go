@@ -109,10 +109,12 @@ func TestUpdateLoopStepSpawnROpensRolePicker(t *testing.T) {
 	m := AppModel{
 		state:     stateLoopStepSpawn,
 		globalCfg: cfg,
-		loopStepDelegRoots: []*loopDelegationNode{
-			{
-				Profile: "worker",
-				Roles:   []string{config.RoleUIDesigner, config.RoleDeveloper},
+		loopWiz: LoopWizardState{
+			StepDelegRoots: []*loopDelegationNode{
+				{
+					Profile: "worker",
+					Roles:   []string{config.RoleUIDesigner, config.RoleDeveloper},
+				},
 			},
 		},
 	}
@@ -131,8 +133,8 @@ func TestUpdateLoopStepSpawnROpensRolePicker(t *testing.T) {
 			break
 		}
 	}
-	if got.loopStepSpawnRoleSel != wantSel {
-		t.Fatalf("loopStepSpawnRoleSel = %d, want %d", got.loopStepSpawnRoleSel, wantSel)
+	if got.loopWiz.StepSpawnRoleSel != wantSel {
+		t.Fatalf("loopStepSpawnRoleSel = %d, want %d", got.loopWiz.StepSpawnRoleSel, wantSel)
 	}
 }
 
@@ -143,10 +145,12 @@ func TestUpdateLoopStepSpawnRolesToggleKeepsAtLeastOneRole(t *testing.T) {
 	m := AppModel{
 		state:     stateLoopStepSpawnRoles,
 		globalCfg: cfg,
-		loopStepDelegRoots: []*loopDelegationNode{
-			{
-				Profile: "worker",
-				Roles:   []string{config.RoleDeveloper},
+		loopWiz: LoopWizardState{
+			StepDelegRoots: []*loopDelegationNode{
+				{
+					Profile: "worker",
+					Roles:   []string{config.RoleDeveloper},
+				},
 			},
 		},
 	}
@@ -155,30 +159,30 @@ func TestUpdateLoopStepSpawnRolesToggleKeepsAtLeastOneRole(t *testing.T) {
 	if devIdx < 0 {
 		t.Fatalf("developer role missing in role catalog")
 	}
-	m.loopStepSpawnRoleSel = devIdx
+	m.loopWiz.StepSpawnRoleSel = devIdx
 
 	updated, _ := m.updateLoopStepSpawnRoles(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	got := updated.(AppModel)
-	if !equalStrings(got.loopStepDelegRoots[0].Roles, []string{config.RoleDeveloper}) {
-		t.Fatalf("roles after removing last role = %v, want [developer]", got.loopStepDelegRoots[0].Roles)
+	if !equalStrings(got.loopWiz.StepDelegRoots[0].Roles, []string{config.RoleDeveloper}) {
+		t.Fatalf("roles after removing last role = %v, want [developer]", got.loopWiz.StepDelegRoots[0].Roles)
 	}
 
 	uiIdx := roleIndex(config.AllRoles(cfg), config.RoleUIDesigner)
 	if uiIdx < 0 {
 		t.Fatalf("ui-designer role missing in role catalog")
 	}
-	got.loopStepSpawnRoleSel = uiIdx
+	got.loopWiz.StepSpawnRoleSel = uiIdx
 	updated, _ = got.updateLoopStepSpawnRoles(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	got = updated.(AppModel)
-	if !equalStrings(got.loopStepDelegRoots[0].Roles, []string{config.RoleDeveloper, config.RoleUIDesigner}) {
-		t.Fatalf("roles after add = %v, want [developer ui-designer]", got.loopStepDelegRoots[0].Roles)
+	if !equalStrings(got.loopWiz.StepDelegRoots[0].Roles, []string{config.RoleDeveloper, config.RoleUIDesigner}) {
+		t.Fatalf("roles after add = %v, want [developer ui-designer]", got.loopWiz.StepDelegRoots[0].Roles)
 	}
 
-	got.loopStepSpawnRoleSel = devIdx
+	got.loopWiz.StepSpawnRoleSel = devIdx
 	updated, _ = got.updateLoopStepSpawnRoles(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	got = updated.(AppModel)
-	if !equalStrings(got.loopStepDelegRoots[0].Roles, []string{config.RoleUIDesigner}) {
-		t.Fatalf("roles after removing developer = %v, want [ui-designer]", got.loopStepDelegRoots[0].Roles)
+	if !equalStrings(got.loopWiz.StepDelegRoots[0].Roles, []string{config.RoleUIDesigner}) {
+		t.Fatalf("roles after removing developer = %v, want [ui-designer]", got.loopWiz.StepDelegRoots[0].Roles)
 	}
 }
 

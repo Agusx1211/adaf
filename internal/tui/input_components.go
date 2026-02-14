@@ -144,39 +144,39 @@ func sanitizeDigitsMsg(msg tea.Msg) (tea.Msg, bool) {
 func (m *AppModel) initInputEditorForState() tea.Cmd {
 	switch m.state {
 	case statePlanCreateID:
-		return m.ensureTextInput("plan-create-id", m.planCreateIDInput, 64)
+		return m.ensureTextInput("plan-create-id", m.planWiz.CreateIDInput, 64)
 	case statePlanCreateTitle:
-		return m.ensureTextInput("plan-create-title", m.planCreateTitleInput, 0)
+		return m.ensureTextInput("plan-create-title", m.planWiz.CreateTitleInput, 0)
 	case stateProfileName:
-		return m.ensureTextInput("profile-name", m.profileNameInput, 0)
+		return m.ensureTextInput("profile-name", m.profileWiz.NameInput, 0)
 	case stateProfileModel:
-		if m.profileCustomModelMode {
-			return m.ensureTextInput("profile-custom-model", m.profileCustomModel, 0)
+		if m.profileWiz.CustomModelMode {
+			return m.ensureTextInput("profile-custom-model", m.profileWiz.CustomModel, 0)
 		}
 	case stateProfileIntel:
-		return m.ensureTextInput("profile-intel", m.profileIntelInput, 2)
+		return m.ensureTextInput("profile-intel", m.profileWiz.IntelInput, 2)
 	case stateProfileDesc:
-		return m.ensureTextInput("profile-desc", m.profileDescInput, 0)
+		return m.ensureTextInput("profile-desc", m.profileWiz.DescInput, 0)
 	case stateProfileMaxInst:
-		return m.ensureTextInput("profile-max-inst", m.profileMaxInstInput, 2)
+		return m.ensureTextInput("profile-max-inst", m.profileWiz.MaxInstInput, 2)
 	case stateLoopName:
-		return m.ensureTextInput("loop-name", m.loopNameInput, 0)
+		return m.ensureTextInput("loop-name", m.loopWiz.NameInput, 0)
 	case stateLoopStepTurns:
-		return m.ensureTextInput("loop-step-turns", m.loopStepTurnsInput, 3)
+		return m.ensureTextInput("loop-step-turns", m.loopWiz.StepTurnsInput, 3)
 	case stateLoopStepInstr:
-		return m.ensureTextInput("loop-step-instr", m.loopStepInstrInput, 0)
+		return m.ensureTextInput("loop-step-instr", m.loopWiz.StepInstrInput, 0)
 	case stateSettingsPushoverUserKey:
-		return m.ensureTextInput("settings-pushover-user", m.settingsPushoverUserKey, 0)
+		return m.ensureTextInput("settings-pushover-user", m.settings.PushoverUserKey, 0)
 	case stateSettingsPushoverAppToken:
-		return m.ensureTextInput("settings-pushover-token", m.settingsPushoverAppToken, 0)
+		return m.ensureTextInput("settings-pushover-token", m.settings.PushoverAppToken, 0)
 	case stateSettingsRoleName:
-		return m.ensureTextInput("settings-role-name", m.settingsRoleNameInput, 0)
+		return m.ensureTextInput("settings-role-name", m.settings.RoleNameInput, 0)
 	case stateSettingsRuleID:
-		return m.ensureTextInput("settings-rule-id", m.settingsRuleIDInput, 0)
+		return m.ensureTextInput("settings-rule-id", m.settings.RuleIDInput, 0)
 	case stateSettingsRuleBody:
 		key, _, ok := m.ruleBodyEditorContext()
 		if ok {
-			return m.ensureTextarea(key, m.settingsRuleBodyInput)
+			return m.ensureTextarea(key, m.settings.RuleBodyInput)
 		}
 	}
 	return nil

@@ -35,16 +35,16 @@ func TestUpdateProfileIntelFiltersInput(t *testing.T) {
 
 	model, _ := m.updateProfileIntel(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
 	m = model.(AppModel)
-	if m.profileIntelInput != "" {
-		t.Fatalf("profileIntelInput after non-digit = %q, want empty", m.profileIntelInput)
+	if m.profileWiz.IntelInput != "" {
+		t.Fatalf("profileIntelInput after non-digit = %q, want empty", m.profileWiz.IntelInput)
 	}
 
 	for _, r := range []rune{'1', '2', '3'} {
 		model, _ = m.updateProfileIntel(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 		m = model.(AppModel)
 	}
-	if m.profileIntelInput != "12" {
-		t.Fatalf("profileIntelInput = %q, want %q", m.profileIntelInput, "12")
+	if m.profileWiz.IntelInput != "12" {
+		t.Fatalf("profileIntelInput = %q, want %q", m.profileWiz.IntelInput, "12")
 	}
 }
 
@@ -53,8 +53,10 @@ func TestUpdateSettingsRuleBodyTextarea(t *testing.T) {
 		globalCfg: &config.GlobalConfig{
 			PromptRules: []config.PromptRule{{ID: "rule_a", Body: ""}},
 		},
-		state:               stateSettingsRuleBody,
-		settingsEditRuleIdx: 0,
+		state: stateSettingsRuleBody,
+		settings: SettingsState{
+			EditRuleIdx: 0,
+		},
 	}
 
 	for _, msg := range []tea.Msg{
@@ -67,8 +69,8 @@ func TestUpdateSettingsRuleBodyTextarea(t *testing.T) {
 		m = model.(AppModel)
 	}
 
-	if m.settingsRuleBodyInput != "ab\nc" {
-		t.Fatalf("settingsRuleBodyInput = %q, want %q", m.settingsRuleBodyInput, "ab\\nc")
+	if m.settings.RuleBodyInput != "ab\nc" {
+		t.Fatalf("settingsRuleBodyInput = %q, want %q", m.settings.RuleBodyInput, "ab\\nc")
 	}
 
 	model, _ := m.updateSettingsRuleBody(tea.KeyMsg{Type: tea.KeyEsc})
@@ -83,15 +85,17 @@ func TestUpdateSettingsRuleBodyAllowsUppercaseS(t *testing.T) {
 		globalCfg: &config.GlobalConfig{
 			PromptRules: []config.PromptRule{{ID: "rule_a", Body: ""}},
 		},
-		state:               stateSettingsRuleBody,
-		settingsEditRuleIdx: 0,
+		state: stateSettingsRuleBody,
+		settings: SettingsState{
+			EditRuleIdx: 0,
+		},
 	}
 
 	model, _ := m.updateSettingsRuleBody(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
 	m = model.(AppModel)
 
-	if m.settingsRuleBodyInput != "S" {
-		t.Fatalf("settingsRuleBodyInput = %q, want %q", m.settingsRuleBodyInput, "S")
+	if m.settings.RuleBodyInput != "S" {
+		t.Fatalf("settingsRuleBodyInput = %q, want %q", m.settings.RuleBodyInput, "S")
 	}
 	if m.state != stateSettingsRuleBody {
 		t.Fatalf("state = %v, want %v", m.state, stateSettingsRuleBody)
@@ -103,8 +107,10 @@ func TestRuleBodyEditorContextRoleIdentity(t *testing.T) {
 		globalCfg: &config.GlobalConfig{
 			Roles: []config.RoleDefinition{{Name: "reviewer"}},
 		},
-		settingsEditRuleIdx: -1,
-		settingsEditRoleIdx: 0,
+		settings: SettingsState{
+			EditRuleIdx: -1,
+			EditRoleIdx: 0,
+		},
 	}
 
 	key, editingRoleIdentity, ok := m.ruleBodyEditorContext()
