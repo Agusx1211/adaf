@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -180,6 +182,12 @@ type AppModel struct {
 	// Session mode: when non-nil, the agent is running via a session daemon.
 	sessionClient *session.Client
 	sessionID     int
+
+	// Shared Bubbles editors for text-entry states.
+	textInput    textinput.Model
+	textInputKey string
+	textArea     textarea.Model
+	textAreaKey  string
 }
 
 // NewApp creates the unified TUI app model.
@@ -299,7 +307,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	updated, cmd := m.updateByState(msg)
 	if next, ok := updated.(AppModel); ok {
 		next.syncScrollState(prevState)
-		return next, cmd
+		initCmd := next.initInputEditorForState()
+		return next, tea.Batch(cmd, initCmd)
 	}
 	return updated, cmd
 }
@@ -1303,7 +1312,7 @@ func (m AppModel) renderStatusBar() string {
 // RunApp launches the unified TUI application.
 func RunApp(s *store.Store) error {
 	m := NewApp(s)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithInputTTY())
 	_, err := p.Run()
 	return err
 }

@@ -115,10 +115,11 @@ func (m AppModel) updatePlanMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m AppModel) updatePlanCreateID(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
+	initCmd := m.ensureTextInput("plan-create-id", m.planCreateIDInput, 64)
+	m.syncTextInput(m.planCreateIDInput)
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyEnter:
 			id := strings.TrimSpace(m.planCreateIDInput)
 			if id == "" {
 				return m, nil
@@ -135,29 +136,22 @@ func (m AppModel) updatePlanCreateID(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.planCreateTitleInput = ""
 			m.state = statePlanCreateTitle
 			return m, nil
-		case "esc":
+		case tea.KeyEsc:
 			m.state = statePlanMenu
-			return m, nil
-		case "backspace":
-			if len(m.planCreateIDInput) > 0 {
-				m.planCreateIDInput = m.planCreateIDInput[:len(m.planCreateIDInput)-1]
-			}
-			return m, nil
-		default:
-			if len(msg.String()) == 1 {
-				m.planCreateIDInput += msg.String()
-			}
 			return m, nil
 		}
 	}
-	return m, nil
+	cmd := m.updateTextInput(msg)
+	m.planCreateIDInput = m.textInput.Value()
+	return m, tea.Batch(initCmd, cmd)
 }
 
 func (m AppModel) updatePlanCreateTitle(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
+	initCmd := m.ensureTextInput("plan-create-title", m.planCreateTitleInput, 0)
+	m.syncTextInput(m.planCreateTitleInput)
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyEnter:
 			title := strings.TrimSpace(m.planCreateTitleInput)
 			if title == "" {
 				return m, nil
@@ -186,22 +180,14 @@ func (m AppModel) updatePlanCreateTitle(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
-		case "esc":
+		case tea.KeyEsc:
 			m.state = statePlanCreateID
-			return m, nil
-		case "backspace":
-			if len(m.planCreateTitleInput) > 0 {
-				m.planCreateTitleInput = m.planCreateTitleInput[:len(m.planCreateTitleInput)-1]
-			}
-			return m, nil
-		default:
-			if len(msg.String()) == 1 {
-				m.planCreateTitleInput += msg.String()
-			}
 			return m, nil
 		}
 	}
-	return m, nil
+	cmd := m.updateTextInput(msg)
+	m.planCreateTitleInput = m.textInput.Value()
+	return m, tea.Batch(initCmd, cmd)
 }
 
 func (m AppModel) selectedPlan() *store.Plan {
@@ -449,14 +435,15 @@ func (m AppModel) viewPlanCreateID() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
+	m.ensureTextInput("plan-create-id", m.planCreateIDInput, 64)
+	m.syncTextInput(m.planCreateIDInput)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render("New Plan — ID"))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("Enter plan ID (lowercase, digits, -, _; max 64):"))
 	lines = append(lines, "")
-	lines = append(lines, "> "+lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(truncateInputForDisplay(m.planCreateIDInput, cw-4))+cursor)
+	lines = append(lines, m.viewTextInput(cw-4))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: next  esc: cancel"))
 	if m.planActionMsg != "" {
@@ -475,7 +462,8 @@ func (m AppModel) viewPlanCreateTitle() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
+	m.ensureTextInput("plan-create-title", m.planCreateTitleInput, 0)
+	m.syncTextInput(m.planCreateTitleInput)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render("New Plan — Title"))
@@ -483,7 +471,7 @@ func (m AppModel) viewPlanCreateTitle() string {
 	lines = append(lines, dimStyle.Render("Plan ID: "+m.planCreateIDInput))
 	lines = append(lines, dimStyle.Render("Enter a title:"))
 	lines = append(lines, "")
-	lines = append(lines, "> "+lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(truncateInputForDisplay(m.planCreateTitleInput, cw-4))+cursor)
+	lines = append(lines, m.viewTextInput(cw-4))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: create  esc: back"))
 	if m.planActionMsg != "" {

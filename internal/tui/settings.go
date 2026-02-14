@@ -133,30 +133,27 @@ func maskValue(s string) string {
 // --- Pushover User Key Input ---
 
 func (m AppModel) updateSettingsPushoverUserKey(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
+	initCmd := m.ensureTextInput("settings-pushover-user", m.settingsPushoverUserKey, 0)
+	m.syncTextInput(m.settingsPushoverUserKey)
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyEnter:
 			key := strings.TrimSpace(m.settingsPushoverUserKey)
 			m.settingsPushoverUserKey = key
 			m.globalCfg.Pushover.UserKey = key
 			config.Save(m.globalCfg)
 			m.state = stateSettings
-		case "esc":
+			return m, nil
+		case tea.KeyEsc:
 			// Revert to saved value.
 			m.settingsPushoverUserKey = m.globalCfg.Pushover.UserKey
 			m.state = stateSettings
-		case "backspace":
-			if len(m.settingsPushoverUserKey) > 0 {
-				m.settingsPushoverUserKey = m.settingsPushoverUserKey[:len(m.settingsPushoverUserKey)-1]
-			}
-		default:
-			if len(msg.String()) == 1 {
-				m.settingsPushoverUserKey += msg.String()
-			}
+			return m, nil
 		}
 	}
-	return m, nil
+	cmd := m.updateTextInput(msg)
+	m.settingsPushoverUserKey = m.textInput.Value()
+	return m, tea.Batch(initCmd, cmd)
 }
 
 func (m AppModel) viewSettingsPushoverUserKey() string {
@@ -166,6 +163,8 @@ func (m AppModel) viewSettingsPushoverUserKey() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
+	m.ensureTextInput("settings-pushover-user", m.settingsPushoverUserKey, 0)
+	m.syncTextInput(m.settingsPushoverUserKey)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render("Settings — Pushover User Key"))
@@ -174,10 +173,7 @@ func (m AppModel) viewSettingsPushoverUserKey() string {
 	lines = append(lines, dimStyle.Render("(found on your Pushover dashboard at pushover.net)"))
 	lines = append(lines, "")
 
-	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	displayKey := truncateInputForDisplay(m.settingsPushoverUserKey, cw-4)
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(displayKey)
-	lines = append(lines, "> "+inputText+cursor)
+	lines = append(lines, m.viewTextInput(cw-4))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: save  esc: cancel"))
 
@@ -189,30 +185,27 @@ func (m AppModel) viewSettingsPushoverUserKey() string {
 // --- Pushover App Token Input ---
 
 func (m AppModel) updateSettingsPushoverAppToken(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
+	initCmd := m.ensureTextInput("settings-pushover-token", m.settingsPushoverAppToken, 0)
+	m.syncTextInput(m.settingsPushoverAppToken)
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyEnter:
 			token := strings.TrimSpace(m.settingsPushoverAppToken)
 			m.settingsPushoverAppToken = token
 			m.globalCfg.Pushover.AppToken = token
 			config.Save(m.globalCfg)
 			m.state = stateSettings
-		case "esc":
+			return m, nil
+		case tea.KeyEsc:
 			// Revert to saved value.
 			m.settingsPushoverAppToken = m.globalCfg.Pushover.AppToken
 			m.state = stateSettings
-		case "backspace":
-			if len(m.settingsPushoverAppToken) > 0 {
-				m.settingsPushoverAppToken = m.settingsPushoverAppToken[:len(m.settingsPushoverAppToken)-1]
-			}
-		default:
-			if len(msg.String()) == 1 {
-				m.settingsPushoverAppToken += msg.String()
-			}
+			return m, nil
 		}
 	}
-	return m, nil
+	cmd := m.updateTextInput(msg)
+	m.settingsPushoverAppToken = m.textInput.Value()
+	return m, tea.Batch(initCmd, cmd)
 }
 
 func (m AppModel) viewSettingsPushoverAppToken() string {
@@ -222,6 +215,8 @@ func (m AppModel) viewSettingsPushoverAppToken() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
+	m.ensureTextInput("settings-pushover-token", m.settingsPushoverAppToken, 0)
+	m.syncTextInput(m.settingsPushoverAppToken)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render("Settings — Pushover App Token"))
@@ -230,10 +225,7 @@ func (m AppModel) viewSettingsPushoverAppToken() string {
 	lines = append(lines, dimStyle.Render("(create an app at pushover.net/apps/build)"))
 	lines = append(lines, "")
 
-	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	displayToken := truncateInputForDisplay(m.settingsPushoverAppToken, cw-4)
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(displayToken)
-	lines = append(lines, "> "+inputText+cursor)
+	lines = append(lines, m.viewTextInput(cw-4))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: save  esc: cancel"))
 

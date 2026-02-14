@@ -311,10 +311,11 @@ func (m AppModel) viewProfileMenu() string {
 
 // updateProfileName handles input in the profile name state.
 func (m AppModel) updateProfileName(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
+	initCmd := m.ensureTextInput("profile-name", m.profileNameInput, 0)
+	m.syncTextInput(m.profileNameInput)
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyEnter:
 			name := strings.TrimSpace(m.profileNameInput)
 			if name == "" {
 				return m, nil
@@ -334,7 +335,7 @@ func (m AppModel) updateProfileName(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.profileAgentSel = 0
 			m.state = stateProfileAgent
 			return m, nil
-		case "esc":
+		case tea.KeyEsc:
 			if m.profileEditing {
 				m.state = stateProfileMenu
 				return m, nil
@@ -342,19 +343,11 @@ func (m AppModel) updateProfileName(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.profileNameInput = ""
 			m.state = stateSelector
 			return m, nil
-		case "backspace":
-			if len(m.profileNameInput) > 0 {
-				m.profileNameInput = m.profileNameInput[:len(m.profileNameInput)-1]
-			}
-			return m, nil
-		default:
-			if len(msg.String()) == 1 {
-				m.profileNameInput += msg.String()
-			}
-			return m, nil
 		}
 	}
-	return m, nil
+	cmd := m.updateTextInput(msg)
+	m.profileNameInput = m.textInput.Value()
+	return m, tea.Batch(initCmd, cmd)
 }
 
 // updateProfileAgent handles agent selection in the profile wizard.
@@ -419,6 +412,7 @@ func (m AppModel) updateProfileModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if model == customModelSentinel {
 					m.profileCustomModelMode = true
 					m.profileCustomModel = ""
+					m.textInputKey = ""
 					return m, nil
 				}
 				if model == "(default)" {
@@ -444,10 +438,11 @@ func (m AppModel) updateProfileModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // updateCustomModelInput handles free-text model input.
 func (m AppModel) updateCustomModelInput(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
+	initCmd := m.ensureTextInput("profile-custom-model", m.profileCustomModel, 0)
+	m.syncTextInput(m.profileCustomModel)
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyEnter:
 			model := strings.TrimSpace(m.profileCustomModel)
 			if model == "" {
 				return m, nil
@@ -459,22 +454,14 @@ func (m AppModel) updateCustomModelInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m.transitionToReasoningOrFinish()
-		case "esc":
+		case tea.KeyEsc:
 			m.profileCustomModelMode = false
-			return m, nil
-		case "backspace":
-			if len(m.profileCustomModel) > 0 {
-				m.profileCustomModel = m.profileCustomModel[:len(m.profileCustomModel)-1]
-			}
-			return m, nil
-		default:
-			if len(msg.String()) == 1 {
-				m.profileCustomModel += msg.String()
-			}
 			return m, nil
 		}
 	}
-	return m, nil
+	cmd := m.updateTextInput(msg)
+	m.profileCustomModel = m.textInput.Value()
+	return m, tea.Batch(initCmd, cmd)
 }
 
 // transitionToReasoningOrFinish moves to reasoning level selection if the agent
@@ -542,10 +529,11 @@ func (m AppModel) updateProfileReasoning(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // updateProfileIntel handles intelligence rating input.
 func (m AppModel) updateProfileIntel(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
+	initCmd := m.ensureTextInput("profile-intel", m.profileIntelInput, 2)
+	m.syncTextInput(m.profileIntelInput)
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyEnter:
 			if m.profileEditing {
 				m.state = stateProfileMenu
 				return m, nil
@@ -553,7 +541,8 @@ func (m AppModel) updateProfileIntel(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Move to description.
 			m.profileDescInput = ""
 			m.state = stateProfileDesc
-		case "esc":
+			return m, nil
+		case tea.KeyEsc:
 			if m.profileEditing {
 				m.state = stateProfileMenu
 				return m, nil
@@ -563,81 +552,86 @@ func (m AppModel) updateProfileIntel(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.state = stateProfileModel
 			}
-		case "backspace":
-			if len(m.profileIntelInput) > 0 {
-				m.profileIntelInput = m.profileIntelInput[:len(m.profileIntelInput)-1]
-			}
-		default:
-			ch := msg.String()
-			if len(ch) == 1 && ch >= "0" && ch <= "9" && len(m.profileIntelInput) < 2 {
-				m.profileIntelInput += ch
-			}
+			return m, nil
 		}
 	}
-	return m, nil
+	filteredMsg, ok := sanitizeDigitsMsg(msg)
+	if !ok {
+		return m, initCmd
+	}
+	cmd := m.updateTextInput(filteredMsg)
+	filtered := digitsOnly(m.textInput.Value(), 2)
+	if filtered != m.textInput.Value() {
+		m.textInput.SetValue(filtered)
+		m.textInput.CursorEnd()
+	}
+	m.profileIntelInput = filtered
+	return m, tea.Batch(initCmd, cmd)
 }
 
 // updateProfileDesc handles description text input.
 func (m AppModel) updateProfileDesc(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
+	initCmd := m.ensureTextInput("profile-desc", m.profileDescInput, 0)
+	m.syncTextInput(m.profileDescInput)
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyEnter:
 			if m.profileEditing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
 			m.profileMaxInstInput = ""
 			m.state = stateProfileMaxInst
-		case "esc":
+			return m, nil
+		case tea.KeyEsc:
 			if m.profileEditing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
 			m.state = stateProfileIntel
-		case "backspace":
-			if len(m.profileDescInput) > 0 {
-				m.profileDescInput = m.profileDescInput[:len(m.profileDescInput)-1]
-			}
-		default:
-			if len(msg.String()) == 1 {
-				m.profileDescInput += msg.String()
-			}
+			return m, nil
 		}
 	}
-	return m, nil
+	cmd := m.updateTextInput(msg)
+	m.profileDescInput = m.textInput.Value()
+	return m, tea.Batch(initCmd, cmd)
 }
 
 // updateProfileMaxInst handles max instances input.
 func (m AppModel) updateProfileMaxInst(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
+	initCmd := m.ensureTextInput("profile-max-inst", m.profileMaxInstInput, 2)
+	m.syncTextInput(m.profileMaxInstInput)
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyEnter:
 			if m.profileEditing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
 			m.profileSpeedSel = 0
 			m.state = stateProfileSpeed
-		case "esc":
+			return m, nil
+		case tea.KeyEsc:
 			if m.profileEditing {
 				m.state = stateProfileMenu
 				return m, nil
 			}
 			m.state = stateProfileDesc
-		case "backspace":
-			if len(m.profileMaxInstInput) > 0 {
-				m.profileMaxInstInput = m.profileMaxInstInput[:len(m.profileMaxInstInput)-1]
-			}
-		default:
-			ch := msg.String()
-			if len(ch) == 1 && ch >= "0" && ch <= "9" && len(m.profileMaxInstInput) < 2 {
-				m.profileMaxInstInput += ch
-			}
+			return m, nil
 		}
 	}
-	return m, nil
+	filteredMsg, ok := sanitizeDigitsMsg(msg)
+	if !ok {
+		return m, initCmd
+	}
+	cmd := m.updateTextInput(filteredMsg)
+	filtered := digitsOnly(m.textInput.Value(), 2)
+	if filtered != m.textInput.Value() {
+		m.textInput.SetValue(filtered)
+		m.textInput.CursorEnd()
+	}
+	m.profileMaxInstInput = filtered
+	return m, tea.Batch(initCmd, cmd)
 }
 
 // finishProfileCreation creates the profile, saves config, and returns to selector.
@@ -807,6 +801,8 @@ func (m AppModel) viewProfileName() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
+	m.ensureTextInput("profile-name", m.profileNameInput, 0)
+	m.syncTextInput(m.profileNameInput)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Name"))
@@ -814,10 +810,7 @@ func (m AppModel) viewProfileName() string {
 	lines = append(lines, dimStyle.Render("Enter a name for the new profile:"))
 	lines = append(lines, "")
 
-	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	displayText := truncateInputForDisplay(m.profileNameInput, cw-4)
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(displayText)
-	lines = append(lines, "> "+inputText+cursor)
+	lines = append(lines, m.viewTextInput(cw-4))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: confirm  esc: cancel"))
 
@@ -876,14 +869,14 @@ func (m AppModel) viewProfileModel() string {
 	cursorLine := -1
 
 	if m.profileCustomModelMode {
+		m.ensureTextInput("profile-custom-model", m.profileCustomModel, 0)
+		m.syncTextInput(m.profileCustomModel)
 		lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Custom Model"))
 		lines = append(lines, dimStyle.Render("Agent: "+agentName))
 		lines = append(lines, "")
 		lines = append(lines, dimStyle.Render("Type the model name:"))
 		lines = append(lines, "")
-		cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-		inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(m.profileCustomModel)
-		lines = append(lines, "> "+inputText+cursor)
+		lines = append(lines, m.viewTextInput(cw-4))
 		lines = append(lines, "")
 		lines = append(lines, dimStyle.Render("enter: confirm  esc: back to list"))
 	} else {
@@ -967,6 +960,8 @@ func (m AppModel) viewProfileIntel() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
+	m.ensureTextInput("profile-intel", m.profileIntelInput, 2)
+	m.syncTextInput(m.profileIntelInput)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Intelligence"))
@@ -974,9 +969,7 @@ func (m AppModel) viewProfileIntel() string {
 	lines = append(lines, dimStyle.Render("Rate this profile's capability (1-10, or empty to skip):"))
 	lines = append(lines, "")
 
-	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(m.profileIntelInput)
-	lines = append(lines, "> "+inputText+cursor)
+	lines = append(lines, m.viewTextInput(cw-4))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: continue  esc: back"))
 
@@ -993,6 +986,8 @@ func (m AppModel) viewProfileDesc() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
+	m.ensureTextInput("profile-desc", m.profileDescInput, 0)
+	m.syncTextInput(m.profileDescInput)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Description"))
@@ -1000,10 +995,7 @@ func (m AppModel) viewProfileDesc() string {
 	lines = append(lines, dimStyle.Render("Describe strengths/weaknesses (or enter to skip):"))
 	lines = append(lines, "")
 
-	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	displayDesc := truncateInputForDisplay(m.profileDescInput, cw-4)
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(displayDesc)
-	lines = append(lines, "> "+inputText+cursor)
+	lines = append(lines, m.viewTextInput(cw-4))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: continue  esc: back"))
 
@@ -1020,6 +1012,8 @@ func (m AppModel) viewProfileMaxInst() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
+	m.ensureTextInput("profile-max-inst", m.profileMaxInstInput, 2)
+	m.syncTextInput(m.profileMaxInstInput)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render(m.wizardTitle()+" — Max Instances"))
@@ -1028,9 +1022,7 @@ func (m AppModel) viewProfileMaxInst() string {
 	lines = append(lines, dimStyle.Render("(empty = unlimited):"))
 	lines = append(lines, "")
 
-	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(m.profileMaxInstInput)
-	lines = append(lines, "> "+inputText+cursor)
+	lines = append(lines, m.viewTextInput(cw-4))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: continue  esc: back"))
 

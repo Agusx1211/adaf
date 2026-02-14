@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -22,15 +21,17 @@ func normalizeRuleIDInput(in string) string {
 	return strings.ToLower(strings.TrimSpace(in))
 }
 
-func deleteLastRune(s string) string {
-	if s == "" {
-		return s
+func (m AppModel) ruleBodyEditorContext() (editorKey string, editingRoleIdentity bool, ok bool) {
+	editingRoleIdentity = m.settingsEditRuleIdx < 0 &&
+		m.settingsEditRoleIdx >= 0 &&
+		m.settingsEditRoleIdx < len(m.globalCfg.Roles)
+	if editingRoleIdentity {
+		return fmt.Sprintf("settings-role-identity-%d", m.settingsEditRoleIdx), true, true
 	}
-	_, size := utf8.DecodeLastRuneInString(s)
-	if size <= 0 || size > len(s) {
-		return s[:len(s)-1]
+	if m.settingsEditRuleIdx >= 0 && m.settingsEditRuleIdx < len(m.globalCfg.PromptRules) {
+		return fmt.Sprintf("settings-rule-body-%d", m.settingsEditRuleIdx), false, true
 	}
-	return s[:len(s)-size]
+	return "", false, false
 }
 
 func ensureSettingsRoleCatalog(cfg *config.GlobalConfig) {
@@ -513,11 +514,11 @@ func (m AppModel) viewSettingsRolesList() string {
 
 func (m AppModel) updateSettingsRoleName(msg tea.Msg) (tea.Model, tea.Cmd) {
 	ensureSettingsRoleCatalog(m.globalCfg)
-
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
+	initCmd := m.ensureTextInput("settings-role-name", m.settingsRoleNameInput, 0)
+	m.syncTextInput(m.settingsRoleNameInput)
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyEnter:
 			name := normalizeRoleNameInput(m.settingsRoleNameInput)
 			if name == "" {
 				return m, nil
@@ -552,20 +553,14 @@ func (m AppModel) updateSettingsRoleName(msg tea.Msg) (tea.Model, tea.Cmd) {
 			saveSettingsRoleCatalog(m.globalCfg)
 			m.state = stateSettingsRolesList
 			return m, nil
-		case "esc":
+		case tea.KeyEsc:
 			m.state = stateSettingsRolesList
-			return m, nil
-		case "backspace":
-			m.settingsRoleNameInput = deleteLastRune(m.settingsRoleNameInput)
-			return m, nil
-		default:
-			if len(msg.String()) == 1 {
-				m.settingsRoleNameInput += msg.String()
-			}
 			return m, nil
 		}
 	}
-	return m, nil
+	cmd := m.updateTextInput(msg)
+	m.settingsRoleNameInput = m.textInput.Value()
+	return m, tea.Batch(initCmd, cmd)
 }
 
 func (m AppModel) viewSettingsRoleName() string {
@@ -575,6 +570,8 @@ func (m AppModel) viewSettingsRoleName() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
+	m.ensureTextInput("settings-role-name", m.settingsRoleNameInput, 0)
+	m.syncTextInput(m.settingsRoleNameInput)
 
 	title := "Settings — New Role Name"
 	if m.settingsEditRoleIdx >= 0 {
@@ -587,10 +584,7 @@ func (m AppModel) viewSettingsRoleName() string {
 	lines = append(lines, dimStyle.Render("Use lowercase role names (example: reviewer, architect, qa)."))
 	lines = append(lines, "")
 
-	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	display := truncateInputForDisplay(m.settingsRoleNameInput, cw-4)
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(display)
-	lines = append(lines, "> "+inputText+cursor)
+	lines = append(lines, m.viewTextInput(cw-4))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: save  esc: cancel"))
 
@@ -907,11 +901,11 @@ func (m AppModel) viewSettingsRulesList() string {
 
 func (m AppModel) updateSettingsRuleID(msg tea.Msg) (tea.Model, tea.Cmd) {
 	ensureSettingsRoleCatalog(m.globalCfg)
-
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
+	initCmd := m.ensureTextInput("settings-rule-id", m.settingsRuleIDInput, 0)
+	m.syncTextInput(m.settingsRuleIDInput)
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyEnter:
 			id := normalizeRuleIDInput(m.settingsRuleIDInput)
 			if id == "" {
 				return m, nil
@@ -942,20 +936,14 @@ func (m AppModel) updateSettingsRuleID(msg tea.Msg) (tea.Model, tea.Cmd) {
 			saveSettingsRoleCatalog(m.globalCfg)
 			m.state = stateSettingsRuleBody
 			return m, nil
-		case "esc":
+		case tea.KeyEsc:
 			m.state = stateSettingsRulesList
-			return m, nil
-		case "backspace":
-			m.settingsRuleIDInput = deleteLastRune(m.settingsRuleIDInput)
-			return m, nil
-		default:
-			if len(msg.String()) == 1 {
-				m.settingsRuleIDInput += msg.String()
-			}
 			return m, nil
 		}
 	}
-	return m, nil
+	cmd := m.updateTextInput(msg)
+	m.settingsRuleIDInput = m.textInput.Value()
+	return m, tea.Batch(initCmd, cmd)
 }
 
 func (m AppModel) viewSettingsRuleID() string {
@@ -965,6 +953,8 @@ func (m AppModel) viewSettingsRuleID() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
+	m.ensureTextInput("settings-rule-id", m.settingsRuleIDInput, 0)
+	m.syncTextInput(m.settingsRuleIDInput)
 
 	title := "Settings — New Rule ID"
 	if m.settingsEditRuleIdx >= 0 {
@@ -977,10 +967,7 @@ func (m AppModel) viewSettingsRuleID() string {
 	lines = append(lines, dimStyle.Render("Use lowercase IDs like: reviewer_identity, qa_checks, handoff_policy"))
 	lines = append(lines, "")
 
-	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	display := truncateInputForDisplay(m.settingsRuleIDInput, cw-4)
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(display)
-	lines = append(lines, "> "+inputText+cursor)
+	lines = append(lines, m.viewTextInput(cw-4))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: continue/save  esc: cancel"))
 
@@ -993,16 +980,16 @@ func (m AppModel) viewSettingsRuleID() string {
 
 func (m AppModel) updateSettingsRuleBody(msg tea.Msg) (tea.Model, tea.Cmd) {
 	ensureSettingsRoleCatalog(m.globalCfg)
-	editingRoleIdentity := m.settingsEditRuleIdx < 0 && m.settingsEditRoleIdx >= 0 && m.settingsEditRoleIdx < len(m.globalCfg.Roles)
-	if !editingRoleIdentity && (m.settingsEditRuleIdx < 0 || m.settingsEditRuleIdx >= len(m.globalCfg.PromptRules)) {
+	editorKey, editingRoleIdentity, ok := m.ruleBodyEditorContext()
+	if !ok {
 		m.state = stateSettingsRulesList
 		return m, nil
 	}
-
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "S", "ctrl+s":
+	initCmd := m.ensureTextarea(editorKey, m.settingsRuleBodyInput)
+	m.syncTextarea(m.settingsRuleBodyInput)
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyCtrlS:
 			if editingRoleIdentity {
 				m.globalCfg.Roles[m.settingsEditRoleIdx].Identity = m.settingsRuleBodyInput
 			} else {
@@ -1016,27 +1003,18 @@ func (m AppModel) updateSettingsRuleBody(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = stateSettingsRulesList
 			}
 			return m, nil
-		case "esc":
+		case tea.KeyEsc:
 			if editingRoleIdentity {
 				m.state = stateSettingsRoleEdit
 			} else {
 				m.state = stateSettingsRulesList
 			}
 			return m, nil
-		case "enter":
-			m.settingsRuleBodyInput += "\n"
-			return m, nil
-		case "backspace":
-			m.settingsRuleBodyInput = deleteLastRune(m.settingsRuleBodyInput)
-			return m, nil
-		default:
-			if len(msg.String()) == 1 {
-				m.settingsRuleBodyInput += msg.String()
-			}
-			return m, nil
 		}
 	}
-	return m, nil
+	cmd := m.updateTextarea(msg)
+	m.settingsRuleBodyInput = m.textArea.Value()
+	return m, tea.Batch(initCmd, cmd)
 }
 
 func (m AppModel) viewSettingsRuleBody() string {
@@ -1046,14 +1024,13 @@ func (m AppModel) viewSettingsRuleBody() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-	textStyle := lipgloss.NewStyle().Foreground(ColorText)
 
-	editingRoleIdentity := m.settingsEditRuleIdx < 0 && m.settingsEditRoleIdx >= 0 && m.settingsEditRoleIdx < len(m.globalCfg.Roles)
+	editorKey, editingRoleIdentity, ok := m.ruleBodyEditorContext()
 	ruleID := ""
 	roleName := ""
 	if editingRoleIdentity {
 		roleName = m.globalCfg.Roles[m.settingsEditRoleIdx].Name
-	} else if m.settingsEditRuleIdx >= 0 && m.settingsEditRuleIdx < len(m.globalCfg.PromptRules) {
+	} else if ok {
 		ruleID = m.globalCfg.PromptRules[m.settingsEditRuleIdx].ID
 	}
 
@@ -1074,16 +1051,24 @@ func (m AppModel) viewSettingsRuleBody() string {
 	} else {
 		lines = append(lines, dimStyle.Render("Type rule text directly."))
 	}
-	lines = append(lines, dimStyle.Render("enter: newline  ctrl+s/S: save  esc: cancel"))
+	lines = append(lines, dimStyle.Render("enter: newline  ctrl+s: save  esc: cancel"))
 	lines = append(lines, "")
 
-	editorLines := strings.Split(m.settingsRuleBodyInput, "\n")
-	if len(editorLines) == 0 {
-		editorLines = []string{""}
-	}
-	editorLines[len(editorLines)-1] = editorLines[len(editorLines)-1] + lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	for _, ln := range editorLines {
-		lines = append(lines, textStyle.Render(ln))
+	if ok {
+		m.ensureTextarea(editorKey, m.settingsRuleBodyInput)
+		m.syncTextarea(m.settingsRuleBodyInput)
+
+		prefixLines := wrapRenderableLines(lines, cw)
+		editorHeight := ch - len(prefixLines)
+		if editorHeight < 3 {
+			editorHeight = 3
+		}
+		editorView := m.viewTextarea(cw, editorHeight)
+		for _, ln := range splitRenderableLines(editorView) {
+			lines = append(lines, ln)
+		}
+	} else {
+		lines = append(lines, dimStyle.Render("No editable rule body selected."))
 	}
 
 	content := fitLines(lines, cw, ch)

@@ -265,10 +265,11 @@ func (m *AppModel) setLoopStepRoleSelection(role string) {
 // --- Loop Name ---
 
 func (m AppModel) updateLoopName(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
+	initCmd := m.ensureTextInput("loop-name", m.loopNameInput, 0)
+	m.syncTextInput(m.loopNameInput)
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyEnter:
 			name := strings.TrimSpace(m.loopNameInput)
 			if name == "" {
 				return m, nil
@@ -288,26 +289,18 @@ func (m AppModel) updateLoopName(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loopStepSel = 0
 			m.state = stateLoopStepList
 			return m, nil
-		case "esc":
+		case tea.KeyEsc:
 			if m.loopEditing {
 				m.state = stateLoopMenu
 				return m, nil
 			}
 			m.state = stateSelector
 			return m, nil
-		case "backspace":
-			if len(m.loopNameInput) > 0 {
-				m.loopNameInput = m.loopNameInput[:len(m.loopNameInput)-1]
-			}
-			return m, nil
-		default:
-			if len(msg.String()) == 1 {
-				m.loopNameInput += msg.String()
-			}
-			return m, nil
 		}
 	}
-	return m, nil
+	cmd := m.updateTextInput(msg)
+	m.loopNameInput = m.textInput.Value()
+	return m, tea.Batch(initCmd, cmd)
 }
 
 func (m AppModel) viewLoopName() string {
@@ -317,6 +310,8 @@ func (m AppModel) viewLoopName() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
+	m.ensureTextInput("loop-name", m.loopNameInput, 0)
+	m.syncTextInput(m.loopNameInput)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Name"))
@@ -324,10 +319,7 @@ func (m AppModel) viewLoopName() string {
 	lines = append(lines, dimStyle.Render("Enter a name for the loop:"))
 	lines = append(lines, "")
 
-	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	displayName := truncateInputForDisplay(m.loopNameInput, cw-4)
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(displayName)
-	lines = append(lines, "> "+inputText+cursor)
+	lines = append(lines, m.viewTextInput(cw-4))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: confirm  esc: cancel"))
 
@@ -749,25 +741,30 @@ func (m AppModel) viewLoopStepRole() string {
 // --- Loop Step Turns ---
 
 func (m AppModel) updateLoopStepTurns(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
+	initCmd := m.ensureTextInput("loop-step-turns", m.loopStepTurnsInput, 3)
+	m.syncTextInput(m.loopStepTurnsInput)
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyEnter:
 			m.state = stateLoopStepInstr
-		case "esc":
+			return m, nil
+		case tea.KeyEsc:
 			m.state = stateLoopStepRole
-		case "backspace":
-			if len(m.loopStepTurnsInput) > 0 {
-				m.loopStepTurnsInput = m.loopStepTurnsInput[:len(m.loopStepTurnsInput)-1]
-			}
-		default:
-			ch := msg.String()
-			if len(ch) == 1 && ch >= "0" && ch <= "9" && len(m.loopStepTurnsInput) < 3 {
-				m.loopStepTurnsInput += ch
-			}
+			return m, nil
 		}
 	}
-	return m, nil
+	filteredMsg, ok := sanitizeDigitsMsg(msg)
+	if !ok {
+		return m, initCmd
+	}
+	cmd := m.updateTextInput(filteredMsg)
+	filtered := digitsOnly(m.textInput.Value(), 3)
+	if filtered != m.textInput.Value() {
+		m.textInput.SetValue(filtered)
+		m.textInput.CursorEnd()
+	}
+	m.loopStepTurnsInput = filtered
+	return m, tea.Batch(initCmd, cmd)
 }
 
 func (m AppModel) viewLoopStepTurns() string {
@@ -777,6 +774,8 @@ func (m AppModel) viewLoopStepTurns() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
+	m.ensureTextInput("loop-step-turns", m.loopStepTurnsInput, 3)
+	m.syncTextInput(m.loopStepTurnsInput)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Step Turns"))
@@ -784,9 +783,7 @@ func (m AppModel) viewLoopStepTurns() string {
 	lines = append(lines, dimStyle.Render("Number of turns for this step (0 = 1):"))
 	lines = append(lines, "")
 
-	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(m.loopStepTurnsInput)
-	lines = append(lines, "> "+inputText+cursor)
+	lines = append(lines, m.viewTextInput(cw-4))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: continue  esc: back"))
 
@@ -798,25 +795,22 @@ func (m AppModel) viewLoopStepTurns() string {
 // --- Loop Step Instructions ---
 
 func (m AppModel) updateLoopStepInstr(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
+	initCmd := m.ensureTextInput("loop-step-instr", m.loopStepInstrInput, 0)
+	m.syncTextInput(m.loopStepInstrInput)
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyEnter:
 			m.loopStepToolsSel = 0
 			m.state = stateLoopStepTools
-		case "esc":
+			return m, nil
+		case tea.KeyEsc:
 			m.state = stateLoopStepTurns
-		case "backspace":
-			if len(m.loopStepInstrInput) > 0 {
-				m.loopStepInstrInput = m.loopStepInstrInput[:len(m.loopStepInstrInput)-1]
-			}
-		default:
-			if len(msg.String()) == 1 {
-				m.loopStepInstrInput += msg.String()
-			}
+			return m, nil
 		}
 	}
-	return m, nil
+	cmd := m.updateTextInput(msg)
+	m.loopStepInstrInput = m.textInput.Value()
+	return m, tea.Batch(initCmd, cmd)
 }
 
 func (m AppModel) viewLoopStepInstr() string {
@@ -826,6 +820,8 @@ func (m AppModel) viewLoopStepInstr() string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
+	m.ensureTextInput("loop-step-instr", m.loopStepInstrInput, 0)
+	m.syncTextInput(m.loopStepInstrInput)
 
 	var lines []string
 	lines = append(lines, sectionStyle.Render(m.loopWizardTitle()+" — Step Instructions"))
@@ -833,10 +829,7 @@ func (m AppModel) viewLoopStepInstr() string {
 	lines = append(lines, dimStyle.Render("Custom instructions for this step (or enter to skip):"))
 	lines = append(lines, "")
 
-	cursor := lipgloss.NewStyle().Foreground(ColorMauve).Render("_")
-	displayInstr := truncateInputForDisplay(m.loopStepInstrInput, cw-4)
-	inputText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(displayInstr)
-	lines = append(lines, "> "+inputText+cursor)
+	lines = append(lines, m.viewTextInput(cw-4))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("enter: continue  esc: back"))
 

@@ -6,6 +6,7 @@ func (m *AppModel) syncScrollState(prev appState) {
 	if m.state != prev {
 		m.clearStateScroll(m.state)
 		m.clearPaneFocus(m.state)
+		m.resetInputEditors()
 	}
 }
 
