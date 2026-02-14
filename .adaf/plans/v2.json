@@ -8,7 +8,7 @@
       "id": "p1-tui-removal",
       "title": "Remove TUI \u0026 Charmbracelet Dependencies",
       "description": "Delete the entire Bubble Tea TUI and all charmbracelet library dependencies.\n\n**Step 1 - Extract shared event protocol:**\n- Move `internal/runtui/events.go` to a new `internal/events/` package. These 17 event types (AgentEventMsg, SpawnStatusMsg, LoopStepStartMsg, etc.) are the shared event protocol between the execution layer and the presentation layer — they are NOT TUI-specific.\n- Update all 10+ importers: `webserver/ws_handler.go`, `session/daemon.go`, `session/client.go`, `orchestrator/orchestrator.go`, `looprun/runner.go`, `cli/attach_cmd.go`, `cli/loop.go`, `cli/run.go`, `cli/ask.go`, and their test files.\n\n**Step 2 - Remove TUI entry point:**\n- In `cli/root.go`, remove the `tui.RunApp(s)` fallback when no subcommand is given. Replace with: if TTY and no command, print a brief status summary and suggest `adaf web` to open the dashboard.\n- Remove the `internal/tui` import from root.go.\n\n**Step 3 - Rewrite attach command:**\n- `cli/attach_cmd.go` currently creates a `runtui.Model` and wraps it in a Bubble Tea program. Replace this with a plain streaming output mode: connect to the session daemon via WebSocket, print events to stdout as formatted text (agent output, spawn status, loop progress). No Bubble Tea, no alt-screen.\n- Support `--json` flag for machine-readable NDJSON output.\n\n**Step 4 - Delete TUI packages:**\n- Delete `internal/tui/` entirely (20 files, ~316KB).\n- Delete `internal/runtui/` except for the already-moved `events.go` (10 remaining files, ~172KB).\n\n**Step 5 - Remove charmbracelet dependencies:**\n- Rewrite `internal/theme/colors.go` to use plain ANSI escape codes instead of lipgloss.\n- Remove from go.mod: `charmbracelet/bubbles`, `charmbracelet/bubbletea`, `charmbracelet/lipgloss`, `charmbracelet/x/ansi`, and all transitive deps.\n- Run `go mod tidy`.\n\n**Step 6 - Update CLAUDE.md:**\n- Remove all TUI-related sections from CLAUDE.md (the 'TUI First-Class' section, runtui references, etc.).\n- Update architecture diagram to remove tui/runtui packages.\n\n**Verification:** `make all` passes. No imports of charmbracelet remain. Event protocol works for webserver and session daemon.",
-      "status": "not_started",
+      "status": "complete",
       "priority": 1
     },
     {
@@ -104,5 +104,5 @@
     "p9-polish"
   ],
   "created": "2026-02-14T15:37:30.322476305Z",
-  "updated": "2026-02-14T15:37:34.720540983Z"
+  "updated": "2026-02-14T15:54:30.29826965Z"
 }
