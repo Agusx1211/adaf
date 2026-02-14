@@ -1,9 +1,16 @@
 package session
 
 import (
+	"context"
+	"net"
+	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/coder/websocket"
 
 	"github.com/agusx1211/adaf/internal/config"
 )
@@ -44,6 +51,79 @@ func TestAbortSessionStartupMarksMetadata(t *testing.T) {
 	}
 	if meta.EndedAt.IsZero() {
 		t.Fatal("EndedAt is zero, want non-zero")
+	}
+}
+
+func TestSendCancelControlUsesWebSocket(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	const sessionID = 78
+	if err := os.MkdirAll(SessionDir(sessionID), 0755); err != nil {
+		t.Fatalf("MkdirAll(SessionDir): %v", err)
+	}
+
+	sockPath := SocketPath(sessionID)
+	_ = os.Remove(sockPath)
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("Listen(unix): %v", err)
+	}
+	defer listener.Close()
+
+	cancelMsgCh := make(chan string, 1)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+			InsecureSkipVerify: true,
+		})
+		if err != nil {
+			return
+		}
+		defer ws.CloseNow()
+
+		metaLine, _ := EncodeMsg(MsgMeta, WireMeta{SessionID: sessionID})
+		if len(metaLine) > 0 && metaLine[len(metaLine)-1] == '\n' {
+			metaLine = metaLine[:len(metaLine)-1]
+		}
+		if err := ws.Write(r.Context(), websocket.MessageText, metaLine); err != nil {
+			return
+		}
+
+		_, data, err := ws.Read(r.Context())
+		if err != nil {
+			return
+		}
+		select {
+		case cancelMsgCh <- string(data):
+		default:
+		}
+	})
+
+	httpServer := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	go func() {
+		_ = httpServer.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = httpServer.Shutdown(ctx)
+	})
+
+	if err := sendCancelControl(sessionID); err != nil {
+		t.Fatalf("sendCancelControl: %v", err)
+	}
+
+	select {
+	case got := <-cancelMsgCh:
+		if got != CtrlCancel {
+			t.Fatalf("cancel message = %q, want %q", got, CtrlCancel)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for cancel control message")
 	}
 }
 

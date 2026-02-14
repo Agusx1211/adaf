@@ -258,6 +258,7 @@ func RunDaemon(sessionID int) error {
 
 	// Wait a bit for clients to read final events, then shut down.
 	b.waitForClients(30 * time.Second)
+	b.closeAllClients(websocket.StatusGoingAway, "daemon shutting down")
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	_ = httpServer.Shutdown(shutdownCtx)
@@ -288,9 +289,7 @@ type clientConn struct {
 	ws      *websocket.Conn
 	ctx     context.Context
 	cancel  context.CancelFunc
-	sendCh  chan []byte
 	minSeq  int64
-	closeCh chan struct{}
 	closeMu sync.Once
 }
 
@@ -302,8 +301,9 @@ const (
 	snapshotRecentEventLimit = 128
 	snapshotRecentByteLimit  = 512 * 1024
 	snapshotWireByteLimit    = 900 * 1024
-	clientSendQueueSize      = 2048
 	clientWriteTimeout       = 15 * time.Second
+	clientPingInterval       = 30 * time.Second
+	clientPingTimeout        = 15 * time.Second
 	wireMsgTypeOverhead      = len(`{"type":""}`)
 	wireMsgDataOverhead      = len(`,"data":`)
 )
@@ -320,15 +320,12 @@ func (b *broadcaster) handleWSClient(w http.ResponseWriter, r *http.Request, can
 
 	wsCtx, wsCancel := context.WithCancel(r.Context())
 	cc := &clientConn{
-		ws:      ws,
-		ctx:     wsCtx,
-		cancel:  wsCancel,
-		sendCh:  make(chan []byte, clientSendQueueSize),
-		closeCh: make(chan struct{}),
+		ws:     ws,
+		ctx:    wsCtx,
+		cancel: wsCancel,
 	}
 	defer func() {
 		b.removeClient(cc)
-		ws.Close(websocket.StatusNormalClosure, "")
 	}()
 
 	// Send metadata.
@@ -342,7 +339,7 @@ func (b *broadcaster) handleWSClient(w http.ResponseWriter, r *http.Request, can
 	}
 
 	// Capture snapshot state under lock, but do NOT register the client yet.
-	// This fixes the race condition where events enqueue before the writer starts.
+	// This keeps snapshot and live-stream boundaries stable.
 	b.mu.Lock()
 	snapshot := cloneWireSnapshot(b.snapshot)
 	loopDone := cloneLoopDone(b.lastLoopDone)
@@ -398,14 +395,11 @@ func (b *broadcaster) handleWSClient(w http.ResponseWriter, r *http.Request, can
 		return
 	}
 
-	// Start the writer goroutine, THEN register the client.
-	// This eliminates the race where broadcasts enqueue before the writer is draining.
-	cc.startWriter()
-
 	b.mu.Lock()
 	cc.minSeq = snapshotSeq + 1
 	b.clients = append(b.clients, cc)
 	b.mu.Unlock()
+	b.startPingLoop(cc)
 
 	// Read control messages from the client via WebSocket.
 	for {
@@ -439,7 +433,7 @@ func (b *broadcaster) handleWSClient(w http.ResponseWriter, r *http.Request, can
 			fmt.Fprintf(os.Stderr, "session %d: encode control_result failed: %v\n", b.meta.SessionID, err)
 			continue
 		}
-		if !cc.enqueue(respLine) {
+		if err := cc.writeImmediate(respLine); err != nil {
 			return
 		}
 	}
@@ -468,14 +462,14 @@ func (b *broadcaster) runControl(req WireControl) WireControlResult {
 
 func (b *broadcaster) removeClient(cc *clientConn) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	for i, c := range b.clients {
 		if c == cc {
 			b.clients = append(b.clients[:i], b.clients[i+1:]...)
 			break
 		}
 	}
-	cc.close()
+	b.mu.Unlock()
+	cc.close(websocket.StatusNormalClosure, "")
 }
 
 // broadcast sends a pre-encoded message to all connected clients and records a
@@ -538,11 +532,10 @@ func (b *broadcaster) broadcastPrepared(line []byte, msg *WireMsg, payload any, 
 		if seq < cc.minSeq {
 			continue
 		}
-		// A copied client entry may race with concurrent removal/close. In that
-		// case enqueue may fail (or enqueue a message that will never be drained),
-		// which is acceptable for a disconnecting client.
-		if !cc.conn.enqueue(line) {
-			fmt.Fprintf(os.Stderr, "session %d: dropping slow client due to outbound backpressure\n", b.meta.SessionID)
+		// A copied client entry may race with concurrent removal/close; write
+		// failure means the client is gone or unhealthy and should be removed.
+		if err := cc.conn.writeImmediate(line); err != nil {
+			fmt.Fprintf(os.Stderr, "session %d: removing websocket client after write failure: %v\n", b.meta.SessionID, err)
 			b.removeClient(cc.conn)
 		}
 	}
@@ -1014,42 +1007,44 @@ func (b *broadcaster) waitForClients(timeout time.Duration) {
 	}
 }
 
-func (cc *clientConn) startWriter() {
+func (b *broadcaster) closeAllClients(status websocket.StatusCode, reason string) {
+	b.mu.Lock()
+	clients := append([]*clientConn(nil), b.clients...)
+	b.clients = nil
+	b.mu.Unlock()
+
+	for _, cc := range clients {
+		cc.close(status, reason)
+	}
+}
+
+func (b *broadcaster) startPingLoop(cc *clientConn) {
 	go func() {
+		ticker := time.NewTicker(clientPingInterval)
+		defer ticker.Stop()
 		for {
 			select {
-			case <-cc.closeCh:
+			case <-cc.ctx.Done():
 				return
-			case data := <-cc.sendCh:
-				if err := cc.writeImmediate(data); err != nil {
-					cc.close()
-					return
-				}
+			case <-ticker.C:
+			}
+
+			pingCtx, pingCancel := context.WithTimeout(cc.ctx, clientPingTimeout)
+			err := cc.ws.Ping(pingCtx)
+			pingCancel()
+			if err != nil {
+				b.removeClient(cc)
+				return
 			}
 		}
 	}()
 }
 
-func (cc *clientConn) enqueue(data []byte) bool {
-	select {
-	case <-cc.closeCh:
-		return false
-	default:
-	}
-	select {
-	case cc.sendCh <- data:
-		return true
-	default:
-		return false
-	}
-}
-
-func (cc *clientConn) close() {
+func (cc *clientConn) close(status websocket.StatusCode, reason string) {
 	cc.closeMu.Do(func() {
-		close(cc.closeCh)
 		cc.cancel()
 		if cc.ws != nil {
-			_ = cc.ws.Close(websocket.StatusNormalClosure, "")
+			_ = cc.ws.Close(status, reason)
 		}
 	})
 }

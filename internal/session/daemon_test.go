@@ -783,7 +783,7 @@ func TestSnapshotRecentPreservesPromptAfterStarted(t *testing.T) {
 	}
 }
 
-func TestBroadcastSkipsClientQueueBeforeSnapshotBoundary(t *testing.T) {
+func TestBroadcastSkipsClientBeforeSnapshotBoundary(t *testing.T) {
 	eventsPath := filepath.Join(t.TempDir(), "events.jsonl")
 	eventsFile, err := os.OpenFile(eventsPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
@@ -791,48 +791,178 @@ func TestBroadcastSkipsClientQueueBeforeSnapshotBoundary(t *testing.T) {
 	}
 	defer eventsFile.Close()
 
-	// Create a clientConn manually to test sequence boundary logic.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cc := &clientConn{
-		ctx:     ctx,
-		cancel:  cancel,
-		sendCh:  make(chan []byte, clientSendQueueSize),
-		closeCh: make(chan struct{}),
-	}
-	cc.minSeq = 7
-
 	b := &broadcaster{
 		eventsFile: eventsFile,
 		meta:       WireMeta{SessionID: 85},
-		clients:    []*clientConn{cc},
-		streamSeq:  5,
 	}
 
-	b.broadcastTyped(MsgRaw, WireRaw{SessionID: 1, Data: "seq6"})
-	select {
-	case <-cc.sendCh:
-		t.Fatal("unexpected queued event below snapshot boundary")
-	default:
+	ws := wsTestServer(t, b)
+	_, order := readWSMsgsUntil(t, ws, MsgLive)
+	if !containsType(order, MsgLive) {
+		t.Fatal("missing MsgLive")
 	}
 
-	b.broadcastTyped(MsgRaw, WireRaw{SessionID: 1, Data: "seq7"})
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		b.mu.Lock()
+		n := len(b.clients)
+		b.mu.Unlock()
+		if n == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	b.mu.Lock()
+	if len(b.clients) != 1 {
+		b.mu.Unlock()
+		t.Fatalf("registered clients = %d, want 1", len(b.clients))
+	}
+	b.clients[0].minSeq = b.streamSeq + 2
+	b.mu.Unlock()
+
+	type readResult struct {
+		msg *WireMsg
+		err error
+	}
+	readCh := make(chan readResult, 1)
+	go func() {
+		readCtx, readCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer readCancel()
+		_, data, err := ws.Read(readCtx)
+		if err != nil {
+			readCh <- readResult{err: err}
+			return
+		}
+		msg, err := DecodeMsg(data)
+		if err != nil {
+			readCh <- readResult{err: err}
+			return
+		}
+		readCh <- readResult{msg: msg}
+	}()
+
+	b.broadcastTyped(MsgRaw, WireRaw{SessionID: 1, Data: "seq-skip"})
 	select {
-	case line := <-cc.sendCh:
-		msg, err := DecodeMsg(line)
-		if err != nil {
-			t.Fatalf("DecodeMsg: %v", err)
+	case got := <-readCh:
+		if got.err != nil {
+			t.Fatalf("unexpected read error below snapshot boundary: %v", got.err)
 		}
-		data, err := DecodeData[WireRaw](msg)
-		if err != nil {
-			t.Fatalf("DecodeData[WireRaw]: %v", err)
+		t.Fatalf("unexpected message below snapshot boundary: %q", got.msg.Type)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	b.broadcastTyped(MsgRaw, WireRaw{SessionID: 1, Data: "seq-hit"})
+	var rawMsg *WireMsg
+	select {
+	case got := <-readCh:
+		if got.err != nil {
+			t.Fatalf("read after boundary broadcast: %v", got.err)
 		}
-		if data.Data != "seq7" {
-			t.Fatalf("queued raw data = %q, want %q", data.Data, "seq7")
-		}
+		rawMsg = got.msg
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for queued event at snapshot boundary")
+		t.Fatal("timed out waiting for boundary message")
 	}
+	if rawMsg.Type != MsgRaw {
+		t.Fatalf("expected raw message at snapshot boundary, got %q", rawMsg.Type)
+	}
+	data, err := DecodeData[WireRaw](rawMsg)
+	if err != nil {
+		t.Fatalf("DecodeData[WireRaw]: %v", err)
+	}
+	if data.Data != "seq-hit" {
+		t.Fatalf("raw data = %q, want %q", data.Data, "seq-hit")
+	}
+}
+
+func TestCloseAllClientsClosesGoingAway(t *testing.T) {
+	eventsPath := filepath.Join(t.TempDir(), "events.jsonl")
+	eventsFile, err := os.OpenFile(eventsPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		t.Fatalf("open events file: %v", err)
+	}
+	defer eventsFile.Close()
+
+	b := &broadcaster{
+		eventsFile: eventsFile,
+		meta:       WireMeta{SessionID: 88},
+	}
+
+	ws := wsTestServer(t, b)
+	_, order := readWSMsgsUntil(t, ws, MsgLive)
+	if !containsType(order, MsgLive) {
+		t.Fatal("missing MsgLive")
+	}
+
+	b.closeAllClients(websocket.StatusGoingAway, "daemon shutting down")
+
+	b.mu.Lock()
+	n := len(b.clients)
+	b.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("client count after closeAllClients = %d, want 0", n)
+	}
+
+	readCtx, readCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer readCancel()
+	_, _, err = ws.Read(readCtx)
+	if err == nil {
+		t.Fatal("expected websocket close after closeAllClients")
+	}
+	if got := websocket.CloseStatus(err); got != websocket.StatusGoingAway {
+		t.Fatalf("close status = %v, want %v", got, websocket.StatusGoingAway)
+	}
+}
+
+func TestBroadcastRemovesClientAfterWriteFailure(t *testing.T) {
+	eventsPath := filepath.Join(t.TempDir(), "events.jsonl")
+	eventsFile, err := os.OpenFile(eventsPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		t.Fatalf("open events file: %v", err)
+	}
+	defer eventsFile.Close()
+
+	b := &broadcaster{
+		eventsFile: eventsFile,
+		meta:       WireMeta{SessionID: 10},
+	}
+
+	ws := wsTestServer(t, b)
+	_, order := readWSMsgsUntil(t, ws, MsgLive)
+	if !containsType(order, MsgLive) {
+		t.Fatal("missing MsgLive")
+	}
+
+	var cc *clientConn
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		b.mu.Lock()
+		if len(b.clients) == 1 {
+			cc = b.clients[0]
+		}
+		b.mu.Unlock()
+		if cc != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if cc == nil {
+		t.Fatal("client did not register in time")
+	}
+
+	cc.close(websocket.StatusNormalClosure, "test close")
+	b.broadcastTyped(MsgRaw, WireRaw{Data: "after-close"})
+
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		b.mu.Lock()
+		n := len(b.clients)
+		b.mu.Unlock()
+		if n == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("client was not removed after write failure")
 }
 
 func TestHandleClientFinishedDaemonSendsSnapshotAndTerminalMessages(t *testing.T) {
@@ -1229,60 +1359,6 @@ func TestBroadcasterConcurrentAttachAndBroadcast(t *testing.T) {
 	}
 }
 
-func TestBroadcastDropsSlowClientWithoutBlocking(t *testing.T) {
-	eventsPath := filepath.Join(t.TempDir(), "events.jsonl")
-	eventsFile, err := os.OpenFile(eventsPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		t.Fatalf("open events file: %v", err)
-	}
-	defer eventsFile.Close()
-
-	b := &broadcaster{
-		eventsFile: eventsFile,
-		meta:       WireMeta{SessionID: 10},
-	}
-
-	// Create a client manually (not connected to a real WebSocket) to test backpressure.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cc := &clientConn{
-		ctx:     ctx,
-		cancel:  cancel,
-		sendCh:  make(chan []byte, clientSendQueueSize),
-		closeCh: make(chan struct{}),
-	}
-	// Start writer that never drains (simulates slow client by not starting the writer).
-
-	b.mu.Lock()
-	b.clients = append(b.clients, cc)
-	b.mu.Unlock()
-
-	line, err := EncodeMsg(MsgRaw, WireRaw{Data: strings.Repeat("x", 512)})
-	if err != nil {
-		t.Fatalf("EncodeMsg raw: %v", err)
-	}
-
-	start := time.Now()
-	for i := 0; i < clientSendQueueSize+500; i++ {
-		b.broadcast(line)
-	}
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Fatalf("broadcast loop took %s; expected non-blocking behavior", elapsed)
-	}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		b.mu.Lock()
-		n := len(b.clients)
-		b.mu.Unlock()
-		if n == 0 {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("slow client was not dropped after queue backpressure")
-}
-
 func TestHandleClientControlRequest(t *testing.T) {
 	eventsPath := filepath.Join(t.TempDir(), "events.jsonl")
 	eventsFile, err := os.OpenFile(eventsPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
@@ -1376,4 +1452,3 @@ func typeIndex(types []string, want string) int {
 	}
 	return -1
 }
-

@@ -1,9 +1,11 @@
 package session
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"github.com/agusx1211/adaf/internal/config"
 )
@@ -329,14 +333,45 @@ func AbortSessionStartup(id int, reason string) {
 }
 
 func sendCancelControl(id int) error {
-	conn, err := net.DialTimeout("unix", SocketPath(id), 500*time.Millisecond)
+	const cancelControlTimeout = 1500 * time.Millisecond
+	socketPath := SocketPath(id)
+
+	ctx, cancel := context.WithTimeout(context.Background(), cancelControlTimeout)
+	defer cancel()
+
+	ws, _, err := websocket.Dial(ctx, "ws://localhost/", &websocket.DialOptions{
+		HTTPClient: &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					return (&net.Dialer{Timeout: 500 * time.Millisecond}).DialContext(ctx, "unix", socketPath)
+				},
+			},
+		},
+	})
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	_ = conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
-	_, err = fmt.Fprintf(conn, "%s\n", CtrlCancel)
-	return err
+	defer ws.Close(websocket.StatusNormalClosure, "")
+
+	// Drain the first metadata message; daemon handlers send metadata first
+	// before entering the control read loop.
+	readCtx, readCancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	_, data, err := ws.Read(readCtx)
+	readCancel()
+	if err != nil {
+		return err
+	}
+	msg, err := DecodeMsg(data)
+	if err != nil {
+		return err
+	}
+	if msg.Type != MsgMeta {
+		return fmt.Errorf("unexpected first daemon message type %q", msg.Type)
+	}
+
+	writeCtx, writeCancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer writeCancel()
+	return ws.Write(writeCtx, websocket.MessageText, []byte(CtrlCancel))
 }
 
 // IsAgentContext returns true if the current process is running inside an
