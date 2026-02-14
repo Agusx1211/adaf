@@ -31,4 +31,4 @@ fmt:
 tidy:
 	go mod tidy
 
-all: tidy fmt build test
+all: tidy fmt build test race
