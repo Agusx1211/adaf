@@ -86,7 +86,7 @@
       "id": "p9-polish",
       "title": "Integration Testing \u0026 Polish",
       "description": "Final integration pass ensuring everything works end-to-end.\n\n1. **End-to-end flow testing:**\n   - Start daemon, register multiple projects, verify web UI shows all\n   - Start a session from web UI, verify stream events appear in real-time\n   - Start a loop, verify loop bar, step progression, spawn tree\n   - Send messages to running sessions, verify delivery\n   - Stop sessions from web UI\n   - Verify CLI commands route through daemon when running\n   - Verify CLI works standalone when daemon is not running\n\n2. **Cross-project flows:**\n   - Multiple projects with concurrent sessions\n   - Project switcher in web UI\n   - Session list filtered by project\n   - Cross-project dashboard stats\n\n3. **Mobile responsiveness:**\n   - Test on narrow viewports\n   - Touch interactions for tree expand/collapse\n   - Readable on phone-sized screens\n\n4. **Performance:**\n   - Large session event streams (thousands of events)\n   - Many concurrent WebSocket connections\n   - Multiple projects with large stores\n\n5. **Error handling:**\n   - Daemon not running: graceful fallback\n   - Project store corrupted: clear error messages\n   - WebSocket disconnection: auto-reconnect with state recovery\n   - Agent binary not found: helpful errors in web UI\n\n6. **Match reference-ui.jsx audit:**\n   - Visual diff against reference-ui.jsx design\n   - Verify: color palette, fonts, spacing, animations, status indicators\n   - Verify: all interactive features from reference are implemented\n   - Verify: tree depth rendering, message badges, question alerts",
-      "status": "not_started",
+      "status": "complete",
       "priority": 3,
       "depends_on": [
         "p5-stream-panel",
@@ -104,5 +104,5 @@
     "p9-polish"
   ],
   "created": "2026-02-14T15:37:30.322476305Z",
-  "updated": "2026-02-14T17:13:21.102692117Z"
+  "updated": "2026-02-14T17:18:34.183214396Z"
 }
