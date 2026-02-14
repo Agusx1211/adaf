@@ -12,18 +12,19 @@ import (
 )
 
 type SettingsState struct {
-	Sel              int
-	PushoverUserKey  string
-	PushoverAppToken string
-	RolesRulesSel    int
-	RolesSel         int
-	RoleRuleSel      int
-	RulesSel         int
-	EditRoleIdx      int
-	EditRuleIdx      int
-	RoleNameInput    string
-	RuleIDInput      string
-	RuleBodyInput    string
+	Sel                 int
+	PushoverUserKey     string
+	PushoverAppToken    string
+	RolesRulesSel       int
+	RolesSel            int
+	RoleRuleSel         int
+	RulesSel            int
+	EditRoleIdx         int
+	EditRuleIdx         int
+	RuleBodyReturnState appState
+	RoleNameInput       string
+	RuleIDInput         string
+	RuleBodyInput       string
 }
 
 const settingsRolesRulesMenuItemCount = 3 // Roles, Prompt Rules, Back
@@ -677,6 +678,7 @@ func (m AppModel) updateSettingsRoleEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.settings.EditRuleIdx = m.settings.RoleRuleSel
 			m.settings.RuleBodyInput = m.globalCfg.PromptRules[m.settings.EditRuleIdx].Body
+			m.settings.RuleBodyReturnState = stateSettingsRoleEdit
 			m.state = stateSettingsRuleBody
 			return m, nil
 		case "a":
@@ -687,6 +689,7 @@ func (m AppModel) updateSettingsRoleEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "i":
 			m.settings.EditRuleIdx = -1
 			m.settings.RuleBodyInput = role.Identity
+			m.settings.RuleBodyReturnState = stateSettingsRoleEdit
 			m.state = stateSettingsRuleBody
 			return m, nil
 		case "esc":
@@ -846,6 +849,7 @@ func (m AppModel) updateSettingsRulesList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.settings.EditRuleIdx = m.settings.RulesSel
 			m.settings.RuleBodyInput = m.globalCfg.PromptRules[m.settings.EditRuleIdx].Body
+			m.settings.RuleBodyReturnState = stateSettingsRulesList
 			m.state = stateSettingsRuleBody
 			return m, nil
 		case "esc":
@@ -948,6 +952,7 @@ func (m AppModel) updateSettingsRuleID(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.settings.RulesSel = len(m.globalCfg.PromptRules) - 1
 			m.settings.EditRuleIdx = m.settings.RulesSel
 			m.settings.RuleBodyInput = ""
+			m.settings.RuleBodyReturnState = stateSettingsRulesList
 			saveSettingsRoleCatalog(m.globalCfg)
 			m.state = stateSettingsRuleBody
 			return m, nil
@@ -1000,6 +1005,14 @@ func (m AppModel) updateSettingsRuleBody(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateSettingsRulesList
 		return m, nil
 	}
+	returnState := m.settings.RuleBodyReturnState
+	if returnState != stateSettingsRoleEdit && returnState != stateSettingsRulesList {
+		if editingRoleIdentity {
+			returnState = stateSettingsRoleEdit
+		} else {
+			returnState = stateSettingsRulesList
+		}
+	}
 	initCmd := m.ensureTextarea(editorKey, m.settings.RuleBodyInput)
 	m.syncTextarea(m.settings.RuleBodyInput)
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
@@ -1011,19 +1024,15 @@ func (m AppModel) updateSettingsRuleBody(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.globalCfg.PromptRules[m.settings.EditRuleIdx].Body = m.settings.RuleBodyInput
 			}
 			saveSettingsRoleCatalog(m.globalCfg)
-			if editingRoleIdentity {
-				m.state = stateSettingsRoleEdit
-			} else {
+			if returnState == stateSettingsRulesList && !editingRoleIdentity {
 				m.settings.RulesSel = m.settings.EditRuleIdx
-				m.state = stateSettingsRulesList
 			}
+			m.settings.RuleBodyReturnState = 0
+			m.state = returnState
 			return m, nil
 		case tea.KeyEsc:
-			if editingRoleIdentity {
-				m.state = stateSettingsRoleEdit
-			} else {
-				m.state = stateSettingsRulesList
-			}
+			m.settings.RuleBodyReturnState = 0
+			m.state = returnState
 			return m, nil
 		}
 	}
