@@ -15,7 +15,7 @@
       "id": "p2-runtui-refactor",
       "title": "Split and Refactor runtui Package",
       "description": "Break up runtui/model.go (~52KB) into logical submodules:\n- Extract panel rendering (left panel, right panel, command panel) into separate files\n- Extract event handling logic by event type\n- Extract scroll/pagination state into its own type\n- Extract spawn hierarchy rendering\n- Extract markdown/ANSI rendering helpers\n- Keep Model as the coordinator but delegate rendering and state to sub-components\n- Ensure all existing TUI behavior is preserved (run existing tests after each split)",
-      "status": "in_progress",
+      "status": "complete",
       "priority": 1,
       "depends_on": [
         "p1-audit"
@@ -25,7 +25,7 @@
       "id": "p3-tui-refactor",
       "title": "Decompose TUI State Machine",
       "description": "Refactor tui/app.go's monolithic state machine:\n- Group related states into sub-state-machines (e.g. profile wizard, loop wizard, plan menu, settings)\n- Each sub-state-machine becomes its own file with its own Update/View methods\n- AppModel delegates to the active sub-state-machine\n- Extract selector rendering into its own component\n- This sets the foundation for standalone mode and project manager mode UI integration\n\nNote: TUI input handling has already been migrated to Bubbles components (issue #24), improving tmux compatibility and reducing custom key handling. Build on this improvement.",
-      "status": "not_started",
+      "status": "complete",
       "priority": 1,
       "depends_on": [
         "p1-audit"
@@ -35,7 +35,7 @@
       "id": "p4-agent-cleanup",
       "title": "Normalize Agent Implementations",
       "description": "Clean up agent integration code:\n- Extract common patterns (process group setup, env overlay, recording) into shared helpers\n- Reduce boilerplate across claude.go, codex.go, gemini.go, vibe.go, opencode.go, generic.go\n- Standardize error wrapping and exit code handling\n- Ensure all agents properly handle context cancellation\n- Verify process cleanup paths (no orphan processes)\n- Add missing tests for edge cases\n\nNote: Several reliability fixes have already landed (WaitDelay on agents, backpressure fixes, scanner buffer consistency, interrupt handling). This phase focuses on structural normalization and DRY refactoring, not bug fixes.",
-      "status": "not_started",
+      "status": "complete",
       "priority": 2,
       "depends_on": [
         "p1-audit"
@@ -45,7 +45,7 @@
       "id": "p5-store-cleanup",
       "title": "Store Package Cleanup",
       "description": "Refactor store.go (1,320 lines):\n- Split into logical files by domain (plan_store.go, session_store.go, spawn_store.go, loop_store.go, signal_store.go)\n- Keep Store struct as the unified type but organize methods by file\n- Standardize file locking patterns\n- Add better error messages for common failure modes\n- Consider adding a lightweight migration system for schema changes",
-      "status": "not_started",
+      "status": "complete",
       "priority": 2,
       "depends_on": [
         "p1-audit"
@@ -55,7 +55,7 @@
       "id": "p6-standalone-core",
       "title": "Standalone Mode - Core Engine",
       "description": "Add a standalone (non-loop) execution mode:\n- New 'adaf ask' (or 'adaf run --standalone') command that takes a prompt from the user (flag, stdin, or interactive input)\n- Runs a single agent session with that prompt, waits for completion, and exits\n- Support --count N flag to run N times sequentially (default 1)\n- Support --agent/--profile flags to select which agent to use\n- Support --model flag for model override\n- The session is still recorded and logged like any other session\n- The daemon is still used for detach/reattach support, but the flow is: prompt -\u003e run -\u003e done (no loop)\n- If --count \u003e 1, each run gets the same prompt but can optionally include the previous run's output as context\n- Exit code reflects the agent's result\n\nNote: CLI surface was recently simplified (issue #26, 6 redundant subcommands removed). Keep the standalone command interface clean and consistent with the new reduced surface.",
-      "status": "not_started",
+      "status": "complete",
       "priority": 1,
       "depends_on": [
         "p4-agent-cleanup"
@@ -149,5 +149,5 @@
     "p13-web-remote"
   ],
   "created": "2026-02-12T11:47:27.999988241Z",
-  "updated": "2026-02-14T07:58:15.773691454Z"
+  "updated": "2026-02-14T09:17:21.37855246Z"
 }

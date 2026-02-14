@@ -2,7 +2,7 @@
   "id": 36,
   "title": "tui: Add transition-matrix tests for 37-state router",
   "description": "Good coverage exists for detach/scroll/delegation helpers but no comprehensive transition tests for the 37-state router (app.go:316). Add table-driven transition tests per state handler and one router dispatch test for updateByState. Relates to phase p3-tui-refactor.",
-  "status": "open",
+  "status": "resolved",
   "priority": "low",
   "labels": [
     "testing",
@@ -10,5 +10,5 @@
   ],
   "session_id": 8,
   "created": "2026-02-14T07:52:59.607227087Z",
-  "updated": "2026-02-14T07:52:59.607227087Z"
+  "updated": "2026-02-14T08:42:22.569404589Z"
 }

@@ -2,7 +2,7 @@
   "id": 30,
   "title": "agent: Unify stream agent implementations into generic StreamRunner",
   "description": "claude.go, gemini.go, and opencode.go Run() implementations are nearly identical (build args, start process, pipe stdout, parse stream, forward events). Extract a StreamRunner struct that takes a Parser and ArgsBuilder function to reduce per-agent code by ~50%. Also: standardize process group usage for vibe/generic agents, and remove unused agent.Register() export from registry.go. Relates to phase p4-agent-cleanup.",
-  "status": "open",
+  "status": "resolved",
   "priority": "medium",
   "labels": [
     "refactor",
@@ -10,5 +10,5 @@
   ],
   "session_id": 8,
   "created": "2026-02-14T07:52:42.6718448Z",
-  "updated": "2026-02-14T07:52:42.6718448Z"
+  "updated": "2026-02-14T08:58:06.743807167Z"
 }

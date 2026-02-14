@@ -2,7 +2,7 @@
   "id": 28,
   "title": "tui: Decompose AppModel god object (87 fields, 37 states)",
   "description": "AppModel has 87 fields spanning unrelated concerns. Decompose into 6 sub-models: SelectorScreen, PlanScreen, ProfileWizard, LoopWizard, SettingsScreen, RolesRulesEditor. Each owns its state enum, Update, and View. Also centralize duplicated split-pane rendering (settings_roles_rules.go:120 vs loop.go:630), replace scroll capability switches with map, move status-help to per-screen providers. Relates to phase p3-tui-refactor.",
-  "status": "open",
+  "status": "resolved",
   "priority": "high",
   "labels": [
     "refactor",
@@ -10,5 +10,5 @@
   ],
   "session_id": 8,
   "created": "2026-02-14T07:52:38.361633452Z",
-  "updated": "2026-02-14T07:52:38.361633452Z"
+  "updated": "2026-02-14T08:36:25.377947296Z"
 }
