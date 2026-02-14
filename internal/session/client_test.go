@@ -1,52 +1,136 @@
 package session
 
 import (
-	"bufio"
+	"context"
 	"math"
-	"net"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/agusx1211/adaf/internal/runtui"
 )
 
-func TestStreamEventsForwardsLoopMessages(t *testing.T) {
-	serverConn, clientConn := net.Pipe()
-	defer serverConn.Close()
+// wsTestClientServer creates a test WebSocket server that sends the given
+// messages and returns a Client connected to it (after handshaking metadata).
+func wsTestClientServer(t *testing.T, meta WireMeta, messages []testWSFrame) *Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+			InsecureSkipVerify: true,
+		})
+		if err != nil {
+			return
+		}
+		defer ws.CloseNow()
+
+		ctx := r.Context()
+
+		// Send meta.
+		metaLine, _ := EncodeMsg(MsgMeta, meta)
+		if len(metaLine) > 0 && metaLine[len(metaLine)-1] == '\n' {
+			metaLine = metaLine[:len(metaLine)-1]
+		}
+		if err := ws.Write(ctx, websocket.MessageText, metaLine); err != nil {
+			return
+		}
+
+		// Send queued messages.
+		for _, msg := range messages {
+			line, err := EncodeMsg(msg.Type, msg.Payload)
+			if err != nil {
+				return
+			}
+			if len(line) > 0 && line[len(line)-1] == '\n' {
+				line = line[:len(line)-1]
+			}
+			if err := ws.Write(ctx, websocket.MessageText, line); err != nil {
+				return
+			}
+		}
+
+		ws.Close(websocket.StatusNormalClosure, "done")
+	}))
+	t.Cleanup(srv.Close)
+
+	// Connect via the Client.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ws, _, err := websocket.Dial(ctx, "ws://"+srv.Listener.Addr().String()+"/", nil)
+	if err != nil {
+		cancel()
+		t.Fatalf("websocket.Dial: %v", err)
+	}
+	ws.SetReadLimit(4 * 1024 * 1024)
 
 	c := &Client{
-		conn:    clientConn,
-		scanner: bufio.NewScanner(clientConn),
+		ws:                ws,
+		ctx:               ctx,
+		cancel:            cancel,
+		unknownTypeLogged: make(map[string]struct{}),
 	}
+
+	// Read meta.
+	_, data, err := ws.Read(ctx)
+	if err != nil {
+		t.Fatalf("reading meta: %v", err)
+	}
+	msg, err := DecodeMsg(data)
+	if err != nil {
+		t.Fatalf("decoding meta: %v", err)
+	}
+	if msg.Type != MsgMeta {
+		t.Fatalf("expected meta, got %q", msg.Type)
+	}
+	metaData, err := DecodeData[WireMeta](msg)
+	if err != nil {
+		t.Fatalf("decoding meta data: %v", err)
+	}
+	c.Meta = *metaData
+
+	t.Cleanup(func() {
+		cancel()
+		ws.CloseNow()
+	})
+	return c
+}
+
+type testWSFrame struct {
+	Type    string
+	Payload any
+}
+
+func TestStreamEventsForwardsLoopMessages(t *testing.T) {
+	c := wsTestClientServer(t, WireMeta{SessionID: 1}, []testWSFrame{
+		{MsgLoopStepStart, WireLoopStepStart{
+			RunID:      12,
+			Cycle:      1,
+			StepIndex:  2,
+			Profile:    "reviewer",
+			Turns:      3,
+			TotalSteps: 5,
+		}},
+		{MsgLoopStepEnd, WireLoopStepEnd{
+			RunID:      12,
+			Cycle:      1,
+			StepIndex:  2,
+			Profile:    "reviewer",
+			TotalSteps: 5,
+		}},
+		{MsgLoopDone, WireLoopDone{
+			RunID:  12,
+			Reason: "stopped",
+		}},
+		{MsgDone, WireDone{}},
+	})
 
 	eventCh := make(chan any, 16)
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- c.StreamEvents(eventCh, nil)
 	}()
-
-	writeWireMsg(t, serverConn, MsgLoopStepStart, WireLoopStepStart{
-		RunID:      12,
-		Cycle:      1,
-		StepIndex:  2,
-		Profile:    "reviewer",
-		Turns:      3,
-		TotalSteps: 5,
-	})
-	writeWireMsg(t, serverConn, MsgLoopStepEnd, WireLoopStepEnd{
-		RunID:      12,
-		Cycle:      1,
-		StepIndex:  2,
-		Profile:    "reviewer",
-		TotalSteps: 5,
-	})
-	writeWireMsg(t, serverConn, MsgLoopDone, WireLoopDone{
-		RunID:  12,
-		Reason: "stopped",
-	})
-	writeWireMsg(t, serverConn, MsgDone, WireDone{})
-	_ = serverConn.Close()
 
 	var got []any
 	for ev := range eventCh {
@@ -87,30 +171,23 @@ func TestStreamEventsForwardsLoopMessages(t *testing.T) {
 }
 
 func TestStreamEventsForwardsPromptMessages(t *testing.T) {
-	serverConn, clientConn := net.Pipe()
-	defer serverConn.Close()
-
-	c := &Client{
-		conn:    clientConn,
-		scanner: bufio.NewScanner(clientConn),
-	}
+	c := wsTestClientServer(t, WireMeta{SessionID: 1}, []testWSFrame{
+		{MsgPrompt, WirePrompt{
+			SessionID:      4,
+			TurnHexID:      "abc123",
+			Prompt:         "hello prompt",
+			IsResume:       true,
+			Truncated:      true,
+			OriginalLength: 4096,
+		}},
+		{MsgDone, WireDone{}},
+	})
 
 	eventCh := make(chan any, 8)
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- c.StreamEvents(eventCh, nil)
 	}()
-
-	writeWireMsg(t, serverConn, MsgPrompt, WirePrompt{
-		SessionID:      4,
-		TurnHexID:      "abc123",
-		Prompt:         "hello prompt",
-		IsResume:       true,
-		Truncated:      true,
-		OriginalLength: 4096,
-	})
-	writeWireMsg(t, serverConn, MsgDone, WireDone{})
-	_ = serverConn.Close()
 
 	var got []any
 	for ev := range eventCh {
@@ -143,23 +220,6 @@ func TestStreamEventsForwardsPromptMessages(t *testing.T) {
 }
 
 func TestStreamEventsAppliesSnapshotAndRecentMessages(t *testing.T) {
-	serverConn, clientConn := net.Pipe()
-	defer serverConn.Close()
-
-	c := &Client{
-		conn:    clientConn,
-		scanner: bufio.NewScanner(clientConn),
-	}
-
-	eventCh := make(chan any, 16)
-	errCh := make(chan error, 1)
-	var liveCalls atomic.Int32
-	go func() {
-		errCh <- c.StreamEvents(eventCh, func() {
-			liveCalls.Add(1)
-		})
-	}()
-
 	recentPrompt := mustWireMsg(t, MsgPrompt, WirePrompt{
 		SessionID: 7,
 		TurnHexID: "turn-hex",
@@ -169,42 +229,53 @@ func TestStreamEventsAppliesSnapshotAndRecentMessages(t *testing.T) {
 		SessionID: 7,
 		Data:      "snapshot output",
 	})
-	writeWireMsg(t, serverConn, MsgSnapshot, WireSnapshot{
-		Loop: WireSnapshotLoop{
-			RunID:      3,
-			RunHexID:   "runhex",
-			StepHexID:  "stephex",
-			Cycle:      1,
-			StepIndex:  2,
-			Profile:    "reviewer",
-			TotalSteps: 5,
-		},
-		Session: &WireSnapshotSession{
-			SessionID:    7,
-			TurnHexID:    "turn-hex",
-			Agent:        "codex",
-			Profile:      "reviewer",
-			Model:        "gpt-5",
-			InputTokens:  123,
-			OutputTokens: 45,
-			CostUSD:      0.0042,
-			NumTurns:     3,
-			Status:       "running",
-			Action:       "responding",
-			StartedAt:    time.Now().UTC().Add(-10 * time.Second),
-		},
-		Spawns: []WireSpawnInfo{
-			{ID: 9, ParentTurnID: 7, Profile: "devstral2", Status: "running"},
-		},
-		Recent: []WireMsg{recentPrompt, recentRaw},
+
+	c := wsTestClientServer(t, WireMeta{SessionID: 1}, []testWSFrame{
+		{MsgSnapshot, WireSnapshot{
+			Loop: WireSnapshotLoop{
+				RunID:      3,
+				RunHexID:   "runhex",
+				StepHexID:  "stephex",
+				Cycle:      1,
+				StepIndex:  2,
+				Profile:    "reviewer",
+				TotalSteps: 5,
+			},
+			Session: &WireSnapshotSession{
+				SessionID:    7,
+				TurnHexID:    "turn-hex",
+				Agent:        "codex",
+				Profile:      "reviewer",
+				Model:        "gpt-5",
+				InputTokens:  123,
+				OutputTokens: 45,
+				CostUSD:      0.0042,
+				NumTurns:     3,
+				Status:       "running",
+				Action:       "responding",
+				StartedAt:    time.Now().UTC().Add(-10 * time.Second),
+			},
+			Spawns: []WireSpawnInfo{
+				{ID: 9, ParentTurnID: 7, Profile: "devstral2", Status: "running"},
+			},
+			Recent: []WireMsg{recentPrompt, recentRaw},
+		}},
+		{MsgLive, nil},
+		{MsgRaw, WireRaw{
+			SessionID: 7,
+			Data:      "live output",
+		}},
+		{MsgDone, WireDone{}},
 	})
-	writeWireMsg(t, serverConn, MsgLive, nil)
-	writeWireMsg(t, serverConn, MsgRaw, WireRaw{
-		SessionID: 7,
-		Data:      "live output",
-	})
-	writeWireMsg(t, serverConn, MsgDone, WireDone{})
-	_ = serverConn.Close()
+
+	eventCh := make(chan any, 16)
+	errCh := make(chan error, 1)
+	var liveCalls atomic.Int32
+	go func() {
+		errCh <- c.StreamEvents(eventCh, func() {
+			liveCalls.Add(1)
+		})
+	}()
 
 	var got []any
 	for ev := range eventCh {
@@ -270,28 +341,22 @@ func TestStreamEventsAppliesSnapshotAndRecentMessages(t *testing.T) {
 }
 
 func TestStreamEventsIgnoresUnsupportedSnapshotRecentTypes(t *testing.T) {
-	serverConn, clientConn := net.Pipe()
-	defer serverConn.Close()
+	recentLoopDone := mustWireMsg(t, MsgLoopDone, WireLoopDone{RunID: 3, Reason: "stopped"})
+	recentRaw := mustWireMsg(t, MsgRaw, WireRaw{SessionID: 7, Data: "snapshot output"})
 
-	c := &Client{
-		conn:    clientConn,
-		scanner: bufio.NewScanner(clientConn),
-	}
+	c := wsTestClientServer(t, WireMeta{SessionID: 1}, []testWSFrame{
+		{MsgSnapshot, WireSnapshot{
+			Recent: []WireMsg{recentLoopDone, recentRaw},
+		}},
+		{MsgLive, nil},
+		{MsgDone, WireDone{}},
+	})
 
 	eventCh := make(chan any, 16)
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- c.StreamEvents(eventCh, nil)
 	}()
-
-	recentLoopDone := mustWireMsg(t, MsgLoopDone, WireLoopDone{RunID: 3, Reason: "stopped"})
-	recentRaw := mustWireMsg(t, MsgRaw, WireRaw{SessionID: 7, Data: "snapshot output"})
-	writeWireMsg(t, serverConn, MsgSnapshot, WireSnapshot{
-		Recent: []WireMsg{recentLoopDone, recentRaw},
-	})
-	writeWireMsg(t, serverConn, MsgLive, nil)
-	writeWireMsg(t, serverConn, MsgDone, WireDone{})
-	_ = serverConn.Close()
 
 	var got []any
 	for ev := range eventCh {
@@ -318,17 +383,6 @@ func TestStreamEventsIgnoresUnsupportedSnapshotRecentTypes(t *testing.T) {
 		if _, ok := ev.(runtui.LoopDoneMsg); ok {
 			t.Fatalf("event[%d] unexpectedly contains runtui.LoopDoneMsg from snapshot recent", i)
 		}
-	}
-}
-
-func writeWireMsg(t *testing.T, conn net.Conn, msgType string, payload any) {
-	t.Helper()
-	line, err := EncodeMsg(msgType, payload)
-	if err != nil {
-		t.Fatalf("EncodeMsg(%q): %v", msgType, err)
-	}
-	if _, err := conn.Write(line); err != nil {
-		t.Fatalf("conn.Write(%q): %v", msgType, err)
 	}
 }
 

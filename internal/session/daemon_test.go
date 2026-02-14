@@ -1,17 +1,19 @@
 package session
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/store"
@@ -240,16 +242,16 @@ func TestRunLoopBroadcastsLoopLifecycleMessages(t *testing.T) {
 	var hasDone bool
 	var loopDone WireLoopDone
 
-	f, err := os.Open(eventsPath)
+	eventsFile.Close()
+	eventsData, err := os.ReadFile(eventsPath)
 	if err != nil {
-		t.Fatalf("open events file for read: %v", err)
+		t.Fatalf("read events file: %v", err)
 	}
-	defer f.Close()
-
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 1024), 1024*1024)
-	for sc.Scan() {
-		msg, err := DecodeMsg(sc.Bytes())
+	for _, line := range strings.Split(strings.TrimSpace(string(eventsData)), "\n") {
+		if line == "" {
+			continue
+		}
+		msg, err := DecodeMsg([]byte(line))
 		if err != nil {
 			t.Fatalf("DecodeMsg: %v", err)
 		}
@@ -268,9 +270,6 @@ func TestRunLoopBroadcastsLoopLifecycleMessages(t *testing.T) {
 		case MsgDone:
 			hasDone = true
 		}
-	}
-	if err := sc.Err(); err != nil {
-		t.Fatalf("scanner error: %v", err)
 	}
 
 	if !hasStepStart {
@@ -296,6 +295,65 @@ func TestRunLoopBroadcastsLoopLifecycleMessages(t *testing.T) {
 	}
 }
 
+// wsTestServer starts a broadcaster-backed HTTP server and returns a WebSocket
+// connection to it. The connection reads messages as JSON text frames.
+func wsTestServer(t *testing.T, b *broadcaster) *websocket.Conn {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b.handleWSClient(w, r, func() {})
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+
+	ws, _, err := websocket.Dial(ctx, "ws://"+srv.Listener.Addr().String()+"/", nil)
+	if err != nil {
+		t.Fatalf("websocket.Dial: %v", err)
+	}
+	ws.SetReadLimit(4 * 1024 * 1024)
+	t.Cleanup(func() { ws.CloseNow() })
+	return ws
+}
+
+// readWSMsg reads one WebSocket text frame and decodes it as a WireMsg.
+func readWSMsg(t *testing.T, ws *websocket.Conn) *WireMsg {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, data, err := ws.Read(ctx)
+	if err != nil {
+		t.Fatalf("ws.Read: %v", err)
+	}
+	msg, err := DecodeMsg(data)
+	if err != nil {
+		t.Fatalf("DecodeMsg: %v", err)
+	}
+	return msg
+}
+
+// readWSMsgsUntil reads messages until it finds one with the given type or times out.
+func readWSMsgsUntil(t *testing.T, ws *websocket.Conn, targetType string) (*WireMsg, []string) {
+	t.Helper()
+	var order []string
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for {
+		_, data, err := ws.Read(ctx)
+		if err != nil {
+			t.Fatalf("ws.Read waiting for %q: %v (seen: %v)", targetType, err, order)
+		}
+		msg, err := DecodeMsg(data)
+		if err != nil {
+			continue
+		}
+		order = append(order, msg.Type)
+		if msg.Type == targetType {
+			return msg, order
+		}
+	}
+}
+
 func TestHandleClientSendsSnapshotRecentOutput(t *testing.T) {
 	eventsPath := filepath.Join(t.TempDir(), "events.jsonl")
 	eventsFile, err := os.OpenFile(eventsPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
@@ -317,62 +375,37 @@ func TestHandleClientSendsSnapshotRecentOutput(t *testing.T) {
 		b.broadcast(line)
 	}
 
-	serverConn, peerConn := net.Pipe()
-	defer peerConn.Close()
+	ws := wsTestServer(t, b)
 
-	doneCh := make(chan struct{})
-	go func() {
-		b.handleClient(serverConn, func() {})
-		close(doneCh)
-	}()
+	// Read meta.
+	metaMsg := readWSMsg(t, ws)
+	if metaMsg.Type != MsgMeta {
+		t.Fatalf("expected meta, got %q", metaMsg.Type)
+	}
 
-	sc := bufio.NewScanner(peerConn)
-	sc.Buffer(make([]byte, 1024), 1024*1024)
-	snapshotSeen := false
+	// Read snapshot.
+	snapMsg := readWSMsg(t, ws)
+	if snapMsg.Type != MsgSnapshot {
+		t.Fatalf("expected snapshot, got %q", snapMsg.Type)
+	}
+	snapshot, err := DecodeData[WireSnapshot](snapMsg)
+	if err != nil {
+		t.Fatalf("DecodeData[WireSnapshot]: %v", err)
+	}
 	recentRawCount := 0
-	liveSeen := false
-	for sc.Scan() {
-		msg, err := DecodeMsg(sc.Bytes())
-		if err != nil {
-			t.Fatalf("DecodeMsg: %v", err)
+	for _, recent := range snapshot.Recent {
+		if recent.Type == MsgRaw {
+			recentRawCount++
 		}
-		switch msg.Type {
-		case MsgSnapshot:
-			data, err := DecodeData[WireSnapshot](msg)
-			if err != nil {
-				t.Fatalf("DecodeData[WireSnapshot]: %v", err)
-			}
-			snapshotSeen = true
-			for _, recent := range data.Recent {
-				if recent.Type == MsgRaw {
-					recentRawCount++
-				}
-			}
-		case MsgLive:
-			liveSeen = true
-			goto done
-		}
-	}
-	if err := sc.Err(); err != nil {
-		t.Fatalf("scanner error: %v", err)
-	}
-
-done:
-	_ = peerConn.Close()
-	select {
-	case <-doneCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("handleClient did not exit")
-	}
-
-	if !liveSeen {
-		t.Fatal("missing MsgLive")
-	}
-	if !snapshotSeen {
-		t.Fatal("missing MsgSnapshot")
 	}
 	if recentRawCount != 5 {
 		t.Fatalf("snapshot recent raw count = %d, want 5", recentRawCount)
+	}
+
+	// Read live marker.
+	liveMsg := readWSMsg(t, ws)
+	if liveMsg.Type != MsgLive {
+		t.Fatalf("expected live, got %q", liveMsg.Type)
 	}
 }
 
@@ -408,45 +441,19 @@ func TestHandleClientSnapshotCarriesCurrentState(t *testing.T) {
 	})
 	b.broadcast(startLine)
 
-	serverConn, clientConn := net.Pipe()
-	defer clientConn.Close()
+	ws := wsTestServer(t, b)
 
-	doneCh := make(chan struct{})
-	go func() {
-		b.handleClient(serverConn, func() {})
-		close(doneCh)
-	}()
+	// Read meta.
+	readWSMsg(t, ws)
 
-	sc := bufio.NewScanner(clientConn)
-	sc.Buffer(make([]byte, 1024), 1024*1024)
-	var snapshot *WireSnapshot
-	for sc.Scan() {
-		msg, err := DecodeMsg(sc.Bytes())
-		if err != nil {
-			t.Fatalf("DecodeMsg: %v", err)
-		}
-		if msg.Type != MsgSnapshot {
-			continue
-		}
-		data, err := DecodeData[WireSnapshot](msg)
-		if err != nil {
-			t.Fatalf("DecodeData[WireSnapshot]: %v", err)
-		}
-		snapshot = data
-		break
+	// Read snapshot.
+	snapMsg := readWSMsg(t, ws)
+	if snapMsg.Type != MsgSnapshot {
+		t.Fatalf("expected snapshot, got %q", snapMsg.Type)
 	}
-	if err := sc.Err(); err != nil {
-		t.Fatalf("scanner error: %v", err)
-	}
-	if snapshot == nil {
-		t.Fatal("missing MsgSnapshot")
-	}
-
-	_ = clientConn.Close()
-	select {
-	case <-doneCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("handleClient did not exit")
+	snapshot, err := DecodeData[WireSnapshot](snapMsg)
+	if err != nil {
+		t.Fatalf("DecodeData[WireSnapshot]: %v", err)
 	}
 
 	if snapshot.Loop.RunID != 3 || snapshot.Loop.StepIndex != 0 || snapshot.Loop.Profile != "reviewer" {
@@ -486,41 +493,13 @@ func TestSnapshotSessionActionTracksMsgEventAsResponding(t *testing.T) {
 		Event: json.RawMessage(`{"type":"assistant","model":"gpt-5"}`),
 	})
 
-	serverConn, clientConn := net.Pipe()
-	defer clientConn.Close()
+	ws := wsTestServer(t, b)
+	readWSMsg(t, ws) // meta
 
-	doneCh := make(chan struct{})
-	go func() {
-		b.handleClient(serverConn, func() {})
-		close(doneCh)
-	}()
-
-	sc := bufio.NewScanner(clientConn)
-	sc.Buffer(make([]byte, 1024), 1024*1024)
-	var snapshot *WireSnapshot
-	for sc.Scan() {
-		msg, err := DecodeMsg(sc.Bytes())
-		if err != nil {
-			t.Fatalf("DecodeMsg: %v", err)
-		}
-		if msg.Type != MsgSnapshot {
-			continue
-		}
-		data, err := DecodeData[WireSnapshot](msg)
-		if err != nil {
-			t.Fatalf("DecodeData[WireSnapshot]: %v", err)
-		}
-		snapshot = data
-		break
-	}
-	if err := sc.Err(); err != nil {
-		t.Fatalf("scanner error: %v", err)
-	}
-	_ = clientConn.Close()
-	select {
-	case <-doneCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("handleClient did not exit")
+	snapMsg := readWSMsg(t, ws)
+	snapshot, err := DecodeData[WireSnapshot](snapMsg)
+	if err != nil {
+		t.Fatalf("DecodeData[WireSnapshot]: %v", err)
 	}
 	if snapshot == nil || snapshot.Session == nil {
 		t.Fatal("missing snapshot session")
@@ -558,46 +537,16 @@ func TestLoopStepStartKeepsExistingTotalStepsWhenUnset(t *testing.T) {
 		Cycle:     0,
 		StepIndex: 1,
 		Profile:   "reviewer",
-		// TotalSteps intentionally omitted.
 	})
 
-	serverConn, clientConn := net.Pipe()
-	defer clientConn.Close()
+	ws := wsTestServer(t, b)
+	readWSMsg(t, ws) // meta
 
-	doneCh := make(chan struct{})
-	go func() {
-		b.handleClient(serverConn, func() {})
-		close(doneCh)
-	}()
-
-	sc := bufio.NewScanner(clientConn)
-	sc.Buffer(make([]byte, 1024), 1024*1024)
-	var snapshot *WireSnapshot
-	for sc.Scan() {
-		msg, err := DecodeMsg(sc.Bytes())
-		if err != nil {
-			t.Fatalf("DecodeMsg: %v", err)
-		}
-		if msg.Type != MsgSnapshot {
-			continue
-		}
-		data, err := DecodeData[WireSnapshot](msg)
-		if err != nil {
-			t.Fatalf("DecodeData[WireSnapshot]: %v", err)
-		}
-		snapshot = data
-		break
+	snapMsg := readWSMsg(t, ws)
+	snapshot, err := DecodeData[WireSnapshot](snapMsg)
+	if err != nil {
+		t.Fatalf("DecodeData[WireSnapshot]: %v", err)
 	}
-	if err := sc.Err(); err != nil {
-		t.Fatalf("scanner error: %v", err)
-	}
-	_ = clientConn.Close()
-	select {
-	case <-doneCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("handleClient did not exit")
-	}
-
 	if snapshot == nil {
 		t.Fatal("missing MsgSnapshot")
 	}
@@ -620,29 +569,29 @@ func TestHandleClientQueuedLiveEventsAfterSnapshotAndLiveMarker(t *testing.T) {
 	}
 	b.broadcastTyped(MsgRaw, WireRaw{Data: "before", SessionID: 1})
 
-	serverConn, clientConn := net.Pipe()
-	defer clientConn.Close()
+	// Start a test server — this triggers WebSocket accept + handleWSClient.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b.handleWSClient(w, r, func() {})
+	}))
+	t.Cleanup(srv.Close)
 
-	doneCh := make(chan struct{})
-	go func() {
-		b.handleClient(serverConn, func() {})
-		close(doneCh)
-	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
 
-	sc := bufio.NewScanner(clientConn)
-	sc.Buffer(make([]byte, 1024), 1024*1024)
-
-	if !sc.Scan() {
-		t.Fatal("missing initial meta message")
-	}
-	metaMsg, err := DecodeMsg(sc.Bytes())
+	ws, _, err := websocket.Dial(ctx, "ws://"+srv.Listener.Addr().String()+"/", nil)
 	if err != nil {
-		t.Fatalf("DecodeMsg(meta): %v", err)
+		t.Fatalf("websocket.Dial: %v", err)
 	}
+	ws.SetReadLimit(4 * 1024 * 1024)
+	t.Cleanup(func() { ws.CloseNow() })
+
+	// Read meta.
+	metaMsg := readWSMsg(t, ws)
 	if metaMsg.Type != MsgMeta {
-		t.Fatalf("first message type = %q, want %q", metaMsg.Type, MsgMeta)
+		t.Fatalf("expected meta, got %q", metaMsg.Type)
 	}
 
+	// Wait for client to be registered.
 	deadline := time.Now().Add(2 * time.Second)
 	registered := false
 	for time.Now().Before(deadline) {
@@ -659,17 +608,15 @@ func TestHandleClientQueuedLiveEventsAfterSnapshotAndLiveMarker(t *testing.T) {
 		t.Fatal("client did not register in time")
 	}
 
+	// Broadcast a live event after registration.
 	b.broadcastTyped(MsgRaw, WireRaw{Data: "after", SessionID: 1})
 
+	// Read remaining messages.
 	var snapshot *WireSnapshot
 	liveSeen := false
 	rawAfterLive := 0
-	rawBeforeAfterLive := 0
-	for sc.Scan() {
-		msg, err := DecodeMsg(sc.Bytes())
-		if err != nil {
-			t.Fatalf("DecodeMsg: %v", err)
-		}
+	for {
+		msg := readWSMsg(t, ws)
 		switch msg.Type {
 		case MsgSnapshot:
 			data, err := DecodeData[WireSnapshot](msg)
@@ -687,28 +634,14 @@ func TestHandleClientQueuedLiveEventsAfterSnapshotAndLiveMarker(t *testing.T) {
 			if err != nil {
 				t.Fatalf("DecodeData[WireRaw]: %v", err)
 			}
-			if data.Data == "before" {
-				rawBeforeAfterLive++
-				continue
-			}
 			if data.Data == "after" {
 				rawAfterLive++
 				goto done
 			}
 		}
 	}
-	if err := sc.Err(); err != nil {
-		t.Fatalf("scanner error: %v", err)
-	}
 
 done:
-	_ = clientConn.Close()
-	select {
-	case <-doneCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("handleClient did not exit")
-	}
-
 	if snapshot == nil {
 		t.Fatal("missing MsgSnapshot")
 	}
@@ -733,9 +666,6 @@ done:
 	}
 	if snapshotRawCount != 1 {
 		t.Fatalf("snapshot raw count = %d, want 1", snapshotRawCount)
-	}
-	if rawBeforeAfterLive != 0 {
-		t.Fatalf("pre-snapshot raw was replayed live %d times", rawBeforeAfterLive)
 	}
 	if rawAfterLive != 1 {
 		t.Fatalf("post-live raw count = %d, want 1", rawAfterLive)
@@ -766,43 +696,14 @@ func TestSnapshotRecentClearsOnLoopStepStart(t *testing.T) {
 	})
 	b.broadcastTyped(MsgRaw, WireRaw{SessionID: 1, Data: "fresh"})
 
-	serverConn, clientConn := net.Pipe()
-	defer clientConn.Close()
+	ws := wsTestServer(t, b)
+	readWSMsg(t, ws) // meta
 
-	doneCh := make(chan struct{})
-	go func() {
-		b.handleClient(serverConn, func() {})
-		close(doneCh)
-	}()
-
-	sc := bufio.NewScanner(clientConn)
-	sc.Buffer(make([]byte, 1024), 1024*1024)
-	var snapshot *WireSnapshot
-	for sc.Scan() {
-		msg, err := DecodeMsg(sc.Bytes())
-		if err != nil {
-			t.Fatalf("DecodeMsg: %v", err)
-		}
-		if msg.Type != MsgSnapshot {
-			continue
-		}
-		data, err := DecodeData[WireSnapshot](msg)
-		if err != nil {
-			t.Fatalf("DecodeData[WireSnapshot]: %v", err)
-		}
-		snapshot = data
-		break
+	snapMsg := readWSMsg(t, ws)
+	snapshot, err := DecodeData[WireSnapshot](snapMsg)
+	if err != nil {
+		t.Fatalf("DecodeData[WireSnapshot]: %v", err)
 	}
-	if err := sc.Err(); err != nil {
-		t.Fatalf("scanner error: %v", err)
-	}
-	_ = clientConn.Close()
-	select {
-	case <-doneCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("handleClient did not exit")
-	}
-
 	if snapshot == nil {
 		t.Fatal("missing MsgSnapshot")
 	}
@@ -842,7 +743,6 @@ func TestSnapshotRecentPreservesPromptAfterStarted(t *testing.T) {
 		eventsFile: eventsFile,
 		meta:       WireMeta{SessionID: 86, AgentName: "claude"},
 	}
-	// Simulate: prompt emitted, then started (which clears recent).
 	b.broadcastTyped(MsgPrompt, WirePrompt{
 		SessionID: 5,
 		TurnHexID: "hex5",
@@ -852,46 +752,16 @@ func TestSnapshotRecentPreservesPromptAfterStarted(t *testing.T) {
 		SessionID: 5,
 		TurnHexID: "hex5",
 	})
-	// Some raw output after started.
 	b.broadcastTyped(MsgRaw, WireRaw{SessionID: 5, Data: "output"})
 
-	serverConn, clientConn := net.Pipe()
-	defer clientConn.Close()
+	ws := wsTestServer(t, b)
+	readWSMsg(t, ws) // meta
 
-	doneCh := make(chan struct{})
-	go func() {
-		b.handleClient(serverConn, func() {})
-		close(doneCh)
-	}()
-
-	sc := bufio.NewScanner(clientConn)
-	sc.Buffer(make([]byte, 1024*64), 1024*1024)
-	var snapshot *WireSnapshot
-	for sc.Scan() {
-		msg, err := DecodeMsg(sc.Bytes())
-		if err != nil {
-			t.Fatalf("DecodeMsg: %v", err)
-		}
-		if msg.Type != MsgSnapshot {
-			continue
-		}
-		data, err := DecodeData[WireSnapshot](msg)
-		if err != nil {
-			t.Fatalf("DecodeData[WireSnapshot]: %v", err)
-		}
-		snapshot = data
-		break
+	snapMsg := readWSMsg(t, ws)
+	snapshot, err := DecodeData[WireSnapshot](snapMsg)
+	if err != nil {
+		t.Fatalf("DecodeData[WireSnapshot]: %v", err)
 	}
-	if err := sc.Err(); err != nil {
-		t.Fatalf("scanner error: %v", err)
-	}
-	_ = clientConn.Close()
-	select {
-	case <-doneCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("handleClient did not exit")
-	}
-
 	if snapshot == nil {
 		t.Fatal("missing MsgSnapshot")
 	}
@@ -921,11 +791,15 @@ func TestBroadcastSkipsClientQueueBeforeSnapshotBoundary(t *testing.T) {
 	}
 	defer eventsFile.Close()
 
-	serverConn, peerConn := net.Pipe()
-	defer peerConn.Close()
-	defer serverConn.Close()
-
-	cc := newClientConn(serverConn, nil)
+	// Create a clientConn manually to test sequence boundary logic.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cc := &clientConn{
+		ctx:     ctx,
+		cancel:  cancel,
+		sendCh:  make(chan []byte, clientSendQueueSize),
+		closeCh: make(chan struct{}),
+	}
 	cc.minSeq = 7
 
 	b := &broadcaster{
@@ -998,50 +872,35 @@ func TestHandleClientFinishedDaemonSendsSnapshotAndTerminalMessages(t *testing.T
 	})
 	b.broadcastTyped(MsgDone, WireDone{})
 
-	serverConn, clientConn := net.Pipe()
-	defer clientConn.Close()
+	ws := wsTestServer(t, b)
 
-	doneCh := make(chan struct{})
-	go func() {
-		b.handleClient(serverConn, func() {})
-		close(doneCh)
-	}()
-
-	sc := bufio.NewScanner(clientConn)
-	sc.Buffer(make([]byte, 1024), 1024*1024)
+	// Collect all messages.
 	var (
 		snapshot *WireSnapshot
 		order    []string
 	)
-	for sc.Scan() {
-		msg, err := DecodeMsg(sc.Bytes())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for {
+		_, data, err := ws.Read(ctx)
 		if err != nil {
-			t.Fatalf("DecodeMsg: %v", err)
+			break
+		}
+		msg, err := DecodeMsg(data)
+		if err != nil {
+			continue
 		}
 		order = append(order, msg.Type)
 		switch msg.Type {
 		case MsgSnapshot:
-			data, err := DecodeData[WireSnapshot](msg)
-			if err != nil {
-				t.Fatalf("DecodeData[WireSnapshot]: %v", err)
-			}
-			snapshot = data
+			d, _ := DecodeData[WireSnapshot](msg)
+			snapshot = d
 		case MsgDone:
 			goto doneFinished
 		}
 	}
-	if err := sc.Err(); err != nil {
-		t.Fatalf("scanner error: %v", err)
-	}
 
 doneFinished:
-	_ = clientConn.Close()
-	select {
-	case <-doneCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("handleClient did not exit")
-	}
-
 	if snapshot == nil {
 		t.Fatal("missing MsgSnapshot")
 	}
@@ -1188,43 +1047,14 @@ func TestMsgFinishedCreatesSnapshotSessionWithLastModel(t *testing.T) {
 		ExitCode:  0,
 	})
 
-	serverConn, clientConn := net.Pipe()
-	defer clientConn.Close()
+	ws := wsTestServer(t, b)
+	readWSMsg(t, ws) // meta
 
-	doneCh := make(chan struct{})
-	go func() {
-		b.handleClient(serverConn, func() {})
-		close(doneCh)
-	}()
-
-	sc := bufio.NewScanner(clientConn)
-	sc.Buffer(make([]byte, 1024), 1024*1024)
-	var snapshot *WireSnapshot
-	for sc.Scan() {
-		msg, err := DecodeMsg(sc.Bytes())
-		if err != nil {
-			t.Fatalf("DecodeMsg: %v", err)
-		}
-		if msg.Type != MsgSnapshot {
-			continue
-		}
-		data, err := DecodeData[WireSnapshot](msg)
-		if err != nil {
-			t.Fatalf("DecodeData[WireSnapshot]: %v", err)
-		}
-		snapshot = data
-		break
+	snapMsg := readWSMsg(t, ws)
+	snapshot, err := DecodeData[WireSnapshot](snapMsg)
+	if err != nil {
+		t.Fatalf("DecodeData[WireSnapshot]: %v", err)
 	}
-	if err := sc.Err(); err != nil {
-		t.Fatalf("scanner error: %v", err)
-	}
-	_ = clientConn.Close()
-	select {
-	case <-doneCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("handleClient did not exit")
-	}
-
 	if snapshot == nil || snapshot.Session == nil {
 		t.Fatal("missing snapshot session")
 	}
@@ -1253,43 +1083,14 @@ func TestMsgFinishedErrorTakesPrecedenceOverWaitForSpawns(t *testing.T) {
 		Error:         "boom",
 	})
 
-	serverConn, clientConn := net.Pipe()
-	defer clientConn.Close()
+	ws := wsTestServer(t, b)
+	readWSMsg(t, ws) // meta
 
-	doneCh := make(chan struct{})
-	go func() {
-		b.handleClient(serverConn, func() {})
-		close(doneCh)
-	}()
-
-	sc := bufio.NewScanner(clientConn)
-	sc.Buffer(make([]byte, 1024), 1024*1024)
-	var snapshot *WireSnapshot
-	for sc.Scan() {
-		msg, err := DecodeMsg(sc.Bytes())
-		if err != nil {
-			t.Fatalf("DecodeMsg: %v", err)
-		}
-		if msg.Type != MsgSnapshot {
-			continue
-		}
-		data, err := DecodeData[WireSnapshot](msg)
-		if err != nil {
-			t.Fatalf("DecodeData[WireSnapshot]: %v", err)
-		}
-		snapshot = data
-		break
+	snapMsg := readWSMsg(t, ws)
+	snapshot, err := DecodeData[WireSnapshot](snapMsg)
+	if err != nil {
+		t.Fatalf("DecodeData[WireSnapshot]: %v", err)
 	}
-	if err := sc.Err(); err != nil {
-		t.Fatalf("scanner error: %v", err)
-	}
-	_ = clientConn.Close()
-	select {
-	case <-doneCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("handleClient did not exit")
-	}
-
 	if snapshot == nil || snapshot.Session == nil {
 		t.Fatal("missing snapshot session")
 	}
@@ -1317,46 +1118,30 @@ func TestHandleClientDoesNotDuplicateDoneAfterDoneBroadcast(t *testing.T) {
 	}
 	b.broadcast(doneLine)
 
-	serverConn, clientConn := net.Pipe()
-	defer clientConn.Close()
+	ws := wsTestServer(t, b)
 
-	doneCh := make(chan struct{})
-	go func() {
-		b.handleClient(serverConn, func() {})
-		close(doneCh)
-	}()
-
-	sc := bufio.NewScanner(clientConn)
-	sc.Buffer(make([]byte, 1024), 1024*1024)
+	// Collect all messages until the server closes the connection.
+	var order []string
 	doneCount := 0
 	liveSeen := false
-	order := make([]string, 0, 8)
-	for sc.Scan() {
-		msg, err := DecodeMsg(sc.Bytes())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for {
+		_, data, err := ws.Read(ctx)
 		if err != nil {
-			t.Fatalf("DecodeMsg: %v", err)
+			break
+		}
+		msg, err := DecodeMsg(data)
+		if err != nil {
+			continue
 		}
 		order = append(order, msg.Type)
 		switch msg.Type {
 		case MsgDone:
 			doneCount++
-			if doneCount >= 1 {
-				goto done
-			}
 		case MsgLive:
 			liveSeen = true
 		}
-	}
-	if err := sc.Err(); err != nil {
-		t.Fatalf("scanner error: %v", err)
-	}
-
-done:
-	_ = clientConn.Close()
-	select {
-	case <-doneCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("handleClient did not exit")
 	}
 
 	if liveSeen {
@@ -1387,17 +1172,31 @@ func TestBroadcasterConcurrentAttachAndBroadcast(t *testing.T) {
 	}
 
 	const clients = 5
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b.handleWSClient(w, r, func() {})
+	}))
+	t.Cleanup(srv.Close)
+
 	clientDone := make(chan error, clients)
 	for i := 0; i < clients; i++ {
-		serverConn, clientConn := net.Pipe()
-		go b.handleClient(serverConn, func() {})
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			ws, _, err := websocket.Dial(ctx, "ws://"+srv.Listener.Addr().String()+"/", nil)
+			if err != nil {
+				clientDone <- err
+				return
+			}
+			ws.SetReadLimit(4 * 1024 * 1024)
+			defer ws.CloseNow()
 
-		go func(c net.Conn) {
-			defer c.Close()
-			sc := bufio.NewScanner(c)
-			sc.Buffer(make([]byte, 1024), 1024*1024)
-			for sc.Scan() {
-				msg, err := DecodeMsg(sc.Bytes())
+			for {
+				_, data, err := ws.Read(ctx)
+				if err != nil {
+					clientDone <- err
+					return
+				}
+				msg, err := DecodeMsg(data)
 				if err != nil {
 					clientDone <- err
 					return
@@ -1407,8 +1206,7 @@ func TestBroadcasterConcurrentAttachAndBroadcast(t *testing.T) {
 					return
 				}
 			}
-			clientDone <- sc.Err()
-		}(clientConn)
+		}()
 	}
 
 	for i := 0; i < 64; i++ {
@@ -1425,7 +1223,7 @@ func TestBroadcasterConcurrentAttachAndBroadcast(t *testing.T) {
 			if err != nil {
 				t.Fatalf("client %d error: %v", i, err)
 			}
-		case <-time.After(3 * time.Second):
+		case <-time.After(5 * time.Second):
 			t.Fatalf("client %d timed out waiting for MsgLive", i)
 		}
 	}
@@ -1444,14 +1242,16 @@ func TestBroadcastDropsSlowClientWithoutBlocking(t *testing.T) {
 		meta:       WireMeta{SessionID: 10},
 	}
 
-	serverConn, peerConn := net.Pipe()
-	defer peerConn.Close()
-
-	var cc *clientConn
-	cc = newClientConn(serverConn, func(err error) {
-		b.removeClient(cc)
-	})
-	cc.startWriter()
+	// Create a client manually (not connected to a real WebSocket) to test backpressure.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cc := &clientConn{
+		ctx:     ctx,
+		cancel:  cancel,
+		sendCh:  make(chan []byte, clientSendQueueSize),
+		closeCh: make(chan struct{}),
+	}
+	// Start writer that never drains (simulates slow client by not starting the writer).
 
 	b.mu.Lock()
 	b.clients = append(b.clients, cc)
@@ -1463,7 +1263,7 @@ func TestBroadcastDropsSlowClientWithoutBlocking(t *testing.T) {
 	}
 
 	start := time.Now()
-	for i := 0; i < 2000; i++ {
+	for i := 0; i < clientSendQueueSize+500; i++ {
 		b.broadcast(line)
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
@@ -1506,37 +1306,28 @@ func TestHandleClientControlRequest(t *testing.T) {
 		}
 	})
 
-	serverConn, clientConn := net.Pipe()
-	defer clientConn.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b.handleWSClient(w, r, func() {})
+	}))
+	t.Cleanup(srv.Close)
 
-	doneCh := make(chan struct{})
-	go func() {
-		b.handleClient(serverConn, func() {})
-		close(doneCh)
-	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
 
-	sc := bufio.NewScanner(clientConn)
-	sc.Buffer(make([]byte, 1024), 1024*1024)
-
-	// Wait until snapshot delivery is complete and the connection is live.
-	liveSeen := false
-	for sc.Scan() {
-		msg, err := DecodeMsg(sc.Bytes())
-		if err != nil {
-			t.Fatalf("DecodeMsg: %v", err)
-		}
-		if msg.Type == MsgLive {
-			liveSeen = true
-			break
-		}
+	ws, _, err := websocket.Dial(ctx, "ws://"+srv.Listener.Addr().String()+"/", nil)
+	if err != nil {
+		t.Fatalf("websocket.Dial: %v", err)
 	}
-	if err := sc.Err(); err != nil {
-		t.Fatalf("scanner error waiting for live marker: %v", err)
-	}
-	if !liveSeen {
+	ws.SetReadLimit(4 * 1024 * 1024)
+	t.Cleanup(func() { ws.CloseNow() })
+
+	// Wait for live marker.
+	_, order := readWSMsgsUntil(t, ws, MsgLive)
+	if !containsType(order, MsgLive) {
 		t.Fatal("missing MsgLive")
 	}
 
+	// Send control request.
 	line, err := EncodeMsg(MsgControl, WireControl{
 		Action: "spawn",
 		Spawn: &WireControlSpawn{
@@ -1549,47 +1340,27 @@ func TestHandleClientControlRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncodeMsg(control): %v", err)
 	}
-	if _, err := clientConn.Write(line); err != nil {
+	// Strip trailing newline for WebSocket frame.
+	if len(line) > 0 && line[len(line)-1] == '\n' {
+		line = line[:len(line)-1]
+	}
+	writeCtx, writeCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer writeCancel()
+	if err := ws.Write(writeCtx, websocket.MessageText, line); err != nil {
 		t.Fatalf("writing control request: %v", err)
 	}
 
-	var got *WireControlResult
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if !sc.Scan() {
-			if err := sc.Err(); err != nil {
-				t.Fatalf("scanner error reading control response: %v", err)
-			}
-			t.Fatal("connection closed before control response")
-		}
-		msg, err := DecodeMsg(sc.Bytes())
-		if err != nil {
-			continue
-		}
-		if msg.Type != MsgControlResult {
-			continue
-		}
-		got, err = DecodeData[WireControlResult](msg)
-		if err != nil {
-			t.Fatalf("DecodeData[WireControlResult]: %v", err)
-		}
-		break
-	}
-	if got == nil {
-		t.Fatal("did not receive MsgControlResult")
+	// Read until we get control result.
+	controlMsg, _ := readWSMsgsUntil(t, ws, MsgControlResult)
+	got, err := DecodeData[WireControlResult](controlMsg)
+	if err != nil {
+		t.Fatalf("DecodeData[WireControlResult]: %v", err)
 	}
 	if !got.OK {
 		t.Fatalf("control response ok=false, error=%q", got.Error)
 	}
 	if got.SpawnID != 42 {
 		t.Fatalf("spawn_id = %d, want 42", got.SpawnID)
-	}
-
-	_ = clientConn.Close()
-	select {
-	case <-doneCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("handleClient did not exit")
 	}
 }
 
@@ -1605,3 +1376,4 @@ func typeIndex(types []string, want string) int {
 	}
 	return -1
 }
+

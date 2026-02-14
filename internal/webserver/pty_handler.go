@@ -1,7 +1,9 @@
 package webserver
 
 import (
+	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
@@ -11,9 +13,10 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
+	"github.com/coder/websocket"
 	"github.com/creack/pty"
-	"golang.org/x/net/websocket"
 )
 
 const (
@@ -31,113 +34,130 @@ type terminalWSMessage struct {
 }
 
 func (srv *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request) {
-	h := websocket.Handler(func(ws *websocket.Conn) {
-		defer ws.Close()
+	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		return
+	}
+	defer ws.CloseNow()
 
-		shell := strings.TrimSpace(os.Getenv("SHELL"))
-		if shell == "" {
-			shell = "/bin/sh"
-		}
+	ctx := r.Context()
 
-		cmd := exec.Command(shell)
-		cmd.Dir = srv.terminalWorkDir()
-		attrs := &syscall.SysProcAttr{Setpgid: true}
-		cmd.SysProcAttr = attrs
+	shell := strings.TrimSpace(os.Getenv("SHELL"))
+	if shell == "" {
+		shell = "/bin/sh"
+	}
 
-		ptmx, err := pty.StartWithAttrs(cmd, nil, attrs)
+	cmd := exec.Command(shell)
+	cmd.Dir = srv.terminalWorkDir()
+	attrs := &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = attrs
+
+	ptmx, err := pty.StartWithAttrs(cmd, nil, attrs)
+	if err != nil {
+		data, _ := json.Marshal(terminalWSMessage{Type: "exit", Code: 1})
+		_ = ws.Write(ctx, websocket.MessageText, data)
+		ws.Close(websocket.StatusInternalError, "pty start failed")
+		return
+	}
+
+	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: terminalDefaultRows, Cols: terminalDefaultCols})
+
+	var (
+		writeMu     sync.Mutex
+		cleanupOnce sync.Once
+	)
+
+	send := func(msg terminalWSMessage) error {
+		data, err := json.Marshal(msg)
 		if err != nil {
-			_ = websocket.JSON.Send(ws, terminalWSMessage{Type: "exit", Code: 1})
-			return
+			return err
 		}
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		writeCtx, writeCancel := context.WithTimeout(ctx, 15*time.Second)
+		defer writeCancel()
+		return ws.Write(writeCtx, websocket.MessageText, data)
+	}
 
-		_ = pty.Setsize(ptmx, &pty.Winsize{Rows: terminalDefaultRows, Cols: terminalDefaultCols})
+	cleanup := func() {
+		cleanupOnce.Do(func() {
+			_ = ptmx.Close()
+			if cmd.Process != nil && cmd.Process.Pid > 0 {
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
+		})
+	}
+	defer cleanup()
 
-		var (
-			writeMu     sync.Mutex
-			cleanupOnce sync.Once
-		)
-
-		send := func(msg terminalWSMessage) error {
-			writeMu.Lock()
-			defer writeMu.Unlock()
-			return websocket.JSON.Send(ws, msg)
-		}
-
-		cleanup := func() {
-			cleanupOnce.Do(func() {
-				_ = ptmx.Close()
-				if cmd.Process != nil && cmd.Process.Pid > 0 {
-					_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	go func() {
+		buf := make([]byte, terminalReadBufferLen)
+		for {
+			n, readErr := ptmx.Read(buf)
+			if n > 0 {
+				out := terminalWSMessage{
+					Type: "output",
+					Data: base64.StdEncoding.EncodeToString(buf[:n]),
 				}
-			})
-		}
-		defer cleanup()
-
-		go func() {
-			buf := make([]byte, terminalReadBufferLen)
-			for {
-				n, readErr := ptmx.Read(buf)
-				if n > 0 {
-					out := terminalWSMessage{
-						Type: "output",
-						Data: base64.StdEncoding.EncodeToString(buf[:n]),
-					}
-					if err := send(out); err != nil {
-						cleanup()
-						_ = ws.Close()
-						return
-					}
-				}
-				if readErr != nil {
-					if errors.Is(readErr, io.EOF) {
-						return
-					}
+				if err := send(out); err != nil {
+					cleanup()
+					ws.CloseNow()
 					return
 				}
 			}
-		}()
+			if readErr != nil {
+				if errors.Is(readErr, io.EOF) {
+					return
+				}
+				return
+			}
+		}
+	}()
 
-		go func() {
-			err := cmd.Wait()
-			_ = send(terminalWSMessage{Type: "exit", Code: exitCode(err)})
+	go func() {
+		err := cmd.Wait()
+		_ = send(terminalWSMessage{Type: "exit", Code: exitCode(err)})
+		cleanup()
+		ws.Close(websocket.StatusNormalClosure, "process exited")
+	}()
+
+	for {
+		_, data, err := ws.Read(ctx)
+		if err != nil {
 			cleanup()
-			_ = ws.Close()
-		}()
+			return
+		}
 
-		for {
-			var msg terminalWSMessage
-			if err := websocket.JSON.Receive(ws, &msg); err != nil {
+		var msg terminalWSMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			continue
+		}
+
+		switch msg.Type {
+		case "input":
+			if msg.Data == "" {
+				continue
+			}
+			decoded, err := base64.StdEncoding.DecodeString(msg.Data)
+			if err != nil || len(decoded) == 0 {
+				continue
+			}
+			if _, err := ptmx.Write(decoded); err != nil {
 				cleanup()
 				return
 			}
 
-			switch msg.Type {
-			case "input":
-				if msg.Data == "" {
-					continue
-				}
-				data, err := base64.StdEncoding.DecodeString(msg.Data)
-				if err != nil || len(data) == 0 {
-					continue
-				}
-				if _, err := ptmx.Write(data); err != nil {
-					cleanup()
-					return
-				}
-
-			case "resize":
-				if msg.Cols <= 0 || msg.Rows <= 0 {
-					continue
-				}
-				_ = pty.Setsize(ptmx, &pty.Winsize{
-					Rows: clampToUint16(msg.Rows),
-					Cols: clampToUint16(msg.Cols),
-				})
+		case "resize":
+			if msg.Cols <= 0 || msg.Rows <= 0 {
+				continue
 			}
+			_ = pty.Setsize(ptmx, &pty.Winsize{
+				Rows: clampToUint16(msg.Rows),
+				Cols: clampToUint16(msg.Cols),
+			})
 		}
-	})
-
-	h.ServeHTTP(w, r)
+	}
 }
 
 func (srv *Server) terminalWorkDir() string {

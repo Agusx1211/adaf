@@ -1,9 +1,8 @@
 package session
 
 import (
-	"bufio"
+	"context"
 	"fmt"
-	"net"
 	"time"
 )
 
@@ -42,37 +41,41 @@ func RequestInterruptSpawn(sessionID int, spawnID int, message string) (*WireCon
 }
 
 func requestControl(sessionID int, req WireControl, expectAction string, waitForCompletion bool) (*WireControlResult, error) {
-	conn, err := net.DialTimeout("unix", SocketPath(sessionID), 5*time.Second)
+	client, err := Connect(SocketPath(sessionID))
 	if err != nil {
 		return nil, fmt.Errorf("connecting to session daemon: %w", err)
 	}
-	defer conn.Close()
-
-	scanner := bufio.NewScanner(conn)
-	scanner.Buffer(make([]byte, 1024*1024), 2*1024*1024)
+	defer client.Close()
 
 	line, err := EncodeMsg(MsgControl, req)
 	if err != nil {
 		return nil, fmt.Errorf("encoding control request: %w", err)
 	}
-	if _, err := conn.Write(line); err != nil {
+	// Strip trailing newline for WebSocket frame.
+	if len(line) > 0 && line[len(line)-1] == '\n' {
+		line = line[:len(line)-1]
+	}
+
+	timeout := controlRequestTimeout
+	if waitForCompletion {
+		timeout = 10 * time.Minute // spawns can take a long time
+	}
+	writeCtx, writeCancel := context.WithTimeout(client.ctx, 5*time.Second)
+	defer writeCancel()
+	if err := client.ws.Write(writeCtx, 1 /* MessageText */, line); err != nil {
 		return nil, fmt.Errorf("sending control request: %w", err)
 	}
 
-	deadline := time.Now().Add(controlRequestTimeout)
-
+	// Read messages until we get the control result we're looking for.
+	readCtx, readCancel := context.WithTimeout(client.ctx, timeout)
+	defer readCancel()
 	for {
-		if !waitForCompletion {
-			_ = conn.SetReadDeadline(deadline)
-		}
-		if !scanner.Scan() {
-			if err := scanner.Err(); err != nil {
-				return nil, fmt.Errorf("reading control response: %w", err)
-			}
-			return nil, fmt.Errorf("connection closed before control response")
+		_, data, err := client.ws.Read(readCtx)
+		if err != nil {
+			return nil, fmt.Errorf("reading control response: %w", err)
 		}
 
-		msg, err := DecodeMsg(scanner.Bytes())
+		msg, err := DecodeMsg(data)
 		if err != nil {
 			continue
 		}

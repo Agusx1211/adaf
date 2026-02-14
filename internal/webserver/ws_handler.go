@@ -1,10 +1,12 @@
 package webserver
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
-	"golang.org/x/net/websocket"
+	"github.com/coder/websocket"
 
 	"github.com/agusx1211/adaf/internal/runtui"
 	"github.com/agusx1211/adaf/internal/session"
@@ -22,44 +24,58 @@ func (srv *Server) handleSessionWebSocket(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	ctx := r.Context()
-	h := websocket.Handler(func(ws *websocket.Conn) {
-		defer ws.Close()
-
-		client, err := session.ConnectToSession(sessionID)
-		if err != nil {
-			_ = websocket.JSON.Send(ws, wsEnvelope{Type: "error", Data: errorResponse{Error: err.Error()}})
-			return
-		}
-		defer client.Close()
-
-		eventCh := make(chan any, 256)
-		errCh := make(chan error, 1)
-		go func() {
-			errCh <- client.StreamEvents(eventCh, nil)
-		}()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case event, ok := <-eventCh:
-				if !ok {
-					if streamErr := <-errCh; streamErr != nil {
-						_ = websocket.JSON.Send(ws, wsEnvelope{Type: "error", Data: errorResponse{Error: streamErr.Error()}})
-					}
-					return
-				}
-
-				msg := toWSEnvelope(event)
-				if err := websocket.JSON.Send(ws, msg); err != nil {
-					return
-				}
-			}
-		}
+	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true,
 	})
+	if err != nil {
+		return
+	}
+	defer ws.CloseNow()
 
-	h.ServeHTTP(w, r)
+	ctx := r.Context()
+
+	client, err := session.ConnectToSession(sessionID)
+	if err != nil {
+		data, _ := json.Marshal(wsEnvelope{Type: "error", Data: errorResponse{Error: err.Error()}})
+		_ = ws.Write(ctx, websocket.MessageText, data)
+		ws.Close(websocket.StatusInternalError, err.Error())
+		return
+	}
+	defer client.Close()
+
+	eventCh := make(chan any, 256)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.StreamEvents(eventCh, nil)
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-eventCh:
+			if !ok {
+				if streamErr := <-errCh; streamErr != nil {
+					data, _ := json.Marshal(wsEnvelope{Type: "error", Data: errorResponse{Error: streamErr.Error()}})
+					_ = ws.Write(ctx, websocket.MessageText, data)
+				}
+				ws.Close(websocket.StatusNormalClosure, "stream ended")
+				return
+			}
+
+			msg := toWSEnvelope(event)
+			data, err := json.Marshal(msg)
+			if err != nil {
+				continue
+			}
+			writeCtx, writeCancel := context.WithTimeout(ctx, 15*time.Second)
+			if err := ws.Write(writeCtx, websocket.MessageText, data); err != nil {
+				writeCancel()
+				return
+			}
+			writeCancel()
+		}
+	}
 }
 
 func toWSEnvelope(event any) wsEnvelope {

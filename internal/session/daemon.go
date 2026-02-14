@@ -1,7 +1,6 @@
 package session
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -9,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -16,6 +16,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
@@ -228,8 +230,20 @@ func RunDaemon(sessionID int) error {
 		cancel()
 	}()
 
-	// Accept client connections in background.
-	go b.acceptLoop(listener, cancel)
+	// Set up HTTP server with WebSocket upgrade handler on the Unix socket.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		b.handleWSClient(w, r, cancel)
+	})
+	httpServer := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	go func() {
+		if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			debug.LogKV("session", "HTTP server error", "session_id", sessionID, "error", err)
+		}
+	}()
 
 	// Run the loop.
 	loopErr := b.runLoop(ctx, cfg)
@@ -243,8 +257,10 @@ func RunDaemon(sessionID int) error {
 	}
 
 	// Wait a bit for clients to read final events, then shut down.
-	_ = listener.Close() // stop accepting late reconnects during grace period
 	b.waitForClients(30 * time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	_ = httpServer.Shutdown(shutdownCtx)
 
 	return normalizeDaemonExit(loopErr)
 }
@@ -269,13 +285,13 @@ type broadcaster struct {
 }
 
 type clientConn struct {
-	conn     net.Conn
-	writer   *bufio.Writer
-	sendCh   chan []byte
-	minSeq   int64
-	closeCh  chan struct{}
-	closeMu  sync.Once
-	writeErr func(error)
+	ws      *websocket.Conn
+	ctx     context.Context
+	cancel  context.CancelFunc
+	sendCh  chan []byte
+	minSeq  int64
+	closeCh chan struct{}
+	closeMu sync.Once
 }
 
 type snapshotUpdate struct {
@@ -286,29 +302,34 @@ const (
 	snapshotRecentEventLimit = 128
 	snapshotRecentByteLimit  = 512 * 1024
 	snapshotWireByteLimit    = 900 * 1024
-	clientSendQueueSize      = 512
-	clientWriteTimeout       = 5 * time.Second
+	clientSendQueueSize      = 2048
+	clientWriteTimeout       = 15 * time.Second
 	wireMsgTypeOverhead      = len(`{"type":""}`)
 	wireMsgDataOverhead      = len(`,"data":`)
 )
 
-func (b *broadcaster) acceptLoop(listener net.Listener, cancelAgent context.CancelFunc) {
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			return // listener closed
-		}
-		go b.handleClient(conn, cancelAgent)
-	}
-}
-
-func (b *broadcaster) handleClient(conn net.Conn, cancelAgent context.CancelFunc) {
-	var cc *clientConn
-	cc = newClientConn(conn, func(err error) {
-		fmt.Fprintf(os.Stderr, "session %d: disconnecting slow client: %v\n", b.meta.SessionID, err)
-		b.removeClient(cc)
+// handleWSClient upgrades an HTTP connection to WebSocket and serves a client.
+func (b *broadcaster) handleWSClient(w http.ResponseWriter, r *http.Request, cancelAgent context.CancelFunc) {
+	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true, // Unix socket, no origin check needed
 	})
-	defer b.removeClient(cc)
+	if err != nil {
+		debug.LogKV("session", "websocket accept failed", "session_id", b.meta.SessionID, "error", err)
+		return
+	}
+
+	wsCtx, wsCancel := context.WithCancel(r.Context())
+	cc := &clientConn{
+		ws:      ws,
+		ctx:     wsCtx,
+		cancel:  wsCancel,
+		sendCh:  make(chan []byte, clientSendQueueSize),
+		closeCh: make(chan struct{}),
+	}
+	defer func() {
+		b.removeClient(cc)
+		ws.Close(websocket.StatusNormalClosure, "")
+	}()
 
 	// Send metadata.
 	metaLine, err := EncodeMsg(MsgMeta, b.meta)
@@ -320,18 +341,14 @@ func (b *broadcaster) handleClient(conn net.Conn, cancelAgent context.CancelFunc
 		return
 	}
 
+	// Capture snapshot state under lock, but do NOT register the client yet.
+	// This fixes the race condition where events enqueue before the writer starts.
 	b.mu.Lock()
 	snapshot := cloneWireSnapshot(b.snapshot)
 	loopDone := cloneLoopDone(b.lastLoopDone)
 	donePayload := cloneDone(b.lastDone)
 	done := b.done
-	// Only forward queued live events emitted after this snapshot boundary.
 	snapshotSeq := b.streamSeq
-	cc.minSeq = snapshotSeq + 1
-	// Register before snapshot write so concurrent broadcasts can queue behind
-	// the snapshot boundary. If the queue overflows before startWriter, the
-	// broadcaster drops this client and writeImmediate below will fail/return.
-	b.clients = append(b.clients, cc)
 	b.mu.Unlock()
 
 	snapshotLine, err := encodeBoundedSnapshot(snapshot)
@@ -368,8 +385,6 @@ func (b *broadcaster) handleClient(conn net.Conn, cancelAgent context.CancelFunc
 		if err := cc.writeImmediate(line); err != nil {
 			return
 		}
-		// Completed sessions do not need control handling; close cleanly after
-		// terminal delivery to avoid draining any queued live events.
 		return
 	}
 
@@ -383,19 +398,28 @@ func (b *broadcaster) handleClient(conn net.Conn, cancelAgent context.CancelFunc
 		return
 	}
 
+	// Start the writer goroutine, THEN register the client.
+	// This eliminates the race where broadcasts enqueue before the writer is draining.
 	cc.startWriter()
 
-	// Read control messages from the client.
-	scanner := bufio.NewScanner(conn)
-	scanner.Buffer(make([]byte, 1024*1024), 2*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
+	b.mu.Lock()
+	cc.minSeq = snapshotSeq + 1
+	b.clients = append(b.clients, cc)
+	b.mu.Unlock()
+
+	// Read control messages from the client via WebSocket.
+	for {
+		_, data, err := ws.Read(wsCtx)
+		if err != nil {
+			return // client disconnected or context cancelled
+		}
+		line := string(data)
 		if line == CtrlCancel {
 			cancelAgent()
 			continue
 		}
 
-		msg, err := DecodeMsg([]byte(line))
+		msg, err := DecodeMsg(data)
 		if err != nil || msg.Type != MsgControl {
 			continue
 		}
@@ -990,16 +1014,6 @@ func (b *broadcaster) waitForClients(timeout time.Duration) {
 	}
 }
 
-func newClientConn(conn net.Conn, onWriteErr func(error)) *clientConn {
-	return &clientConn{
-		conn:     conn,
-		writer:   bufio.NewWriter(conn),
-		sendCh:   make(chan []byte, clientSendQueueSize),
-		closeCh:  make(chan struct{}),
-		writeErr: onWriteErr,
-	}
-}
-
 func (cc *clientConn) startWriter() {
 	go func() {
 		for {
@@ -1008,11 +1022,7 @@ func (cc *clientConn) startWriter() {
 				return
 			case data := <-cc.sendCh:
 				if err := cc.writeImmediate(data); err != nil {
-					if cc.writeErr != nil {
-						cc.writeErr(err)
-					} else {
-						cc.close()
-					}
+					cc.close()
 					return
 				}
 			}
@@ -1037,7 +1047,10 @@ func (cc *clientConn) enqueue(data []byte) bool {
 func (cc *clientConn) close() {
 	cc.closeMu.Do(func() {
 		close(cc.closeCh)
-		_ = cc.conn.Close()
+		cc.cancel()
+		if cc.ws != nil {
+			_ = cc.ws.Close(websocket.StatusNormalClosure, "")
+		}
 	})
 }
 
@@ -1045,14 +1058,14 @@ func (cc *clientConn) writeImmediate(data []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
-	if err := cc.conn.SetWriteDeadline(time.Now().Add(clientWriteTimeout)); err != nil {
-		return err
+	// Strip trailing newline — WebSocket frames don't need line delimiters.
+	msg := data
+	if len(msg) > 0 && msg[len(msg)-1] == '\n' {
+		msg = msg[:len(msg)-1]
 	}
-	defer cc.conn.SetWriteDeadline(time.Time{})
-	if _, err := cc.writer.Write(data); err != nil {
-		return err
-	}
-	return cc.writer.Flush()
+	writeCtx, writeCancel := context.WithTimeout(cc.ctx, clientWriteTimeout)
+	defer writeCancel()
+	return cc.ws.Write(writeCtx, websocket.MessageText, msg)
 }
 
 // runLoop runs the loop runtime and broadcasts events through the broadcaster.

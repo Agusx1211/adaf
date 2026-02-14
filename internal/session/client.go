@@ -1,12 +1,15 @@
 package session
 
 import (
-	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/runtui"
@@ -15,57 +18,67 @@ import (
 
 // Client connects to a session daemon and receives events.
 type Client struct {
-	conn              net.Conn
-	scanner           *bufio.Scanner
+	ws                *websocket.Conn
+	ctx               context.Context
+	cancel            context.CancelFunc
 	Meta              WireMeta
 	unknownTypeLogged map[string]struct{}
 }
 
-const (
-	clientScannerInitialBuffer = 256 * 1024
-	clientScannerMaxBuffer     = 2 * 1024 * 1024
-)
-
-// Connect establishes a connection to the session daemon at the given socket path.
+// Connect establishes a WebSocket connection to the session daemon at the given socket path.
 // It reads the initial metadata message and returns a ready-to-use client.
 func Connect(socketPath string) (*Client, error) {
-	conn, err := net.DialTimeout("unix", socketPath, 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Dial WebSocket over Unix socket.
+	ws, _, err := websocket.Dial(ctx, "ws://localhost/", &websocket.DialOptions{
+		HTTPClient: &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "unix", socketPath)
+				},
+			},
+		},
+	})
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("connecting to session: %w", err)
 	}
 
-	scanner := bufio.NewScanner(conn)
-	// Keep comfortable headroom above bounded snapshot size.
-	scanner.Buffer(make([]byte, clientScannerInitialBuffer), clientScannerMaxBuffer)
+	// Set a generous read limit for large snapshot messages.
+	ws.SetReadLimit(4 * 1024 * 1024)
 
 	c := &Client{
-		conn:              conn,
-		scanner:           scanner,
+		ws:                ws,
+		ctx:               ctx,
+		cancel:            cancel,
 		unknownTypeLogged: make(map[string]struct{}),
 	}
 
 	// Read the metadata message.
-	if !scanner.Scan() {
-		conn.Close()
-		if err := scanner.Err(); err != nil {
-			return nil, fmt.Errorf("reading metadata: %w", err)
-		}
-		return nil, fmt.Errorf("connection closed before metadata")
+	_, data, err := ws.Read(ctx)
+	if err != nil {
+		ws.Close(websocket.StatusNormalClosure, "")
+		cancel()
+		return nil, fmt.Errorf("reading metadata: %w", err)
 	}
 
-	msg, err := DecodeMsg(scanner.Bytes())
+	msg, err := DecodeMsg(data)
 	if err != nil {
-		conn.Close()
+		ws.Close(websocket.StatusNormalClosure, "")
+		cancel()
 		return nil, fmt.Errorf("decoding metadata: %w", err)
 	}
 	if msg.Type != MsgMeta {
-		conn.Close()
+		ws.Close(websocket.StatusNormalClosure, "")
+		cancel()
 		return nil, fmt.Errorf("expected meta message, got %q", msg.Type)
 	}
 
 	meta, err := DecodeData[WireMeta](msg)
 	if err != nil {
-		conn.Close()
+		ws.Close(websocket.StatusNormalClosure, "")
+		cancel()
 		return nil, fmt.Errorf("decoding meta data: %w", err)
 	}
 	c.Meta = *meta
@@ -94,8 +107,21 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 	defer close(eventCh)
 	loopDoneSeen := false
 
-	for c.scanner.Scan() {
-		msg, err := DecodeMsg(c.scanner.Bytes())
+	for {
+		_, data, err := c.ws.Read(c.ctx)
+		if err != nil {
+			// Check if context was cancelled (intentional close).
+			if c.ctx.Err() != nil {
+				return nil
+			}
+			// Connection closed without a done message — daemon may have died.
+			eventCh <- runtui.AgentLoopDoneMsg{
+				Err: fmt.Errorf("connection to session daemon lost"),
+			}
+			return nil
+		}
+
+		msg, err := DecodeMsg(data)
 		if err != nil {
 			continue
 		}
@@ -108,41 +134,41 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 			continue
 
 		case MsgSnapshot:
-			data, err := DecodeData[WireSnapshot](msg)
+			snapData, err := DecodeData[WireSnapshot](msg)
 			if err != nil {
 				continue
 			}
 			snapshot := runtui.SessionSnapshotMsg{
 				Loop: runtui.SessionLoopSnapshot{
-					RunID:      data.Loop.RunID,
-					RunHexID:   data.Loop.RunHexID,
-					StepHexID:  data.Loop.StepHexID,
-					Cycle:      data.Loop.Cycle,
-					StepIndex:  data.Loop.StepIndex,
-					Profile:    data.Loop.Profile,
-					TotalSteps: data.Loop.TotalSteps,
+					RunID:      snapData.Loop.RunID,
+					RunHexID:   snapData.Loop.RunHexID,
+					StepHexID:  snapData.Loop.StepHexID,
+					Cycle:      snapData.Loop.Cycle,
+					StepIndex:  snapData.Loop.StepIndex,
+					Profile:    snapData.Loop.Profile,
+					TotalSteps: snapData.Loop.TotalSteps,
 				},
 			}
-			if data.Session != nil {
+			if snapData.Session != nil {
 				snapshot.Session = &runtui.SessionTurnSnapshot{
-					SessionID:    data.Session.SessionID,
-					TurnHexID:    data.Session.TurnHexID,
-					Agent:        data.Session.Agent,
-					Profile:      data.Session.Profile,
-					Model:        data.Session.Model,
-					InputTokens:  data.Session.InputTokens,
-					OutputTokens: data.Session.OutputTokens,
-					CostUSD:      data.Session.CostUSD,
-					NumTurns:     data.Session.NumTurns,
-					Status:       data.Session.Status,
-					Action:       data.Session.Action,
-					StartedAt:    data.Session.StartedAt,
-					EndedAt:      data.Session.EndedAt,
+					SessionID:    snapData.Session.SessionID,
+					TurnHexID:    snapData.Session.TurnHexID,
+					Agent:        snapData.Session.Agent,
+					Profile:      snapData.Session.Profile,
+					Model:        snapData.Session.Model,
+					InputTokens:  snapData.Session.InputTokens,
+					OutputTokens: snapData.Session.OutputTokens,
+					CostUSD:      snapData.Session.CostUSD,
+					NumTurns:     snapData.Session.NumTurns,
+					Status:       snapData.Session.Status,
+					Action:       snapData.Session.Action,
+					StartedAt:    snapData.Session.StartedAt,
+					EndedAt:      snapData.Session.EndedAt,
 				}
 			}
-			if len(data.Spawns) > 0 {
-				spawns := make([]runtui.SpawnInfo, len(data.Spawns))
-				for i, s := range data.Spawns {
+			if len(snapData.Spawns) > 0 {
+				spawns := make([]runtui.SpawnInfo, len(snapData.Spawns))
+				for i, s := range snapData.Spawns {
 					spawns[i] = runtui.SpawnInfo{
 						ID:            s.ID,
 						ParentTurnID:  s.ParentTurnID,
@@ -158,12 +184,12 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 			}
 			eventCh <- snapshot
 
-			for i := range data.Recent {
-				if !isSnapshotRecentType(data.Recent[i].Type) {
-					c.logUnknownWireType("unsupported snapshot.recent type", data.Recent[i].Type)
+			for i := range snapData.Recent {
+				if !isSnapshotRecentType(snapData.Recent[i].Type) {
+					c.logUnknownWireType("unsupported snapshot.recent type", snapData.Recent[i].Type)
 					continue
 				}
-				if done := c.forwardEventMsg(eventCh, &data.Recent[i], &loopDoneSeen); done {
+				if done := c.forwardEventMsg(eventCh, &snapData.Recent[i], &loopDoneSeen); done {
 					return nil
 				}
 			}
@@ -174,16 +200,6 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 			return nil
 		}
 	}
-
-	if err := c.scanner.Err(); err != nil {
-		return err
-	}
-
-	// Connection closed without a done message — daemon may have died.
-	eventCh <- runtui.AgentLoopDoneMsg{
-		Err: fmt.Errorf("connection to session daemon lost"),
-	}
-	return nil
 }
 
 func (c *Client) forwardEventMsg(eventCh chan<- any, msg *WireMsg, loopDoneSeen *bool) bool {
@@ -374,11 +390,29 @@ func (c *Client) logUnknownWireType(prefix, msgType string) {
 
 // Cancel sends a cancel request to the daemon.
 func (c *Client) Cancel() error {
-	_, err := fmt.Fprintf(c.conn, "%s\n", CtrlCancel)
-	return err
+	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
+	defer cancel()
+	return c.ws.Write(ctx, websocket.MessageText, []byte(CtrlCancel))
+}
+
+// SendControl sends a structured control message to the daemon and returns
+// the next control_result response.
+func (c *Client) SendControl(ctrl WireControl) (*WireControlResult, error) {
+	line, err := EncodeMsg(MsgControl, ctrl)
+	if err != nil {
+		return nil, fmt.Errorf("encoding control message: %w", err)
+	}
+	// Strip trailing newline for WebSocket frame.
+	if len(line) > 0 && line[len(line)-1] == '\n' {
+		line = line[:len(line)-1]
+	}
+	ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+	defer cancel()
+	return nil, c.ws.Write(ctx, websocket.MessageText, line)
 }
 
 // Close disconnects from the daemon without cancelling the agent.
 func (c *Client) Close() error {
-	return c.conn.Close()
+	c.cancel()
+	return c.ws.Close(websocket.StatusNormalClosure, "detach")
 }
