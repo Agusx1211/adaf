@@ -57,7 +57,7 @@ func emitLoopEvent(eventCh chan any, eventType string, event any) bool {
 	if eventq.Offer(eventCh, event) {
 		return true
 	}
-	debug.LogKV("looprun", "dropping tui event due to backpressure", "type", eventType)
+	debug.LogKV("looprun", "dropping event due to backpressure", "type", eventType)
 	return false
 }
 
@@ -231,7 +231,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			var turnCancelMu sync.Mutex
 			var currentTurnCancel context.CancelFunc
 
-			// Bridge stream events to the TUI event channel.
+			// Bridge stream events to the live event channel.
 			bridgeDone := make(chan struct{})
 			go func() {
 				for ev := range streamCh {
@@ -355,7 +355,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				OnEnd: func(turnID int, turnHexID string, result *agent.Result) {
 					// Keep the spawn poller alive here: if this turn entered
 					// wait-for-spawns, loop.OnWait will block next and we still
-					// need realtime child output/status updates in the TUI.
+					// need realtime child output/status updates in live consumers.
 					waitingForSpawns := cfg.Store != nil && cfg.Store.IsWaiting(turnID)
 					emitLoopEvent(eventCh, "agent_finished", events.AgentFinishedMsg{
 						SessionID:     turnID,
@@ -552,7 +552,7 @@ func pollSpawnStatus(ctx context.Context, s *store.Store, parentTurnID int, even
 }
 
 // emitSpawnOutput tails child spawn recording events and forwards readable
-// output chunks into spawn-scoped raw output events for the loop TUI.
+// output chunks into spawn-scoped raw output events for live loop consumers.
 func emitSpawnOutput(records []store.SpawnRecord, s *store.Store, offsets map[int]int64, eventCh chan any) {
 	for _, rec := range records {
 		if rec.ID <= 0 || rec.ChildTurnID <= 0 {

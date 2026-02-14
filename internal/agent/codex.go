@@ -29,7 +29,7 @@ func (c *CodexAgent) Name() string {
 // Run executes the codex CLI with the given configuration.
 //
 // ADAF runs codex in non-interactive mode via "codex exec" so the underlying
-// TUI does not take over the terminal. The exec subcommand defaults to
+// terminal UI layer does not take over the terminal. The exec subcommand defaults to
 // never asking for approvals. Additional flags (e.g. --model,
 // --dangerously-bypass-approvals-and-sandbox) can be supplied via cfg.Args.
 //
@@ -38,7 +38,7 @@ func (c *CodexAgent) Name() string {
 // already supplied it (or --yolo).
 //
 // Output is requested in JSONL mode (--json) and parsed into the common stream
-// event format so TUI/CLI rendering is consistent with other stream agents.
+// event format so CLI rendering is consistent with other stream agents.
 func (c *CodexAgent) Run(ctx context.Context, cfg Config, recorder *recording.Recorder) (*Result, error) {
 	cmdName := cfg.Command
 	if cmdName == "" {

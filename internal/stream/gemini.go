@@ -54,7 +54,7 @@ type GeminiStreamStats struct {
 }
 
 // GeminiToClaudeEvent converts a Gemini stream event into the common ClaudeEvent
-// format used by the Display and TUI layers.
+// format used by terminal display and event stream consumers.
 func GeminiToClaudeEvent(ge GeminiEvent) (ClaudeEvent, bool) {
 	switch ge.Type {
 	case "init":

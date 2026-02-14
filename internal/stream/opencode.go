@@ -57,8 +57,8 @@ type opencodeCache struct {
 }
 
 // ParseOpencode reads NDJSON lines from `opencode run --format json` and maps
-// them to ClaudeEvent so existing display/TUI renderers can format them
-// consistently with other agents.
+// them to ClaudeEvent so existing display layers can format them consistently
+// with other agents.
 func ParseOpencode(ctx context.Context, r io.Reader) <-chan RawEvent {
 	ch := make(chan RawEvent, 64)
 	go func() {

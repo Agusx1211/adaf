@@ -15,7 +15,7 @@ var sessionsCmd = &cobra.Command{
 	Aliases: []string{"session-list", "session_list", "ls-sessions", "ls_sessions"},
 	Short:   "List active and recent adaf sessions",
 	Long: `List all adaf sessions that are currently running or recently completed.
-Sessions are created when agents are launched through the TUI with session support.
+Sessions are created when agents are launched in daemon session mode.
 
 Use 'adaf attach <id>' to reattach to a running session.`,
 	RunE: runSessions,
@@ -60,7 +60,7 @@ func runSessions(cmd *cobra.Command, args []string) error {
 	if len(sessions) == 0 {
 		fmt.Println(colorDim + "  No active sessions." + colorReset)
 		fmt.Println()
-		fmt.Println("  Start a session from the TUI (" + styleBoldWhite + "adaf" + colorReset + ") or with " + styleBoldWhite + "adaf run --session" + colorReset)
+		fmt.Println("  Start a session with " + styleBoldWhite + "adaf run --session" + colorReset + " or by launching loop/pm/ask with --session.")
 		return nil
 	}
 

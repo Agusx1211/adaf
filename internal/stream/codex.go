@@ -58,7 +58,7 @@ type codexTodoItem struct {
 }
 
 // ParseCodex reads Codex --json JSONL output and maps known events to
-// ClaudeEvent so existing display/TUI renderers can format it consistently.
+// ClaudeEvent so existing display layers can format it consistently.
 func ParseCodex(ctx context.Context, r io.Reader) <-chan RawEvent {
 	ch := make(chan RawEvent, 64)
 	go func() {

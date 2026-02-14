@@ -177,7 +177,7 @@ type bufferOutput struct {
 
 // setupBufferOutput configures stdout and stderr capture with MultiWriter
 // chains that write to in-memory buffers, the recorder, optional cfg writers,
-// and optionally the EventSink for TUI mode.
+// and optionally the EventSink for live stream mode.
 func setupBufferOutput(cmd *exec.Cmd, cfg Config, recorder *recording.Recorder) *bufferOutput {
 	bo := &bufferOutput{}
 	stdoutW := writerOrDefault(cfg.Stdout, os.Stdout)
@@ -405,7 +405,7 @@ func defaultAccumulateText(ev stream.ClaudeEvent, buf *strings.Builder) {
 }
 
 // runStreamLoop consumes parsed stream events, recording them and either
-// forwarding to the TUI EventSink or displaying via the legacy terminal
+// forwarding to EventSink for live stream consumers or displaying via terminal
 // Display with a 30-second heartbeat ticker.
 //
 // Returns the accumulated text output and the agent session ID (if captured
@@ -414,7 +414,7 @@ func runStreamLoop(cfg Config, events <-chan stream.RawEvent, recorder *recordin
 	var textBuf strings.Builder
 
 	if cfg.EventSink != nil {
-		// TUI mode: forward events to the sink channel for the TUI to render.
+		// Stream mode: forward events to the sink channel for live rendering.
 		dropped := 0
 		for ev := range events {
 			if len(ev.Raw) > 0 {

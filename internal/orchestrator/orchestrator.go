@@ -144,7 +144,7 @@ type Orchestrator struct {
 	waitAny   map[int]chan struct{} // parent turn -> completion notification channel
 	waiters   map[int]int           // parent turn -> active WaitAny waiter count
 	spawnWG   sync.WaitGroup        // tracks running spawn goroutines
-	eventCh   chan any              // optional TUI event channel for real-time sub-agent events
+	eventCh   chan any              // optional event channel for real-time sub-agent events
 }
 
 // New creates an Orchestrator.
@@ -162,8 +162,8 @@ func New(s *store.Store, globalCfg *config.GlobalConfig, repoRoot string) *Orche
 	}
 }
 
-// SetEventCh sets the TUI event channel so sub-agent lifecycle events
-// (prompts, finishes, raw output, guardrail violations) are forwarded to the TUI.
+// SetEventCh sets the event channel so sub-agent lifecycle events
+// (prompts, finishes, raw output, guardrail violations) are forwarded to the runtime event stream.
 func (o *Orchestrator) SetEventCh(ch chan any) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -187,10 +187,10 @@ func (o *Orchestrator) emitEvent(eventType string, msg any) bool {
 			o.eventCh = nil
 		}
 		o.mu.Unlock()
-		debug.LogKV("orch", "dropping tui event: channel closed", "type", eventType)
+		debug.LogKV("orch", "dropping event: channel closed", "type", eventType)
 		return false
 	}
-	debug.LogKV("orch", "dropping tui event due to backpressure", "type", eventType)
+	debug.LogKV("orch", "dropping event due to backpressure", "type", eventType)
 	return false
 }
 
@@ -577,7 +577,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 	var turnCancelMu sync.Mutex
 	var currentTurnCancel context.CancelFunc
 
-	// Bridge stream events into the ring buffer AND forward to eventCh for the TUI.
+	// Bridge stream events into the ring buffer and forward them to eventCh for live sessions.
 	eventDone := make(chan struct{})
 	go func() {
 		defer close(eventDone)

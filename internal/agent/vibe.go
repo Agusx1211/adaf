@@ -38,8 +38,8 @@ func (v *VibeAgent) Name() string {
 // agent profile).
 //
 // We select output mode based on runtime:
-//   - TUI/EventSink mode: --output streaming for realtime NDJSON updates.
-//   - Non-TUI mode: --output text for deterministic plain-text output.
+//   - EventSink mode: --output streaming for realtime NDJSON updates.
+//   - Standard mode: --output text for deterministic plain-text output.
 //
 // Model selection is done via the VIBE_ACTIVE_MODEL environment variable
 // (set in cfg.Env) rather than a --model flag, because vibe uses

@@ -27,8 +27,7 @@ type Config struct {
 	ResumeSessionID string
 
 	// EventSink, when set, receives parsed Claude stream events instead of
-	// displaying them to stdout. Used by the TUI to render events in its
-	// own viewport.
+	// displaying them to stdout. Used by CLI/web runtime consumers for live output.
 	EventSink chan<- stream.RawEvent
 
 	// Stdout and Stderr override the default os.Stdout/os.Stderr for agent
