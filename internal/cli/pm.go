@@ -9,7 +9,6 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
-	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/debug"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
@@ -59,7 +58,7 @@ func runPM(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	prof, commandOverride, err := resolvePMProfile(cmd, s)
+	prof, globalCfg, commandOverride, err := resolvePMProfile(cmd)
 	if err != nil {
 		return err
 	}
@@ -80,7 +79,7 @@ func runPM(cmd *cobra.Command, args []string) error {
 		workDir, _ = os.Getwd()
 	}
 
-	fullPrompt, err := buildPMPrompt(s, projCfg, effectivePlanID, prof, message)
+	fullPrompt, err := buildPMPrompt(s, projCfg, effectivePlanID, prof, globalCfg, message)
 	if err != nil {
 		return err
 	}
@@ -169,69 +168,14 @@ func resolvePMMessage(args []string) (string, error) {
 	return "", fmt.Errorf("no message provided — pass as argument or pipe via stdin")
 }
 
-func resolvePMProfile(cmd *cobra.Command, _ *store.Store) (*config.Profile, string, error) {
-	profileName, _ := cmd.Flags().GetString("profile")
-	agentName, _ := cmd.Flags().GetString("agent")
-	modelFlag, _ := cmd.Flags().GetString("model")
-
-	modelFlag = strings.TrimSpace(modelFlag)
-	profileName = strings.TrimSpace(profileName)
-
-	globalCfg, err := config.Load()
-	if err != nil {
-		return nil, "", fmt.Errorf("loading global config: %w", err)
-	}
-
-	agentsCfg, err := agent.LoadAgentsConfig()
-	if err != nil {
-		return nil, "", fmt.Errorf("loading agent configuration: %w", err)
-	}
-
-	if profileName != "" {
-		prof := globalCfg.FindProfile(profileName)
-		if prof == nil {
-			return nil, "", fmt.Errorf("profile %q not found", profileName)
-		}
-		if modelFlag != "" {
-			prof.Model = modelFlag
-		}
-
-		var cmdOverride string
-		if rec, ok := agentsCfg.Agents[prof.Agent]; ok && strings.TrimSpace(rec.Path) != "" {
-			cmdOverride = strings.TrimSpace(rec.Path)
-		}
-		return prof, cmdOverride, nil
-	}
-
-	if _, ok := agent.Get(agentName); !ok {
-		return nil, "", fmt.Errorf("unknown agent %q (valid: %s)", agentName, strings.Join(agentNames(), ", "))
-	}
-
-	var customCmd string
-	if rec, ok := agentsCfg.Agents[agentName]; ok && strings.TrimSpace(rec.Path) != "" {
-		customCmd = strings.TrimSpace(rec.Path)
-	}
-
-	modelOverride := agent.ResolveModelOverride(agentsCfg, globalCfg, agentName)
-	if modelFlag != "" {
-		modelOverride = modelFlag
-	}
-
-	prof := &config.Profile{
-		Name:  fmt.Sprintf("pm:%s", agentName),
-		Agent: agentName,
-		Model: modelOverride,
-	}
-
-	return prof, customCmd, nil
+func resolvePMProfile(cmd *cobra.Command) (*config.Profile, *config.GlobalConfig, string, error) {
+	prof, globalCfg, cmdOverride, err := resolveProfile(cmd, ProfileResolveOpts{
+		Prefix: "pm",
+	})
+	return prof, globalCfg, cmdOverride, err
 }
 
-func buildPMPrompt(s *store.Store, projCfg *store.ProjectConfig, planID string, prof *config.Profile, userMessage string) (string, error) {
-	globalCfg, err := config.Load()
-	if err != nil {
-		return "", fmt.Errorf("loading global config: %w", err)
-	}
-
+func buildPMPrompt(s *store.Store, projCfg *store.ProjectConfig, planID string, prof *config.Profile, globalCfg *config.GlobalConfig, userMessage string) (string, error) {
 	basePrompt, err := promptpkg.Build(promptpkg.BuildOpts{
 		Store:     s,
 		Project:   projCfg,

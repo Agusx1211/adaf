@@ -90,7 +90,8 @@ func TestBuildPMPrompt(t *testing.T) {
 	}
 	userMessage := "Please prioritize blockers and update the plan."
 
-	got, err := buildPMPrompt(s, projCfg, "", prof, userMessage)
+	globalCfg := &config.GlobalConfig{}
+	got, err := buildPMPrompt(s, projCfg, "", prof, globalCfg, userMessage)
 	if err != nil {
 		t.Fatalf("buildPMPrompt() error: %v", err)
 	}
