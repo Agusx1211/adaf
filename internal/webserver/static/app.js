@@ -2,7 +2,18 @@
   'use strict';
   var REFRESH_MS = 10000;
   var MAX_OUTPUT_CHARS = 120000;
-  var state = { tab: '', dashboardTimer: null, selectedSessionID: null, selectedPlanID: null, issueFilter: 'all', ws: null, wsSessionID: null };
+  var state = {
+    tab: '',
+    dashboardTimer: null,
+    selectedSessionID: null,
+    selectedPlanID: null,
+    issueFilter: 'all',
+    ws: null,
+    wsSessionID: null,
+    term: null,
+    termFit: null,
+    termWS: null
+  };
   var nav = document.getElementById('nav');
   var content = document.getElementById('content');
   function init() {
@@ -32,6 +43,9 @@
     if (nextTab !== 'sessions') {
       disconnectSessionSocket();
       state.selectedSessionID = null;
+    }
+    if (nextTab !== 'terminal') {
+      disconnectTerminal();
     }
     if (nextTab !== 'plans') state.selectedPlanID = null;
   }
@@ -78,6 +92,7 @@
     if (state.tab === 'sessions') return renderSessions();
     if (state.tab === 'plans') return renderPlans();
     if (state.tab === 'issues') return renderIssues();
+    if (state.tab === 'terminal') return renderTerminal();
     return renderDashboard();
   }
   function renderLoading(label) {
@@ -140,6 +155,121 @@
       content.innerHTML = '<section class="card"><h2>Issues</h2><div class="filters">' + renderFilterButton('all', 'All') + renderFilterButton('open', 'Open') + renderFilterButton('resolved', 'Resolved') + '</div>' + renderIssueList(issues, false) + '</section>';
     } catch (err) {
       renderError('Failed to load issues: ' + errorMessage(err));
+    }
+  }
+  function renderTerminal() {
+    if (typeof Terminal === 'undefined' || typeof FitAddon === 'undefined') {
+      return renderError('Terminal runtime unavailable. Reload the page and try again.');
+    }
+    content.innerHTML = '<section class="card terminal-card"><div id="terminal-container"></div></section>';
+    var container = document.getElementById('terminal-container');
+    if (!container) return;
+
+    if (!state.term) {
+      state.term = new Terminal({
+        cursorBlink: true,
+        fontSize: 13,
+        fontFamily: '"IBM Plex Mono", "SFMono-Regular", monospace',
+        theme: {
+          background: '#11111b',
+          foreground: '#cdd6f4',
+          cursor: '#f5e0dc',
+          selectionBackground: '#45475a',
+          black: '#45475a',
+          red: '#f38ba8',
+          green: '#a6e3a1',
+          yellow: '#f9e2af',
+          blue: '#89b4fa',
+          magenta: '#cba6f7',
+          cyan: '#89dceb',
+          white: '#bac2de',
+          brightBlack: '#585b70',
+          brightRed: '#f38ba8',
+          brightGreen: '#a6e3a1',
+          brightYellow: '#f9e2af',
+          brightBlue: '#89b4fa',
+          brightMagenta: '#cba6f7',
+          brightCyan: '#89dceb',
+          brightWhite: '#a6adc8'
+        }
+      });
+      state.termFit = new FitAddon.FitAddon();
+      state.term.loadAddon(state.termFit);
+      state.term.onData(function (data) {
+        if (state.termWS && state.termWS.readyState === WebSocket.OPEN) {
+          state.termWS.send(JSON.stringify({ type: 'input', data: btoa(data) }));
+        }
+      });
+      state.term.onResize(function (size) {
+        if (state.termWS && state.termWS.readyState === WebSocket.OPEN) {
+          state.termWS.send(JSON.stringify({ type: 'resize', cols: size.cols, rows: size.rows }));
+        }
+      });
+      state.term.open(container);
+    } else if (state.term.element) {
+      container.appendChild(state.term.element);
+    } else {
+      state.term.open(container);
+    }
+
+    fitTerminal();
+    connectTerminalSocket();
+    window.removeEventListener('resize', fitTerminal);
+    window.addEventListener('resize', fitTerminal);
+    state.term.focus();
+  }
+  function fitTerminal() {
+    if (state.termFit) {
+      try {
+        state.termFit.fit();
+      } catch (_) {
+        // best effort
+      }
+    }
+  }
+  function connectTerminalSocket() {
+    disconnectTerminal();
+    state.termWS = new WebSocket(buildWSURL('/ws/terminal'));
+    state.termWS.addEventListener('open', function () {
+      fitTerminal();
+      if (state.term) {
+        state.termWS.send(JSON.stringify({
+          type: 'resize',
+          cols: state.term.cols,
+          rows: state.term.rows
+        }));
+      }
+    });
+    state.termWS.addEventListener('message', function (event) {
+      var msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch (_) {
+        return;
+      }
+      if (msg.type === 'output' && msg.data && state.term) {
+        state.term.write(atob(msg.data));
+      } else if (msg.type === 'exit' && state.term) {
+        state.term.write('\r\n[Process exited with code ' + (msg.code || 0) + ']\r\n');
+      }
+    });
+    state.termWS.addEventListener('close', function () {
+      if (state.term) state.term.write('\r\n[Connection closed]\r\n');
+      state.termWS = null;
+    });
+    state.termWS.addEventListener('error', function () {
+      if (state.term) state.term.write('\r\n[Connection error]\r\n');
+    });
+  }
+  function disconnectTerminal() {
+    window.removeEventListener('resize', fitTerminal);
+    if (state.termWS) {
+      try {
+        state.termWS.close();
+      } catch (_) {
+        // best effort
+      }
+      state.termWS = null;
     }
   }
   function renderSessionList(sessions, compact) {

@@ -105,6 +105,7 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/stats/profiles", srv.handleProfileStats)
 
 	mux.HandleFunc("GET /ws/sessions/{id}", srv.handleSessionWebSocket)
+	mux.HandleFunc("GET /ws/terminal", srv.handleTerminalWebSocket)
 
 	mux.HandleFunc("GET /api/{rest...}", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")

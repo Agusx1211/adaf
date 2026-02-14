@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ADAF</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.min.css">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -14,6 +15,7 @@
       <a href="#" data-tab="sessions">Sessions</a>
       <a href="#" data-tab="plans">Plans</a>
       <a href="#" data-tab="issues">Issues</a>
+      <a href="#" data-tab="terminal">Terminal</a>
     </nav>
   </header>
 
@@ -26,6 +28,8 @@
     </section>
   </template>
 
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10/lib/addon-fit.min.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>
