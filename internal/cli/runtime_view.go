@@ -40,6 +40,7 @@ const (
 var commandAudienceByPath = map[string]commandAudience{
 	"init":            commandAudienceUserOnly,
 	"run":             commandAudienceUserOnly,
+	"web":             commandAudienceUserOnly,
 	"attach":          commandAudienceUserOnly,
 	"sessions":        commandAudienceUserOnly,
 	"config":          commandAudienceUserOnly,
