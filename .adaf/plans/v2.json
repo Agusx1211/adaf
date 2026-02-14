@@ -55,7 +55,7 @@
       "id": "p6-project-views",
       "title": "Web Frontend: Plan, Issues, Docs, Logs Views",
       "description": "Implement the remaining left-panel views from `reference-ui.jsx`.\n\n**PlanView (tab 4):**\n- Plan title and overall status\n- Progress bar: percentage of completed phases with gradient fill (C.green to C.teal)\n- Phase list with:\n  - Phase ID and title\n  - Status badge (complete=green, in_progress=yellow, not_started=overlay0)\n  - Priority indicator\n  - Dependencies listed (depends_on phase IDs)\n  - Click to expand: full description with markdown rendering\n- Inline phase status editing (click status badge to cycle or dropdown)\n- Plan switcher if multiple plans exist\n\n**IssuesList (tab 2):**\n- Issue cards with:\n  - Priority indicator (color-coded: critical=red, high=peach, medium=yellow, low=green)\n  - Title\n  - Status badge\n  - Labels as small tags\n  - Created date\n- Click to expand: full description, edit controls\n- Create new issue button\n- Filter by status (open/closed/all)\n\n**DocsView (tab 3):**\n- Document list with title and created date\n- Click to view: full content rendered with markdown\n- Create/edit documents inline\n\n**LogsView (tab 5):**\n- Turn history showing:\n  - Turn hex ID\n  - Agent name and model\n  - Profile name\n  - Date and duration\n  - Build state (success/failure)\n  - Objective and what_was_built summaries\n  - Next steps\n- Expandable for full details\n- Filter by agent, profile, or build state\n\n**All views:**\n- Follow the reference-ui.jsx styling: Catppuccin colors, consistent spacing, monospace for IDs/numbers\n- Smooth transitions when switching between views\n- API endpoints already exist for all of these (from the v1-1 work)",
-      "status": "not_started",
+      "status": "complete",
       "priority": 2,
       "depends_on": [
         "p3-web-layout"
@@ -104,5 +104,5 @@
     "p9-polish"
   ],
   "created": "2026-02-14T15:37:30.322476305Z",
-  "updated": "2026-02-14T17:04:14.369350134Z"
+  "updated": "2026-02-14T17:04:14.388366524Z"
 }
