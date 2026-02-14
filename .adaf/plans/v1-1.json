@@ -1,0 +1,108 @@
+{
+  "id": "v1-1",
+  "title": "ADAF v1.1 - Web UI Overhaul, Interactive Control \u0026 Quality Polish",
+  "description": "Transform the web UI from a read-only dashboard into a full project control surface comparable to the TUI. Add write APIs, rich session rendering, interactive agent control (send messages to running loops), multi-project support from a single web server instance, and address all open infrastructure issues (daemon transport, TUI dedup, CLI cleanup, test coverage).",
+  "status": "active",
+  "phases": [
+    {
+      "id": "p1-write-api",
+      "title": "Web API: Write Endpoints \u0026 Session Control",
+      "description": "Add POST/PUT/DELETE endpoints for full project control through the web UI. Includes: (1) Issue CRUD - create, update status/priority, close issues via API. (2) Plan management - create plans, switch active plan, update phase status, freeze/cancel/archive. (3) Session control - start new ask/pm/loop session from API, stop session by ID (also resolves issue #33), send message to running loop (spawn-message equivalent). (4) Profile and loop CRUD - create, edit, delete profiles and loops via API, reading/writing the global config. (5) Config management - roles, rules, pushover settings. All mutations go through existing store/config packages. Add request validation, proper HTTP methods, and error responses. This phase makes the web UI capable of everything the TUI and CLI can do.",
+      "status": "not_started",
+      "priority": 1
+    },
+    {
+      "id": "p2-web-ui-overhaul",
+      "title": "Web Frontend: Full Interactive UI",
+      "description": "Rewrite the web frontend to be a full interactive control surface, matching TUI capabilities. (1) Rich session viewer - render agent output with markdown formatting, syntax-highlighted code blocks, tool use visualization (collapsible tool calls with name/input/output), diff rendering, cost/token counters per turn. Replace the plain-text session-events div with structured rendering. (2) Session control panel - start new sessions (ask/PM/loop) with profile picker, model selector, prompt input. Stop running sessions. Send messages to running loops via input box (equivalent to spawn-message/loop-message). (3) Issue management - create/edit issues inline, update status, view full descriptions with markdown rendering. (4) Plan management - create plans, add/edit phases, update phase status, switch active plan, freeze/cancel. (5) Profile/loop editor - create and edit profiles (agent, model, reasoning, speed) and loops (steps, delegation trees) through forms. (6) Config panel - manage roles, prompt rules, pushover settings. (7) Responsive design - maintain mobile usability. (8) Offline assets - bundle xterm.js instead of CDN loading. The goal is that a user should never need the TUI or CLI for any project operation.",
+      "status": "not_started",
+      "priority": 1,
+      "depends_on": [
+        "p1-write-api"
+      ]
+    },
+    {
+      "id": "p3-multi-project",
+      "title": "Web Server: Multi-Project Support",
+      "description": "Allow a single web server instance to serve multiple ADAF projects simultaneously. Currently the web server binds to a single store via openStoreRequired() at startup. Changes: (1) New command: 'adaf web --multi' or 'adaf web --projects /path/a,/path/b' that registers multiple project stores. (2) API namespace: prefix all project-specific routes with /api/projects/{project-id}/... (keep backward-compat /api/ as alias for a default project). (3) Frontend project switcher - dropdown or sidebar showing all registered projects, switching context without reloading. (4) Project auto-discovery - optionally scan a parent directory for all subdirectories containing .adaf/project.json. (5) Session listing across projects - unified session view showing which project each session belongs to. (6) Global dashboard - aggregate view across all projects (total active sessions, open issues per project, etc.).",
+      "status": "not_started",
+      "priority": 2,
+      "depends_on": [
+        "p2-web-ui-overhaul"
+      ]
+    },
+    {
+      "id": "p4-daemon-websocket",
+      "title": "Daemon Transport: WebSocket Unification",
+      "description": "Replace the raw Unix socket protocol between session daemons and clients with HTTP/WebSocket (resolves issues #40 and #41). (1) Session daemon: replace net.Listener + handleClient with http.Server + WebSocket upgrade on the existing Unix socket path. Use nhooyr.io/websocket for proper write buffering, ping/pong keepalive, and graceful close frames. (2) TUI client: replace net.Dial + bufio.Scanner with WebSocket dial over Unix socket. (3) Web server: proxy WebSocket connections to daemon Unix sockets. (4) Eliminate the hand-rolled backpressure policy (enqueue/removeClient) - WebSocket library handles buffering. (5) Add reconnection support with snapshot catchup. (6) Fix the race condition where client is registered before writer startup. This is the most architecturally significant change and touches daemon.go, client.go, attach_cmd.go, and ws_handler.go.",
+      "status": "not_started",
+      "priority": 1
+    },
+    {
+      "id": "p5-session-rendering",
+      "title": "Web UI: Rich Session Output Rendering",
+      "description": "Transform the session viewer from plain text into a rich, structured display matching what agent output actually contains. (1) Markdown rendering - agent text output contains markdown; render it with proper headings, lists, code blocks, inline formatting. Use a lightweight markdown library (marked.js or similar, embedded not CDN). (2) Syntax highlighting - code blocks in agent output should be syntax-highlighted. Use highlight.js or Prism (embedded). (3) Tool use visualization - show tool calls as collapsible cards with tool name, input parameters (formatted JSON), and output. Distinguish Read, Write, Edit, Bash, Grep, Glob tools with icons or color coding. (4) Diff rendering - when agents show diffs (Edit tool, git diff), render them with proper diff coloring (red/green). (5) Cost/token tracking - show per-turn and cumulative token counts and cost in a sidebar or header. (6) Spawn tree visualization - show the hierarchy of spawned sub-agents as a tree, with status indicators and expandable output. (7) Turn boundaries - clearly delineate turns with separator bars showing turn number, agent, duration.",
+      "status": "not_started",
+      "priority": 2,
+      "depends_on": [
+        "p2-web-ui-overhaul"
+      ]
+    },
+    {
+      "id": "p6-tui-dedup",
+      "title": "TUI \u0026 CLI: Code Deduplication",
+      "description": "Address the structural duplication identified in issues #42, #43, and #29. (1) CLI profile resolution - extract shared resolveProfile() function from resolveAskProfile() and resolvePMProfile() (issue #42). Fix double config.Load() in PM path. Remove unused store parameter from resolveAskProfile. (2) TUI wizard dedup - extract generic wizard component from ask.go and pm.go (issue #43). The 9 nearly-identical function pairs should become a single parameterized wizard with field definitions. Target: 820 combined lines to ~350 + two small wrappers. (3) CLI file splitting - split stats_cmd.go (773 LOC), spawn.go (769 LOC), plan.go (740 LOC) into per-subcommand files (issue #29). Extract shared helpers (formatTimeAgo, formatDuration) to helpers.go.",
+      "status": "not_started",
+      "priority": 2
+    },
+    {
+      "id": "p7-test-coverage",
+      "title": "Test Coverage: Critical Gaps",
+      "description": "Address the test coverage gaps identified in issue #44 and the audit. (1) Profile resolution tests - add tests for resolveAskProfile/resolvePMProfile (or the shared function after p6) covering: profile flag lookup with valid/invalid names, agent flag with model override, missing agent binary, default fallback behavior. (2) Orchestrator tests - spawn lifecycle, concurrent spawn limits, merge/reject operations, cleanup on context cancellation. (3) Recording package tests - currently zero test coverage for the entire recording package. (4) LoopRun tests - runner.go is 850 LOC with only 2 tests; add tests for multi-step execution, wait-for-spawns flow, error handling, context cancellation. (5) Add 'go test -race' to Makefile. (6) Integration test improvements - process crash simulation, orphan process detection.",
+      "status": "not_started",
+      "priority": 2,
+      "depends_on": [
+        "p6-tui-dedup"
+      ]
+    },
+    {
+      "id": "p8-cli-improvements",
+      "title": "CLI: Operational Improvements",
+      "description": "Address remaining CLI issues. (1) Session stop command - add 'adaf sessions stop \u003csession-id\u003e' for non-interactive session termination (issue #33). Support --force flag and batch forms (--all, --agent \u003cname\u003e). Return clear exit codes and status text. (2) Description file flag - add --description-file \u003cpath\u003e to issue create, plan create, doc create commands (issue #37). Also support --description - for stdin input. Apply the pattern consistently across all commands accepting long-form text. (3) Web server startup improvements - better error messages when port is in use, show clickable URL in terminal output, add --open flag to auto-open browser.",
+      "status": "not_started",
+      "priority": 2
+    },
+    {
+      "id": "p9-adaf-scope-split",
+      "title": "Store: .adaf Scope Split",
+      "description": "Implement the .adaf directory scope split proposed in issue #38. (1) Separate structural state (plans, issues, decisions, docs, config.json) from operational telemetry (sessions, recordings, loops, spawns, waits, interrupts). (2) Move operational data under .adaf/local/ which is gitignored. (3) Keep structural artifacts in .adaf/ root for committing - cloned repos should carry plans/issues/docs context. (4) Add auto-commit option: CLI auto-commits structural mutations (issue create, plan create, etc.) with standardized message prefix 'adaf: create issue #NN'. Make this configurable (on by default, can disable). (5) Ensure all store operations work correctly with the new layout. (6) Migration: on first run, detect old layout and move files to new structure.",
+      "status": "not_started",
+      "priority": 3,
+      "depends_on": [
+        "p7-test-coverage"
+      ]
+    },
+    {
+      "id": "p10-web-launch",
+      "title": "Web Server: Launch \u0026 Discovery UX",
+      "description": "Improve how the web server is started and discovered. (1) Auto-start option - 'adaf web --daemon' to start in background, write PID file. 'adaf web --stop' to stop a running daemon. (2) TUI integration - add a 'w' hotkey in TUI selector to launch/open web UI. Show web server status in TUI header if running. (3) Project registration for multi-project - 'adaf web register' to add current project to a central registry (~/.adaf/web-projects.json). 'adaf web serve' reads the registry and serves all registered projects. (4) mDNS/Bonjour discovery - optionally advertise the web server on the local network so other machines can find it. (5) QR code - when starting with --expose, print a QR code to terminal for easy mobile access.",
+      "status": "not_started",
+      "priority": 3,
+      "depends_on": [
+        "p3-multi-project"
+      ]
+    },
+    {
+      "id": "p11-model-ranking",
+      "title": "Feature: Model Performance Ranking",
+      "description": "Implement the model performance ranking system from issue #3. (1) Task categorization - require task category when spawning sub-agents (refactor, bugfix, feature, test, docs, investigation, review, config). Store in spawn metadata. (2) Quality scoring - after worker completes, manager provides 1-5 score. Store rankings in .adaf/rankings/ as JSON. (3) CLI command 'adaf stats models' - per-model average score (overall and per-category), number of ranked tasks, confidence indicators. (4) Protocol integration - expose aggregated stats to manager agents via system prompt so they can make informed spawning decisions. (5) Web UI stats page - visualize model performance with charts/tables.",
+      "status": "not_started",
+      "priority": 3,
+      "depends_on": [
+        "p1-write-api"
+      ]
+    }
+  ],
+  "created": "2026-02-14T11:22:27.60226705Z",
+  "updated": "2026-02-14T11:24:17.376316504Z"
+}
