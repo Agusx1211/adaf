@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -28,6 +30,9 @@ func TestWebCommandFlags(t *testing.T) {
 	cmd.Flags().Float64("rate-limit", 0, "Max requests per second per IP (0 = unlimited)")
 	cmd.Flags().StringSlice("projects", nil, "Comma-separated list of project directories to serve")
 	cmd.Flags().Bool("multi", false, "Auto-discover projects in parent directory")
+	cmd.Flags().Bool("registry", false, "Serve projects from ~/.adaf/web-projects.json")
+	cmd.Flags().Bool("daemon", false, "Run web server in background")
+	cmd.Flags().Bool("mdns", false, "Advertise server on local network via mDNS/Bonjour")
 	cmd.Flags().Bool("open", false, "Open browser automatically")
 
 	// Test that the --port flag is registered
@@ -60,6 +65,138 @@ func TestWebCommandFlags(t *testing.T) {
 	}
 	if open != true {
 		t.Errorf("Expected open flag to be true after setting, got %v", open)
+	}
+}
+
+func TestWebPIDFileRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "web.pid")
+	if err := writeWebPIDFile(path, 4242); err != nil {
+		t.Fatalf("writeWebPIDFile() error = %v", err)
+	}
+
+	got, err := readWebPIDFile(path)
+	if err != nil {
+		t.Fatalf("readWebPIDFile() error = %v", err)
+	}
+	if got != 4242 {
+		t.Fatalf("readWebPIDFile() = %d, want %d", got, 4242)
+	}
+}
+
+func TestLoadWebDaemonStateRunning(t *testing.T) {
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "web.pid")
+	statePath := filepath.Join(dir, "web.json")
+
+	want := webRuntimeState{
+		PID:    999,
+		URL:    "http://127.0.0.1:8080",
+		Port:   8080,
+		Host:   "127.0.0.1",
+		Scheme: "http",
+	}
+	if err := writeWebRuntimeFiles(pidPath, statePath, want); err != nil {
+		t.Fatalf("writeWebRuntimeFiles() error = %v", err)
+	}
+
+	got, running, err := loadWebDaemonState(pidPath, statePath, func(pid int) bool {
+		return pid == want.PID
+	})
+	if err != nil {
+		t.Fatalf("loadWebDaemonState() error = %v", err)
+	}
+	if !running {
+		t.Fatalf("loadWebDaemonState() running = false, want true")
+	}
+	if got.PID != want.PID || got.URL != want.URL || got.Port != want.Port || got.Host != want.Host || got.Scheme != want.Scheme {
+		t.Fatalf("loadWebDaemonState() = %+v, want %+v", got, want)
+	}
+}
+
+func TestLoadWebDaemonStateStalePIDRemovesFiles(t *testing.T) {
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "web.pid")
+	statePath := filepath.Join(dir, "web.json")
+
+	state := webRuntimeState{
+		PID:    1001,
+		URL:    "http://127.0.0.1:8080",
+		Port:   8080,
+		Host:   "127.0.0.1",
+		Scheme: "http",
+	}
+	if err := writeWebRuntimeFiles(pidPath, statePath, state); err != nil {
+		t.Fatalf("writeWebRuntimeFiles() error = %v", err)
+	}
+
+	got, running, err := loadWebDaemonState(pidPath, statePath, func(pid int) bool {
+		return false
+	})
+	if err != nil {
+		t.Fatalf("loadWebDaemonState() error = %v", err)
+	}
+	if running {
+		t.Fatalf("loadWebDaemonState() running = true, want false")
+	}
+	if got.PID != 0 {
+		t.Fatalf("loadWebDaemonState() state = %+v, want zero-value state", got)
+	}
+
+	if _, err := os.Stat(pidPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("pid file should be removed, stat error = %v", err)
+	}
+	if _, err := os.Stat(statePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("state file should be removed, stat error = %v", err)
+	}
+}
+
+func TestWebProjectRegistryLoadSaveAddRemove(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "web-projects.json")
+
+	registry, err := loadWebProjectRegistry(path)
+	if err != nil {
+		t.Fatalf("loadWebProjectRegistry() on missing file error = %v", err)
+	}
+	if len(registry.Projects) != 0 {
+		t.Fatalf("missing registry should start empty, got %d entries", len(registry.Projects))
+	}
+
+	projectA := webProjectRecord{ID: "alpha", Path: "/tmp/alpha"}
+	projectB := webProjectRecord{ID: "beta", Path: "/tmp/beta"}
+
+	if !addWebProject(registry, projectA) {
+		t.Fatalf("addWebProject(alpha) = false, want true")
+	}
+	if addWebProject(registry, projectA) {
+		t.Fatalf("addWebProject(alpha duplicate) = true, want false")
+	}
+	if !addWebProject(registry, projectB) {
+		t.Fatalf("addWebProject(beta) = false, want true")
+	}
+
+	if err := saveWebProjectRegistry(path, registry); err != nil {
+		t.Fatalf("saveWebProjectRegistry() error = %v", err)
+	}
+
+	loaded, err := loadWebProjectRegistry(path)
+	if err != nil {
+		t.Fatalf("loadWebProjectRegistry() after save error = %v", err)
+	}
+	if len(loaded.Projects) != 2 {
+		t.Fatalf("loaded project count = %d, want 2", len(loaded.Projects))
+	}
+	if loaded.Projects[0].ID != "alpha" || loaded.Projects[1].ID != "beta" {
+		t.Fatalf("loaded projects not sorted or unexpected: %+v", loaded.Projects)
+	}
+
+	if !removeWebProject(loaded, projectA.Path) {
+		t.Fatalf("removeWebProject(alpha) = false, want true")
+	}
+	if removeWebProject(loaded, projectA.Path) {
+		t.Fatalf("removeWebProject(alpha again) = true, want false")
+	}
+	if len(loaded.Projects) != 1 || loaded.Projects[0].ID != "beta" {
+		t.Fatalf("remaining projects = %+v, want only beta", loaded.Projects)
 	}
 }
 
