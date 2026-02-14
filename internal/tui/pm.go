@@ -22,93 +22,39 @@ const pmPromptPrefix = "# Role: Project Manager\n\n" +
 	"Keep outcomes concrete, prioritized, and actionable.\n\n" +
 	"## User Message\n\n"
 
+// PMWizardState holds the state for the PM wizard, embedding the common WizardState.
 type PMWizardState struct {
-	MessageText   string
-	ProfileSel    int
-	Profiles      []string
-	ModelOverride string
-
-	ConfigSel int
-	Msg       string
+	WizardState
+	MessageText string
 }
 
 func (m *AppModel) initPMWizard() {
-	if m.globalCfg == nil {
-		m.globalCfg = &config.GlobalConfig{}
-	}
-
-	prevName := ""
-	if m.pmWiz.ProfileSel >= 0 && m.pmWiz.ProfileSel < len(m.pmWiz.Profiles) {
-		prevName = m.pmWiz.Profiles[m.pmWiz.ProfileSel]
-	}
-
-	profiles := make([]string, 0, len(m.globalCfg.Profiles))
-	for _, prof := range m.globalCfg.Profiles {
-		profiles = append(profiles, prof.Name)
-	}
-	m.pmWiz.Profiles = profiles
-	m.pmWiz.ProfileSel = 0
-	if prevName != "" {
-		for i, name := range profiles {
-			if strings.EqualFold(name, prevName) {
-				m.pmWiz.ProfileSel = i
-				break
-			}
-		}
-	}
-	if m.pmWiz.ProfileSel >= len(profiles) {
-		m.pmWiz.ProfileSel = len(profiles) - 1
-	}
-	if m.pmWiz.ProfileSel < 0 {
-		m.pmWiz.ProfileSel = 0
-	}
-	if m.pmWiz.ConfigSel < 0 || m.pmWiz.ConfigSel >= pmConfigFieldTotal {
-		m.pmWiz.ConfigSel = 0
-	}
-	m.pmWiz.Msg = ""
+	initWizardProfiles(m, &m.pmWiz.WizardState, pmConfigFieldTotal)
 }
 
+// clampPMProfileSelection delegates to the shared clampProfileSelection.
 func (m *AppModel) clampPMProfileSelection() {
-	if m.pmWiz.ProfileSel >= len(m.pmWiz.Profiles) {
-		m.pmWiz.ProfileSel = len(m.pmWiz.Profiles) - 1
-	}
-	if m.pmWiz.ProfileSel < 0 {
-		m.pmWiz.ProfileSel = 0
-	}
+	clampProfileSelection(&m.pmWiz.WizardState)
 }
 
+// adjustPMProfileSelection delegates to the shared adjustProfileSelection.
 func (m *AppModel) adjustPMProfileSelection(delta int) {
-	if len(m.pmWiz.Profiles) == 0 {
-		m.pmWiz.ProfileSel = 0
-		return
-	}
-	sel := m.pmWiz.ProfileSel + delta
-	for sel < 0 {
-		sel += len(m.pmWiz.Profiles)
-	}
-	m.pmWiz.ProfileSel = sel % len(m.pmWiz.Profiles)
+	adjustProfileSelection(&m.pmWiz.WizardState, delta)
 }
 
+// pmSelectedProfile delegates to the shared selectedProfile.
 func (m *AppModel) pmSelectedProfile() *config.Profile {
-	if m.globalCfg == nil {
-		return nil
-	}
-	if len(m.pmWiz.Profiles) == 0 {
-		return nil
-	}
-	m.clampPMProfileSelection()
-	if m.pmWiz.ProfileSel < 0 || m.pmWiz.ProfileSel >= len(m.pmWiz.Profiles) {
-		return nil
-	}
-	return m.globalCfg.FindProfile(m.pmWiz.Profiles[m.pmWiz.ProfileSel])
+	return selectedProfile(m, &m.pmWiz.WizardState)
 }
 
+// pmConfigNextField delegates to the shared wizardNextField.
 func (m *AppModel) pmConfigNextField() {
-	m.pmWiz.ConfigSel = (m.pmWiz.ConfigSel + 1) % pmConfigFieldTotal
+	wizardNextField(&m.pmWiz.WizardState, pmConfigFieldTotal)
 }
 
+// pmConfigPrevField delegates to the shared wizardPrevField.
 func (m *AppModel) pmConfigPrevField() {
-	m.pmWiz.ConfigSel = (m.pmWiz.ConfigSel - 1 + pmConfigFieldTotal) % pmConfigFieldTotal
+	wizardPrevField(&m.pmWiz.WizardState, pmConfigFieldTotal)
 }
 
 func (m AppModel) startPMWizard() (tea.Model, tea.Cmd) {
@@ -201,45 +147,13 @@ func (m AppModel) updatePMPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(initCmd, cmd)
 }
 
+// viewPMPrompt delegates to the shared viewWizardPrompt.
 func (m AppModel) viewPMPrompt() string {
-	header := m.renderHeader()
-	statusBar := m.renderStatusBar()
-	style, cw, ch := profileWizardPanel(m)
-
-	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
-	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
-	errStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorRed)
-
-	m.ensureTextarea("pm-message", m.pmWiz.MessageText)
-	m.syncTextarea(m.pmWiz.MessageText)
-
-	var lines []string
-	lines = append(lines, sectionStyle.Render("Project Manager — Enter Message"))
-	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("Type your project management message (multi-line supported)."))
-	lines = append(lines, dimStyle.Render("ctrl+s or ctrl+enter: next  esc: cancel"))
-	lines = append(lines, "")
-
-	if msg := strings.TrimSpace(m.pmWiz.Msg); msg != "" {
-		lines = append(lines, errStyle.Render(msg))
-		lines = append(lines, "")
-	}
-
-	prefixLines := wrapRenderableLines(lines, cw)
-	editorHeight := ch - len(prefixLines)
-	if editorHeight < 3 {
-		editorHeight = 3
-	}
-	editorView := m.viewTextarea(cw, editorHeight)
-	lines = append(lines, splitRenderableLines(editorView)...)
-
-	content := fitLines(lines, cw, ch)
-	panel := style.Render(content)
-	return header + "\n" + panel + "\n" + statusBar
+	return viewWizardPrompt(m, &m.pmWiz.WizardState, "Project Manager — Enter Message", "pm-message", m.pmWiz.MessageText)
 }
 
 func (m AppModel) updatePMConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
-	m.clampPMProfileSelection()
+	clampProfileSelection(&m.pmWiz.WizardState)
 	if m.pmWiz.ConfigSel < 0 || m.pmWiz.ConfigSel >= pmConfigFieldTotal {
 		m.pmWiz.ConfigSel = 0
 	}
@@ -254,13 +168,13 @@ func (m AppModel) updatePMConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = statePMPrompt
 				return m, nil
 			case "tab", "down", "j":
-				m.pmConfigNextField()
+				wizardNextField(&m.pmWiz.WizardState, pmConfigFieldTotal)
 				return m, nil
 			case "shift+tab", "up", "k":
-				m.pmConfigPrevField()
+				wizardPrevField(&m.pmWiz.WizardState, pmConfigFieldTotal)
 				return m, nil
 			case "enter":
-				m.pmConfigNextField()
+				wizardNextField(&m.pmWiz.WizardState, pmConfigFieldTotal)
 				return m, nil
 			}
 		}
@@ -276,10 +190,10 @@ func (m AppModel) updatePMConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state = statePMPrompt
 			return m, nil
 		case "tab", "down", "j":
-			m.pmConfigNextField()
+			wizardNextField(&m.pmWiz.WizardState, pmConfigFieldTotal)
 			return m, nil
 		case "shift+tab", "up", "k":
-			m.pmConfigPrevField()
+			wizardPrevField(&m.pmWiz.WizardState, pmConfigFieldTotal)
 			return m, nil
 		}
 
@@ -291,7 +205,7 @@ func (m AppModel) updatePMConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "right", "l":
 				m.adjustPMProfileSelection(1)
 			case "enter":
-				m.pmConfigNextField()
+				wizardNextField(&m.pmWiz.WizardState, pmConfigFieldTotal)
 			}
 		case pmConfigFieldRun:
 			if keyMsg.String() == "enter" {
@@ -304,33 +218,18 @@ func (m AppModel) updatePMConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m AppModel) viewPMConfig() string {
-	header := m.renderHeader()
-	statusBar := m.renderStatusBar()
-	style, cw, ch := profileWizardPanel(m)
+	_, cw, ch := profileWizardPanel(m)
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorLavender)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorOverlay0)
 	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
 	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorMauve)
-	errStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorRed)
 
 	var lines []string
 	cursorLine := -1
 
-	lines = append(lines, sectionStyle.Render("Project Manager — Configure"))
-	lines = append(lines, "")
-
-	selectedProfile := m.pmSelectedProfile()
-	profileText := "(no profile)"
-	if selectedProfile != nil {
-		modelText := selectedProfile.Model
-		if strings.TrimSpace(modelText) == "" {
-			modelText = "(default)"
-		}
-		profileText = fmt.Sprintf("%s (%s, %s)", selectedProfile.Name, selectedProfile.Agent, modelText)
-	}
-
-	renderField := func(field int, label, value string) {
+	// Use shared function for common fields
+	lines = viewWizardConfigCommon(&m, &m.pmWiz.WizardState, "Project Manager — Configure", func(field int, label, value string) {
 		line := fmt.Sprintf("%-8s %s", label, value)
 		if m.pmWiz.ConfigSel == field {
 			lines = append(lines, selectedStyle.Render("> "+line))
@@ -338,15 +237,16 @@ func (m AppModel) viewPMConfig() string {
 		} else {
 			lines = append(lines, "  "+valueStyle.Render(line))
 		}
-	}
+	}, &cursorLine)
 
-	renderField(pmConfigFieldProfile, "Profile:", profileText)
-
-	modelValue := strings.TrimSpace(m.pmWiz.ModelOverride)
-	if modelValue == "" {
-		modelValue = "(default profile model)"
+	// Model field (already handled by shared function, but we need to handle the input editor)
+	if m.pmWiz.ConfigSel == pmConfigFieldModel {
+		m.ensureTextInput("pm-model-override", m.pmWiz.ModelOverride, 0)
+		m.syncTextInput(m.pmWiz.ModelOverride)
+		lines = append(lines, "")
+		lines = append(lines, dimStyle.Render("Model override input:"))
+		lines = append(lines, m.viewTextInput(cw-4))
 	}
-	renderField(pmConfigFieldModel, "Model:", modelValue)
 
 	runLabel := "[ Run PM ]"
 	if m.pmWiz.ConfigSel == pmConfigFieldRun {
@@ -354,14 +254,6 @@ func (m AppModel) viewPMConfig() string {
 		cursorLine = len(lines) - 1
 	} else {
 		lines = append(lines, "  "+valueStyle.Render(runLabel))
-	}
-
-	if m.pmWiz.ConfigSel == pmConfigFieldModel {
-		m.ensureTextInput("pm-model-override", m.pmWiz.ModelOverride, 0)
-		m.syncTextInput(m.pmWiz.ModelOverride)
-		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("Model override input:"))
-		lines = append(lines, m.viewTextInput(cw-4))
 	}
 
 	lines = append(lines, "")
@@ -374,15 +266,6 @@ func (m AppModel) viewPMConfig() string {
 	}
 	lines = append(lines, dimStyle.Render("Runs: 1 cycle"))
 
-	if msg := strings.TrimSpace(m.pmWiz.Msg); msg != "" {
-		lines = append(lines, "")
-		lines = append(lines, errStyle.Render(msg))
-	}
-
-	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("tab/up/down: field  left/right: adjust  enter: run/select  esc: back"))
-
-	content := fitLinesWithCursor(lines, cw, ch, cursorLine)
-	panel := style.Render(content)
-	return header + "\n" + panel + "\n" + statusBar
+	// Use shared function for footer
+	return viewWizardConfigFooter(&m, &m.pmWiz.WizardState, lines, cursorLine, cw, ch)
 }
