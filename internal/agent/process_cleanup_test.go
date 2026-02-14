@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
-	"strings"
 	"time"
 
 	"github.com/agusx1211/adaf/internal/recording"
@@ -25,7 +25,7 @@ func TestProcessGroupCleanup(t *testing.T) {
 	}
 
 	tmp := t.TempDir()
-	
+
 	// Create a script that spawns a background child process and writes its PID
 	pidFile := filepath.Join(tmp, "child.pid")
 	script := filepath.Join(tmp, "spawn_child.sh")
@@ -35,7 +35,7 @@ func TestProcessGroupCleanup(t *testing.T) {
 # Also keep the parent running
 sleep 300
 `, pidFile)
-	
+
 	if err := os.WriteFile(script, []byte(scriptContent), 0755); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -94,7 +94,7 @@ sleep 300
 	err = syscall.Kill(childPID, 0)
 	if err == nil {
 		t.Errorf("Child process %d is still running after parent cancellation - process group cleanup failed", childPID)
-		
+
 		// Try to kill it to clean up
 		syscall.Kill(childPID, syscall.SIGKILL)
 	} else if err != syscall.ESRCH {
@@ -110,7 +110,7 @@ func TestOrphanProcessDetection(t *testing.T) {
 	}
 
 	tmp := t.TempDir()
-	
+
 	// Create a script that spawns multiple orphan processes
 	script := filepath.Join(tmp, "spawn_orphans.sh")
 	scriptContent := `#!/usr/bin/env sh
@@ -121,7 +121,7 @@ done
 # Keep parent running
 sleep 300
 `
-	
+
 	if err := os.WriteFile(script, []byte(scriptContent), 0755); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -170,7 +170,7 @@ func TestProcessCleanupWithGoTestSubprocess(t *testing.T) {
 	}
 
 	tmp := t.TempDir()
-	
+
 	// Setup store and recorder
 	s, err := store.New(t.TempDir())
 	if err != nil {

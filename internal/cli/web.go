@@ -208,10 +208,10 @@ func runWeb(cmd *cobra.Command, args []string) error {
 
 	// Build the full URL
 	url := fmt.Sprintf("%s://%s", srv.Scheme(), srv.Addr())
-	
+
 	// Print clickable URL - use OSC 8 hyperlink escape sequences for terminals that support it
 	fmt.Printf("\033]8;;%s\033\\%s\033]8;;\033\\\n", url, url)
-	
+
 	if len(servedProjectIDs) > 0 {
 		label := "projects"
 		if len(servedProjectIDs) == 1 {

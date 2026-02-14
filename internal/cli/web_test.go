@@ -71,7 +71,7 @@ func TestOpenBrowserFunctionExists(t *testing.T) {
 			t.Errorf("openBrowser function panicked: %v", r)
 		}
 	}()
-	
+
 	_ = openBrowser("http://localhost:8080")
 }
 
@@ -95,7 +95,7 @@ func TestGenerateToken(t *testing.T) {
 func TestPortInUseErrorDetection(t *testing.T) {
 	// Test that we can detect net.OpError which indicates port in use
 	// This simulates the error that would come from net.Listen when port is already in use
-	
+
 	// Create a mock net.OpError
 	mockOpError := &net.OpError{
 		Op:     "listen",
@@ -104,13 +104,13 @@ func TestPortInUseErrorDetection(t *testing.T) {
 		Addr:   nil,
 		Err:    fmt.Errorf("address already in use"),
 	}
-	
+
 	// Test that errors.As can detect this error type
 	var opErr *net.OpError
 	if !errors.As(mockOpError, &opErr) {
 		t.Error("Failed to detect net.OpError with errors.As")
 	}
-	
+
 	if opErr == nil {
 		t.Error("Expected opErr to be non-nil after errors.As")
 	}

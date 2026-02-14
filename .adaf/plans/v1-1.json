@@ -76,7 +76,7 @@
       "id": "p9-adaf-scope-split",
       "title": "Store: .adaf Scope Split",
       "description": "Implement the .adaf directory scope split proposed in issue #38. (1) Separate structural state (plans, issues, decisions, docs, config.json) from operational telemetry (sessions, recordings, loops, spawns, waits, interrupts). (2) Move operational data under .adaf/local/ which is gitignored. (3) Keep structural artifacts in .adaf/ root for committing - cloned repos should carry plans/issues/docs context. (4) Add auto-commit option: CLI auto-commits structural mutations (issue create, plan create, etc.) with standardized message prefix 'adaf: create issue #NN'. Make this configurable (on by default, can disable). (5) Ensure all store operations work correctly with the new layout. (6) Migration: on first run, detect old layout and move files to new structure.",
-      "status": "not_started",
+      "status": "complete",
       "priority": 3,
       "depends_on": [
         "p7-test-coverage"
@@ -104,5 +104,5 @@
     }
   ],
   "created": "2026-02-14T11:22:27.60226705Z",
-  "updated": "2026-02-14T14:14:11.423335893Z"
+  "updated": "2026-02-14T14:32:19.618572555Z"
 }

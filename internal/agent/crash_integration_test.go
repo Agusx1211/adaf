@@ -22,7 +22,7 @@ func TestGenericAgent_IntegrationProcessCrash(t *testing.T) {
 	}
 
 	tmp := t.TempDir()
-	
+
 	// Create a script that simulates an agent crash
 	script := filepath.Join(tmp, "crash_agent.sh")
 	scriptContent := `#!/usr/bin/env sh
@@ -72,7 +72,7 @@ func TestGenericAgent_IntegrationContextCancellation(t *testing.T) {
 	}
 
 	tmp := t.TempDir()
-	
+
 	// Create a script that simulates a long-running agent
 	script := filepath.Join(tmp, "long_running_agent.sh")
 	scriptContent := `#!/usr/bin/env sh
@@ -123,7 +123,7 @@ func TestGenericAgent_IntegrationOrphanCleanup(t *testing.T) {
 	}
 
 	tmp := t.TempDir()
-	
+
 	// Create a script that spawns orphan processes like a real agent might
 	script := filepath.Join(tmp, "orphan_spawning_agent.sh")
 	scriptContent := `#!/usr/bin/env sh

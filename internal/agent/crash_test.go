@@ -20,7 +20,7 @@ func TestGenericAgent_ProcessCrash(t *testing.T) {
 	}
 
 	tmp := t.TempDir()
-	
+
 	// Create a script that crashes after writing some output
 	script := filepath.Join(tmp, "crash.sh")
 	scriptContent := `#!/usr/bin/env sh
@@ -59,7 +59,7 @@ kill -9 $$
 
 	// Verify that the process didn't hang and returned cleanly
 	// (the test should complete within a reasonable time)
-	
+
 	// Verify that we captured some output before the crash
 	if !strings.Contains(result.Output, "starting process") {
 		t.Errorf("Expected output to contain 'starting process', got: %q", result.Output)
@@ -73,7 +73,7 @@ func TestGenericAgent_ContextCancellation(t *testing.T) {
 	}
 
 	tmp := t.TempDir()
-	
+
 	// Create a script that runs forever
 	script := filepath.Join(tmp, "forever.sh")
 	scriptContent := `#!/usr/bin/env sh
@@ -126,7 +126,7 @@ func TestGenericAgent_StderrCapture(t *testing.T) {
 	}
 
 	tmp := t.TempDir()
-	
+
 	// Create a script that writes to stderr and exits with error
 	script := filepath.Join(tmp, "stderr.sh")
 	scriptContent := `#!/usr/bin/env sh

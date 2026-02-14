@@ -402,9 +402,6 @@ func mustWireMsg(t *testing.T, msgType string, payload any) WireMsg {
 	return *msg
 }
 
-
-
-
 func TestStreamEventsReconnection(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "adaf-reconnect-test-*")
 	if err != nil {
@@ -414,7 +411,7 @@ func TestStreamEventsReconnection(t *testing.T) {
 	socketPath := filepath.Join(tmpDir, "session.sock")
 
 	meta := WireMeta{SessionID: 123}
-	
+
 	// Track connections
 	var connCount atomic.Int32
 
@@ -443,7 +440,7 @@ func TestStreamEventsReconnection(t *testing.T) {
 			}
 			ws.Write(ctx, websocket.MessageText, msgLine)
 			// Abrupt close
-			return 
+			return
 		} else {
 			// Second connection: send another message and then close normally
 			msgLine, _ := EncodeMsg(MsgRaw, WireRaw{Data: "second"})
@@ -465,7 +462,7 @@ func TestStreamEventsReconnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
-	
+
 	go server.Serve(listener)
 	defer server.Close()
 
@@ -483,7 +480,7 @@ func TestStreamEventsReconnection(t *testing.T) {
 
 	var got []string
 	timeout := time.After(10 * time.Second)
-	
+
 loop:
 	for {
 		select {
