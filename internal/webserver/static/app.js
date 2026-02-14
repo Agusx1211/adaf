@@ -1568,16 +1568,20 @@
     var outputTokens = metrics && typeof metrics.outputTokens === 'number' ? metrics.outputTokens : 0;
     var cost = metrics && typeof metrics.costUSD === 'number' ? metrics.costUSD : 0;
     var turns = metrics && typeof metrics.turns === 'number' ? metrics.turns : 0;
+    var totalTokens = inputTokens + outputTokens;
 
     return '' +
-      metricCard('Input Tokens', formatNumber(inputTokens)) +
-      metricCard('Output Tokens', formatNumber(outputTokens)) +
-      metricCard('Cost (USD)', cost > 0 ? ('$' + cost.toFixed(4)) : '$0.0000') +
-      metricCard('Turns', formatNumber(turns));
+      metricCard('Input Tokens', formatNumber(inputTokens), 'metric-input') +
+      metricCard('Output Tokens', formatNumber(outputTokens), 'metric-output') +
+      metricCard('Total Tokens', formatNumber(totalTokens), 'metric-total') +
+      metricCard('Cost (USD)', cost > 0 ? ('$' + cost.toFixed(4)) : '$0.0000', 'metric-cost') +
+      metricCard('Turns', formatNumber(turns), 'metric-turns') +
+      metricCard('Avg Tokens/Turn', turns > 0 ? formatNumber(Math.round(totalTokens / turns)) : '-', 'metric-avg');
   }
 
-  function metricCard(label, value) {
-    return '<div class="metric-card"><div class="label">' + escapeHTML(label) + '</div><div class="value">' + escapeHTML(String(value)) + '</div></div>';
+  function metricCard(label, value, extraClass) {
+    var cls = 'metric-card' + (extraClass ? ' ' + extraClass : '');
+    return '<div class="' + cls + '"><div class="label">' + escapeHTML(label) + '</div><div class="value">' + escapeHTML(String(value)) + '</div></div>';
   }
 
   function renderLoopProgress(loop) {
@@ -1597,26 +1601,147 @@
     var list = arrayOrEmpty(spawns);
     if (!list.length) return '';
 
-    return '' +
-      '<div class="spawn-grid">' + list.map(function (spawn) {
-        return '' +
-          '<div class="spawn-card">' +
-            '<div><strong>Spawn #' + escapeHTML(String(spawn.id)) + '</strong></div>' +
-            '<div class="meta">Agent/Profile: ' + escapeHTML(spawn.profile || 'unknown') + '</div>' +
-            '<div class="meta">Role: ' + escapeHTML(spawn.role || 'none') + '</div>' +
-            '<div class="filters">' + createPill(spawn.status || 'unknown', spawn.status || 'unknown') + '</div>' +
-          '</div>';
-      }).join('') + '</div>';
+    var roots = [];
+    var childMap = {};
+    list.forEach(function (spawn) {
+      var parentID = spawn.parent_id || spawn.parent_spawn_id || 0;
+      if (!parentID) {
+        roots.push(spawn);
+      } else {
+        if (!childMap[parentID]) childMap[parentID] = [];
+        childMap[parentID].push(spawn);
+      }
+    });
+
+    if (!roots.length) roots = list;
+
+    function renderSpawnNode(spawn, depth) {
+      var children = childMap[spawn.id] || [];
+      var statusNorm = normalizeStatus(spawn.status || 'unknown');
+      var statusIcon = statusNorm === 'running' || statusNorm === 'active' ? '\u{1F7E2}' :
+                       statusNorm === 'complete' || statusNorm === 'done' ? '\u{2705}' :
+                       statusNorm === 'error' ? '\u{1F534}' : '\u{26AA}';
+
+      var html = '' +
+        '<div class="spawn-tree-node" style="margin-left:' + (depth * 1.2) + 'rem">' +
+          '<details class="spawn-details"' + (children.length || spawn.objective ? '' : ' open') + '>' +
+            '<summary class="spawn-summary">' +
+              '<span class="spawn-status-icon">' + statusIcon + '</span>' +
+              '<strong>Spawn #' + escapeHTML(String(spawn.id)) + '</strong>' +
+              '<span class="meta"> ' + escapeHTML(spawn.profile || spawn.agent || 'unknown') + '</span>' +
+              (spawn.role ? '<span class="spawn-role-tag">' + escapeHTML(spawn.role) + '</span>' : '') +
+              '<span class="pill status-' + statusNorm + '" style="margin-left:0.4rem"><span class="dot"></span>' + escapeHTML(spawn.status || 'unknown') + '</span>' +
+            '</summary>' +
+            '<div class="spawn-tree-body">' +
+              (spawn.objective ? '<div class="spawn-objective">' + escapeHTML(String(spawn.objective).slice(0, 200)) + '</div>' : '') +
+              (spawn.description ? '<div class="spawn-description meta">' + escapeHTML(String(spawn.description).slice(0, 300)) + '</div>' : '') +
+            '</div>' +
+          '</details>' +
+          (children.length ? children.map(function (child) { return renderSpawnNode(child, depth + 1); }).join('') : '') +
+        '</div>';
+
+      return html;
+    }
+
+    return '<div class="spawn-tree">' +
+      '<h4 class="spawn-tree-title">Spawn Tree (' + list.length + ')</h4>' +
+      roots.map(function (root) { return renderSpawnNode(root, 0); }).join('') +
+    '</div>';
+  }
+
+  var TOOL_ICONS = {
+    Read: '\u{1F4C4}', Write: '\u{1F4DD}', Edit: '\u{270F}\uFE0F',
+    Bash: '\u{1F4BB}', Grep: '\u{1F50D}', Glob: '\u{1F4C2}',
+    WebFetch: '\u{1F310}', WebSearch: '\u{1F50E}', Task: '\u{1F9E9}',
+    TodoWrite: '\u{2705}', NotebookEdit: '\u{1F4D3}',
+    AskUserQuestion: '\u{2753}', Skill: '\u{26A1}',
+    shell: '\u{1F4BB}', command_execution: '\u{1F4BB}'
+  };
+
+  function toolIcon(name) {
+    return TOOL_ICONS[name] || '\u{1F527}';
+  }
+
+  function isDiffContent(text) {
+    if (typeof text !== 'string' || text.length < 10) return false;
+    var lines = text.split('\n');
+    var diffIndicators = 0;
+    for (var i = 0; i < Math.min(lines.length, 20); i++) {
+      if (/^[+-]{3}\s/.test(lines[i]) || /^@@\s/.test(lines[i]) || /^diff\s--git/.test(lines[i])) diffIndicators++;
+    }
+    return diffIndicators >= 2;
+  }
+
+  function renderDiff(text) {
+    var lines = String(text).split('\n');
+    return '<div class="diff-block">' + lines.map(function (line) {
+      var cls = 'diff-line';
+      if (/^@@/.test(line)) cls += ' diff-hunk';
+      else if (/^\+/.test(line)) cls += ' diff-add';
+      else if (/^-/.test(line)) cls += ' diff-del';
+      else if (/^diff\s--git/.test(line) || /^index\s/.test(line)) cls += ' diff-meta';
+      return '<div class="' + cls + '">' + escapeHTML(line) + '</div>';
+    }).join('') + '</div>';
+  }
+
+  function renderToolOutput(output) {
+    if (output == null || output === '') {
+      return '<div class="meta tool-output-pending">Waiting for tool output...</div>';
+    }
+    var text = typeof output === 'object' ? safeJSONString(output) : String(output);
+    if (isDiffContent(text)) {
+      return '<div class="tool-output-label">Output</div>' + renderDiff(text);
+    }
+    if (typeof output === 'object') {
+      return '<div class="tool-output-label">Output</div><pre class="code-block">' + highlightJSON(output) + '</pre>';
+    }
+    return '<div class="tool-output-label">Output</div><pre class="code-block">' + escapeHTML(text) + '</pre>';
+  }
+
+  function renderToolInput(toolName, input) {
+    if (input == null) return '';
+    var inputObj = typeof input === 'object' ? input : {};
+
+    if (toolName === 'Edit' && inputObj.file_path) {
+      var parts = [];
+      parts.push('<div class="tool-file-path">' + escapeHTML(inputObj.file_path) + '</div>');
+      if (inputObj.old_string) {
+        parts.push('<div class="tool-diff-inline">');
+        parts.push('<div class="diff-block"><div class="diff-line diff-del">' + escapeHTML(inputObj.old_string).replace(/\n/g, '</div><div class="diff-line diff-del">') + '</div></div>');
+        if (inputObj.new_string) {
+          parts.push('<div class="diff-block"><div class="diff-line diff-add">' + escapeHTML(inputObj.new_string).replace(/\n/g, '</div><div class="diff-line diff-add">') + '</div></div>');
+        }
+        parts.push('</div>');
+      }
+      return parts.join('');
+    }
+
+    if ((toolName === 'Read' || toolName === 'Write' || toolName === 'Glob' || toolName === 'Grep') && inputObj.file_path) {
+      return '<div class="tool-file-path">' + escapeHTML(inputObj.file_path) + '</div>' +
+        '<pre class="code-block">' + highlightJSON(inputObj) + '</pre>';
+    }
+
+    if (toolName === 'Bash' && inputObj.command) {
+      var cmdHTML = escapeHTML(inputObj.command);
+      if (typeof hljs !== 'undefined') {
+        try { cmdHTML = hljs.highlight(inputObj.command, { language: 'bash' }).value; } catch (_) {}
+      }
+      return '<pre class="code-block hljs"><code>' + cmdHTML + '</code></pre>';
+    }
+
+    return '<pre class="code-block">' + highlightJSON(inputObj) + '</pre>';
   }
 
   function renderSessionEvents(entries) {
     if (!entries || !entries.length) {
       return '<p class="empty">Waiting for stream events...</p>';
     }
-    return entries.map(renderSessionEventCard).join('');
+    return entries.map(function (entry, index) {
+      return renderSessionEventCard(entry, index, entries);
+    }).join('');
   }
 
-  function renderSessionEventCard(entry) {
+  function renderSessionEventCard(entry, index, entries) {
     var kind = entry.kind || 'system';
     var eventClass = 'event-card event-' + normalizeStatus(kind.replace(/_use$/, '').replace(/_result$/, ''));
     if (kind === 'tool_use') eventClass = 'event-card event-tool';
@@ -1627,28 +1752,38 @@
     if (kind === 'error') eventClass = 'event-card event-error';
     if (kind === 'raw' || kind === 'system') eventClass = 'event-card event-raw';
 
+    var turnBoundary = '';
+    if (kind === 'result' && entry.label === 'result') {
+      var turnNum = 0;
+      for (var t = 0; t <= index; t++) {
+        if (entries[t] && entries[t].kind === 'result' && entries[t].label === 'result') turnNum++;
+      }
+      turnBoundary = '<div class="turn-boundary"><span class="turn-boundary-line"></span><span class="turn-boundary-label">Turn ' + turnNum + ' complete</span><span class="turn-boundary-line"></span></div>';
+    }
+    if (kind === 'loop' && entry.label === 'loop step start') {
+      turnBoundary = '<div class="turn-boundary turn-boundary-loop"><span class="turn-boundary-line"></span><span class="turn-boundary-label">' + escapeHTML(entry.text || 'Loop step') + '</span><span class="turn-boundary-line"></span></div>';
+    }
+
     var bodyHTML = '';
 
     if (kind === 'assistant') {
       bodyHTML = '<div class="markdown">' + renderMarkdown(entry.text || '') + '</div>';
     } else if (kind === 'tool_use') {
-      var inputHTML = '<pre class="code-block">' + highlightJSON(entry.input == null ? {} : entry.input) + '</pre>';
-      var outputHTML = '';
-      if (entry.output != null && entry.output !== '') {
-        if (typeof entry.output === 'object') {
-          outputHTML = '<div class="meta">Output</div><pre class="code-block">' + highlightJSON(entry.output) + '</pre>';
-        } else {
-          outputHTML = '<div class="meta">Output</div><pre class="code-block">' + escapeHTML(String(entry.output)) + '</pre>';
-        }
-      } else {
-        outputHTML = '<div class="meta">Waiting for tool output.</div>';
-      }
+      var toolName = entry.name || 'tool';
+      var icon = toolIcon(toolName);
+      var defaultOpen = (toolName === 'Edit' || toolName === 'Write') ? ' open' : '';
 
       bodyHTML = '' +
-        '<details class="tool-section" open>' +
-          '<summary>' + escapeHTML(entry.name || 'tool') + '</summary>' +
+        '<details class="tool-section"' + defaultOpen + '>' +
+          '<summary class="tool-summary">' +
+            '<span class="tool-icon">' + icon + '</span>' +
+            '<span class="tool-name">' + escapeHTML(toolName) + '</span>' +
+            (entry.output != null && entry.output !== '' ? '<span class="tool-done-badge">done</span>' : '<span class="tool-pending-badge">running</span>') +
+          '</summary>' +
           '<div class="tool-body">' +
-            '<div class="meta">Input</div>' + inputHTML + outputHTML +
+            '<div class="tool-input-label">Input</div>' +
+            renderToolInput(toolName, entry.input) +
+            renderToolOutput(entry.output) +
           '</div>' +
         '</details>';
     } else if (kind === 'raw') {
@@ -1662,7 +1797,7 @@
       bodyHTML = '<pre class="code-block">' + escapeHTML(entry.text || safeJSONString(entry.data)) + '</pre>';
     }
 
-    return '' +
+    return turnBoundary +
       '<article class="' + eventClass + '">' +
         '<div class="event-header"><span>' + escapeHTML(entry.label || entry.kind || 'event') + '</span><span>' + escapeHTML(formatClock(entry.ts)) + '</span></div>' +
         '<div class="event-body">' + bodyHTML + '</div>' +
@@ -3204,105 +3339,63 @@
     return '<span class="pill status-' + normalized + '"><span class="dot"></span>' + escapeHTML(label == null ? status : label) + '</span>';
   }
 
+  var markedRenderer = (function () {
+    if (typeof marked === 'undefined') return null;
+
+    marked.setOptions({
+      breaks: true,
+      gfm: true,
+      highlight: function (code, lang) {
+        if (typeof hljs !== 'undefined' && lang && hljs.getLanguage(lang)) {
+          try { return hljs.highlight(code, { language: lang }).value; } catch (_) {}
+        }
+        if (typeof hljs !== 'undefined') {
+          try { return hljs.highlightAuto(code).value; } catch (_) {}
+        }
+        return escapeHTML(code);
+      }
+    });
+
+    var renderer = new marked.Renderer();
+
+    renderer.link = function (href, title, text) {
+      var url = sanitizeURL(typeof href === 'object' ? href.href : href);
+      var linkText = typeof href === 'object' ? href.text : text;
+      return '<a href="' + escapeHTML(url) + '" target="_blank" rel="noopener noreferrer">' + (linkText || url) + '</a>';
+    };
+
+    renderer.code = function (code, infostring) {
+      var text = typeof code === 'object' ? code.text : code;
+      var lang = typeof code === 'object' ? code.lang : infostring;
+      lang = String(lang || '').trim();
+
+      var highlighted;
+      if (typeof hljs !== 'undefined' && lang && hljs.getLanguage(lang)) {
+        try { highlighted = hljs.highlight(text, { language: lang }).value; } catch (_) { highlighted = escapeHTML(text); }
+      } else if (typeof hljs !== 'undefined') {
+        try { highlighted = hljs.highlightAuto(text).value; } catch (_) { highlighted = escapeHTML(text); }
+      } else {
+        highlighted = escapeHTML(text);
+      }
+
+      var langLabel = lang ? '<span class="code-lang-label">' + escapeHTML(lang) + '</span>' : '';
+      return '<div class="code-block-wrapper">' + langLabel + '<pre class="hljs"><code>' + highlighted + '</code></pre></div>';
+    };
+
+    return renderer;
+  })();
+
   function renderMarkdown(text) {
-    var source = String(text == null ? '' : text).replace(/\r\n?/g, '\n');
+    var source = String(text == null ? '' : text);
     if (!source.trim()) return '';
 
-    var codeBlocks = [];
-    source = source.replace(/```([\s\S]*?)```/g, function (_match, code) {
-      var idx = codeBlocks.length;
-      codeBlocks.push('<pre><code>' + escapeHTML(code) + '</code></pre>');
-      return '@@CODEBLOCK_' + idx + '@@';
-    });
+    if (markedRenderer) {
+      try {
+        return marked.parse(source, { renderer: markedRenderer });
+      } catch (_) {}
+    }
 
-    var lines = source.split('\n');
-    var out = [];
-    var inList = false;
-
-    lines.forEach(function (line) {
-      var trimmed = line.trim();
-
-      if (!trimmed) {
-        if (inList) {
-          out.push('</ul>');
-          inList = false;
-        }
-        return;
-      }
-
-      var codeToken = trimmed.match(/^@@CODEBLOCK_(\d+)@@$/);
-      if (codeToken) {
-        if (inList) {
-          out.push('</ul>');
-          inList = false;
-        }
-        out.push('@@CODEBLOCK_' + codeToken[1] + '@@');
-        return;
-      }
-
-      var h2 = trimmed.match(/^##\s+(.+)$/);
-      if (h2) {
-        if (inList) {
-          out.push('</ul>');
-          inList = false;
-        }
-        out.push('<h2>' + renderInlineMarkdown(h2[1]) + '</h2>');
-        return;
-      }
-
-      var h3 = trimmed.match(/^###\s+(.+)$/);
-      if (h3) {
-        if (inList) {
-          out.push('</ul>');
-          inList = false;
-        }
-        out.push('<h3>' + renderInlineMarkdown(h3[1]) + '</h3>');
-        return;
-      }
-
-      var bullet = trimmed.match(/^-\s+(.+)$/);
-      if (bullet) {
-        if (!inList) {
-          out.push('<ul>');
-          inList = true;
-        }
-        out.push('<li>' + renderInlineMarkdown(bullet[1]) + '</li>');
-        return;
-      }
-
-      if (inList) {
-        out.push('</ul>');
-        inList = false;
-      }
-
-      out.push('<p>' + renderInlineMarkdown(trimmed) + '</p>');
-    });
-
-    if (inList) out.push('</ul>');
-
-    var html = out.join('');
-
-    codeBlocks.forEach(function (codeHTML, index) {
-      html = html.replace('@@CODEBLOCK_' + index + '@@', codeHTML);
-    });
-
-    return html;
-  }
-
-  function renderInlineMarkdown(text) {
-    var safe = escapeHTML(text || '');
-
-    safe = safe.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-    safe = safe.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_match, label, url) {
-      var href = sanitizeURL(url);
-      return '<a href="' + escapeHTML(href) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>';
-    });
-
-    safe = safe.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    safe = safe.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-
-    return safe;
+    return '<p>' + escapeHTML(source) + '</p>';
   }
 
   function sanitizeURL(raw) {

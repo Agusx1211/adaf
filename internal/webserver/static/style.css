@@ -486,7 +486,7 @@ textarea {
 
 .session-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 0.55rem;
   margin-bottom: 0.65rem;
 }
@@ -896,7 +896,7 @@ textarea {
   }
 
   .session-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .project-card-stats {
@@ -911,4 +911,301 @@ textarea {
     top: 4vh;
     max-height: 90vh;
   }
+}
+
+/* --- Rich session rendering --- */
+
+/* Turn boundaries */
+.turn-boundary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.85rem 0;
+}
+
+.turn-boundary-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.turn-boundary-label {
+  font: 600 0.72rem/1 "IBM Plex Mono", "SFMono-Regular", monospace;
+  color: var(--muted);
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.turn-boundary-loop .turn-boundary-line {
+  background: rgba(203, 166, 247, 0.4);
+}
+
+.turn-boundary-loop .turn-boundary-label {
+  color: #cba6f7;
+}
+
+/* Tool cards enhanced */
+.tool-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.55rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tool-icon {
+  font-size: 0.95rem;
+  flex-shrink: 0;
+}
+
+.tool-name {
+  font-weight: 600;
+  color: var(--accent-2);
+}
+
+.tool-done-badge {
+  margin-left: auto;
+  padding: 0.08rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(166, 227, 161, 0.15);
+  border: 1px solid rgba(166, 227, 161, 0.35);
+  color: var(--success);
+  font: 600 0.65rem/1.3 "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.tool-pending-badge {
+  margin-left: auto;
+  padding: 0.08rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(249, 226, 175, 0.12);
+  border: 1px solid rgba(249, 226, 175, 0.3);
+  color: var(--gold);
+  font: 600 0.65rem/1.3 "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.tool-input-label,
+.tool-output-label {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0.4rem 0 0.25rem;
+}
+
+.tool-output-pending {
+  font-style: italic;
+}
+
+.tool-file-path {
+  padding: 0.3rem 0.5rem;
+  margin-bottom: 0.35rem;
+  border-radius: 0.4rem;
+  background: rgba(137, 180, 250, 0.08);
+  border: 1px solid rgba(137, 180, 250, 0.2);
+  color: var(--accent);
+  font: 0.8rem/1.4 "IBM Plex Mono", "SFMono-Regular", monospace;
+  word-break: break-all;
+}
+
+/* Diff rendering */
+.diff-block {
+  margin: 0.3rem 0;
+  border-radius: 0.5rem;
+  border: 1px solid #3a3d5a;
+  background: #11111b;
+  overflow: auto;
+  max-height: 320px;
+  font: 12px/1.5 "IBM Plex Mono", "SFMono-Regular", monospace;
+}
+
+.diff-line {
+  padding: 0 0.55rem;
+  white-space: pre;
+  min-height: 1.5em;
+}
+
+.diff-add {
+  background: rgba(166, 227, 161, 0.1);
+  color: #a6e3a1;
+}
+
+.diff-del {
+  background: rgba(243, 139, 168, 0.1);
+  color: #f38ba8;
+}
+
+.diff-hunk {
+  background: rgba(137, 180, 250, 0.08);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.diff-meta {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.tool-diff-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+/* Code block wrapper with language label */
+.code-block-wrapper {
+  position: relative;
+  margin: 0.55rem 0;
+}
+
+.code-lang-label {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.55rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 0.3rem;
+  background: rgba(137, 180, 250, 0.12);
+  color: var(--accent);
+  font: 600 0.65rem/1.3 "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.code-block-wrapper pre.hljs {
+  margin: 0;
+  padding: 0.65rem;
+  border-radius: 0.6rem;
+  border: 1px solid #3a3d5a;
+  background: #11111b;
+  overflow: auto;
+  max-height: 400px;
+}
+
+.code-block-wrapper pre.hljs code {
+  font: 12px/1.5 "IBM Plex Mono", "SFMono-Regular", monospace;
+}
+
+/* Markdown rendered content enhancements */
+.markdown pre {
+  position: relative;
+}
+
+.markdown table {
+  border-collapse: collapse;
+  margin: 0.55rem 0;
+  font-size: 0.85rem;
+}
+
+.markdown th,
+.markdown td {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid #3a3d5a;
+  text-align: left;
+}
+
+.markdown th {
+  background: var(--panel-strong);
+  font-weight: 600;
+}
+
+.markdown blockquote {
+  margin: 0.55rem 0;
+  padding: 0.35rem 0.75rem;
+  border-left: 3px solid var(--accent);
+  color: var(--muted);
+  background: rgba(137, 180, 250, 0.05);
+  border-radius: 0 0.4rem 0.4rem 0;
+}
+
+.markdown hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.75rem 0;
+}
+
+.markdown img {
+  max-width: 100%;
+  border-radius: 0.5rem;
+}
+
+/* Spawn tree */
+.spawn-tree {
+  margin-bottom: 0.7rem;
+}
+
+.spawn-tree-title {
+  margin: 0 0 0.45rem;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.spawn-tree-node {
+  margin-bottom: 0.3rem;
+}
+
+.spawn-details {
+  border: 1px solid #3a3d5a;
+  border-radius: 0.5rem;
+  background: var(--panel-soft);
+}
+
+.spawn-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.55rem;
+  cursor: pointer;
+  font-size: 0.84rem;
+  user-select: none;
+}
+
+.spawn-summary strong {
+  margin-right: 0.15rem;
+}
+
+.spawn-status-icon {
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.spawn-role-tag {
+  padding: 0.05rem 0.35rem;
+  border-radius: 0.3rem;
+  background: rgba(203, 166, 247, 0.12);
+  border: 1px solid rgba(203, 166, 247, 0.3);
+  color: #cba6f7;
+  font: 600 0.65rem/1.3 "IBM Plex Mono", monospace;
+}
+
+.spawn-tree-body {
+  padding: 0.45rem 0.55rem;
+  border-top: 1px solid #3a3d5a;
+}
+
+.spawn-objective {
+  font-size: 0.82rem;
+  color: var(--text);
+  margin-bottom: 0.25rem;
+}
+
+.spawn-description {
+  font-size: 0.78rem;
+}
+
+/* Metric card color accents */
+.metric-cost .value {
+  color: var(--success);
+}
+
+.metric-turns .value {
+  color: var(--accent);
+}
+
+/* Event feed auto-height */
+.events-feed {
+  max-height: 60vh;
 }
