@@ -79,7 +79,14 @@ func (s *Store) CreateIssue(issue *Issue) error {
 	if issue.Status == "" {
 		issue.Status = "open"
 	}
-	return s.writeJSON(filepath.Join(s.root, "issues", fmt.Sprintf("%d.json", issue.ID)), issue)
+	filename := fmt.Sprintf("%d.json", issue.ID)
+	if err := s.writeJSON(filepath.Join(s.root, "issues", filename), issue); err != nil {
+		return err
+	}
+	
+	// Auto-commit the created issue
+	s.AutoCommit([]string{"issues/" + filename}, fmt.Sprintf("adaf: create issue #%d: %s", issue.ID, issue.Title))
+	return nil
 }
 
 func (s *Store) GetIssue(id int) (*Issue, error) {
@@ -92,19 +99,30 @@ func (s *Store) GetIssue(id int) (*Issue, error) {
 
 func (s *Store) UpdateIssue(issue *Issue) error {
 	issue.Updated = time.Now().UTC()
-	return s.writeJSON(filepath.Join(s.root, "issues", fmt.Sprintf("%d.json", issue.ID)), issue)
+	filename := fmt.Sprintf("%d.json", issue.ID)
+	if err := s.writeJSON(filepath.Join(s.root, "issues", filename), issue); err != nil {
+		return err
+	}
+	
+	// Auto-commit the updated issue
+	s.AutoCommit([]string{"issues/" + filename}, fmt.Sprintf("adaf: update issue #%d", issue.ID))
+	return nil
 }
 
 func (s *Store) DeleteIssue(id int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	path := filepath.Join(s.root, "issues", fmt.Sprintf("%d.json", id))
+	filename := fmt.Sprintf("%d.json", id)
+	path := filepath.Join(s.root, "issues", filename)
 	if err := os.Remove(path); err != nil {
 		if os.IsNotExist(err) {
 			return err
 		}
 		return fmt.Errorf("deleting issue %d: %w", id, err)
 	}
+	
+	// Auto-commit the deletion
+	s.AutoCommit([]string{"issues/" + filename}, fmt.Sprintf("adaf: delete issue #%d", id))
 	return nil
 }

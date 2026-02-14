@@ -78,7 +78,14 @@ func (s *Store) CreateDoc(doc *Doc) error {
 	}
 	doc.Created = time.Now().UTC()
 	doc.Updated = doc.Created
-	return s.writeJSON(filepath.Join(s.root, "docs", doc.ID+".json"), doc)
+	filename := doc.ID + ".json"
+	if err := s.writeJSON(filepath.Join(s.root, "docs", filename), doc); err != nil {
+		return err
+	}
+	
+	// Auto-commit the created doc
+	s.AutoCommit([]string{"docs/" + filename}, fmt.Sprintf("adaf: create doc %s", doc.ID))
+	return nil
 }
 
 func (s *Store) GetDoc(id string) (*Doc, error) {
@@ -91,7 +98,14 @@ func (s *Store) GetDoc(id string) (*Doc, error) {
 
 func (s *Store) UpdateDoc(doc *Doc) error {
 	doc.Updated = time.Now().UTC()
-	return s.writeJSON(filepath.Join(s.root, "docs", doc.ID+".json"), doc)
+	filename := doc.ID + ".json"
+	if err := s.writeJSON(filepath.Join(s.root, "docs", filename), doc); err != nil {
+		return err
+	}
+	
+	// Auto-commit the updated doc
+	s.AutoCommit([]string{"docs/" + filename}, fmt.Sprintf("adaf: update doc %s", doc.ID))
+	return nil
 }
 
 func (s *Store) DeleteDoc(id string) error {
