@@ -28,6 +28,8 @@ func TestUpdateByStateDispatch(t *testing.T) {
 
 	states := []appState{
 		stateSelector,
+		stateAskPrompt,
+		stateAskConfig,
 		statePlanMenu,
 		statePlanCreateID,
 		statePlanCreateTitle,
@@ -100,9 +102,17 @@ func TestStateTransitions(t *testing.T) {
 	}{
 		// Selector transitions
 		{"selector n opens profile name", stateSelector, "n", nil, stateProfileName},
+		{"selector a opens ask prompt", stateSelector, "a", nil, stateAskPrompt},
 		{"selector l opens loop name", stateSelector, "l", nil, stateLoopName},
 		{"selector S opens settings", stateSelector, "S", nil, stateSettings},
 		{"selector p opens plan menu", stateSelector, "p", nil, statePlanMenu},
+
+		// Ask wizard navigation
+		{"ask prompt ctrl+s goes to config", stateAskPrompt, "ctrl+s", func(m *AppModel) {
+			m.askWiz.PromptText = "fix the failing tests"
+		}, stateAskConfig},
+		{"ask prompt esc returns to selector", stateAskPrompt, "esc", nil, stateSelector},
+		{"ask config esc returns to prompt", stateAskConfig, "esc", nil, stateAskPrompt},
 
 		// Profile wizard forward navigation
 		{"profile name enter goes to agent", stateProfileName, "enter", func(m *AppModel) { m.profileWiz.NameInput = "test" }, stateProfileAgent},
@@ -224,6 +234,44 @@ func TestStateTransitions(t *testing.T) {
 				t.Errorf("got state %v, want %v", got.state, tt.wantState)
 			}
 		})
+	}
+}
+
+func TestStartAskWizardInitializesState(t *testing.T) {
+	t.Setenv("ADAF_TURN_ID", "")
+	t.Setenv("ADAF_SESSION_ID", "")
+	t.Setenv("ADAF_AGENT", "")
+	t.Setenv("HOME", t.TempDir())
+
+	tmp := t.TempDir()
+	s, err := store.New(tmp)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+
+	m := NewApp(s)
+	m.askWiz.Count = 0
+	m.askWiz.ProfileSel = 42
+	m.askWiz.Profiles = nil
+	m.askWiz.Msg = "stale"
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	got := updated.(AppModel)
+
+	if got.state != stateAskPrompt {
+		t.Fatalf("state = %v, want %v", got.state, stateAskPrompt)
+	}
+	if got.askWiz.Count != 1 {
+		t.Fatalf("ask count = %d, want 1", got.askWiz.Count)
+	}
+	if len(got.askWiz.Profiles) == 0 {
+		t.Fatalf("ask profiles is empty; expected at least one profile")
+	}
+	if got.askWiz.ProfileSel < 0 || got.askWiz.ProfileSel >= len(got.askWiz.Profiles) {
+		t.Fatalf("ask profile selection = %d out of bounds for len=%d", got.askWiz.ProfileSel, len(got.askWiz.Profiles))
+	}
+	if got.askWiz.Msg != "" {
+		t.Fatalf("ask message = %q, want empty", got.askWiz.Msg)
 	}
 }
 

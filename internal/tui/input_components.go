@@ -178,6 +178,12 @@ func (m *AppModel) initInputEditorForState() tea.Cmd {
 		if ok {
 			return m.ensureTextarea(key, m.settings.RuleBodyInput)
 		}
+	case stateAskPrompt:
+		return m.ensureTextarea("ask-prompt", m.askWiz.PromptText)
+	case stateAskConfig:
+		if m.askWiz.ConfigSel == askConfigFieldModel {
+			return m.ensureTextInput("ask-model-override", m.askWiz.ModelOverride, 0)
+		}
 	}
 	return nil
 }

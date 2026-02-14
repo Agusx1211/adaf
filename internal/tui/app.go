@@ -25,6 +25,8 @@ type appState int
 const (
 	stateSelector appState = iota
 	stateRunning
+	stateAskPrompt                // standalone ask: compose prompt
+	stateAskConfig                // standalone ask: profile/count/model config
 	statePlanMenu                 // manage plans (switch/create/status/delete)
 	statePlanCreateID             // text input for new plan ID
 	statePlanCreateTitle          // text input for new plan title
@@ -98,6 +100,9 @@ type AppModel struct {
 
 	// Loop creation/editing wizard state.
 	loopWiz LoopWizardState
+
+	// Standalone ask wizard state.
+	askWiz AskWizardState
 
 	// Confirm delete state.
 	confirmDeleteIdx int // index of profile/loop pending deletion
@@ -263,6 +268,10 @@ func (m AppModel) updateByState(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSelector(msg)
 	case stateRunning:
 		return m.updateRunning(msg)
+	case stateAskPrompt:
+		return m.updateAskPrompt(msg)
+	case stateAskConfig:
+		return m.updateAskConfig(msg)
 	case statePlanMenu:
 		return m.updatePlanMenu(msg)
 	case statePlanCreateID:
@@ -389,6 +398,8 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.profileWiz.NameInput = ""
 			m.state = stateProfileName
 			return m, nil
+		case "a":
+			return m.startAskWizard()
 		case "l":
 			// Start new loop creation.
 			m.loopWiz.Editing = false
@@ -911,6 +922,10 @@ func (m AppModel) View() string {
 	}
 
 	switch m.state {
+	case stateAskPrompt:
+		return m.viewAskPrompt()
+	case stateAskConfig:
+		return m.viewAskConfig()
 	case stateRunning:
 		return m.runModel.View()
 	case statePlanMenu:
@@ -1106,6 +1121,7 @@ func (m AppModel) renderStatusBar() string {
 			add("enter", "start")
 		}
 		add("n", "new profile")
+		add("a", "ask")
 		add("l", "new loop")
 		add("p", "plans")
 		add("[/]", "cycle plan")
@@ -1127,6 +1143,17 @@ func (m AppModel) renderStatusBar() string {
 		add("r", "refresh")
 		add("esc", "back")
 		add("q", "back")
+	case stateAskPrompt:
+		add("type", "prompt")
+		add("enter", "newline")
+		add("ctrl+s", "next")
+		add("esc", "cancel")
+	case stateAskConfig:
+		add("up/down", "field")
+		add("tab", "next")
+		add("left/right", "adjust")
+		add("enter", "run/select")
+		add("esc", "back")
 	case statePlanMenu:
 		add("j/k", "select")
 		add("enter", "switch")
