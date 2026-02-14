@@ -75,8 +75,6 @@ type BuildOpts struct {
 	// Handoffs from previous loop step, injected into the prompt.
 	Handoffs []store.HandoffInfo
 
-	// Guardrails indicates that runtime guardrails are active for this step.
-	Guardrails bool
 }
 
 // WaitResultInfo describes the result of a spawn that was waited on.
@@ -153,18 +151,10 @@ func Build(opts BuildOpts) (string, error) {
 		b.WriteString("\n")
 	}
 
-	// Guardrails notice.
+	// Compute effective role for role-conditional prompt sections.
 	effectiveRole := ""
 	if opts.Profile != nil {
 		effectiveRole = config.EffectiveStepRole(opts.Role, opts.GlobalCfg)
-	}
-	if opts.Guardrails && !config.CanWriteCode(effectiveRole, opts.GlobalCfg) {
-		b.WriteString("# Guardrails Active\n\n")
-		b.WriteString("**Runtime guardrails are enabled for your role.** ")
-		b.WriteString("You are NOT allowed to write or modify files. ")
-		b.WriteString("Any attempt to use write/edit tools (Write, Edit, Bash with redirects, etc.) ")
-		b.WriteString("will immediately interrupt your current turn and you will lose progress. ")
-		b.WriteString("Delegate all coding work to sub-agents instead.\n\n")
 	}
 
 	// Rules.
@@ -174,9 +164,14 @@ func Build(opts BuildOpts) (string, error) {
 			"You must make all decisions yourself. Do not ask for confirmation or direction — decide and act. " +
 			"If something is ambiguous, use your best judgment and move forward.\n")
 	}
-	b.WriteString("- Write code, run tests, and ensure everything compiles before finishing.\n")
+	roleCanWrite := config.CanWriteCode(effectiveRole, opts.GlobalCfg)
+	if roleCanWrite {
+		b.WriteString("- Write code, run tests, and ensure everything compiles before finishing.\n")
+	} else {
+		b.WriteString("- Review work, check progress, and provide guidance to running agents. Do NOT write or modify code.\n")
+	}
 	b.WriteString("- Focus on one coherent unit of work. Stop when the current phase (or a meaningful increment of it) is complete.\n")
-	if !opts.ReadOnly {
+	if !opts.ReadOnly && roleCanWrite {
 		b.WriteString("- **You own your repository. Commit your work.** Do not leave changes uncommitted. " +
 			"Every time you finish a coherent piece of work, create a git commit. " +
 			"Uncommitted changes are invisible to scouts, other agents, and future sessions. " +
@@ -418,7 +413,11 @@ func Build(opts BuildOpts) (string, error) {
 		}
 
 		if currentPhase != nil {
-			fmt.Fprintf(&b, "Your task is to work on phase **%s: %s**.\n\n", currentPhase.ID, currentPhase.Title)
+			if roleCanWrite {
+				fmt.Fprintf(&b, "Your task is to work on phase **%s: %s**.\n\n", currentPhase.ID, currentPhase.Title)
+			} else {
+				fmt.Fprintf(&b, "Review progress on phase **%s: %s**. Check if agents completed the work correctly. Verify the build passes. Provide guidance or flag issues.\n\n", currentPhase.ID, currentPhase.Title)
+			}
 			if currentPhase.Description != "" {
 				b.WriteString(currentPhase.Description + "\n\n")
 			}

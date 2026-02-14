@@ -39,7 +39,6 @@ type LoopRunStep struct {
 	CanStop      bool   `json:"can_stop,omitempty"`
 	CanMessage   bool   `json:"can_message,omitempty"`
 	CanPushover  bool   `json:"can_pushover,omitempty"`
-	Guardrails   bool   `json:"guardrails,omitempty"`
 }
 
 // LoopMessage is a message posted by a loop step for subsequent steps.

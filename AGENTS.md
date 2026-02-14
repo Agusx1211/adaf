@@ -22,7 +22,6 @@ internal/
   loop/                Single-agent loop controller (turn management, recording, callbacks)
   looprun/             Multi-step loop runtime
   orchestrator/        Sub-agent spawning with worktree isolation and concurrency limits
-  guardrail/           Runtime policy enforcement
   hexid/               Stable identifiers for sessions and work items
   pushover/            Pushover notification integration
   stats/               Statistics extraction from recordings

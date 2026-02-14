@@ -83,8 +83,8 @@ type Loop struct {
 	InterruptCh <-chan string
 
 	// OnTurnContext is called at the start of each turn with the turn-scoped
-	// cancel function. This allows external code (e.g. guardrail monitors) to
-	// cancel only the current turn without stopping the entire loop.
+	// cancel function. This allows external code to cancel only the current
+	// turn without stopping the entire loop.
 	OnTurnContext func(cancel context.CancelFunc)
 
 	// LastResult is populated after each Agent.Run() call so callers
@@ -284,9 +284,9 @@ func (l *Loop) Run(ctx context.Context) error {
 				cfg.Prompt = l.PromptFunc(turnID)
 			}
 
-			// Inject interrupt message from a previous guardrail violation.
+			// Inject interrupt message from a previous interruption.
 			if l.lastInterruptMsg != "" {
-				cfg.Prompt += "\n## Guardrail Interrupt\n\n" + l.lastInterruptMsg + "\n\n"
+				cfg.Prompt += "\n## Interrupt\n\n" + l.lastInterruptMsg + "\n\n"
 				l.lastInterruptMsg = ""
 			}
 
@@ -328,7 +328,7 @@ func (l *Loop) Run(ctx context.Context) error {
 			rec.RecordMeta("step_hex_id", l.StepHexID)
 		}
 
-		// Create a turn-scoped context so guardrails can cancel just the
+		// Create a turn-scoped context so external code can cancel just the
 		// current turn without stopping the entire loop. A timeout safety net
 		// avoids indefinite hangs in agent execution.
 		var (
@@ -588,8 +588,8 @@ func (l *Loop) Run(ctx context.Context) error {
 			if errors.Is(runErr, context.Canceled) {
 				if msg := l.drainInterrupt(); msg != "" {
 					debug.LogKV("loop", "interrupt drained after cancel", "turn_id", turnID, "msg_len", len(msg))
-					// Interrupted (e.g. guardrail violation or parent signal) —
-					// continue to next turn with the interrupt message injected.
+					// Interrupted (e.g. parent signal) — continue to next
+					// turn with the interrupt message injected.
 					// Don't increment turn count — interrupt turns don't count
 					// toward MaxTurns (same as wait-for-spawns).
 					l.lastInterruptMsg = msg
@@ -597,7 +597,7 @@ func (l *Loop) Run(ctx context.Context) error {
 				}
 				// If the parent context is still alive and we have turn-scoped
 				// cancel support (OnTurnContext), this was a turn-only cancel
-				// (e.g. guardrail) that raced with drainInterrupt.
+				// that raced with drainInterrupt.
 				if l.OnTurnContext != nil && ctx.Err() == nil {
 					debug.LogKV("loop", "turn canceled without interrupt payload; continuing",
 						"turn_id", turnID,
@@ -619,8 +619,8 @@ func (l *Loop) Run(ctx context.Context) error {
 		}
 
 		// Check for interrupt even when runErr is nil.
-		// When agents are killed by SIGKILL (e.g. interrupt from parent or
-		// guardrail), cmd.Wait() returns *exec.ExitError which Agent.Run()
+		// When agents are killed by SIGKILL (e.g. interrupt from parent),
+		// cmd.Wait() returns *exec.ExitError which Agent.Run()
 		// handles as a normal exit — returning (*Result, nil) rather than
 		// (nil, context.Canceled). We must still drain the interrupt channel
 		// so the message is injected into the next turn.
@@ -726,7 +726,7 @@ func buildResumePrompt(waitResults []WaitResult, moreSpawnsPending bool, interru
 	b.WriteString("Continue from where you left off.\n\n")
 
 	if interruptMsg != "" {
-		b.WriteString("## Guardrail Interrupt\n\n")
+		b.WriteString("## Interrupt\n\n")
 		b.WriteString(interruptMsg)
 		b.WriteString("\n\n")
 	}

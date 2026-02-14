@@ -173,8 +173,6 @@ func printEventText(w io.Writer, ev any) {
 		if e.Session != nil {
 			fmt.Fprintf(w, "%s[snapshot] Session: %s (%s) — %s%s\n", colorDim, e.Session.Agent, e.Session.Model, e.Session.Status, colorReset)
 		}
-	case events.GuardrailViolationMsg:
-		fmt.Fprintf(w, "%s[guardrail]%s role=%s tool=%s\n", styleBoldYellow, colorReset, e.Role, e.Tool)
 	}
 }
 

@@ -16,7 +16,6 @@ import (
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/events"
-	"github.com/agusx1211/adaf/internal/guardrail"
 	"github.com/agusx1211/adaf/internal/loop"
 	promptpkg "github.com/agusx1211/adaf/internal/prompt"
 	"github.com/agusx1211/adaf/internal/store"
@@ -163,7 +162,7 @@ func New(s *store.Store, globalCfg *config.GlobalConfig, repoRoot string) *Orche
 }
 
 // SetEventCh sets the event channel so sub-agent lifecycle events
-// (prompts, finishes, raw output, guardrail violations) are forwarded to the runtime event stream.
+// (prompts, finishes, raw output) are forwarded to the runtime event stream.
 func (o *Orchestrator) SetEventCh(ch chan any) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -571,12 +570,6 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 	o.spawns[rec.ID] = as
 	o.mu.Unlock()
 
-	// Set up guardrail monitor for this sub-agent.
-	effectiveRole := config.EffectiveStepRole(req.ChildRole, o.globalCfg)
-	monitor := guardrail.NewMonitor(effectiveRole, true, o.globalCfg)
-	var turnCancelMu sync.Mutex
-	var currentTurnCancel context.CancelFunc
-
 	// Bridge stream events into the ring buffer and forward them to eventCh for live sessions.
 	eventDone := make(chan struct{})
 	go func() {
@@ -592,31 +585,6 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 				continue
 			}
 			o.emitEvent("agent_event", events.AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw})
-
-			// Guardrail check on parsed events.
-			if monitor != nil {
-				if toolName := monitor.CheckEvent(ev.Parsed); toolName != "" {
-					o.emitEvent("guardrail_violation", events.GuardrailViolationMsg{
-						Tool: toolName,
-						Role: effectiveRole,
-					})
-					msg := guardrail.WarningMessage(effectiveRole, toolName, monitor.Violations())
-					select {
-					case interruptCh <- msg:
-					default:
-						debug.LogKV("orch", "guardrail interrupt dropped: channel full",
-							"spawn_id", rec.ID,
-							"tool", toolName,
-							"role", effectiveRole,
-						)
-					}
-					turnCancelMu.Lock()
-					if currentTurnCancel != nil {
-						currentTurnCancel()
-					}
-					turnCancelMu.Unlock()
-				}
-			}
 		}
 	}()
 
@@ -712,11 +680,6 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 					TurnHexID: turnHexID,
 					Result:    result,
 				})
-			},
-			OnTurnContext: func(cancel context.CancelFunc) {
-				turnCancelMu.Lock()
-				currentTurnCancel = cancel
-				turnCancelMu.Unlock()
 			},
 			PromptFunc: func(turnID int) string {
 				msgs, _ := o.store.UnreadMessages(rec.ID, "parent_to_child")

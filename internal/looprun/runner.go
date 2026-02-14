@@ -12,14 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"sync"
-
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/eventq"
 	"github.com/agusx1211/adaf/internal/events"
-	"github.com/agusx1211/adaf/internal/guardrail"
 	"github.com/agusx1211/adaf/internal/hexid"
 	"github.com/agusx1211/adaf/internal/loop"
 	"github.com/agusx1211/adaf/internal/orchestrator"
@@ -84,7 +81,6 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			CanStop:      s.CanStop,
 			CanMessage:   s.CanMessage,
 			CanPushover:  s.CanPushover,
-			Guardrails:   s.Guardrails,
 		}
 	}
 
@@ -200,16 +196,15 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			cfg.Store.UpdateLoopRun(run)
 
 			promptOpts := promptpkg.BuildOpts{
-				Store:       cfg.Store,
-				Project:     cfg.Project,
-				Profile:     prof,
-				Role:        stepDef.Role,
-				GlobalCfg:   cfg.GlobalCfg,
-				PlanID:      cfg.PlanID,
+				Store:      cfg.Store,
+				Project:    cfg.Project,
+				Profile:    prof,
+				Role:       stepDef.Role,
+				GlobalCfg:  cfg.GlobalCfg,
+				PlanID:     cfg.PlanID,
 				LoopContext: loopCtx,
-				Delegation:  stepDef.Delegation,
-				Handoffs:    handoffs,
-				Guardrails:  stepDef.Guardrails,
+				Delegation: stepDef.Delegation,
+				Handoffs:   handoffs,
 			}
 
 			prompt, err := promptpkg.Build(promptOpts)
@@ -221,15 +216,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 
 			// Run the agent for this step using the existing loop infrastructure.
 			streamCh := make(chan stream.RawEvent, 64)
-
-			// Set up guardrail monitor for this step.
-			effectiveRole := config.EffectiveStepRole(stepDef.Role, cfg.GlobalCfg)
-			monitor := guardrail.NewMonitor(effectiveRole, stepDef.Guardrails, cfg.GlobalCfg)
 			interruptCh := make(chan string, 1)
-
-			// Track the current turn's cancel function (mutex-protected).
-			var turnCancelMu sync.Mutex
-			var currentTurnCancel context.CancelFunc
 
 			// Bridge stream events to the live event channel.
 			bridgeDone := make(chan struct{})
@@ -243,26 +230,6 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 						continue
 					}
 					emitLoopEvent(eventCh, "agent_event", events.AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw})
-
-					// Guardrail check on parsed events.
-					if monitor != nil {
-						if toolName := monitor.CheckEvent(ev.Parsed); toolName != "" {
-							emitLoopEvent(eventCh, "guardrail_violation", events.GuardrailViolationMsg{
-								Tool: toolName,
-								Role: effectiveRole,
-							})
-							msg := guardrail.WarningMessage(effectiveRole, toolName, monitor.Violations())
-							select {
-							case interruptCh <- msg:
-							default:
-							}
-							turnCancelMu.Lock()
-							if currentTurnCancel != nil {
-								currentTurnCancel()
-							}
-							turnCancelMu.Unlock()
-						}
-					}
 				}
 				close(bridgeDone)
 			}()
@@ -316,11 +283,6 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				},
 				ProfileName: prof.Name,
 				InterruptCh: interruptCh,
-				OnTurnContext: func(cancel context.CancelFunc) {
-					turnCancelMu.Lock()
-					currentTurnCancel = cancel
-					turnCancelMu.Unlock()
-				},
 				OnPrompt: func(turnID int, turnHexID, prompt string, isResume bool) {
 					trimmedPrompt, truncated, originalLen := truncatePromptForEvent(prompt)
 					emitLoopEvent(eventCh, "agent_prompt", events.AgentPromptMsg{
