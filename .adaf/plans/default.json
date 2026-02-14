@@ -1,13 +1,13 @@
 {
   "id": "default",
-  "title": "ADAF v2 - Refactor, Standalone Mode \u0026 Web UI",
-  "description": "Major evolution of ADAF: (1) code quality cleanup and refactoring, (2) standalone agent mode for single-run or N-run sessions with user-provided prompts instead of plans, fully integrated into the TUI, and (3) a web server providing remote UI for managing loops, standalone sessions, and a built-in terminal, accessible from desktop and mobile.",
+  "title": "ADAF v2 - Refactor, Standalone Mode, Project Manager \u0026 Web UI",
+  "description": "Major evolution of ADAF: (1) code quality cleanup and refactoring, (2) standalone agent mode for single-run or N-run sessions with user-provided prompts instead of plans, fully integrated into the TUI, (3) a Project Manager mode where any supported agent can serve as an interactive project manager for plans, issues, and general project coordination via chat, and (4) a web server providing remote UI for managing loops, standalone sessions, project manager conversations, and a built-in terminal, accessible from desktop and mobile.",
   "status": "active",
   "phases": [
     {
       "id": "p1-audit",
       "title": "Code Audit \u0026 Cleanup Targets",
-      "description": "Audit the entire codebase to identify refactoring targets. Focus areas:\n- runtui/model.go is ~52KB in a single file - identify logical splits\n- tui/app.go has 53+ states in one state machine - consider decomposing\n- cli/ has 31 files with some inconsistent patterns - normalize\n- Identify dead code, unused exports, and overly complex functions\n- Document tech debt items as issues in the store\n- Check for error handling inconsistencies\n- Identify any code duplication across agent implementations",
+      "description": "Audit the entire codebase to identify refactoring targets. Focus areas:\n- runtui/model.go is ~52KB in a single file - identify logical splits\n- tui/app.go has 53+ states in one state machine - consider decomposing\n- cli/ has 31 files with some inconsistent patterns - normalize\n- Identify dead code, unused exports, and overly complex functions\n- Document tech debt items as issues in the store\n- Check for error handling inconsistencies\n- Identify any code duplication across agent implementations\n\nNote: Many reliability issues discovered during initial development have already been resolved (issues #5-#22), including deadlocks, race conditions, backpressure problems, and error handling gaps. This audit should focus on structural/architectural improvements rather than bug hunting.",
       "status": "not_started",
       "priority": 1
     },
@@ -24,7 +24,7 @@
     {
       "id": "p3-tui-refactor",
       "title": "Decompose TUI State Machine",
-      "description": "Refactor tui/app.go's monolithic state machine:\n- Group related states into sub-state-machines (e.g. profile wizard, loop wizard, plan menu, settings)\n- Each sub-state-machine becomes its own file with its own Update/View methods\n- AppModel delegates to the active sub-state-machine\n- Extract selector rendering into its own component\n- This sets the foundation for standalone mode UI integration",
+      "description": "Refactor tui/app.go's monolithic state machine:\n- Group related states into sub-state-machines (e.g. profile wizard, loop wizard, plan menu, settings)\n- Each sub-state-machine becomes its own file with its own Update/View methods\n- AppModel delegates to the active sub-state-machine\n- Extract selector rendering into its own component\n- This sets the foundation for standalone mode and project manager mode UI integration\n\nNote: TUI input handling has already been migrated to Bubbles components (issue #24), improving tmux compatibility and reducing custom key handling. Build on this improvement.",
       "status": "not_started",
       "priority": 1,
       "depends_on": [
@@ -34,7 +34,7 @@
     {
       "id": "p4-agent-cleanup",
       "title": "Normalize Agent Implementations",
-      "description": "Clean up agent integration code:\n- Extract common patterns (process group setup, env overlay, recording) into shared helpers\n- Reduce boilerplate across claude.go, codex.go, gemini.go, vibe.go, opencode.go, generic.go\n- Standardize error wrapping and exit code handling\n- Ensure all agents properly handle context cancellation\n- Verify process cleanup paths (no orphan processes)\n- Add missing tests for edge cases",
+      "description": "Clean up agent integration code:\n- Extract common patterns (process group setup, env overlay, recording) into shared helpers\n- Reduce boilerplate across claude.go, codex.go, gemini.go, vibe.go, opencode.go, generic.go\n- Standardize error wrapping and exit code handling\n- Ensure all agents properly handle context cancellation\n- Verify process cleanup paths (no orphan processes)\n- Add missing tests for edge cases\n\nNote: Several reliability fixes have already landed (WaitDelay on agents, backpressure fixes, scanner buffer consistency, interrupt handling). This phase focuses on structural normalization and DRY refactoring, not bug fixes.",
       "status": "not_started",
       "priority": 2,
       "depends_on": [
@@ -54,7 +54,7 @@
     {
       "id": "p6-standalone-core",
       "title": "Standalone Mode - Core Engine",
-      "description": "Add a standalone (non-loop) execution mode:\n- New 'adaf ask' (or 'adaf run --standalone') command that takes a prompt from the user (flag, stdin, or interactive input)\n- Runs a single agent session with that prompt, waits for completion, and exits\n- Support --count N flag to run N times sequentially (default 1)\n- Support --agent/--profile flags to select which agent to use\n- Support --model flag for model override\n- The session is still recorded and logged like any other session\n- The daemon is still used for detach/reattach support, but the flow is: prompt -\u003e run -\u003e done (no loop)\n- If --count \u003e 1, each run gets the same prompt but can optionally include the previous run's output as context\n- Exit code reflects the agent's result",
+      "description": "Add a standalone (non-loop) execution mode:\n- New 'adaf ask' (or 'adaf run --standalone') command that takes a prompt from the user (flag, stdin, or interactive input)\n- Runs a single agent session with that prompt, waits for completion, and exits\n- Support --count N flag to run N times sequentially (default 1)\n- Support --agent/--profile flags to select which agent to use\n- Support --model flag for model override\n- The session is still recorded and logged like any other session\n- The daemon is still used for detach/reattach support, but the flow is: prompt -> run -> done (no loop)\n- If --count > 1, each run gets the same prompt but can optionally include the previous run's output as context\n- Exit code reflects the agent's result\n\nNote: CLI surface was recently simplified (issue #26, 6 redundant subcommands removed). Keep the standalone command interface clean and consistent with the new reduced surface.",
       "status": "not_started",
       "priority": 1,
       "depends_on": [
@@ -64,7 +64,7 @@
     {
       "id": "p7-standalone-tui",
       "title": "Standalone Mode - TUI Integration",
-      "description": "Integrate standalone mode into the Bubble Tea TUI:\n- Add a 'Quick Run' or 'Ask' option in the main selector alongside profiles and loops\n- Prompt input: text area where user types their prompt (multi-line support)\n- Agent/profile picker dropdown\n- Model selector (optional override)\n- Count selector (1, 2, 3, N)\n- Live output view reuses the existing runtui display\n- Progress indicator showing run X of N when count \u003e 1\n- After completion, show summary and option to run again with modified prompt\n- Keyboard shortcut for quick access (e.g. 'a' for ask from selector)\n- The standalone session should appear in the sessions list for later review",
+      "description": "Integrate standalone mode into the Bubble Tea TUI:\n- Add a 'Quick Run' or 'Ask' option in the main selector alongside profiles and loops\n- Prompt input: text area where user types their prompt (multi-line support via Bubbles textarea)\n- Agent/profile picker dropdown\n- Model selector (optional override)\n- Count selector (1, 2, 3, N)\n- Live output view reuses the existing runtui display\n- Progress indicator showing run X of N when count > 1\n- After completion, show summary and option to run again with modified prompt\n- Keyboard shortcut for quick access (e.g. 'a' for ask from selector)\n- The standalone session should appear in the sessions list for later review",
       "status": "not_started",
       "priority": 1,
       "depends_on": [
@@ -73,56 +73,81 @@
       ]
     },
     {
-      "id": "p8-web-foundation",
+      "id": "p8-pm-core",
+      "title": "Project Manager Mode - Core Engine",
+      "description": "Add a Project Manager mode that lets any supported agent act as an interactive project manager:\n\nConcept: The user opens a conversational chat with one of the supported agents (Claude, Codex, Gemini, Vibe, OpenCode, or a generic CLI). The agent does NOT write code — it manages the project: updating plans, creating/closing issues, reviewing project status, and advising on priorities. It is a regular back-and-forth chat where the user can ask the agent to do project management tasks.\n\nCore requirements:\n- New 'adaf pm' (or 'adaf manage') command that starts a project manager session\n- Support --agent flag to choose which agent to use (default: claude)\n- Support --model flag for model override\n- Build a context-aware system prompt that includes:\n  - Current plan state (phases, statuses, dependencies)\n  - Open issues with priorities and descriptions\n  - Recent session/loop activity summary\n  - Project metadata and structure\n- Define tool/function definitions the agent can invoke:\n  - create_issue(title, description, priority)\n  - update_issue(id, fields...)\n  - close_issue(id, resolution)\n  - list_issues(filter?)\n  - update_plan_phase(phase_id, status, description?)\n  - add_plan_phase(title, description, priority, depends_on?)\n  - remove_plan_phase(phase_id)\n  - get_project_status()\n  - add_doc(title, content)\n- The agent receives the project context, the user sends messages, and the agent responds with advice, actions, or questions\n- All PM sessions are recorded like any other session\n- Tool invocations are executed against the local .adaf/ store\n- The PM agent operates in a stateless request-response pattern per message — each user message triggers an agent run with full project context re-injected\n\nImplementation approach:\n- Reuse the existing Agent interface and Run() mechanism\n- Build prompt in internal/prompt/ that assembles project context\n- Build tool executor in internal/project/ (or new internal/pm/) that handles store mutations\n- The PM session is essentially a loop of: user message -> build prompt with context + message -> run agent -> parse tool calls -> execute against store -> show response -> repeat",
+      "status": "not_started",
+      "priority": 1,
+      "depends_on": [
+        "p5-store-cleanup"
+      ]
+    },
+    {
+      "id": "p9-pm-tui",
+      "title": "Project Manager Mode - TUI Integration",
+      "description": "Integrate the Project Manager mode into the Bubble Tea TUI:\n- Add a 'Project Manager' or 'Manage' option in the main selector\n- Agent picker: choose which agent to use as PM (with model override)\n- Chat interface:\n  - Scrollable message history showing user messages and agent responses\n  - Multi-line text input (Bubbles textarea) for composing messages\n  - Agent responses rendered with markdown formatting\n  - Tool call results shown inline (e.g. 'Created issue #27: ...' or 'Updated phase p3 status to in_progress')\n- Sidebar or header showing current project state:\n  - Plan phases with statuses\n  - Open issue count\n  - Active sessions\n- Visual indicators when the agent is thinking/running\n- Message history persisted for session continuity\n- Keyboard shortcuts: Enter to send, Esc to exit, Ctrl+L to clear\n- The PM chat should feel like a regular messaging interface, not a terminal",
+      "status": "not_started",
+      "priority": 1,
+      "depends_on": [
+        "p8-pm-core",
+        "p3-tui-refactor"
+      ]
+    },
+    {
+      "id": "p10-web-foundation",
       "title": "Web Server - Foundation \u0026 API",
-      "description": "Add an HTTP/WebSocket server to ADAF:\n- New 'adaf web' command that starts the server (configurable port, default 8080)\n- REST API endpoints:\n  - GET /api/status - project status\n  - GET /api/sessions - list sessions (active + recent)\n  - GET /api/sessions/:id - session details\n  - POST /api/sessions/:id/stop - stop a session\n  - GET /api/loops - list loop definitions\n  - POST /api/loops/:name/start - start a loop\n  - POST /api/loops/:name/stop - stop a running loop\n  - GET /api/loopruns - list loop runs\n  - GET /api/plans - list plans\n  - GET /api/plans/:id - plan details\n  - GET /api/profiles - list profiles\n  - GET /api/agents - list detected agents\n  - POST /api/ask - start a standalone session\n- WebSocket endpoint for live event streaming:\n  - WS /ws/sessions/:id/events - stream session events in real time\n  - WS /ws/loops/:name/events - stream loop events\n- Authentication: optional API key (configured in ~/.adaf/config.json)\n- CORS support for local development\n- Use stdlib net/http + gorilla/websocket (or nhooyr.io/websocket for fewer deps)\n- Internal package: internal/web/",
+      "description": "Add an HTTP/WebSocket server to ADAF:\n- New 'adaf web' command that starts the server (configurable port, default 8080)\n- REST API endpoints:\n  - GET /api/status - project status\n  - GET /api/sessions - list sessions (active + recent)\n  - GET /api/sessions/:id - session details\n  - POST /api/sessions/:id/stop - stop a session\n  - GET /api/loops - list loop definitions\n  - POST /api/loops/:name/start - start a loop\n  - POST /api/loops/:name/stop - stop a running loop\n  - GET /api/loopruns - list loop runs\n  - GET /api/plans - list plans\n  - GET /api/plans/:id - plan details\n  - PUT /api/plans/:id/phases/:phaseId - update plan phase\n  - GET /api/issues - list issues\n  - POST /api/issues - create issue\n  - PUT /api/issues/:id - update issue\n  - GET /api/profiles - list profiles\n  - GET /api/agents - list detected agents\n  - POST /api/ask - start a standalone session\n  - POST /api/pm/start - start a project manager session\n  - POST /api/pm/:id/message - send a message to PM session\n  - GET /api/pm/:id/history - get PM session message history\n- WebSocket endpoint for live event streaming:\n  - WS /ws/sessions/:id/events - stream session events in real time\n  - WS /ws/loops/:name/events - stream loop events\n  - WS /ws/pm/:id/events - stream PM conversation events\n- Authentication: optional API key (configured in ~/.adaf/config.json)\n- CORS support for local development\n- Use stdlib net/http + gorilla/websocket (or nhooyr.io/websocket for fewer deps)\n- Internal package: internal/web/",
       "status": "not_started",
       "priority": 2,
       "depends_on": [
-        "p6-standalone-core"
+        "p6-standalone-core",
+        "p8-pm-core"
       ]
     },
     {
-      "id": "p9-web-ui",
+      "id": "p11-web-ui",
       "title": "Web Server - Frontend UI",
-      "description": "Build the web frontend (embedded in the Go binary):\n- Technology: vanilla JS/HTML/CSS or lightweight framework (Preact/Alpine.js) - keep deps minimal\n- Embedded via Go embed directive (internal/web/static/)\n- Pages/Views:\n  - Dashboard: project status, active sessions, recent runs\n  - Sessions list: all sessions with status, agent, duration, filter/sort\n  - Session detail: live streaming output (via WebSocket), session metadata, controls (stop/pause)\n  - Loops: list loops, start/stop controls, current cycle info\n  - Loop detail: step-by-step progress, spawn tree, messages\n  - Plans: plan viewer with phase status\n  - Standalone/Ask: prompt input, agent selector, run button, live output\n  - Settings: profile/loop management\n- Responsive design: works on both desktop and mobile\n- Dark theme matching terminal aesthetics\n- Auto-reconnect WebSocket connections\n- Toast notifications for session completions/failures",
+      "description": "Build the web frontend (embedded in the Go binary).\n\nDesign reference: reference-ui.jsx in the project root is a React mockup that demonstrates the visual style, layout patterns, and component hierarchy to follow. This file is NOT a working implementation — it is a design reference only. Use it as a guide for:\n- Color scheme: dark theme with agent-specific colors (Claude=#E8A838, Codex=#4AE68A, Gemini=#7B8CFF, Vibe=#FF6B9D, OpenCode=#5BCEFC, Generic=#9CA3AF)\n- Layout structure: left panel (agent tree + project status), center (detail/loop views), right sidebar (communication), bottom (event stream)\n- Component patterns: StatusDot, AgentBadge, Tag, TreeNode, TabBar, SectionHeader\n- Typography: JetBrains Mono for code/data, Outfit for UI text\n- Animations: slideIn, fadeIn, pulse for status indicators\n- The mockup shows the orchestration monitoring view; the actual implementation will also need views for the Project Manager chat, standalone mode, and settings\n\nTechnology: vanilla JS/HTML/CSS or lightweight framework (Preact/Alpine.js) - keep deps minimal\nEmbedded via Go embed directive (internal/web/static/)\n\nPages/Views:\n- Dashboard: project status, active sessions, recent runs\n- Sessions list: all sessions with status, agent, duration, filter/sort\n- Session detail: live streaming output (via WebSocket), session metadata, controls (stop/pause)\n- Loops: list loops, start/stop controls, current cycle info\n- Loop detail: step-by-step progress, spawn tree, messages (use the LoopVisualizer pattern from the reference)\n- Plans: plan viewer with phase status and inline editing\n- Issues: issue list with create/edit/close actions\n- Standalone/Ask: prompt input, agent selector, run button, live output\n- Project Manager: chat interface for PM conversations — message history, input box, agent responses with tool call results shown inline, agent/model selector\n- Settings: profile/loop management\n\nResponsive design: works on both desktop and mobile\nDark theme matching terminal aesthetics (follow the reference-ui.jsx color system)\nAuto-reconnect WebSocket connections\nToast notifications for session completions/failures",
       "status": "not_started",
       "priority": 2,
       "depends_on": [
-        "p8-web-foundation"
+        "p10-web-foundation"
       ]
     },
     {
-      "id": "p10-web-terminal",
+      "id": "p12-web-terminal",
       "title": "Web Server - Built-in Terminal",
       "description": "Add a web-based terminal emulator:\n- Embed xterm.js in the web UI\n- Backend: WebSocket-backed PTY (os/exec with pty allocation)\n- Endpoint: WS /ws/terminal - spawns a shell session\n- Support multiple terminal tabs\n- Terminal can run adaf CLI commands directly\n- Can also be used to run arbitrary shell commands in the project directory\n- Optional: restrict terminal access with authentication\n- Handle resize events (SIGWINCH forwarding)\n- Graceful cleanup on disconnect\n- Consider using creack/pty for PTY allocation",
       "status": "not_started",
       "priority": 3,
       "depends_on": [
-        "p9-web-ui"
+        "p11-web-ui"
       ]
     },
     {
-      "id": "p11-web-remote",
+      "id": "p13-web-remote",
       "title": "Web Server - Remote Access \u0026 Polish",
       "description": "Make the web server suitable for remote access:\n- TLS support (auto-generate self-signed cert or use Let's Encrypt with ACME)\n- Authentication: password or token-based auth (not just API key)\n- Rate limiting for public-facing deployments\n- Session timeout and idle disconnect\n- Mobile-optimized touch interactions\n- Push notifications (browser Notification API) for session events\n- Shareable session URLs\n- Connection status indicator\n- Offline resilience (queue actions when disconnected)\n- 'adaf web --expose' mode for LAN/public access vs default localhost-only",
       "status": "not_started",
       "priority": 3,
       "depends_on": [
-        "p10-web-terminal"
+        "p12-web-terminal"
       ]
     }
   ],
   "critical_path": [
     "p1-audit",
     "p3-tui-refactor",
+    "p5-store-cleanup",
+    "p8-pm-core",
+    "p9-pm-tui",
     "p6-standalone-core",
     "p7-standalone-tui",
-    "p8-web-foundation",
-    "p9-web-ui",
-    "p10-web-terminal",
-    "p11-web-remote"
+    "p10-web-foundation",
+    "p11-web-ui",
+    "p12-web-terminal",
+    "p13-web-remote"
   ],
   "created": "2026-02-12T11:47:27.999988241Z",
-  "updated": "2026-02-12T11:03:30.623257318Z"
+  "updated": "2026-02-14T12:00:00.000000000Z"
 }
