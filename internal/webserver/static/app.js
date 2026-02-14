@@ -1942,6 +1942,7 @@
     var steps = arrayOrEmpty(state.loopRun.steps);
     var stepIndex = Number(state.loopRun.step_index) || 0;
     var cycle = Number(state.loopRun.cycle) || 0;
+    var loopElapsed = formatElapsed(state.loopRun.started_at, state.loopRun.completed_at || state.loopRun.ended_at);
 
     var pills = steps.map(function (step, idx) {
       var cls = 'loop-pill';
@@ -1967,7 +1968,7 @@
         renderStatusBadge(state.loopRun.status) +
         '<span class="loop-bar-meta mono">cycle ' + (cycle + 1) + ' · step ' + (stepIndex + 1) + '/' + (steps.length || '?') + '</span>' +
         '<span class="loop-pill-row">' + pills + '</span>' +
-        '<span class="loop-hex">[' + escapeHTML(state.loopRun.hex_id || String(state.loopRun.id || '')) + ']</span>' +
+        '<span class="loop-hex">[' + escapeHTML(state.loopRun.hex_id || String(state.loopRun.id || '')) + '] ' + escapeHTML(loopElapsed) + '</span>' +
       '</div>';
   }
 
@@ -2160,7 +2161,13 @@
     }
 
     var connector = '';
-    if (depth > 0) connector = '<span class="scope-connector">└</span>';
+    if (depth > 0) {
+      var rails = '';
+      for (var i = 1; i < depth; i += 1) {
+        rails += '<span class="scope-rail"></span>';
+      }
+      connector = '<span class="scope-tree-connector">' + rails + '<span class="scope-corner">└</span></span>';
+    }
 
     return '' +
       '<div class="scope-tree-indent" style="--depth:' + ((depth - 1) * 18) + 'px">' +
@@ -2181,7 +2188,7 @@
             '</div>' +
             (spawn.task ? '<div class="scope-task">' + escapeHTML(spawn.task) + '</div>' : '') +
             (spawn.branch ? '<div class="scope-extra mono">' + icon('branch', '') + ' ' + escapeHTML(spawn.branch) + '</div>' : '') +
-            (hasPendingQuestion ? '<div class="pending-question"><strong>AWAITING RESPONSE</strong>' + escapeHTML(spawn.question) + '</div>' : '') +
+            (hasPendingQuestion ? '<div class="pending-question"><span class="pending-icon">' + icon('alert', '') + '</span><div><strong>AWAITING RESPONSE</strong>' + escapeHTML(spawn.question) + '</div></div>' : '') +
           '</div>' +
         '</div>' +
         childrenHTML +
@@ -2371,7 +2378,7 @@
           var kind = normalizeStatus(entry.type || 'text');
           var scopeColorValue = scopeColor(entry.scope);
           var typeMeta = typeDisplayMeta(entry.type);
-          var rowClass = 'raw-row raw-' + kind;
+          var rowClass = 'raw-row raw-' + kind.replace(/_/g, '-');
 
           var body = '';
           if (kind === 'tool_use') {
@@ -2409,6 +2416,7 @@
 
     return '' +
       '<div class="activity-feed">' +
+        '<div class="layer-panel-title">Activity Feed</div>' +
         entries.map(function (entry, idx) {
           var display = activityDisplay(entry);
           return '' +
@@ -2458,17 +2466,20 @@
 
     return '' +
       '<div class="messages-feed">' +
+        '<div class="layer-panel-title">Agent Communication</div>' +
         messages.map(function (msg) {
           var type = normalizeStatus(msg.type || 'message');
           if (type !== 'ask' && type !== 'reply') type = 'message';
           var direction = normalizeStatus(msg.direction) === 'parent_to_child' ? '↓' : '↑';
           var spawnLabel = msg.spawn_id ? ('spawn #' + msg.spawn_id) : (msg.step_index != null ? ('step ' + msg.step_index) : 'loop');
+          var spawn = msg.spawn_id ? state.spawns.find(function (item) { return item.id === Number(msg.spawn_id); }) || null : null;
+          var spawnProfile = (spawn && spawn.profile) ? '<span class="message-spawn-profile"> (' + escapeHTML(spawn.profile) + ')</span>' : '';
 
           return '' +
             '<div class="message-card ' + type + '">' +
               '<div class="message-head">' +
                 '<span class="message-type ' + type + '">' + escapeHTML(type) + '</span>' +
-                '<span class="message-meta">' + direction + ' ' + escapeHTML(spawnLabel) + '</span>' +
+                '<span class="message-meta">' + direction + ' ' + escapeHTML(spawnLabel) + spawnProfile + '</span>' +
                 '<span class="message-time">' + escapeHTML(formatRelativeTime(msg.created_at)) + '</span>' +
               '</div>' +
               '<div class="message-content">' + escapeHTML(msg.content || '') + '</div>' +

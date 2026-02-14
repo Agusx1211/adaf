@@ -113,6 +113,16 @@ code,
   }
 }
 
+@keyframes glow {
+  0%,
+  100% {
+    box-shadow: 0 0 4px rgba(166, 227, 161, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 12px rgba(166, 227, 161, 0.6);
+  }
+}
+
 .hidden {
   display: none !important;
 }
@@ -243,6 +253,7 @@ code,
 .ws-pill.online .ws-pill-dot {
   background: var(--green);
   box-shadow: 0 0 8px rgba(166, 227, 161, 0.7);
+  animation: glow 2.2s ease-in-out infinite;
 }
 
 .mobile-panel-toggle {
@@ -523,11 +534,24 @@ code,
   margin-left: var(--depth, 0px);
 }
 
-.scope-connector {
-  color: rgba(88, 91, 112, 0.7);
-  font-size: 11px;
-  line-height: 1.3;
+.scope-tree-connector {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-shrink: 0;
   margin-top: 2px;
+}
+
+.scope-rail {
+  width: 1px;
+  height: 16px;
+  background: rgba(88, 91, 112, 0.55);
+}
+
+.scope-corner {
+  color: rgba(88, 91, 112, 0.7);
+  font: 11px/1.3 'JetBrains Mono', 'Fira Code', monospace;
+  min-width: 7px;
 }
 
 .expand-toggle {
@@ -645,6 +669,9 @@ code,
 
 .pending-question {
   margin-top: 6px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   padding: 6px 9px;
   border-radius: 6px;
   border: 1px solid rgba(137, 180, 250, 0.34);
@@ -652,6 +679,18 @@ code,
   color: var(--blue);
   font-size: 11px;
   line-height: 1.35;
+}
+
+.pending-icon {
+  color: var(--blue);
+  display: inline-flex;
+  align-items: center;
+  margin-top: 1px;
+}
+
+.pending-icon .icon {
+  width: 12px;
+  height: 12px;
 }
 
 .pending-question strong {
@@ -1044,9 +1083,20 @@ code,
   color: var(--green);
 }
 
+.raw-tool-result .raw-text .tool-name {
+  font-weight: 600;
+}
+
 .activity-feed,
 .messages-feed {
   padding: 12px;
+}
+
+.layer-panel-title {
+  margin-bottom: 12px;
+  color: var(--lavender);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .activity-entry {
@@ -1165,6 +1215,10 @@ code,
 .message-meta {
   color: var(--overlay0);
   font-size: 11px;
+}
+
+.message-spawn-profile {
+  color: var(--overlay1);
 }
 
 .message-time {
