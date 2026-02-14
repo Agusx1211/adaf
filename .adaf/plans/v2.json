@@ -15,7 +15,7 @@
       "id": "p2-system-service",
       "title": "System-Wide Daemon Architecture",
       "description": "Transform ADAF from a per-project tool into a system-wide shared service.\n\n**Current state:** `adaf web` can already run in daemon mode (`--daemon`) and supports multi-project via a registry (`~/.adaf/web-projects.json`). Sessions are already globally scoped (`~/.adaf/sessions/`). Config is already global (`~/.adaf/config.json`). The foundation exists but requires polish.\n\n**Changes:**\n\n1. **Single daemon model**: The `adaf` CLI should detect a running daemon (via `~/.adaf/web.json`) and route operations through it. If no daemon is running, the CLI operates locally as today. Goal: one `adaf` daemon per user, always running.\n\n2. **Auto-registration**: When running any `adaf` command in a directory with `.adaf/project.json`, automatically register that project with the daemon's registry if not already registered. Remove the need for explicit `adaf web register`.\n\n3. **CLI as thin client**: For commands that modify state (plan create, issue create, session start, etc.), the CLI should prefer sending the request to the running daemon via its HTTP API rather than directly mutating the store. This ensures the web UI gets real-time updates. Fall back to direct store access when no daemon is running.\n\n4. **Project context in web UI**: The web UI header should show a project switcher. All API calls are project-scoped. The dashboard shows a cross-project overview.\n\n5. **Daemon lifecycle**: `adaf daemon start` starts the background daemon. `adaf daemon stop` stops it. `adaf daemon status` shows state. The `adaf web` command becomes an alias for `adaf daemon start --open-browser`. Consider auto-start on first CLI use.\n\n6. **Remove per-project assumption from CLI**: Commands like `adaf plan`, `adaf issue`, `adaf run` should work relative to CWD (detecting the nearest `.adaf/` upward), but route through the daemon when available.\n\n7. **Session-project binding**: Ensure sessions are tagged with their project ID so the web UI can filter sessions per project.",
-      "status": "not_started",
+      "status": "complete",
       "priority": 1,
       "depends_on": [
         "p1-tui-removal"
@@ -104,5 +104,5 @@
     "p9-polish"
   ],
   "created": "2026-02-14T15:37:30.322476305Z",
-  "updated": "2026-02-14T15:54:30.29826965Z"
+  "updated": "2026-02-14T16:23:01.291399745Z"
 }
