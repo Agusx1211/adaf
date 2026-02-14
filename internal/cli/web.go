@@ -4,10 +4,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -36,6 +40,7 @@ func init() {
 	webCmd.Flags().Float64("rate-limit", 0, "Max requests per second per IP (0 = unlimited)")
 	webCmd.Flags().StringSlice("projects", nil, "Comma-separated list of project directories to serve")
 	webCmd.Flags().Bool("multi", false, "Auto-discover projects in parent directory")
+	webCmd.Flags().Bool("open", false, "Open browser automatically")
 	rootCmd.AddCommand(webCmd)
 }
 
@@ -192,10 +197,21 @@ func runWeb(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := srv.Start(); err != nil {
+		// Check for port-in-use error
+		var opErr *net.OpError
+		if errors.As(err, &opErr) {
+			fmt.Fprintf(os.Stderr, "Port %d is already in use.\n", port)
+			fmt.Fprintf(os.Stderr, "Try: adaf web --port %d\n", port+1)
+		}
 		return fmt.Errorf("starting web server: %w", err)
 	}
 
-	fmt.Printf("Web server running at %s://%s\n", srv.Scheme(), srv.Addr())
+	// Build the full URL
+	url := fmt.Sprintf("%s://%s", srv.Scheme(), srv.Addr())
+	
+	// Print clickable URL - use OSC 8 hyperlink escape sequences for terminals that support it
+	fmt.Printf("\033]8;;%s\033\\%s\033]8;;\033\\\n", url, url)
+	
 	if len(servedProjectIDs) > 0 {
 		label := "projects"
 		if len(servedProjectIDs) == 1 {
@@ -205,6 +221,14 @@ func runWeb(cmd *cobra.Command, args []string) error {
 	}
 	if authToken != "" {
 		fmt.Printf("Auth token required for API access.\n")
+	}
+
+	// Open browser if --open flag is set
+	open, _ := cmd.Flags().GetBool("open")
+	if open {
+		if err := openBrowser(url); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to open browser: %v\n", err)
+		}
 	}
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
@@ -225,6 +249,19 @@ func generateToken() string {
 	b := make([]byte, 32)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func openBrowser(url string) error {
+	switch runtime.GOOS {
+	case "linux":
+		return exec.Command("xdg-open", url).Start()
+	case "darwin":
+		return exec.Command("open", url).Start()
+	case "windows":
+		return exec.Command("cmd", "/c", "start", url).Start()
+	default:
+		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
+	}
 }
 
 func currentDirAbs() (string, error) {
