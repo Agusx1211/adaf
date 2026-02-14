@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ADAF</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.min.css">
+  <link rel="stylesheet" href="/static/vendor/xterm.min.css">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -19,21 +19,24 @@
       <a href="#" data-tab="sessions">Sessions</a>
       <a href="#" data-tab="plans">Plans</a>
       <a href="#" data-tab="issues">Issues</a>
+      <a href="#" data-tab="docs">Docs</a>
+      <a href="#" data-tab="config">Config</a>
       <a href="#" data-tab="terminal">Terminal</a>
     </nav>
   </header>
 
   <main id="content" aria-live="polite" aria-busy="false"></main>
 
-  <template id="error-template">
-    <section class="card error-card">
-      <h2>Error</h2>
-      <p class="error-text"></p>
-    </section>
-  </template>
+  <div id="global-loading" class="global-loading hidden" aria-hidden="true">
+    <span class="spinner"></span>
+    <span>Loading</span>
+  </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/lib/xterm.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10/lib/addon-fit.min.js"></script>
+  <div id="modal-root"></div>
+  <div id="toast-root" aria-live="polite" aria-atomic="true"></div>
+
+  <script src="/static/vendor/xterm.min.js"></script>
+  <script src="/static/vendor/addon-fit.min.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>
