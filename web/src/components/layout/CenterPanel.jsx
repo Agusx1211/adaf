@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { useAppState } from '../../state/store.js';
-import { agentInfo } from '../../utils/colors.js';
 import TabBar from '../common/TabBar.jsx';
 import AgentDetail from '../detail/AgentDetail.jsx';
 import AgentOutput from '../detail/AgentOutput.jsx';
 import LoopVisualizer from '../loop/LoopVisualizer.jsx';
 import PMChatView from '../views/PMChatView.jsx';
+import IssueDetailPanel from '../detail/IssueDetailPanel.jsx';
+import DocsDetailPanel from '../detail/DocsDetailPanel.jsx';
+import PlanDetailPanel from '../detail/PlanDetailPanel.jsx';
+import LogDetailPanel from '../detail/LogDetailPanel.jsx';
 
 export default function CenterPanel() {
   var state = useAppState();
@@ -13,6 +16,7 @@ export default function CenterPanel() {
   var { selectedScope, loopRun, leftView } = state;
 
   var isPM = leftView === 'pm';
+  var isAgents = leftView === 'agents';
 
   var loopName = loopRun ? (loopRun.loop_name || 'loop') : null;
 
@@ -40,19 +44,27 @@ export default function CenterPanel() {
         <PMChatView />
       </div>
 
-      {/* Normal agent view */}
-      <div style={{ display: isPM ? 'none' : 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-        <TabBar tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-        <div style={{ flex: 1, overflow: 'hidden' }}>
-          {activeTab === 'detail' ? (
-            <AgentDetail scope={selectedScope} />
-          ) : activeTab === 'output' ? (
-            <AgentOutput scope={selectedScope} />
-          ) : activeTab === 'loop' ? (
-            <LoopVisualizer />
-          ) : null}
+      {/* Normal agent view - only for agents view */}
+      {isAgents && (
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+          <TabBar tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            {activeTab === 'detail' ? (
+              <AgentDetail scope={selectedScope} />
+            ) : activeTab === 'output' ? (
+              <AgentOutput scope={selectedScope} />
+            ) : activeTab === 'loop' ? (
+              <LoopVisualizer />
+            ) : null}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Detail panels for other views */}
+      {leftView === 'issues' && <IssueDetailPanel />}
+      {leftView === 'docs' && <DocsDetailPanel />}
+      {leftView === 'plan' && <PlanDetailPanel />}
+      {leftView === 'logs' && <LogDetailPanel />}
     </div>
   );
 }

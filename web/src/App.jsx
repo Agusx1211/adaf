@@ -116,7 +116,7 @@ export default function App() {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
             <CenterPanel />
-            {leftView !== 'pm' && <RightSidebar />}
+            {leftView === 'agents' && <RightSidebar />}
           </div>
           <BottomBar />
         </div>
