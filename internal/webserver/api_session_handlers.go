@@ -124,8 +124,9 @@ func (srv *Server) handleStartLoopSession(w http.ResponseWriter, r *http.Request
 
 func handleStartLoopSessionP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Loop   string `json:"loop"`
-		PlanID string `json:"plan_id"`
+		Loop          string `json:"loop"`
+		PlanID        string `json:"plan_id"`
+		InitialPrompt string `json:"initial_prompt"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -173,14 +174,15 @@ func handleStartLoopSessionP(s *store.Store, w http.ResponseWriter, r *http.Requ
 	}
 
 	dcfg := session.DaemonConfig{
-		ProjectDir:  projDir,
-		ProjectName: projCfg.Name,
-		WorkDir:     projDir,
-		PlanID:      planID,
-		ProfileName: mainProf.Name,
-		AgentName:   mainProf.Agent,
-		Loop:        *loopDef,
-		Profiles:    profiles,
+		ProjectDir:    projDir,
+		ProjectName:   projCfg.Name,
+		WorkDir:       projDir,
+		PlanID:        planID,
+		ProfileName:   mainProf.Name,
+		AgentName:     mainProf.Agent,
+		Loop:          *loopDef,
+		Profiles:      profiles,
+		InitialPrompt: strings.TrimSpace(req.InitialPrompt),
 	}
 
 	sessionID, err := session.CreateSession(dcfg)

@@ -77,6 +77,9 @@ type DaemonConfig struct {
 	// ResumeSessionID is the agent-level session ID to resume (e.g. Claude --resume).
 	// When set, the agent continues the previous session instead of starting fresh.
 	ResumeSessionID string `json:"resume_session_id,omitempty"`
+
+	// InitialPrompt is a general objective injected into every agent's prompt across all loop steps.
+	InitialPrompt string `json:"initial_prompt,omitempty"`
 }
 
 // Dir returns the global sessions directory (~/.adaf/sessions/), creating it if needed.

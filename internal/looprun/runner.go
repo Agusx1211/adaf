@@ -46,6 +46,9 @@ type RunConfig struct {
 	// ResumeSessionID is the agent-level session ID to resume (e.g. Claude --resume).
 	// Used by standalone chat to continue a previous conversation.
 	ResumeSessionID string
+
+	// InitialPrompt is a general objective injected into every agent's prompt across all loop steps.
+	InitialPrompt string
 }
 
 const spawnCleanupGracePeriod = 12 * time.Second
@@ -182,16 +185,17 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 
 			// Build prompt with loop context.
 			loopCtx := &promptpkg.LoopPromptContext{
-				LoopName:     loopDef.Name,
-				Cycle:        cycle,
-				StepIndex:    stepIdx,
-				TotalSteps:   len(loopDef.Steps),
-				Instructions: stepDef.Instructions,
-				CanStop:      stepDef.CanStop,
-				CanMessage:   stepDef.CanMessage,
-				CanPushover:  stepDef.CanPushover,
-				Messages:     unseenMsgs,
-				RunID:        run.ID,
+				LoopName:      loopDef.Name,
+				Cycle:         cycle,
+				StepIndex:     stepIdx,
+				TotalSteps:    len(loopDef.Steps),
+				Instructions:  stepDef.Instructions,
+				InitialPrompt: cfg.InitialPrompt,
+				CanStop:       stepDef.CanStop,
+				CanMessage:    stepDef.CanMessage,
+				CanPushover:   stepDef.CanPushover,
+				Messages:      unseenMsgs,
+				RunID:         run.ID,
 			}
 
 			// Pass any pending handoffs from previous step and clear them.

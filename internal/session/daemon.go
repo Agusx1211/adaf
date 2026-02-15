@@ -1320,6 +1320,7 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 		WorkDir:         workDir,
 		MaxCycles:       cfg.MaxCycles,
 		ResumeSessionID: cfg.ResumeSessionID,
+		InitialPrompt:   cfg.InitialPrompt,
 	}, eventCh)
 
 	close(eventCh)

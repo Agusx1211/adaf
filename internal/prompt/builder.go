@@ -46,16 +46,17 @@ func buildSubAgentPrompt(opts BuildOpts) (string, error) {
 
 // LoopPromptContext provides loop-specific context for prompt generation.
 type LoopPromptContext struct {
-	LoopName     string
-	Cycle        int
-	StepIndex    int
-	TotalSteps   int
-	Instructions string // step-specific custom instructions
-	CanStop      bool
-	CanMessage   bool
-	CanPushover  bool
-	Messages     []store.LoopMessage // unseen messages from other steps
-	RunID        int
+	LoopName      string
+	Cycle         int
+	StepIndex     int
+	TotalSteps    int
+	Instructions  string // step-specific custom instructions
+	InitialPrompt string // general objective injected across all steps
+	CanStop       bool
+	CanMessage    bool
+	CanPushover   bool
+	Messages      []store.LoopMessage // unseen messages from other steps
+	RunID         int
 }
 
 // BuildOpts configures prompt generation.
@@ -329,6 +330,11 @@ func Build(opts BuildOpts) (string, error) {
 		}
 		b.WriteString(".\n")
 
+		if lc.InitialPrompt != "" {
+			b.WriteString("\n## General Objective\n\n")
+			b.WriteString(lc.InitialPrompt + "\n")
+		}
+
 		if lc.Instructions != "" {
 			b.WriteString("\n" + lc.Instructions + "\n")
 		}
@@ -554,6 +560,13 @@ func buildStandaloneChatContext(opts BuildOpts) (string, error) {
 	}
 
 	b.WriteString("`````\n\n")
+
+	// General objective for standalone chat.
+	if lc := opts.LoopContext; lc != nil && lc.InitialPrompt != "" {
+		b.WriteString("## General Objective\n\n")
+		b.WriteString(lc.InitialPrompt)
+		b.WriteString("\n\n")
+	}
 
 	// Step instructions (standalone profile instructions + current message).
 	if lc := opts.LoopContext; lc != nil && lc.Instructions != "" {
