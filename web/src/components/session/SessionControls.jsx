@@ -20,7 +20,7 @@ export function NewSessionButton() {
           fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
         }}
       >
-        New Session
+        Start Loop
       </button>
       {showModal && <NewSessionModal onClose={function () { setShowModal(false); }} />}
     </>
@@ -31,24 +31,16 @@ function NewSessionModal({ onClose }) {
   var state = useAppState();
   var dispatch = useDispatch();
   var showToast = useToast();
-  var [mode, setMode] = useState('standalone');
   var [loading, setLoading] = useState(false);
-  var [profiles, setProfiles] = useState(null);
   var [loops, setLoops] = useState(null);
 
-  // Load profiles and loops on mount
+  // Load loops on mount
   useState(function () {
-    var base = apiBase(state.currentProjectID);
-    Promise.all([
-      apiCall('/api/config/profiles', 'GET', null, { allow404: true }),
-      apiCall('/api/config/loops', 'GET', null, { allow404: true }),
-    ]).then(function (results) {
-      setProfiles(arrayOrEmpty(results[0]).filter(function (p) { return p && p.name; }));
-      setLoops(arrayOrEmpty(results[1]).filter(function (l) { return l && l.name; }));
-    }).catch(function () {
-      setProfiles([]);
-      setLoops([]);
-    });
+    apiCall('/api/config/loops', 'GET', null, { allow404: true })
+      .then(function (result) {
+        setLoops(arrayOrEmpty(result).filter(function (l) { return l && l.name; }));
+      })
+      .catch(function () { setLoops([]); });
   });
 
   var handleSubmit = useCallback(async function (e) {
@@ -58,34 +50,14 @@ function NewSessionModal({ onClose }) {
     var form = e.target;
 
     try {
-      var payload = {};
-      var endpoint = '';
+      var loopName = form.loop_name?.value || '';
+      var loopPlanId = form.loop_plan_id?.value || '';
+      if (!loopName) { showToast('Loop definition is required.', 'error'); setLoading(false); return; }
 
-      if (mode === 'standalone') {
-        var saProfile = form.sa_profile?.value || '';
-        var saPlanId = form.sa_plan_id?.value || '';
-        if (!saProfile) { showToast('Profile is required.', 'error'); setLoading(false); return; }
-        endpoint = base + '/sessions/ask';
-        payload = { profile: saProfile };
-        if (saPlanId) payload.plan_id = saPlanId;
-      } else if (mode === 'ask') {
-        var profile = form.ask_profile?.value || '';
-        var prompt = form.ask_prompt?.value || '';
-        var planId = form.ask_plan_id?.value || '';
-        if (!profile || !prompt) { showToast('Profile and prompt are required.', 'error'); setLoading(false); return; }
-        endpoint = base + '/sessions/ask';
-        payload = { profile: profile, prompt: prompt };
-        if (planId) payload.plan_id = planId;
-      } else {
-        var loopName = form.loop_name?.value || '';
-        var loopPlanId = form.loop_plan_id?.value || '';
-        if (!loopName) { showToast('Loop definition is required.', 'error'); setLoading(false); return; }
-        endpoint = base + '/sessions/loop';
-        payload = { loop_name: loopName, loop: loopName };
-        if (loopPlanId) payload.plan_id = loopPlanId;
-      }
+      var payload = { loop_name: loopName, loop: loopName };
+      if (loopPlanId) payload.plan_id = loopPlanId;
 
-      var response = await apiCall(endpoint, 'POST', payload);
+      var response = await apiCall(base + '/sessions/loop', 'POST', payload);
       var sessionID = Number(response && response.id);
       if (Number.isFinite(sessionID) && sessionID > 0) {
         dispatch({ type: 'SET_SELECTED_SCOPE', payload: 'session-' + sessionID });
@@ -98,7 +70,7 @@ function NewSessionModal({ onClose }) {
     } finally {
       setLoading(false);
     }
-  }, [mode, state.currentProjectID, dispatch, showToast, onClose]);
+  }, [state.currentProjectID, dispatch, showToast, onClose]);
 
   var inputStyle = {
     width: '100%', padding: '6px 8px', background: 'var(--bg-3)', border: '1px solid var(--border)',
@@ -108,90 +80,24 @@ function NewSessionModal({ onClose }) {
   var selectStyle = { ...inputStyle };
 
   return (
-    <Modal title="New Session" onClose={onClose}>
+    <Modal title="Start Loop" onClose={onClose}>
       <form onSubmit={handleSubmit}>
-        {/* Mode tabs */}
-        <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
-          {['standalone', 'ask', 'loop'].map(function (m) {
-            return (
-              <button key={m} type="button"
-                onClick={function () { setMode(m); }}
-                style={{
-                  flex: 1, padding: '6px', border: '1px solid ' + (mode === m ? 'var(--accent)' : 'var(--border)'),
-                  background: mode === m ? 'var(--accent)15' : 'var(--bg-2)',
-                  color: mode === m ? 'var(--accent)' : 'var(--text-2)',
-                  borderRadius: 4, cursor: 'pointer',
-                  fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: mode === m ? 600 : 400,
-                  textTransform: 'uppercase',
-                }}
-              >{m}</button>
-            );
-          })}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div>
+            <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Loop Definition</label>
+            <select name="loop_name" style={selectStyle}>
+              <option value="">Select loop</option>
+              {(loops || []).map(function (l) {
+                var steps = arrayOrEmpty(l.steps).length;
+                return <option key={l.name} value={l.name}>{l.name}{steps ? ' (' + steps + ' steps)' : ''}</option>;
+              })}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Plan ID (optional)</label>
+            <input name="loop_plan_id" placeholder="plan-id" style={inputStyle} />
+          </div>
         </div>
-
-        {mode === 'standalone' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', lineHeight: 1.4 }}>
-              Agent runs once with full project context. No prompt needed.
-            </div>
-            <div>
-              <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Profile</label>
-              <select name="sa_profile" style={selectStyle}>
-                <option value="">Select profile</option>
-                {(profiles || []).map(function (p) {
-                  var label = p.name + (p.agent ? ' (' + p.agent + ')' : '');
-                  return <option key={p.name} value={p.name}>{label}</option>;
-                })}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Plan ID (optional)</label>
-              <input name="sa_plan_id" placeholder="plan-id" style={inputStyle} />
-            </div>
-          </div>
-        )}
-
-        {mode === 'ask' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div>
-              <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Profile</label>
-              <select name="ask_profile" style={selectStyle}>
-                <option value="">Select profile</option>
-                {(profiles || []).map(function (p) {
-                  var label = p.name + (p.agent ? ' (' + p.agent + ')' : '');
-                  return <option key={p.name} value={p.name}>{label}</option>;
-                })}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Prompt</label>
-              <textarea name="ask_prompt" placeholder="Describe what the agent should do" style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} />
-            </div>
-            <div>
-              <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Plan ID (optional)</label>
-              <input name="ask_plan_id" placeholder="plan-id" style={inputStyle} />
-            </div>
-          </div>
-        )}
-
-        {mode === 'loop' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div>
-              <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Loop Definition</label>
-              <select name="loop_name" style={selectStyle}>
-                <option value="">Select loop</option>
-                {(loops || []).map(function (l) {
-                  var steps = arrayOrEmpty(l.steps).length;
-                  return <option key={l.name} value={l.name}>{l.name}{steps ? ' (' + steps + ' steps)' : ''}</option>;
-                })}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Plan ID (optional)</label>
-              <input name="loop_plan_id" placeholder="plan-id" style={inputStyle} />
-            </div>
-          </div>
-        )}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
           <button type="button" onClick={onClose} style={{
@@ -205,7 +111,7 @@ function NewSessionModal({ onClose }) {
             borderRadius: 4, cursor: loading ? 'wait' : 'pointer',
             fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600,
             opacity: loading ? 0.6 : 1,
-          }}>Start Session</button>
+          }}>Start Loop</button>
         </div>
       </form>
     </Modal>
