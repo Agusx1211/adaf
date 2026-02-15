@@ -306,6 +306,12 @@ func (srv *Server) registerProjectRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("POST "+prefix+"/loops/{id}/stop", srv.projectHandler(handleStopLoopRunP))
 	mux.HandleFunc("POST "+prefix+"/loops/{id}/message", srv.projectHandler(handleLoopRunMessageP))
 
+	// PM Chat
+	mux.HandleFunc("GET "+prefix+"/pm/chat", srv.projectHandler(handleGetPMChatP))
+	mux.HandleFunc("POST "+prefix+"/pm/chat", srv.projectHandler(handleSendPMChatMessageP))
+	mux.HandleFunc("POST "+prefix+"/pm/chat/response", srv.projectHandler(handleSavePMChatResponseP))
+	mux.HandleFunc("DELETE "+prefix+"/pm/chat", srv.projectHandler(handleClearPMChatP))
+
 	// Stats
 	mux.HandleFunc("GET "+prefix+"/stats/loops", srv.projectHandler(handleLoopStatsP))
 	mux.HandleFunc("GET "+prefix+"/stats/profiles", srv.projectHandler(handleProfileStatsP))

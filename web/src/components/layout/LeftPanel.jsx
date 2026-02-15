@@ -12,6 +12,7 @@ import { STATUSES } from '../../utils/colors.js';
 
 var LEFT_VIEWS = [
   { id: 'agents', label: 'Agents', icon: '\u2699' },
+  { id: 'pm', label: 'PM', icon: '\u26A1' },
   { id: 'issues', label: 'Issues', icon: '\u26A0' },
   { id: 'docs', label: 'Docs', icon: '\u2630' },
   { id: 'plan', label: 'Plan', icon: '\u2261' },
@@ -25,6 +26,7 @@ export default function LeftPanel() {
 
   var counts = {
     agents: sessions.length + spawns.length,
+    pm: 0,
     issues: issues.length,
     docs: docs.length,
     plan: activePlan && activePlan.phases ? activePlan.phases.length : plans.length,
@@ -37,6 +39,16 @@ export default function LeftPanel() {
 
   function renderContent() {
     if (leftView === 'agents') return <AgentTree />;
+    if (leftView === 'pm') return (
+      <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-3)' }}>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, marginBottom: 8 }}>
+          PM Chat
+        </div>
+        <div style={{ fontSize: 10, lineHeight: 1.5, opacity: 0.7 }}>
+          Chat with your PM assistant in the center panel. Ask about plans, issues, priorities, or project status.
+        </div>
+      </div>
+    );
     if (leftView === 'issues') return <IssuesView />;
     if (leftView === 'docs') return <DocsView />;
     if (leftView === 'plan') return <PlanView />;

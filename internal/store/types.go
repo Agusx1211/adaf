@@ -91,3 +91,11 @@ type RecordingEvent struct {
 	Type      string    `json:"type"` // "stdin", "stdout", "stderr", "meta"
 	Data      string    `json:"data"`
 }
+
+type PMChatMessage struct {
+	ID        int       `json:"id"`
+	Role      string    `json:"role"` // "user" or "assistant"
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+	SessionID int       `json:"session_id,omitempty"` // linked PM session if any
+}
