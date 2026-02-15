@@ -372,27 +372,29 @@ func (srv *Server) handleDeleteRule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func (srv *Server) handleListStandaloneProfiles(w http.ResponseWriter, r *http.Request) {
+// ── Team handlers ──
+
+func (srv *Server) handleListTeams(w http.ResponseWriter, r *http.Request) {
 	cfg, err := config.Load()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load config")
 		return
 	}
-	profiles := cfg.StandaloneProfiles
-	if profiles == nil {
-		profiles = []config.StandaloneProfile{}
+	teams := cfg.Teams
+	if teams == nil {
+		teams = []config.Team{}
 	}
-	writeJSON(w, http.StatusOK, profiles)
+	writeJSON(w, http.StatusOK, teams)
 }
 
-func (srv *Server) handleCreateStandaloneProfile(w http.ResponseWriter, r *http.Request) {
-	var sp config.StandaloneProfile
-	if err := json.NewDecoder(r.Body).Decode(&sp); err != nil {
+func (srv *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
+	var t config.Team
+	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if sp.Name == "" || sp.Profile == "" {
-		writeError(w, http.StatusBadRequest, "name and profile are required")
+	if t.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 
@@ -402,12 +404,7 @@ func (srv *Server) handleCreateStandaloneProfile(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if cfg.FindProfile(sp.Profile) == nil {
-		writeError(w, http.StatusBadRequest, "referenced profile not found: "+sp.Profile)
-		return
-	}
-
-	if err := cfg.AddStandaloneProfile(sp); err != nil {
+	if err := cfg.AddTeam(t); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -417,10 +414,10 @@ func (srv *Server) handleCreateStandaloneProfile(w http.ResponseWriter, r *http.
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, sp)
+	writeJSON(w, http.StatusCreated, t)
 }
 
-func (srv *Server) handleUpdateStandaloneProfile(w http.ResponseWriter, r *http.Request) {
+func (srv *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
@@ -434,24 +431,20 @@ func (srv *Server) handleUpdateStandaloneProfile(w http.ResponseWriter, r *http.
 	}
 
 	found := false
-	for i := range cfg.StandaloneProfiles {
-		if cfg.StandaloneProfiles[i].Name == name {
-			if err := json.NewDecoder(r.Body).Decode(&cfg.StandaloneProfiles[i]); err != nil {
+	for i := range cfg.Teams {
+		if cfg.Teams[i].Name == name {
+			if err := json.NewDecoder(r.Body).Decode(&cfg.Teams[i]); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid request body")
 				return
 			}
-			cfg.StandaloneProfiles[i].Name = name
-			if cfg.StandaloneProfiles[i].Profile != "" && cfg.FindProfile(cfg.StandaloneProfiles[i].Profile) == nil {
-				writeError(w, http.StatusBadRequest, "referenced profile not found: "+cfg.StandaloneProfiles[i].Profile)
-				return
-			}
+			cfg.Teams[i].Name = name
 			found = true
 			break
 		}
 	}
 
 	if !found {
-		writeError(w, http.StatusNotFound, "standalone profile not found")
+		writeError(w, http.StatusNotFound, "team not found")
 		return
 	}
 
@@ -463,7 +456,7 @@ func (srv *Server) handleUpdateStandaloneProfile(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func (srv *Server) handleDeleteStandaloneProfile(w http.ResponseWriter, r *http.Request) {
+func (srv *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
@@ -476,7 +469,7 @@ func (srv *Server) handleDeleteStandaloneProfile(w http.ResponseWriter, r *http.
 		return
 	}
 
-	cfg.RemoveStandaloneProfile(name)
+	cfg.RemoveTeam(name)
 
 	if err := config.Save(cfg); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save config")
@@ -484,6 +477,19 @@ func (srv *Server) handleDeleteStandaloneProfile(w http.ResponseWriter, r *http.
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (srv *Server) handleListRecentCombinations(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load config")
+		return
+	}
+	combos := cfg.RecentCombinations
+	if combos == nil {
+		combos = []config.RecentCombination{}
+	}
+	writeJSON(w, http.StatusOK, combos)
 }
 
 func (srv *Server) handleGetPushover(w http.ResponseWriter, r *http.Request) {

@@ -55,7 +55,7 @@ Examples:
 func init() {
 	askCmd.Flags().String("agent", "claude", "Agent to use (claude, codex, vibe, opencode, gemini, generic)")
 	askCmd.Flags().String("profile", "", "Use a named profile instead of --agent/--model")
-	askCmd.Flags().String("standalone-profile", "", "Use a named standalone profile (bundles profile + instructions + delegation)")
+	askCmd.Flags().String("team", "", "Use a named team for sub-agent delegation (requires --profile)")
 	askCmd.Flags().String("prompt", "", "Prompt/instructions (alternative to positional arg)")
 	askCmd.Flags().String("model", "", "Model override for the agent")
 	askCmd.Flags().String("command", "", "Custom command path for the selected agent")
@@ -91,44 +91,35 @@ func runAsk(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Check for --standalone-profile first.
-	standaloneProfileName, _ := cmd.Flags().GetString("standalone-profile")
+	teamName, _ := cmd.Flags().GetString("team")
 
 	var prof *config.Profile
 	var commandOverride string
-	var standaloneInstructions string
-	var standaloneDelegation *config.DelegationConfig
+	var delegation *config.DelegationConfig
 	var extraProfiles []config.Profile
 
-	if standaloneProfileName != "" {
+	prof, commandOverride, err = resolveAskProfile(cmd)
+	if err != nil {
+		return err
+	}
+
+	// If --team is set, load team and use its delegation.
+	if teamName != "" {
 		cfg, err := config.Load()
 		if err != nil {
 			return fmt.Errorf("loading config: %w", err)
 		}
-		sp := cfg.FindStandaloneProfile(standaloneProfileName)
-		if sp == nil {
-			return fmt.Errorf("standalone profile not found: %s", standaloneProfileName)
+		team := cfg.FindTeam(teamName)
+		if team == nil {
+			return fmt.Errorf("team not found: %s", teamName)
 		}
-		p := cfg.FindProfile(sp.Profile)
-		if p == nil {
-			return fmt.Errorf("referenced profile not found: %s", sp.Profile)
-		}
-		prof = p
-		standaloneInstructions = sp.Instructions
-		standaloneDelegation = sp.Delegation
-		if sp.Delegation != nil {
-			for _, dp := range sp.Delegation.Profiles {
+		delegation = team.Delegation
+		if team.Delegation != nil {
+			for _, dp := range team.Delegation.Profiles {
 				if ep := cfg.FindProfile(dp.Name); ep != nil {
 					extraProfiles = append(extraProfiles, *ep)
 				}
 			}
-		}
-	} else {
-		// Resolve agent/profile/model normally.
-		var err error
-		prof, commandOverride, err = resolveAskProfile(cmd)
-		if err != nil {
-			return err
 		}
 	}
 
@@ -153,11 +144,6 @@ func runAsk(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Append standalone profile instructions if present.
-	if standaloneInstructions != "" {
-		fullPrompt += "\n\n## Standalone Profile Instructions\n\n" + standaloneInstructions + "\n"
-	}
-
 	// For count > 1, we run multiple sequential sessions.
 	// For count == 1, this is just one session.
 	var lastOutput string
@@ -170,8 +156,8 @@ func runAsk(cmd *cobra.Command, args []string) error {
 		loopDef, maxCycles := buildAskLoopDefinition(prof.Name, iterPrompt)
 
 		// Attach delegation from standalone profile if present.
-		if standaloneDelegation != nil && len(loopDef.Steps) > 0 {
-			loopDef.Steps[0].Delegation = standaloneDelegation
+		if delegation != nil && len(loopDef.Steps) > 0 {
+			loopDef.Steps[0].Delegation = delegation
 		}
 
 		allProfiles := []config.Profile{*prof}

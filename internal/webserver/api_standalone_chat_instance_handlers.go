@@ -3,7 +3,6 @@ package webserver
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/session"
@@ -23,10 +22,11 @@ func handleListChatInstances(s *store.Store, w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, instances)
 }
 
-// handleCreateChatInstance creates a new chat instance for a standalone profile.
+// handleCreateChatInstance creates a new chat instance with a profile+team combination.
 func handleCreateChatInstance(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Profile string `json:"profile"`
+		Team    string `json:"team"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -42,12 +42,21 @@ func handleCreateChatInstance(s *store.Store, w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusInternalServerError, "failed to load config")
 		return
 	}
-	if sp := cfg.FindStandaloneProfile(req.Profile); sp == nil {
-		writeError(w, http.StatusBadRequest, "standalone profile not found: "+req.Profile)
+
+	if cfg.FindProfile(req.Profile) == nil {
+		writeError(w, http.StatusBadRequest, "profile not found: "+req.Profile)
 		return
 	}
+	if req.Team != "" {
+		if cfg.FindTeam(req.Team) == nil {
+			writeError(w, http.StatusBadRequest, "team not found: "+req.Team)
+			return
+		}
+		cfg.RecordRecentCombination(req.Profile, req.Team)
+		_ = config.Save(cfg)
+	}
 
-	inst, err := s.CreateChatInstance(req.Profile)
+	inst, err := s.CreateChatInstance(req.Profile, req.Team)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create chat instance")
 		return
@@ -112,16 +121,16 @@ func handleSendChatInstanceMessage(s *store.Store, w http.ResponseWriter, r *htt
 		return
 	}
 
-	sp := cfg.FindStandaloneProfile(inst.Profile)
-	if sp == nil {
-		writeError(w, http.StatusBadRequest, "standalone profile not found: "+inst.Profile)
+	prof := cfg.FindProfile(inst.Profile)
+	if prof == nil {
+		writeError(w, http.StatusBadRequest, "profile not found: "+inst.Profile)
 		return
 	}
-
-	prof := cfg.FindProfile(sp.Profile)
-	if prof == nil {
-		writeError(w, http.StatusBadRequest, "referenced profile not found: "+sp.Profile)
-		return
+	var delegation *config.DelegationConfig
+	if inst.Team != "" {
+		if team := cfg.FindTeam(inst.Team); team != nil {
+			delegation = team.Delegation
+		}
 	}
 
 	projCfg, err := s.LoadProject()
@@ -151,14 +160,7 @@ func handleSendChatInstanceMessage(s *store.Store, w http.ResponseWriter, r *htt
 		resumeSessionID = session.ReadAgentSessionID(inst.LastSessionID)
 	}
 
-	// When resuming, just pass the user message directly — the agent already
-	// has the full context from its previous session.
-	var fullPrompt string
-	if resumeSessionID != "" {
-		fullPrompt = req.Message
-	} else {
-		fullPrompt = buildStandaloneChatInstancePrompt(sp, req.Message)
-	}
+	fullPrompt := req.Message
 
 	step := config.LoopStep{
 		Profile:        prof.Name,
@@ -166,8 +168,8 @@ func handleSendChatInstanceMessage(s *store.Store, w http.ResponseWriter, r *htt
 		Instructions:   fullPrompt,
 		StandaloneChat: true,
 	}
-	if sp.Delegation != nil {
-		step.Delegation = sp.Delegation
+	if delegation != nil {
+		step.Delegation = delegation
 	}
 
 	loopDef := config.LoopDef{
@@ -176,8 +178,8 @@ func handleSendChatInstanceMessage(s *store.Store, w http.ResponseWriter, r *htt
 	}
 
 	allProfiles := []config.Profile{*prof}
-	if sp.Delegation != nil {
-		for _, dp := range sp.Delegation.Profiles {
+	if delegation != nil {
+		for _, dp := range delegation.Profiles {
 			if p := cfg.FindProfile(dp.Name); p != nil {
 				allProfiles = append(allProfiles, *p)
 			}
@@ -274,25 +276,4 @@ func handleDeleteChatInstance(s *store.Store, w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-// buildStandaloneChatInstancePrompt is analogous to buildStandaloneChatPrompt
-// but works with messages from a chat instance.
-func buildStandaloneChatInstancePrompt(sp *config.StandaloneProfile, userMessage string) string {
-	var b strings.Builder
-
-	if sp.Instructions != "" {
-		b.WriteString("## Standalone Profile Instructions\n\n")
-		b.WriteString(sp.Instructions)
-		b.WriteString("\n\n")
-	}
-
-	if userMessage != "" {
-		b.WriteString(userMessage)
-		b.WriteString("\n")
-	} else {
-		b.WriteString("Begin working on the project using the context and instructions above.\n")
-	}
-
-	return b.String()
 }

@@ -33,8 +33,8 @@ export default function ConfigView() {
   var showToast = useToast();
   var [profiles, setProfiles] = useState([]);
   var [loops, setLoops] = useState([]);
-  var [standaloneProfiles, setStandaloneProfiles] = useState([]);
-  var [expanded, setExpanded] = useState({ profiles: true, loops: true, standalone: true });
+  var [teams, setTeams] = useState([]);
+  var [expanded, setExpanded] = useState({ profiles: true, loops: true, teams: true });
 
   var configSelection = state.configSelection;
 
@@ -43,11 +43,11 @@ export default function ConfigView() {
       var results = await Promise.all([
         apiCall('/api/config/profiles', 'GET', null, { allow404: true }),
         apiCall('/api/config/loops', 'GET', null, { allow404: true }),
-        apiCall('/api/config/standalone-profiles', 'GET', null, { allow404: true }),
+        apiCall('/api/config/teams', 'GET', null, { allow404: true }),
       ]);
       setProfiles(results[0] || []);
       setLoops(results[1] || []);
-      setStandaloneProfiles(results[2] || []);
+      setTeams(results[2] || []);
     } catch (err) {
       if (!err.authRequired) console.error('Config load error:', err);
     }
@@ -59,8 +59,9 @@ export default function ConfigView() {
   useEffect(function () {
     window.__configReload = loadAll;
     window.__configProfiles = profiles;
-    return function () { delete window.__configReload; delete window.__configProfiles; };
-  }, [loadAll, profiles]);
+    window.__configTeams = teams;
+    return function () { delete window.__configReload; delete window.__configProfiles; delete window.__configTeams; };
+  }, [loadAll, profiles, teams]);
 
   function toggle(section) {
     setExpanded(function (prev) { return { ...prev, [section]: !prev[section] }; });
@@ -133,35 +134,36 @@ export default function ConfigView() {
         )}
       </div>
 
-      {/* Standalone Profiles */}
+      {/* Teams */}
       <div>
-        <div style={sectionHeaderStyle} onClick={function () { toggle('standalone'); }}>
-          <span style={titleStyle}>{expanded.standalone ? '\u25BE' : '\u25B8'} Standalone Profiles ({standaloneProfiles.length})</span>
-          <button onClick={function (e) { e.stopPropagation(); handleNew('standalone'); }} style={btnNewStyle}>+ New</button>
+        <div style={sectionHeaderStyle} onClick={function () { toggle('teams'); }}>
+          <span style={titleStyle}>{expanded.teams ? '\u25BE' : '\u25B8'} Teams ({teams.length})</span>
+          <button onClick={function (e) { e.stopPropagation(); handleNew('team'); }} style={{ ...btnNewStyle, border: '1px solid var(--green)40', background: 'var(--green)15', color: 'var(--green)' }}>+ New</button>
         </div>
-        {expanded.standalone && standaloneProfiles.map(function (sp) {
-          var sel = isSelected('standalone', sp.name);
+        {expanded.teams && teams.map(function (t) {
+          var sel = isSelected('team', t.name);
+          var subCount = t.delegation && t.delegation.profiles ? t.delegation.profiles.length : 0;
           return (
-            <div key={sp.name} onClick={function () { select('standalone', sp.name); }}
-              style={{ ...rowStyle, background: sel ? 'var(--bg-3)' : 'transparent', borderLeft: sel ? '2px solid var(--orange)' : '2px solid transparent' }}
+            <div key={t.name} onClick={function () { select('team', t.name); }}
+              style={{ ...rowStyle, background: sel ? 'var(--bg-3)' : 'transparent', borderLeft: sel ? '2px solid var(--green)' : '2px solid transparent' }}
               onMouseEnter={function (e) { if (!sel) e.currentTarget.style.background = 'var(--bg-2)'; }}
               onMouseLeave={function (e) { if (!sel) e.currentTarget.style.background = 'transparent'; }}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: 'var(--text-0)' }}>{sp.name}</div>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: 'var(--text-0)' }}>{t.name}</div>
                 <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)', marginTop: 2 }}>
-                  profile: {sp.profile}
-                  {sp.instructions ? ' \u00B7 has instructions' : ''}
-                  {sp.delegation ? ' \u00B7 has delegation' : ''}
+                  {subCount} sub-agent{subCount !== 1 ? 's' : ''}
+                  {t.description ? ' \u00B7 ' + t.description : ''}
                 </div>
               </div>
             </div>
           );
         })}
-        {expanded.standalone && standaloneProfiles.length === 0 && (
-          <div style={{ padding: 12, color: 'var(--text-3)', fontSize: 11, textAlign: 'center' }}>No standalone profiles configured.</div>
+        {expanded.teams && teams.length === 0 && (
+          <div style={{ padding: 12, color: 'var(--text-3)', fontSize: 11, textAlign: 'center' }}>No teams configured.</div>
         )}
       </div>
+
     </div>
   );
 }

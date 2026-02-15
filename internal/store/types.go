@@ -106,11 +106,12 @@ type StandaloneChatMessage struct {
 }
 
 // StandaloneChatInstance is an independent conversation thread backed by a
-// standalone profile.  Multiple instances can share the same profile.
+// profile+team combination.
 type StandaloneChatInstance struct {
 	ID            string    `json:"id"`
-	Profile       string    `json:"profile"`                    // standalone profile name
-	Title         string    `json:"title"`                      // auto-set from first user message
+	Profile       string    `json:"profile"`        // profile name
+	Team          string    `json:"team,omitempty"` // team name (provides delegation config)
+	Title         string    `json:"title"`          // auto-set from first user message
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 	LastSessionID int       `json:"last_session_id,omitempty"` // most recent daemon session ID

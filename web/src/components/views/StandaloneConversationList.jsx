@@ -79,7 +79,7 @@ export default function StandaloneConversationList() {
           No Chats Yet
         </div>
         <div style={{ fontSize: 10, lineHeight: 1.5, opacity: 0.7, marginBottom: 12 }}>
-          Start a new conversation with one of your standalone profiles.
+          Start a new conversation with a profile and optional team.
         </div>
         <button
           onClick={function () { setShowNewChat(true); }}
@@ -168,6 +168,12 @@ export default function StandaloneConversationList() {
               ) : (
                 <>
                   <span style={{ opacity: 0.7 }}>{inst.profile}</span>
+                  {inst.team && (
+                    <>
+                      <span style={{ opacity: 0.4 }}>{'\u00B7'}</span>
+                      <span style={{ opacity: 0.7, color: 'var(--green)' }}>{inst.team}</span>
+                    </>
+                  )}
                   <span style={{ opacity: 0.4 }}>{'\u00B7'}</span>
                   <span style={{ opacity: 0.5 }}>{timeAgo(inst.updated_at)}</span>
                 </>
@@ -194,25 +200,38 @@ export default function StandaloneConversationList() {
 
 export function NewChatModal({ base, onCreated, onClose }) {
   var [profiles, setProfiles] = useState([]);
-  var [selected, setSelected] = useState('');
+  var [teams, setTeams] = useState([]);
+  var [recentCombos, setRecentCombos] = useState([]);
+  var [selectedProfile, setSelectedProfile] = useState('');
+  var [selectedTeam, setSelectedTeam] = useState('');
   var [creating, setCreating] = useState(false);
   var showToast = useToast();
 
   useEffect(function () {
-    apiCall('/api/config/standalone-profiles', 'GET', null, { allow404: true })
-      .then(function (list) {
-        var procs = (list || []).filter(function (p) { return p && p.name; });
-        setProfiles(procs);
-        if (procs.length > 0) setSelected(procs[0].name);
-      })
-      .catch(function () {});
+    Promise.all([
+      apiCall('/api/config/profiles', 'GET', null, { allow404: true }),
+      apiCall('/api/config/teams', 'GET', null, { allow404: true }),
+      apiCall('/api/config/recent-combinations', 'GET', null, { allow404: true }),
+    ]).then(function (results) {
+      var profs = (results[0] || []).filter(function (p) { return p && p.name; });
+      var ts = (results[1] || []).filter(function (t) { return t && t.name; });
+      var combos = (results[2] || []).filter(function (c) { return c && c.profile; });
+      setProfiles(profs);
+      setTeams(ts);
+      setRecentCombos(combos);
+      if (profs.length > 0) setSelectedProfile(profs[0].name);
+    }).catch(function () {});
   }, []);
 
   function handleCreate(e) {
     e.preventDefault();
-    if (!selected || creating) return;
+    if (creating || !selectedProfile) return;
+
+    var body = { profile: selectedProfile };
+    if (selectedTeam) body.team = selectedTeam;
+
     setCreating(true);
-    apiCall(base + '/chat-instances', 'POST', { profile: selected })
+    apiCall(base + '/chat-instances', 'POST', body)
       .then(function (inst) {
         onCreated(inst);
       })
@@ -223,49 +242,100 @@ export function NewChatModal({ base, onCreated, onClose }) {
       .finally(function () { setCreating(false); });
   }
 
+  function handleQuickPick(combo) {
+    setSelectedProfile(combo.profile);
+    setSelectedTeam(combo.team || '');
+  }
+
+  var selectStyle = {
+    width: '100%', padding: '8px 10px', background: 'var(--bg-2)',
+    border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-0)',
+    fontFamily: "'JetBrains Mono', monospace", fontSize: 12,
+  };
+
+  var labelStyle = {
+    fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+    color: 'var(--text-3)', display: 'block', marginBottom: 6,
+    textTransform: 'uppercase', letterSpacing: '0.05em',
+  };
+
+  var canCreate = !!selectedProfile;
+
   return (
     <Modal title="New Chat" onClose={onClose}>
       <form onSubmit={handleCreate}>
+        {/* Recent Combinations */}
+        {recentCombos.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <label style={labelStyle}>Recent</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {recentCombos.slice(0, 6).map(function (combo, idx) {
+                var isActive = selectedProfile === combo.profile && selectedTeam === (combo.team || '');
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={function () { handleQuickPick(combo); }}
+                    style={{
+                      padding: '4px 10px', borderRadius: 12,
+                      border: isActive ? '1px solid var(--accent)' : '1px solid var(--border)',
+                      background: isActive ? 'var(--accent)15' : 'var(--bg-2)',
+                      color: isActive ? 'var(--accent)' : 'var(--text-1)',
+                      cursor: 'pointer',
+                      fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+                    }}
+                  >
+                    {combo.profile}{combo.team ? ' + ' + combo.team : ''}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Profile dropdown */}
         <div style={{ marginBottom: 12 }}>
-          <label style={{
-            fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
-            color: 'var(--text-3)', display: 'block', marginBottom: 6,
-            textTransform: 'uppercase', letterSpacing: '0.05em',
-          }}>Standalone Profile</label>
+          <label style={labelStyle}>Profile</label>
           {profiles.length === 0 ? (
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--text-3)', padding: 8 }}>
-              No standalone profiles configured. Create one in the Config tab first.
+              No profiles configured. Create one in the Config tab first.
             </div>
           ) : (
-            <select
-              value={selected}
-              onChange={function (e) { setSelected(e.target.value); }}
-              style={{
-                width: '100%', padding: '8px 10px', background: 'var(--bg-2)',
-                border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-0)',
-                fontFamily: "'JetBrains Mono', monospace", fontSize: 12,
-              }}
-            >
+            <select value={selectedProfile} onChange={function (e) { setSelectedProfile(e.target.value); }} style={selectStyle}>
+              <option value="">Select profile</option>
               {profiles.map(function (p) {
-                var label = p.name;
-                if (p.agent) label += ' (' + p.agent + ')';
-                return <option key={p.name} value={p.name}>{label}</option>;
+                return <option key={p.name} value={p.name}>{p.name} ({p.agent})</option>;
               })}
             </select>
           )}
         </div>
+
+        {/* Team dropdown (optional) */}
+        {selectedProfile && (
+          <div style={{ marginBottom: 12 }}>
+            <label style={labelStyle}>Team (optional)</label>
+            <select value={selectedTeam} onChange={function (e) { setSelectedTeam(e.target.value); }} style={selectStyle}>
+              <option value="">No team</option>
+              {teams.map(function (t) {
+                var subCount = t.delegation && t.delegation.profiles ? t.delegation.profiles.length : 0;
+                return <option key={t.name} value={t.name}>{t.name} ({subCount} sub-agents)</option>;
+              })}
+            </select>
+          </div>
+        )}
+
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type="button" onClick={onClose} style={{
             padding: '6px 12px', border: '1px solid var(--border)', background: 'var(--bg-2)',
             color: 'var(--text-1)', borderRadius: 4, cursor: 'pointer',
             fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
           }}>Cancel</button>
-          <button type="submit" disabled={!selected || creating} style={{
+          <button type="submit" disabled={!canCreate || creating} style={{
             padding: '6px 12px', border: '1px solid var(--accent)',
             background: 'var(--accent)', color: '#000',
-            borderRadius: 4, cursor: !selected || creating ? 'not-allowed' : 'pointer',
+            borderRadius: 4, cursor: !canCreate || creating ? 'not-allowed' : 'pointer',
             fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600,
-            opacity: !selected || creating ? 0.6 : 1,
+            opacity: !canCreate || creating ? 0.6 : 1,
           }}>Create</button>
         </div>
       </form>

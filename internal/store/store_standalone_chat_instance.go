@@ -4,12 +4,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/agusx1211/adaf/internal/hexid"
 )
+
+var safeNameRe = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
+
+func safeDirName(name string) string {
+	return safeNameRe.ReplaceAllString(strings.ToLower(name), "_")
+}
 
 func (s *Store) instancesDir() string {
 	return s.localDir("standalonechat", "instances")
@@ -71,8 +78,8 @@ func (s *Store) GetChatInstance(id string) (*StandaloneChatInstance, error) {
 	return &inst, nil
 }
 
-// CreateChatInstance creates a new chat instance linked to a standalone profile.
-func (s *Store) CreateChatInstance(profile string) (*StandaloneChatInstance, error) {
+// CreateChatInstance creates a new chat instance for a profile+team combination.
+func (s *Store) CreateChatInstance(profile, team string) (*StandaloneChatInstance, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -86,6 +93,7 @@ func (s *Store) CreateChatInstance(profile string) (*StandaloneChatInstance, err
 	inst := &StandaloneChatInstance{
 		ID:        id,
 		Profile:   profile,
+		Team:      team,
 		Title:     "New Chat",
 		CreatedAt: now,
 		UpdatedAt: now,

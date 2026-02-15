@@ -52,6 +52,7 @@ export default function ConfigDetailPanel() {
 
   var [data, setData] = useState(null);
   var [profiles, setProfiles] = useState([]);
+  var [teams, setTeams] = useState([]);
   var [agentsMeta, setAgentsMeta] = useState(null);
   var [saving, setSaving] = useState(false);
 
@@ -69,12 +70,16 @@ export default function ConfigDetailPanel() {
     try { profs = (await apiCall('/api/config/profiles', 'GET', null, { allow404: true })) || []; } catch (_) {}
     setProfiles(profs);
 
+    var teamsList = [];
+    try { teamsList = (await apiCall('/api/config/teams', 'GET', null, { allow404: true })) || []; } catch (_) {}
+    setTeams(teamsList);
+
     if (!sel) { setData(null); return; }
 
     if (sel.isNew) {
       if (sel.type === 'profile') setData({ name: '', agent: 'claude', model: '', reasoning_level: '', description: '', intelligence: 0, max_instances: 0, speed: '' });
       else if (sel.type === 'loop') setData({ name: '', steps: [emptyStep()] });
-      else if (sel.type === 'standalone') setData({ name: '', profile: '', instructions: '', delegation: null });
+      else if (sel.type === 'team') setData({ name: '', description: '', delegation: null });
       return;
     }
 
@@ -87,10 +92,9 @@ export default function ConfigDetailPanel() {
         var allLoops = (await apiCall('/api/config/loops', 'GET', null, { allow404: true })) || [];
         var loop = allLoops.find(function (l) { return l.name === sel.name; });
         setData(loop ? deepCopy(loop) : null);
-      } else if (sel.type === 'standalone') {
-        var allSP = (await apiCall('/api/config/standalone-profiles', 'GET', null, { allow404: true })) || [];
-        var sp = allSP.find(function (s) { return s.name === sel.name; });
-        setData(sp ? deepCopy(sp) : null);
+      } else if (sel.type === 'team') {
+        var t = teamsList.find(function (t) { return t.name === sel.name; });
+        setData(t ? deepCopy(t) : null);
       }
     } catch (err) {
       if (!err.authRequired) console.error('Config load error:', err);
@@ -104,7 +108,7 @@ export default function ConfigDetailPanel() {
       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)' }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, marginBottom: 8 }}>Select a config item</div>
-          <div style={{ fontSize: 11, opacity: 0.6 }}>Choose a profile, loop, or standalone profile from the left panel</div>
+          <div style={{ fontSize: 11, opacity: 0.6 }}>Choose a profile, loop, or team from the left panel</div>
         </div>
       </div>
     );
@@ -137,16 +141,16 @@ export default function ConfigDetailPanel() {
         } else {
           await apiCall('/api/config/loops/' + encodeURIComponent(data.name), 'PUT', lOut);
         }
-      } else if (sel.type === 'standalone') {
-        var spOut = { name: data.name, profile: data.profile };
-        if (data.instructions) spOut.instructions = data.instructions;
+      } else if (sel.type === 'team') {
+        var tOut = { name: data.name };
+        if (data.description) tOut.description = data.description;
         if (data.delegation && data.delegation.profiles && data.delegation.profiles.length > 0) {
-          spOut.delegation = cleanDelegation(data.delegation);
+          tOut.delegation = cleanDelegation(data.delegation);
         }
         if (sel.isNew) {
-          await apiCall('/api/config/standalone-profiles', 'POST', spOut);
+          await apiCall('/api/config/teams', 'POST', tOut);
         } else {
-          await apiCall('/api/config/standalone-profiles/' + encodeURIComponent(data.name), 'PUT', spOut);
+          await apiCall('/api/config/teams/' + encodeURIComponent(data.name), 'PUT', tOut);
         }
       }
       showToast('Saved', 'success');
@@ -167,7 +171,7 @@ export default function ConfigDetailPanel() {
     try {
       var endpoint = sel.type === 'profile' ? '/api/config/profiles/' :
         sel.type === 'loop' ? '/api/config/loops/' :
-        '/api/config/standalone-profiles/';
+        '/api/config/teams/';
       await apiCall(endpoint + encodeURIComponent(data.name), 'DELETE');
       showToast('Deleted', 'success');
       dispatch({ type: 'SET_CONFIG_SELECTION', payload: null });
@@ -182,7 +186,7 @@ export default function ConfigDetailPanel() {
     setData(function (prev) { return { ...prev, [key]: val }; });
   }
 
-  var typeLabel = sel.type === 'profile' ? 'Profile' : sel.type === 'loop' ? 'Loop' : 'Standalone Profile';
+  var typeLabel = sel.type === 'profile' ? 'Profile' : sel.type === 'loop' ? 'Loop' : 'Team';
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -195,7 +199,9 @@ export default function ConfigDetailPanel() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{
             fontFamily: "'JetBrains Mono', monospace", fontSize: 9, padding: '2px 6px',
-            borderRadius: 3, background: 'var(--accent)15', color: 'var(--accent)',
+            borderRadius: 3,
+            background: sel.type === 'team' ? 'var(--green)15' : 'var(--accent)15',
+            color: sel.type === 'team' ? 'var(--green)' : 'var(--accent)',
             textTransform: 'uppercase', fontWeight: 600,
           }}>{typeLabel}</span>
           <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>
@@ -213,8 +219,8 @@ export default function ConfigDetailPanel() {
       {/* Body */}
       <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px' }}>
         {sel.type === 'profile' && <ProfileEditor data={data} set={set} setData={setData} isNew={sel.isNew} agentsMeta={agentsMeta} onRefreshAgents={fetchAgentsMeta} showToast={showToast} />}
-        {sel.type === 'loop' && <LoopEditor data={data} setData={setData} profiles={profiles} isNew={sel.isNew} />}
-        {sel.type === 'standalone' && <StandaloneEditor data={data} set={set} setData={setData} profiles={profiles} isNew={sel.isNew} />}
+        {sel.type === 'loop' && <LoopEditor data={data} setData={setData} profiles={profiles} teams={teams} isNew={sel.isNew} />}
+        {sel.type === 'team' && <TeamEditor data={data} set={set} setData={setData} profiles={profiles} isNew={sel.isNew} />}
       </div>
     </div>
   );
@@ -307,7 +313,7 @@ function ProfileEditor({ data, set, setData, isNew, agentsMeta, onRefreshAgents,
 
 // ── Loop Editor ──
 
-function LoopEditor({ data, setData, profiles, isNew }) {
+function LoopEditor({ data, setData, profiles, teams, isNew }) {
   function setName(val) {
     setData(function (prev) { return { ...prev, name: val }; });
   }
@@ -374,6 +380,19 @@ function LoopEditor({ data, setData, profiles, isNew }) {
                   <input type="number" min="1" value={step.turns || 1} onChange={function (e) { setStep(idx, 'turns', parseInt(e.target.value, 10) || 1); }} style={inputStyle} />
                 </div>
               </div>
+
+              {/* Team dropdown */}
+              <div>
+                <label style={labelStyle}>Team (optional)</label>
+                <select value={step.team || ''} onChange={function (e) { setStep(idx, 'team', e.target.value); }} style={selectStyle}>
+                  <option value="">None (use inline delegation)</option>
+                  {(teams || []).map(function (t) {
+                    var subCount = t.delegation && t.delegation.profiles ? t.delegation.profiles.length : 0;
+                    return <option key={t.name} value={t.name}>{t.name} ({subCount} sub-agents)</option>;
+                  })}
+                </select>
+              </div>
+
               <div>
                 <label style={labelStyle}>Instructions (optional)</label>
                 <textarea value={step.instructions || ''} onChange={function (e) { setStep(idx, 'instructions', e.target.value); }} style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} placeholder="Step-specific instructions" />
@@ -384,13 +403,22 @@ function LoopEditor({ data, setData, profiles, isNew }) {
                 <Checkbox label="can_pushover" checked={!!step.can_pushover} onChange={function (v) { setStep(idx, 'can_pushover', v); }} />
               </div>
 
-              {/* Delegation */}
-              <DelegationEditor
-                delegation={step.delegation}
-                onChange={function (d) { setStepDelegation(idx, d); }}
-                profiles={profiles}
-                label={'Step ' + (idx + 1) + ' Sub-Agent Delegation'}
-              />
+              {/* Delegation (only show if no team selected) */}
+              {!step.team && (
+                <DelegationEditor
+                  delegation={step.delegation}
+                  onChange={function (d) { setStepDelegation(idx, d); }}
+                  profiles={profiles}
+                  label={'Step ' + (idx + 1) + ' Sub-Agent Delegation'}
+                />
+              )}
+              {step.team && (
+                <div style={{ padding: 8, border: '1px solid var(--green)30', borderRadius: 4, background: 'var(--green)08' }}>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--green)' }}>
+                    Delegation provided by team "{step.team}". Remove team to use inline delegation.
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         );
@@ -401,26 +429,19 @@ function LoopEditor({ data, setData, profiles, isNew }) {
   );
 }
 
-// ── Standalone Editor ──
+// ── Team Editor ──
 
-function StandaloneEditor({ data, set, setData, profiles, isNew }) {
+function TeamEditor({ data, set, setData, profiles, isNew }) {
   function setDelegation(deleg) {
     setData(function (prev) { return { ...prev, delegation: deleg }; });
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <Field label="Name" value={data.name} onChange={function (v) { set('name', v); }} disabled={!isNew} placeholder="my-standalone" />
+      <Field label="Name" value={data.name} onChange={function (v) { set('name', v); }} disabled={!isNew} placeholder="my-team" />
       <div>
-        <label style={labelStyle}>Profile</label>
-        <select value={data.profile || ''} onChange={function (e) { set('profile', e.target.value); }} style={selectStyle}>
-          <option value="">Select profile</option>
-          {profiles.map(function (p) { return <option key={p.name} value={p.name}>{p.name} ({p.agent})</option>; })}
-        </select>
-      </div>
-      <div>
-        <label style={labelStyle}>Instructions</label>
-        <textarea value={data.instructions || ''} onChange={function (e) { set('instructions', e.target.value); }} style={{ ...inputStyle, minHeight: 120, resize: 'vertical' }} placeholder="Custom instructions for the standalone agent..." />
+        <label style={labelStyle}>Description</label>
+        <textarea value={data.description || ''} onChange={function (e) { set('description', e.target.value); }} style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} placeholder="What this team is good at..." />
       </div>
 
       {/* Delegation */}
@@ -428,7 +449,7 @@ function StandaloneEditor({ data, set, setData, profiles, isNew }) {
         delegation={data.delegation}
         onChange={setDelegation}
         profiles={profiles}
-        label="Sub-Agent Delegation"
+        label="Team Sub-Agent Delegation"
       />
     </div>
   );
@@ -616,7 +637,7 @@ function Checkbox({ label, checked, onChange }) {
 // ── Helpers ──
 
 function emptyStep() {
-  return { profile: '', role: '', turns: 1, instructions: '', can_stop: false, can_message: false, can_pushover: false, delegation: null };
+  return { profile: '', role: '', turns: 1, instructions: '', can_stop: false, can_message: false, can_pushover: false, delegation: null, team: '' };
 }
 
 function emptyDelegationProfile() {
@@ -631,6 +652,7 @@ function cleanStep(s) {
   if (s.can_stop) out.can_stop = true;
   if (s.can_message) out.can_message = true;
   if (s.can_pushover) out.can_pushover = true;
+  if (s.team) out.team = s.team;
   if (s.delegation && s.delegation.profiles && s.delegation.profiles.length > 0) {
     out.delegation = cleanDelegation(s.delegation);
   }

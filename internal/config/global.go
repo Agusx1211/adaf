@@ -5,7 +5,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 )
 
 // Profile is a named agent+model combo stored in the global config.
@@ -24,14 +26,15 @@ type Profile struct {
 
 // LoopStep defines one step in a loop cycle.
 type LoopStep struct {
-	Profile        string            `json:"profile"`                  // profile name reference
-	Role           string            `json:"role,omitempty"`           // role name from global roles catalog
-	Turns          int               `json:"turns,omitempty"`          // turns per step (0 = 1 turn)
-	Instructions   string            `json:"instructions,omitempty"`   // custom instructions appended to prompt
-	CanStop        bool              `json:"can_stop,omitempty"`       // can this step signal loop stop?
-	CanMessage     bool              `json:"can_message,omitempty"`    // can this step send messages to subsequent steps?
-	CanPushover    bool              `json:"can_pushover,omitempty"`   // can this step send Pushover notifications?
-	Delegation     *DelegationConfig `json:"delegation,omitempty"`     // spawn capabilities for this step
+	Profile        string            `json:"profile"`                   // profile name reference
+	Role           string            `json:"role,omitempty"`            // role name from global roles catalog
+	Turns          int               `json:"turns,omitempty"`           // turns per step (0 = 1 turn)
+	Instructions   string            `json:"instructions,omitempty"`    // custom instructions appended to prompt
+	CanStop        bool              `json:"can_stop,omitempty"`        // can this step signal loop stop?
+	CanMessage     bool              `json:"can_message,omitempty"`     // can this step send messages to subsequent steps?
+	CanPushover    bool              `json:"can_pushover,omitempty"`    // can this step send Pushover notifications?
+	Delegation     *DelegationConfig `json:"delegation,omitempty"`      // spawn capabilities for this step
+	Team           string            `json:"team,omitempty"`            // team name reference (resolved to delegation if Delegation is nil)
 	StandaloneChat bool              `json:"standalone_chat,omitempty"` // interactive chat mode (minimal prompt)
 }
 
@@ -47,12 +50,18 @@ type PushoverConfig struct {
 	AppToken string `json:"app_token,omitempty"` // Pushover application API token
 }
 
-// StandaloneProfile is a named bundle of profile + instructions + delegation for standalone mode.
-type StandaloneProfile struct {
-	Name         string            `json:"name"`
-	Profile      string            `json:"profile"` // references a Profile.Name
-	Instructions string            `json:"instructions,omitempty"`
-	Delegation   *DelegationConfig `json:"delegation,omitempty"`
+// Team is a named, reusable DelegationConfig.
+type Team struct {
+	Name        string            `json:"name"`
+	Description string            `json:"description,omitempty"`
+	Delegation  *DelegationConfig `json:"delegation,omitempty"`
+}
+
+// RecentCombination tracks a recently used profile+team pair for quick-pick in the UI.
+type RecentCombination struct {
+	Profile string    `json:"profile"`
+	Team    string    `json:"team"`
+	UsedAt  time.Time `json:"used_at"`
 }
 
 // GlobalConfig holds user-level preferences stored in ~/.adaf/config.json.
@@ -60,7 +69,8 @@ type GlobalConfig struct {
 	Agents             map[string]GlobalAgentConfig `json:"agents,omitempty"`
 	Profiles           []Profile                    `json:"profiles,omitempty"`
 	Loops              []LoopDef                    `json:"loops,omitempty"`
-	StandaloneProfiles []StandaloneProfile          `json:"standalone_profiles,omitempty"`
+	Teams              []Team                       `json:"teams,omitempty"`
+	RecentCombinations []RecentCombination          `json:"recent_combinations,omitempty"`
 	Pushover           PushoverConfig               `json:"pushover,omitempty"`
 	PromptRules        []PromptRule                 `json:"prompt_rules,omitempty"`
 	Roles              []RoleDefinition             `json:"roles,omitempty"`
@@ -193,34 +203,62 @@ func (c *GlobalConfig) FindLoop(name string) *LoopDef {
 	return nil
 }
 
-// AddStandaloneProfile appends a standalone profile. Returns an error if the name already exists.
-func (c *GlobalConfig) AddStandaloneProfile(sp StandaloneProfile) error {
-	for _, existing := range c.StandaloneProfiles {
-		if strings.EqualFold(existing.Name, sp.Name) {
-			return errors.New("standalone profile already exists: " + sp.Name)
+// AddTeam appends a team. Returns an error if the name already exists.
+func (c *GlobalConfig) AddTeam(t Team) error {
+	for _, existing := range c.Teams {
+		if strings.EqualFold(existing.Name, t.Name) {
+			return errors.New("team already exists: " + t.Name)
 		}
 	}
-	c.StandaloneProfiles = append(c.StandaloneProfiles, sp)
+	c.Teams = append(c.Teams, t)
 	return nil
 }
 
-// RemoveStandaloneProfile removes a standalone profile by name (case-insensitive).
-func (c *GlobalConfig) RemoveStandaloneProfile(name string) {
-	out := c.StandaloneProfiles[:0]
-	for _, sp := range c.StandaloneProfiles {
-		if !strings.EqualFold(sp.Name, name) {
-			out = append(out, sp)
+// RemoveTeam removes a team by name (case-insensitive).
+func (c *GlobalConfig) RemoveTeam(name string) {
+	out := c.Teams[:0]
+	for _, t := range c.Teams {
+		if !strings.EqualFold(t.Name, name) {
+			out = append(out, t)
 		}
 	}
-	c.StandaloneProfiles = out
+	c.Teams = out
 }
 
-// FindStandaloneProfile returns a pointer to a standalone profile by name, or nil if not found.
-func (c *GlobalConfig) FindStandaloneProfile(name string) *StandaloneProfile {
-	for i := range c.StandaloneProfiles {
-		if strings.EqualFold(c.StandaloneProfiles[i].Name, name) {
-			return &c.StandaloneProfiles[i]
+// FindTeam returns a pointer to a team by name, or nil if not found.
+func (c *GlobalConfig) FindTeam(name string) *Team {
+	for i := range c.Teams {
+		if strings.EqualFold(c.Teams[i].Name, name) {
+			return &c.Teams[i]
 		}
 	}
 	return nil
+}
+
+const maxRecentCombinations = 20
+
+// RecordRecentCombination adds or bumps a profile+team combination to the top of recent list.
+func (c *GlobalConfig) RecordRecentCombination(profile, team string) {
+	now := time.Now().UTC()
+
+	// Remove existing entry for this combination.
+	out := make([]RecentCombination, 0, len(c.RecentCombinations))
+	for _, rc := range c.RecentCombinations {
+		if !(strings.EqualFold(rc.Profile, profile) && strings.EqualFold(rc.Team, team)) {
+			out = append(out, rc)
+		}
+	}
+
+	// Prepend new entry.
+	out = append([]RecentCombination{{Profile: profile, Team: team, UsedAt: now}}, out...)
+
+	// Cap at max.
+	if len(out) > maxRecentCombinations {
+		out = out[:maxRecentCombinations]
+	}
+
+	// Sort by most recent first.
+	sort.Slice(out, func(i, j int) bool { return out[i].UsedAt.After(out[j].UsedAt) })
+
+	c.RecentCombinations = out
 }
