@@ -12,7 +12,7 @@ import (
 
 // ProfileResolveOpts holds variant-specific options for profile resolution.
 type ProfileResolveOpts struct {
-	Prefix         string // e.g. "ask" or "pm" — used in synthetic profile name
+	Prefix         string // e.g. "ask" — used in synthetic profile name
 	CustomCmd      string // value from --command flag (empty if not supported)
 	ReasoningLevel string // value from --reasoning-level flag (empty if not supported)
 }

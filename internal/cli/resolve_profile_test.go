@@ -144,7 +144,7 @@ func TestResolveProfile_AgentFlagWithModelOverride(t *testing.T) {
 	_ = cmd.Flags().Set("agent", "codex")
 	_ = cmd.Flags().Set("model", "custom-model-v2")
 
-	prof, _, _, err := resolveProfile(cmd, ProfileResolveOpts{Prefix: "pm"})
+	prof, _, _, err := resolveProfile(cmd, ProfileResolveOpts{Prefix: "run"})
 	if err != nil {
 		t.Fatalf("resolveProfile() error = %v", err)
 	}
@@ -314,7 +314,7 @@ func TestResolveProfile_PrefixUsedInSyntheticName(t *testing.T) {
 		want   string
 	}{
 		{prefix: "ask", want: "ask:claude"},
-		{prefix: "pm", want: "pm:claude"},
+		{prefix: "run", want: "run:claude"},
 	}
 
 	for _, tt := range tests {

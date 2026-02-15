@@ -1422,10 +1422,6 @@ code,
   display: block;
 }
 
-.new-session-form[data-mode='pm'] .new-session-panel[data-mode-panel='pm'] {
-  display: block;
-}
-
 .new-session-form[data-mode='loop'] .new-session-panel[data-mode-panel='loop'] {
   display: block;
 }

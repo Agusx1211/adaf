@@ -4,7 +4,6 @@ import TabBar from '../common/TabBar.jsx';
 import AgentDetail from '../detail/AgentDetail.jsx';
 import AgentOutput from '../detail/AgentOutput.jsx';
 import LoopVisualizer from '../loop/LoopVisualizer.jsx';
-import PMChatView from '../views/PMChatView.jsx';
 import StandaloneChatView from '../views/StandaloneChatView.jsx';
 import IssueDetailPanel from '../detail/IssueDetailPanel.jsx';
 import DocsDetailPanel from '../detail/DocsDetailPanel.jsx';
@@ -17,7 +16,6 @@ export default function CenterPanel() {
   var [activeTab, setActiveTab] = useState('detail');
   var { selectedScope, loopRun, leftView } = state;
 
-  var isPM = leftView === 'pm';
   var isStandalone = leftView === 'standalone';
   var isAgents = leftView === 'agents';
 
@@ -42,11 +40,6 @@ export default function CenterPanel() {
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* PM Chat - stays mounted, hidden when not active */}
-      <div style={{ display: isPM ? 'flex' : 'none', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-        <PMChatView />
-      </div>
-
       {/* Standalone Chat - stays mounted, hidden when not active */}
       <div style={{ display: isStandalone ? 'flex' : 'none', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
         <StandaloneChatView />

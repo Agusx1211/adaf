@@ -299,7 +299,6 @@ func (srv *Server) registerProjectRoutes(mux *http.ServeMux, prefix string) {
 
 	// Session control (project-scoped for create, since the store determines context)
 	mux.HandleFunc("POST "+prefix+"/sessions/ask", srv.projectHandler(handleStartAskSessionP))
-	mux.HandleFunc("POST "+prefix+"/sessions/pm", srv.projectHandler(handleStartPMSessionP))
 	mux.HandleFunc("POST "+prefix+"/sessions/loop", srv.projectHandler(handleStartLoopSessionP))
 	mux.HandleFunc("POST "+prefix+"/sessions/{id}/stop", srv.projectHandler(handleStopSessionP))
 	mux.HandleFunc("POST "+prefix+"/sessions/{id}/message", srv.projectHandler(handleSessionMessageP))
@@ -312,12 +311,6 @@ func (srv *Server) registerProjectRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("GET "+prefix+"/loops/{id}/messages", srv.projectHandler(handleLoopMessagesP))
 	mux.HandleFunc("POST "+prefix+"/loops/{id}/stop", srv.projectHandler(handleStopLoopRunP))
 	mux.HandleFunc("POST "+prefix+"/loops/{id}/message", srv.projectHandler(handleLoopRunMessageP))
-
-	// PM Chat
-	mux.HandleFunc("GET "+prefix+"/pm/chat", srv.projectHandler(handleGetPMChatP))
-	mux.HandleFunc("POST "+prefix+"/pm/chat", srv.projectHandler(handleSendPMChatMessageP))
-	mux.HandleFunc("POST "+prefix+"/pm/chat/response", srv.projectHandler(handleSavePMChatResponseP))
-	mux.HandleFunc("DELETE "+prefix+"/pm/chat", srv.projectHandler(handleClearPMChatP))
 
 	// Standalone Chat (legacy per-profile)
 	mux.HandleFunc("GET "+prefix+"/standalone-chat/{profile}", srv.projectHandler(handleGetStandaloneChatP))

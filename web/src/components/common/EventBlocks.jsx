@@ -66,7 +66,7 @@ function truncate(str, max) {
 
 export function MarkdownContent({ text, style }) {
   var html = useMemo(function () { return renderMarkdown(text); }, [text]);
-  return <div className="pm-md-content" style={style || {}} dangerouslySetInnerHTML={{ __html: html }} />;
+  return <div className="md-content" style={style || {}} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 export function ThinkingBlock({ content }) {
@@ -301,28 +301,28 @@ export function injectEventBlockStyles() {
   style.textContent = [
     '@keyframes slideIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }',
     '@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }',
-    '.pm-md-content { margin: 0; padding: 0; font-size: 13px; line-height: 1.7; color: var(--text-0); word-break: break-word; }',
-    '.pm-md-content p { margin: 0 0 8px 0; }',
-    '.pm-md-content p:last-child { margin-bottom: 0; }',
-    '.pm-md-content h1, .pm-md-content h2, .pm-md-content h3, .pm-md-content h4 { margin: 16px 0 8px 0; color: var(--text-0); }',
-    '.pm-md-content h1 { font-size: 18px; }',
-    '.pm-md-content h2 { font-size: 15px; }',
-    '.pm-md-content h3 { font-size: 14px; }',
-    '.pm-md-content h4 { font-size: 13px; }',
-    '.pm-md-content ul, .pm-md-content ol { margin: 4px 0 8px 0; padding-left: 20px; }',
-    '.pm-md-content li { margin-bottom: 4px; }',
-    '.pm-md-content code { font-family: "JetBrains Mono", monospace; font-size: 12px; background: var(--bg-3); padding: 1px 5px; border-radius: 3px; }',
-    '.pm-md-content pre { margin: 8px 0; padding: 12px; background: var(--bg-3); border-radius: 6px; overflow-x: auto; border: 1px solid var(--border); }',
-    '.pm-md-content pre code { background: none; padding: 0; font-size: 12px; }',
-    '.pm-md-content blockquote { margin: 8px 0; padding: 4px 12px; border-left: 3px solid var(--accent); color: var(--text-2); background: var(--bg-2); border-radius: 0 4px 4px 0; }',
-    '.pm-md-content a { color: var(--accent); text-decoration: none; }',
-    '.pm-md-content a:hover { text-decoration: underline; }',
-    '.pm-md-content table { border-collapse: collapse; margin: 8px 0; width: 100%; }',
-    '.pm-md-content th, .pm-md-content td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; font-size: 12px; }',
-    '.pm-md-content th { background: var(--bg-3); font-weight: 600; }',
-    '.pm-md-content hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }',
-    '.pm-md-content strong { color: var(--text-0); font-weight: 600; }',
-    '.pm-md-content img { max-width: 100%; border-radius: 4px; }',
+    '.md-content { margin: 0; padding: 0; font-size: 13px; line-height: 1.7; color: var(--text-0); word-break: break-word; }',
+    '.md-content p { margin: 0 0 8px 0; }',
+    '.md-content p:last-child { margin-bottom: 0; }',
+    '.md-content h1, .md-content h2, .md-content h3, .md-content h4 { margin: 16px 0 8px 0; color: var(--text-0); }',
+    '.md-content h1 { font-size: 18px; }',
+    '.md-content h2 { font-size: 15px; }',
+    '.md-content h3 { font-size: 14px; }',
+    '.md-content h4 { font-size: 13px; }',
+    '.md-content ul, .md-content ol { margin: 4px 0 8px 0; padding-left: 20px; }',
+    '.md-content li { margin-bottom: 4px; }',
+    '.md-content code { font-family: "JetBrains Mono", monospace; font-size: 12px; background: var(--bg-3); padding: 1px 5px; border-radius: 3px; }',
+    '.md-content pre { margin: 8px 0; padding: 12px; background: var(--bg-3); border-radius: 6px; overflow-x: auto; border: 1px solid var(--border); }',
+    '.md-content pre code { background: none; padding: 0; font-size: 12px; }',
+    '.md-content blockquote { margin: 8px 0; padding: 4px 12px; border-left: 3px solid var(--accent); color: var(--text-2); background: var(--bg-2); border-radius: 0 4px 4px 0; }',
+    '.md-content a { color: var(--accent); text-decoration: none; }',
+    '.md-content a:hover { text-decoration: underline; }',
+    '.md-content table { border-collapse: collapse; margin: 8px 0; width: 100%; }',
+    '.md-content th, .md-content td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; font-size: 12px; }',
+    '.md-content th { background: var(--bg-3); font-weight: 600; }',
+    '.md-content hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }',
+    '.md-content strong { color: var(--text-0); font-weight: 600; }',
+    '.md-content img { max-width: 100%; border-radius: 4px; }',
   ].join('\n');
   document.head.appendChild(style);
 }

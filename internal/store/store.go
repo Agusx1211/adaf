@@ -48,7 +48,6 @@ var requiredProjectSubdirs = []string{
 	"local/stats",
 	"local/stats/profiles",
 	"local/stats/loops",
-	"local/pmchat",
 	"waits",
 	"interrupts",
 }

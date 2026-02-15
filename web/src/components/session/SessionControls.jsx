@@ -76,13 +76,6 @@ function NewSessionModal({ onClose }) {
         endpoint = base + '/sessions/ask';
         payload = { profile: profile, prompt: prompt };
         if (planId) payload.plan_id = planId;
-      } else if (mode === 'pm') {
-        var pmProfile = form.pm_profile?.value || '';
-        var pmPlanId = form.pm_plan_id?.value || '';
-        if (!pmProfile) { showToast('Profile is required.', 'error'); setLoading(false); return; }
-        endpoint = base + '/sessions/pm';
-        payload = { profile: pmProfile };
-        if (pmPlanId) payload.plan_id = pmPlanId;
       } else {
         var loopName = form.loop_name?.value || '';
         var loopPlanId = form.loop_plan_id?.value || '';
@@ -119,7 +112,7 @@ function NewSessionModal({ onClose }) {
       <form onSubmit={handleSubmit}>
         {/* Mode tabs */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
-          {['standalone', 'ask', 'pm', 'loop'].map(function (m) {
+          {['standalone', 'ask', 'loop'].map(function (m) {
             return (
               <button key={m} type="button"
                 onClick={function () { setMode(m); }}
@@ -177,22 +170,6 @@ function NewSessionModal({ onClose }) {
             <div>
               <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Plan ID (optional)</label>
               <input name="ask_plan_id" placeholder="plan-id" style={inputStyle} />
-            </div>
-          </div>
-        )}
-
-        {mode === 'pm' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div>
-              <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Profile</label>
-              <select name="pm_profile" style={selectStyle}>
-                <option value="">Select profile</option>
-                {(profiles || []).map(function (p) { return <option key={p.name} value={p.name}>{p.name}</option>; })}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Plan ID (optional)</label>
-              <input name="pm_plan_id" placeholder="plan-id" style={inputStyle} />
             </div>
           </div>
         )}

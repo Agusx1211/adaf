@@ -7,7 +7,6 @@ import StatusDot from '../common/StatusDot.jsx';
 var NAV_ITEMS = [
   { id: 'agents', label: 'Agents' },
   { id: 'standalone', label: 'Standalone' },
-  { id: 'pm', label: 'PM' },
   { id: 'issues', label: 'Issues' },
   { id: 'docs', label: 'Docs' },
   { id: 'plan', label: 'Plan' },

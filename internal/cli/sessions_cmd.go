@@ -60,7 +60,7 @@ func runSessions(cmd *cobra.Command, args []string) error {
 	if len(sessions) == 0 {
 		fmt.Println(colorDim + "  No active sessions." + colorReset)
 		fmt.Println()
-		fmt.Println("  Start a session with " + styleBoldWhite + "adaf run --session" + colorReset + " or by launching loop/pm/ask with --session.")
+		fmt.Println("  Start a session with " + styleBoldWhite + "adaf run --session" + colorReset + " or by launching loop/ask with --session.")
 		return nil
 	}
 
