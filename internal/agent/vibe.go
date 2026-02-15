@@ -13,6 +13,7 @@ import (
 
 	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/recording"
+	"github.com/agusx1211/adaf/internal/stream"
 )
 
 // VibeAgent runs the vibe CLI tool.
@@ -37,9 +38,8 @@ func (v *VibeAgent) Name() string {
 // after completing the response (equivalent to using the "auto-approve"
 // agent profile).
 //
-// We always use --output text because vibe's streaming mode outputs NDJSON
-// which requires a stream parser (not yet implemented). Text mode provides
-// plain-text output that works with runBufferAgent.
+// We use --output streaming which produces NDJSON with complete messages
+// including tool calls and results, parsed by stream.ParseVibe.
 //
 // Model selection is done via the VIBE_ACTIVE_MODEL environment variable
 // (set in cfg.Env) rather than a --model flag, because vibe uses
@@ -74,10 +74,8 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 			// (for example when /dev/tty is unavailable).
 			args = append(args, "-p", cfg.Prompt)
 		}
-		// Always use text output mode. Vibe's streaming mode outputs NDJSON
-		// which requires a stream parser (not yet implemented). Text mode
-		// provides plain-text output that works with runBufferAgent.
-		args = append(args, "--output", "text")
+		// Use streaming output for NDJSON with tool call visibility.
+		args = append(args, "--output", "streaming")
 		recorder.RecordStdin(cfg.Prompt)
 	}
 
@@ -124,7 +122,7 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 	setupEnv(cmd, cfg.Env)
 
 	start := time.Now()
-	result, err := runBufferAgent(cmd, cfg, recorder, "vibe", cmdName, args)
+	result, err := runStreamAgent(ctx, cmd, cfg, recorder, "vibe", cmdName, args, stream.ParseVibe)
 	if err != nil {
 		return nil, err
 	}

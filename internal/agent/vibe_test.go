@@ -54,8 +54,7 @@ mode="stdin"
 if [ "$has_prompt_arg" -eq 1 ]; then
 	mode="argv"
 fi
-printf 'mode:%s\n' "$mode"
-printf 'ok\n'
+printf '{"role":"assistant","content":"mode:%s ok"}\n' "$mode"
 `
 	if err := os.WriteFile(cmdPath, []byte(script), 0755); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -107,7 +106,7 @@ func TestVibeRunBasic(t *testing.T) {
 	tmp := t.TempDir()
 	cmdPath := filepath.Join(tmp, "fake-vibe")
 	script := `#!/usr/bin/env sh
-echo "Hello from vibe"
+echo '{"role":"assistant","content":"Hello from vibe"}'
 `
 	if err := os.WriteFile(cmdPath, []byte(script), 0755); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
