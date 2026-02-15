@@ -13,6 +13,7 @@ export default function StandaloneConversationList() {
   var [instances, setInstances] = useState([]);
   var [loading, setLoading] = useState(true);
   var [showNewChat, setShowNewChat] = useState(false);
+  var chatStatuses = state.standaloneChatStatuses || {};
 
   var loadInstances = useCallback(function () {
     if (!state.currentProjectID) return;
@@ -99,6 +100,8 @@ export default function StandaloneConversationList() {
         var isSelected = state.standaloneChatID === inst.id;
         var title = inst.title || 'New Chat';
         if (title.length > 60) title = title.slice(0, 60) + '\u2026';
+        var chatStatus = chatStatuses[inst.id]; // 'thinking' | 'responding' | undefined
+        var statusColor = chatStatus === 'thinking' ? 'var(--accent)' : chatStatus === 'responding' ? 'var(--green)' : null;
         return (
           <div
             key={inst.id}
@@ -118,12 +121,24 @@ export default function StandaloneConversationList() {
               gap: 8,
             }}>
               <div style={{
-                fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
-                color: isSelected ? 'var(--text-0)' : 'var(--text-1)',
-                fontWeight: isSelected ? 600 : 400,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                flex: 1,
-              }}>{title}</div>
+                display: 'flex', alignItems: 'center', gap: 6,
+                overflow: 'hidden', flex: 1, minWidth: 0,
+              }}>
+                {chatStatus && (
+                  <span style={{
+                    width: 6, height: 6, borderRadius: '50%',
+                    background: statusColor,
+                    animation: 'pulse 1.5s ease-in-out infinite',
+                    flexShrink: 0,
+                  }} />
+                )}
+                <span style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+                  color: isSelected ? 'var(--text-0)' : 'var(--text-1)',
+                  fontWeight: isSelected ? 600 : 400,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>{title}</span>
+              </div>
               <button
                 onClick={function (e) { handleDelete(e, inst.id); }}
                 title="Delete chat"
@@ -140,10 +155,23 @@ export default function StandaloneConversationList() {
               display: 'flex', alignItems: 'center', gap: 6,
               fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)',
               marginTop: 2,
+              marginLeft: chatStatus ? 12 : 0,
             }}>
-              <span style={{ opacity: 0.7 }}>{inst.profile}</span>
-              <span style={{ opacity: 0.4 }}>{'\u00B7'}</span>
-              <span style={{ opacity: 0.5 }}>{timeAgo(inst.updated_at)}</span>
+              {chatStatus ? (
+                <span style={{
+                  color: statusColor,
+                  animation: 'pulse 1.5s ease-in-out infinite',
+                  fontWeight: 500,
+                }}>
+                  {chatStatus === 'thinking' ? 'thinking\u2026' : 'responding\u2026'}
+                </span>
+              ) : (
+                <>
+                  <span style={{ opacity: 0.7 }}>{inst.profile}</span>
+                  <span style={{ opacity: 0.4 }}>{'\u00B7'}</span>
+                  <span style={{ opacity: 0.5 }}>{timeAgo(inst.updated_at)}</span>
+                </>
+              )}
             </div>
           </div>
         );

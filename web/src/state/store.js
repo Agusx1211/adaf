@@ -45,6 +45,7 @@ var initialState = {
   configSelection: null, // { type: 'profile'|'loop'|'standalone', name: string } or null
   standaloneProfile: '',
   standaloneChatID: '', // active chat instance ID
+  standaloneChatStatuses: {}, // { [chatID]: 'thinking' | 'responding' }
 };
 
 function reducer(state, action) {
@@ -92,6 +93,18 @@ function reducer(state, action) {
 
     case 'SET_STANDALONE_CHAT_ID':
       return { ...state, standaloneChatID: action.payload || '' };
+
+    case 'SET_STANDALONE_CHAT_STATUS': {
+      var statusChatID = action.payload.chatID;
+      var chatStatus = action.payload.status;
+      var nextStatuses = { ...state.standaloneChatStatuses };
+      if (!chatStatus || chatStatus === 'idle') {
+        delete nextStatuses[statusChatID];
+      } else {
+        nextStatuses[statusChatID] = chatStatus;
+      }
+      return { ...state, standaloneChatStatuses: nextStatuses };
+    }
 
     case 'TOGGLE_NODE': {
       var nodeID = action.payload;
@@ -147,7 +160,7 @@ function reducer(state, action) {
         sessions: [], spawns: [], messages: [], streamEvents: [], activity: [], activityLast: null,
         issues: [], plans: [], activePlan: null, docs: [], turns: [], loopRun: null, usage: null,
         selectedIssue: null, selectedPlan: null, selectedDoc: null, selectedTurn: null, selectedScope: null,
-        expandedNodes: {}, projectMeta: null, activeLoopIDForMessages: 0,
+        expandedNodes: {}, projectMeta: null, activeLoopIDForMessages: 0, standaloneChatStatuses: {},
         viewLoaded: { issues: false, docs: false, plan: false, logs: false },
       };
 

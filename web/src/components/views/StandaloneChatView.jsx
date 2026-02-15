@@ -20,12 +20,45 @@ export default function StandaloneChatView() {
   var [streamEvents, setStreamEvents] = useState([]);
   var [inspectedMessage, setInspectedMessage] = useState(null);
   var listRef = useRef(null);
-  var wsRef = useRef(null);
   var inputRef = useRef(null);
-  var promptRef = useRef(null);
   var base = apiBase(state.currentProjectID);
 
+  // Refs for per-chat session management
+  var currentChatIDRef = useRef(chatID);
+  var chatSessionsRef = useRef({}); // { [chatID]: { sessionID, events, ws, sending, finalized, promptData, base } }
+  var dispatchRef = useRef(dispatch);
+  dispatchRef.current = dispatch;
+
   useEffect(function () { injectEventBlockStyles(); }, []);
+
+  // Keep currentChatIDRef in sync
+  currentChatIDRef.current = chatID;
+
+  // When chatID changes, swap React state to reflect the new chat's session
+  useEffect(function () {
+    var entry = chatSessionsRef.current[chatID];
+    if (entry && entry.sending && !entry.finalized) {
+      setSending(true);
+      setStreamEvents(entry.events.slice());
+      setActiveSessionID(entry.sessionID);
+    } else {
+      setSending(false);
+      setStreamEvents([]);
+      setActiveSessionID(null);
+    }
+  }, [chatID]);
+
+  // Cleanup all WebSockets on unmount
+  useEffect(function () {
+    return function () {
+      Object.keys(chatSessionsRef.current).forEach(function (id) {
+        var entry = chatSessionsRef.current[id];
+        if (entry && entry.ws && entry.ws.readyState <= 1) {
+          try { entry.ws.close(); } catch (_) {}
+        }
+      });
+    };
+  }, []);
 
   // Load messages when chat instance changes
   var loadMessages = useCallback(async function () {
@@ -67,37 +100,89 @@ export default function StandaloneChatView() {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [messages, streamEvents]);
 
-  // WebSocket for streaming session output
-  useEffect(function () {
-    if (!activeSessionID) return;
+  // --- Per-chat WebSocket management ---
+
+  function pushEventForChat(forChatID, evt) {
+    var entry = chatSessionsRef.current[forChatID];
+    if (!entry) return;
+
+    var events = entry.events;
+    var last = events.length > 0 ? events[events.length - 1] : null;
+    if (evt.type === 'text' && last && last.type === 'text') {
+      last.content += evt.content;
+    } else if (evt.type === 'thinking' && last && last.type === 'thinking') {
+      last.content += evt.content;
+    } else {
+      events.push(evt);
+    }
+
+    // Update React state only if this is the currently viewed chat
+    if (forChatID === currentChatIDRef.current) {
+      setStreamEvents(events.slice());
+    }
+
+    // Update global status to 'responding' once we have content
+    if (evt.type === 'text' || evt.type === 'tool_use' || evt.type === 'tool_result') {
+      dispatchRef.current({ type: 'SET_STANDALONE_CHAT_STATUS', payload: { chatID: forChatID, status: 'responding' } });
+    }
+  }
+
+  function finalizeChat(forChatID) {
+    var entry = chatSessionsRef.current[forChatID];
+    if (!entry || entry.finalized) return;
+    entry.finalized = true;
+    entry.sending = false;
+
+    var textParts = [];
+    entry.events.forEach(function (e) {
+      if (e.type === 'text') textParts.push(e.content);
+    });
+    var finalText = cleanResponse(textParts.join(''));
+
+    if (finalText || entry.events.length > 0) {
+      saveAssistantResponseForChat(forChatID, finalText || '(no text output)', entry.events.slice(), entry.promptData, entry.base);
+    }
+
+    // Close WS
+    if (entry.ws && entry.ws.readyState <= 1) {
+      try { entry.ws.close(); } catch (_) {}
+    }
+
+    // Clean up entry
+    delete chatSessionsRef.current[forChatID];
+
+    // Update global status
+    dispatchRef.current({ type: 'SET_STANDALONE_CHAT_STATUS', payload: { chatID: forChatID, status: 'idle' } });
+
+    // Update React state if current chat
+    if (forChatID === currentChatIDRef.current) {
+      setSending(false);
+      setActiveSessionID(null);
+      setStreamEvents([]);
+    }
+  }
+
+  function startSessionWS(forChatID, sessionID) {
+    var entry = chatSessionsRef.current[forChatID];
+    if (!entry) return;
 
     var ws;
     try {
-      ws = new WebSocket(buildWSURL('/ws/sessions/' + encodeURIComponent(String(activeSessionID))));
-      wsRef.current = ws;
+      ws = new WebSocket(buildWSURL('/ws/sessions/' + encodeURIComponent(String(sessionID))));
+      entry.ws = ws;
     } catch (e) {
       console.error('Standalone Chat WebSocket error:', e);
-      setSending(false);
+      entry.sending = false;
+      delete chatSessionsRef.current[forChatID];
+      if (forChatID === currentChatIDRef.current) {
+        setSending(false);
+      }
+      dispatchRef.current({ type: 'SET_STANDALONE_CHAT_STATUS', payload: { chatID: forChatID, status: 'idle' } });
       return;
     }
 
-    var events = [];
     var isStreaming = false;
     var hasRawText = false;
-    var finalized = false;
-    promptRef.current = null;
-
-    function pushEvent(evt) {
-      var last = events.length > 0 ? events[events.length - 1] : null;
-      if (evt.type === 'text' && last && last.type === 'text') {
-        last.content += evt.content;
-      } else if (evt.type === 'thinking' && last && last.type === 'thinking') {
-        last.content += evt.content;
-      } else {
-        events.push(evt);
-      }
-      setStreamEvents(events.slice());
-    }
 
     ws.addEventListener('message', function (wsEvent) {
       try {
@@ -106,7 +191,7 @@ export default function StandaloneChatView() {
         var data = envelope.data;
 
         if (type === 'prompt' && data) {
-          promptRef.current = {
+          entry.promptData = {
             text: data.text || data.prompt || '',
             truncated: !!data.truncated,
             turn_id: data.turn_id || null,
@@ -124,8 +209,8 @@ export default function StandaloneChatView() {
 
           if (ev.type === 'content_block_delta' && ev.delta) {
             isStreaming = true;
-            if (ev.delta.text) pushEvent({ type: 'text', content: ev.delta.text });
-            if (ev.delta.thinking) pushEvent({ type: 'thinking', content: ev.delta.thinking });
+            if (ev.delta.text) pushEventForChat(forChatID, { type: 'text', content: ev.delta.text });
+            if (ev.delta.thinking) pushEventForChat(forChatID, { type: 'thinking', content: ev.delta.thinking });
             return;
           }
 
@@ -134,13 +219,13 @@ export default function StandaloneChatView() {
             blocks.forEach(function (block) {
               if (!block) return;
               if (block.type === 'text' && block.text) {
-                if (!isStreaming && !hasRawText) pushEvent({ type: 'text', content: block.text });
+                if (!isStreaming && !hasRawText) pushEventForChat(forChatID, { type: 'text', content: block.text });
               } else if (block.type === 'thinking' && block.text) {
-                if (!isStreaming) pushEvent({ type: 'thinking', content: block.text });
+                if (!isStreaming) pushEventForChat(forChatID, { type: 'thinking', content: block.text });
               } else if (block.type === 'tool_use') {
-                pushEvent({ type: 'tool_use', tool: block.name || 'tool', input: block.input || {} });
+                pushEventForChat(forChatID, { type: 'tool_use', tool: block.name || 'tool', input: block.input || {} });
               } else if (block.type === 'tool_result') {
-                pushEvent({
+                pushEventForChat(forChatID, {
                   type: 'tool_result', tool: block.name || '',
                   result: block.content || block.tool_content || block.output || block.text || '',
                   isError: !!block.is_error,
@@ -154,7 +239,7 @@ export default function StandaloneChatView() {
             var userBlocks = (ev.message && Array.isArray(ev.message.content)) ? ev.message.content : (Array.isArray(ev.content) ? ev.content : []);
             userBlocks.forEach(function (block) {
               if (block && block.type === 'tool_result') {
-                pushEvent({
+                pushEventForChat(forChatID, {
                   type: 'tool_result', tool: block.name || '',
                   result: block.content || block.tool_content || block.output || block.text || '',
                   isError: !!block.is_error,
@@ -170,25 +255,13 @@ export default function StandaloneChatView() {
           var rawText = typeof data === 'string' ? data : (data.data || '');
           if (rawText && rawText.indexOf('\x1b') === -1 && rawText.indexOf('[stderr]') === -1) {
             hasRawText = true;
-            pushEvent({ type: 'text', content: rawText });
+            pushEventForChat(forChatID, { type: 'text', content: rawText });
           }
           return;
         }
 
-        if ((type === 'done' || type === 'loop_done') && !finalized) {
-          finalized = true;
-          var textParts = [];
-          events.forEach(function (e) {
-            if (e.type === 'text') textParts.push(e.content);
-          });
-          var finalText = cleanResponse(textParts.join(''));
-          if (finalText || events.length > 0) {
-            saveAssistantResponse(finalText || '(no text output)', events.slice());
-          }
-          setSending(false);
-          setActiveSessionID(null);
-          setStreamEvents([]);
-          ws.close();
+        if (type === 'done' || type === 'loop_done') {
+          finalizeChat(forChatID);
         }
       } catch (e) {
         console.error('Standalone Chat WebSocket parse error:', e);
@@ -196,66 +269,67 @@ export default function StandaloneChatView() {
     });
 
     ws.addEventListener('error', function () {
-      if (!finalized) {
-        finalized = true;
-        setSending(false);
-        setActiveSessionID(null);
-        setStreamEvents([]);
-      }
+      finalizeChat(forChatID);
     });
+
     ws.addEventListener('close', function () {
-      wsRef.current = null;
-      if (!finalized) {
-        finalized = true;
-        var textParts = [];
-        events.forEach(function (e) {
-          if (e.type === 'text') textParts.push(e.content);
-        });
-        var finalText = cleanResponse(textParts.join(''));
-        if (finalText || events.length > 0) {
-          saveAssistantResponse(finalText || '(session ended)', events.slice());
-        }
-        setSending(false);
-        setActiveSessionID(null);
-        setStreamEvents([]);
-      }
+      finalizeChat(forChatID);
     });
+  }
 
-    return function () {
-      if (ws && ws.readyState <= 1) ws.close();
-    };
-  }, [activeSessionID]);
-
-  // Handlers
-
-  async function saveAssistantResponse(content, structuredEvents) {
+  async function saveAssistantResponseForChat(forChatID, content, structuredEvents, promptData, capturedBase) {
     var assistantMsg = {
       id: Date.now(),
       role: 'assistant',
       content: content,
       _events: structuredEvents || null,
-      _prompt: promptRef.current || null,
+      _prompt: promptData || null,
       created_at: new Date().toISOString(),
     };
-    promptRef.current = null;
-    setMessages(function (prev) { return prev.concat([assistantMsg]); });
+
+    // Update local messages only if this is the current chat
+    if (forChatID === currentChatIDRef.current) {
+      setMessages(function (prev) { return prev.concat([assistantMsg]); });
+    }
+
     // Refresh conversation list to update title/timestamp
     if (window.__reloadChatInstances) window.__reloadChatInstances();
+
     try {
-      await apiCall(base + '/chat-instances/' + encodeURIComponent(chatID) + '/response', 'POST', { content: content });
+      await apiCall((capturedBase || base) + '/chat-instances/' + encodeURIComponent(forChatID) + '/response', 'POST', { content: content });
     } catch (err) {
       console.error('Failed to save assistant response:', err);
     }
   }
 
+  // --- Handlers ---
+
   async function handleSend(e) {
     e.preventDefault();
-    if (sending || !chatID) return;
+    if (!chatID) return;
+
+    // Check if this chat already has an active session
+    var existingEntry = chatSessionsRef.current[chatID];
+    if (existingEntry && existingEntry.sending) return;
 
     var msg = input.trim();
     setInput('');
+
+    // Create per-chat session entry
+    var entry = {
+      sessionID: null,
+      events: [],
+      ws: null,
+      sending: true,
+      finalized: false,
+      promptData: null,
+      base: base,
+    };
+    chatSessionsRef.current[chatID] = entry;
+
     setSending(true);
     setStreamEvents([]);
+    dispatch({ type: 'SET_STANDALONE_CHAT_STATUS', payload: { chatID: chatID, status: 'thinking' } });
 
     if (msg) {
       var userMsg = {
@@ -272,16 +346,30 @@ export default function StandaloneChatView() {
         message: msg,
       });
       if (result && result.session_id) {
-        setActiveSessionID(result.session_id);
+        entry.sessionID = result.session_id;
+        if (chatID === currentChatIDRef.current) {
+          setActiveSessionID(result.session_id);
+        }
+        startSessionWS(chatID, result.session_id);
       } else {
-        setSending(false);
+        entry.sending = false;
+        delete chatSessionsRef.current[chatID];
+        if (chatID === currentChatIDRef.current) {
+          setSending(false);
+        }
+        dispatch({ type: 'SET_STANDALONE_CHAT_STATUS', payload: { chatID: chatID, status: 'idle' } });
       }
       // Refresh conversation list to update title after first message
       if (window.__reloadChatInstances) window.__reloadChatInstances();
     } catch (err) {
+      entry.sending = false;
+      delete chatSessionsRef.current[chatID];
       if (err.authRequired) return;
       showToast('Failed to send message: ' + (err.message || err), 'error');
-      setSending(false);
+      if (chatID === currentChatIDRef.current) {
+        setSending(false);
+      }
+      dispatch({ type: 'SET_STANDALONE_CHAT_STATUS', payload: { chatID: chatID, status: 'idle' } });
     }
   }
 
@@ -330,6 +418,14 @@ export default function StandaloneChatView() {
         background: 'var(--bg-1)', flexShrink: 0,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {sending && (
+            <span style={{
+              width: 7, height: 7, borderRadius: '50%',
+              background: streamEvents.length > 0 ? 'var(--green)' : 'var(--accent)',
+              animation: 'pulse 1.5s ease-in-out infinite',
+              flexShrink: 0,
+            }} />
+          )}
           <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: 'var(--text-1)' }}>
             {headerTitle}
           </span>
@@ -340,7 +436,9 @@ export default function StandaloneChatView() {
           )}
         </div>
         <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>
-          {messages.length} messages
+          {sending
+            ? (streamEvents.length > 0 ? 'responding\u2026' : 'thinking\u2026')
+            : messages.length + ' messages'}
         </span>
       </div>
 
