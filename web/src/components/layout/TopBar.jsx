@@ -164,7 +164,7 @@ export default function TopBar() {
                 flexShrink: 0,
               }} />
             )}
-            <span>{counts.running > 0 ? counts.running + ' running' : counts.total + ' agents'}</span>
+            <span>{counts.running > 0 ? counts.running + ' running' : '0 running'}</span>
             <span style={{ fontSize: 7, opacity: 0.6 }}>{'\u25BE'}</span>
           </button>
 
