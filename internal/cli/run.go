@@ -25,8 +25,11 @@ var runCmd = &cobra.Command{
 	Use:     "run",
 	Aliases: []string{"execute", "exec"},
 	Short:   "Run an agent loop against the project (daemon-backed)",
-	Long: `Run an AI agent against the project. Execution is daemon-backed and follows
-the loop runtime model used throughout ADAF.
+	Long: `Run an AI agent against the project in a continuous loop. Execution is
+daemon-backed and follows the loop runtime model used throughout ADAF.
+
+For a single-turn standalone session, use 'adaf ask' instead — it runs the
+agent once with full project context and exits.
 
 Supported agents: claude, codex, vibe, opencode, gemini, generic
 

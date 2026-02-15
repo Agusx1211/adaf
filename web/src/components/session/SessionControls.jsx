@@ -31,7 +31,7 @@ function NewSessionModal({ onClose }) {
   var state = useAppState();
   var dispatch = useDispatch();
   var showToast = useToast();
-  var [mode, setMode] = useState('ask');
+  var [mode, setMode] = useState('standalone');
   var [loading, setLoading] = useState(false);
   var [profiles, setProfiles] = useState(null);
   var [loops, setLoops] = useState(null);
@@ -61,7 +61,14 @@ function NewSessionModal({ onClose }) {
       var payload = {};
       var endpoint = '';
 
-      if (mode === 'ask') {
+      if (mode === 'standalone') {
+        var saProfile = form.sa_profile?.value || '';
+        var saPlanId = form.sa_plan_id?.value || '';
+        if (!saProfile) { showToast('Profile is required.', 'error'); setLoading(false); return; }
+        endpoint = base + '/sessions/ask';
+        payload = { profile: saProfile };
+        if (saPlanId) payload.plan_id = saPlanId;
+      } else if (mode === 'ask') {
         var profile = form.ask_profile?.value || '';
         var prompt = form.ask_prompt?.value || '';
         var planId = form.ask_plan_id?.value || '';
@@ -112,7 +119,7 @@ function NewSessionModal({ onClose }) {
       <form onSubmit={handleSubmit}>
         {/* Mode tabs */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
-          {['ask', 'pm', 'loop'].map(function (m) {
+          {['standalone', 'ask', 'pm', 'loop'].map(function (m) {
             return (
               <button key={m} type="button"
                 onClick={function () { setMode(m); }}
@@ -128,6 +135,28 @@ function NewSessionModal({ onClose }) {
             );
           })}
         </div>
+
+        {mode === 'standalone' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', lineHeight: 1.4 }}>
+              Agent runs once with full project context. No prompt needed.
+            </div>
+            <div>
+              <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Profile</label>
+              <select name="sa_profile" style={selectStyle}>
+                <option value="">Select profile</option>
+                {(profiles || []).map(function (p) {
+                  var label = p.name + (p.agent ? ' (' + p.agent + ')' : '');
+                  return <option key={p.name} value={p.name}>{label}</option>;
+                })}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Plan ID (optional)</label>
+              <input name="sa_plan_id" placeholder="plan-id" style={inputStyle} />
+            </div>
+          </div>
+        )}
 
         {mode === 'ask' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

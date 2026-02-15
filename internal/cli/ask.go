@@ -24,20 +24,26 @@ import (
 
 var askCmd = &cobra.Command{
 	Use:   "ask [prompt]",
-	Short: "Run a single agent session with a prompt and exit",
+	Short: "Run a single agent session (with optional prompt) and exit",
 	Long: `Run a single standalone agent session. Unlike 'run', 'ask' is designed for
-one-shot usage: provide a prompt, the agent runs once, and adaf exits.
+one-shot usage: the agent runs once and adaf exits.
+
+If no prompt is provided, the agent runs in standalone mode using the full
+project context (rules, plan, docs, etc.) — similar to opening a vibe coding
+agent directly, but with ADAF's context injection.
 
 The prompt can be provided as:
   - A positional argument: adaf ask "Fix the failing tests"
   - Via --prompt flag: adaf ask --prompt "Fix the failing tests"
   - Via stdin pipe: echo "Fix the failing tests" | adaf ask
+  - Omitted entirely for standalone mode: adaf ask --agent claude
 
 Use --count N to repeat the same prompt N times sequentially.
 When --count > 1, each run gets the same prompt but can optionally include
 the previous run's output as context (--chain).
 
 Examples:
+  adaf ask --agent claude                  # standalone mode with project context
   adaf ask "Fix the failing tests in auth/"
   adaf ask --agent codex --model gpt-5.1-codex-max "Refactor the utils"
   adaf ask --count 3 "Run and fix tests until they pass"
@@ -217,7 +223,9 @@ func resolveAskPrompt(cmd *cobra.Command, args []string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("no prompt provided — pass as argument, --prompt flag, or pipe via stdin")
+	// No prompt provided — standalone mode.
+	fmt.Println("  No prompt provided — running in standalone mode with project context.")
+	return "", nil
 }
 
 // resolveAskProfile resolves the agent profile from --profile, --agent/--model flags.
@@ -233,6 +241,7 @@ func resolveAskProfile(cmd *cobra.Command) (*config.Profile, string, error) {
 }
 
 // buildAskPrompt wraps the user prompt with project context.
+// When userPrompt is empty (standalone mode), returns just the project context.
 func buildAskPrompt(s *store.Store, projCfg *store.ProjectConfig, planID, userPrompt string) (string, error) {
 	built, err := promptpkg.Build(promptpkg.BuildOpts{
 		Store:   s,
@@ -241,7 +250,15 @@ func buildAskPrompt(s *store.Store, projCfg *store.ProjectConfig, planID, userPr
 	})
 	if err != nil {
 		debug.LogKV("cli.ask", "prompt.Build failed, using raw prompt", "error", err)
+		if userPrompt == "" {
+			return "Work on the project using the available context.", nil
+		}
 		return userPrompt, nil
+	}
+
+	// Standalone mode: return just the project context without a task section.
+	if userPrompt == "" {
+		return built, nil
 	}
 
 	// The built prompt includes project context (rules, context, etc.).

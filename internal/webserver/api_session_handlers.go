@@ -27,8 +27,8 @@ func handleStartAskSessionP(s *store.Store, w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Profile == "" || req.Prompt == "" {
-		writeError(w, http.StatusBadRequest, "profile and prompt are required")
+	if req.Profile == "" {
+		writeError(w, http.StatusBadRequest, "profile is required")
 		return
 	}
 
@@ -57,12 +57,37 @@ func handleStartAskSessionP(s *store.Store, w http.ResponseWriter, r *http.Reque
 
 	projDir := projectDir(s)
 
+	// Build prompt: if user provided one, wrap it with project context;
+	// otherwise use project context alone (standalone mode).
+	instructions := strings.TrimSpace(req.Prompt)
+	if instructions != "" {
+		built, err := promptpkg.Build(promptpkg.BuildOpts{
+			Store:   s,
+			Project: projCfg,
+			PlanID:  planID,
+		})
+		if err == nil {
+			instructions = built + "\n\n# Task\n\n" + instructions + "\n"
+		}
+	} else {
+		built, err := promptpkg.Build(promptpkg.BuildOpts{
+			Store:   s,
+			Project: projCfg,
+			PlanID:  planID,
+		})
+		if err == nil {
+			instructions = built
+		} else {
+			instructions = "Work on the project using the available context."
+		}
+	}
+
 	loopDef := config.LoopDef{
 		Name: "ask",
 		Steps: []config.LoopStep{{
 			Profile:      prof.Name,
 			Turns:        1,
-			Instructions: req.Prompt,
+			Instructions: instructions,
 		}},
 	}
 
@@ -75,6 +100,7 @@ func handleStartAskSessionP(s *store.Store, w http.ResponseWriter, r *http.Reque
 		AgentName:   prof.Agent,
 		Loop:        loopDef,
 		Profiles:    []config.Profile{*prof},
+		MaxCycles:   1,
 	}
 
 	sessionID, err := session.CreateSession(dcfg)

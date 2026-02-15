@@ -70,24 +70,27 @@ func TestResolveAskPrompt_FlagOnly(t *testing.T) {
 	}
 }
 
-func TestResolveAskPrompt_NoInput(t *testing.T) {
+func TestResolveAskPrompt_NoInput_StandaloneMode(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("prompt", "", "")
-	_, err := resolveAskPrompt(cmd, nil)
-	if err == nil {
-		t.Fatal("expected error when no prompt provided")
+	prompt, err := resolveAskPrompt(cmd, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "no prompt provided") {
-		t.Fatalf("error = %q, want 'no prompt provided' message", err.Error())
+	if prompt != "" {
+		t.Fatalf("prompt = %q, want empty string for standalone mode", prompt)
 	}
 }
 
-func TestResolveAskPrompt_EmptyArgs(t *testing.T) {
+func TestResolveAskPrompt_EmptyArgs_StandaloneMode(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("prompt", "", "")
-	_, err := resolveAskPrompt(cmd, []string{"  "})
-	if err == nil {
-		t.Fatal("expected error when empty args provided")
+	prompt, err := resolveAskPrompt(cmd, []string{"  "})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if prompt != "" {
+		t.Fatalf("prompt = %q, want empty string for standalone mode", prompt)
 	}
 }
 
