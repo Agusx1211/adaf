@@ -81,21 +81,22 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 		recorder.RecordStdin(cfg.Prompt)
 	}
 
-	// Create an isolated VIBE_HOME so session logs are written to a known
-	// location with zero collision risk from concurrent or external vibe runs.
-	vibeHome, err := os.MkdirTemp("", "adaf-vibe-home-*")
-	if err != nil {
-		return nil, fmt.Errorf("vibe agent: failed to create temp VIBE_HOME: %w", err)
+	// Use a persistent VIBE_HOME under the project's .adaf directory so that
+	// session data survives across runs and --resume can find previous sessions.
+	// Vibe natively supports multiple sessions in the same home directory.
+	// Fall back to a temp dir if WorkDir is unavailable.
+	vibeHome, vibeHomeTmp := vibeHomeDir(cfg.WorkDir)
+	if vibeHomeTmp {
+		defer os.RemoveAll(vibeHome)
 	}
-	defer os.RemoveAll(vibeHome)
 
 	sessionLogDir := filepath.Join(vibeHome, "logs", "session")
 	if err := os.MkdirAll(sessionLogDir, 0o755); err != nil {
 		return nil, fmt.Errorf("vibe agent: failed to create session log dir: %w", err)
 	}
 
-	// Copy user config files into the isolated home so model/provider settings
-	// and API keys are available.
+	// Copy user config files so model/provider settings and API keys
+	// are available in the vibe home.
 	copyVibeConfigFiles(vibeHome)
 
 	// Merge VIBE_HOME into the env overlay.
@@ -122,12 +123,34 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 	cmd.WaitDelay = 5 * time.Second
 	setupEnv(cmd, cfg.Env)
 
+	start := time.Now()
 	result, err := runBufferAgent(cmd, cfg, recorder, "vibe", cmdName, args)
 	if err != nil {
 		return nil, err
 	}
-	result.AgentSessionID = extractVibeSessionID(sessionLogDir)
+	result.AgentSessionID = extractVibeSessionID(start, vibeHome)
 	return result, nil
+}
+
+// vibeHomeDir returns a VIBE_HOME directory path and whether it's a temp dir
+// (that the caller should clean up). When a workDir is available, it uses a
+// persistent location under .adaf/local/vibe_home/ so session data survives
+// across runs. Falls back to a temp dir when workDir is empty.
+func vibeHomeDir(workDir string) (string, bool) {
+	if workDir != "" {
+		dir := filepath.Join(workDir, ".adaf", "local", "vibe_home")
+		if err := os.MkdirAll(dir, 0o755); err == nil {
+			return dir, false
+		}
+	}
+	dir, err := os.MkdirTemp("", "adaf-vibe-home-*")
+	if err != nil {
+		// Last resort: use a fixed temp path.
+		dir = filepath.Join(os.TempDir(), "adaf-vibe-home-fallback")
+		_ = os.MkdirAll(dir, 0o755)
+		return dir, false
+	}
+	return dir, true
 }
 
 func canUseVibeStdinPrompt() bool {
@@ -158,28 +181,62 @@ func copyVibeConfigFiles(vibeHome string) {
 	}
 }
 
-// extractVibeSessionID reads the session ID from the meta.json file inside
-// the first session_* subdirectory found in sessionDir. Returns empty string
-// on any error (best-effort, non-fatal).
-func extractVibeSessionID(sessionDir string) string {
-	entries, err := os.ReadDir(sessionDir)
-	if err != nil {
-		return ""
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "session_") {
-			continue
+// extractVibeSessionID finds the vibe session ID created during the current run.
+// It searches the active VIBE_HOME path first, then falls back to ~/.vibe.
+func extractVibeSessionID(startTime time.Time, vibeHome string) string {
+	candidateDirs := []string{}
+	seen := make(map[string]struct{})
+	addSessionDir := func(dir string) {
+		if dir == "" {
+			return
 		}
-		metaPath := filepath.Join(sessionDir, entry.Name(), "meta.json")
-		data, err := os.ReadFile(metaPath)
+		if _, ok := seen[dir]; ok {
+			return
+		}
+		seen[dir] = struct{}{}
+		candidateDirs = append(candidateDirs, dir)
+	}
+
+	if strings.TrimSpace(vibeHome) != "" {
+		addSessionDir(filepath.Join(vibeHome, "logs", "session"))
+	}
+
+	if home, err := os.UserHomeDir(); err == nil {
+		addSessionDir(filepath.Join(home, ".vibe", "logs", "session"))
+	}
+
+	for _, sessionDir := range candidateDirs {
+		entries, err := os.ReadDir(sessionDir)
 		if err != nil {
 			continue
 		}
-		var meta struct {
-			SessionID string `json:"session_id"`
-		}
-		if json.Unmarshal(data, &meta) == nil && meta.SessionID != "" {
-			return meta.SessionID
+
+		// Walk entries in reverse order (most recent first, since names are
+		// timestamp-sorted) and return the first session created after startTime.
+		for i := len(entries) - 1; i >= 0; i-- {
+			entry := entries[i]
+			if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "session_") {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			// Only consider sessions created during or after our run.
+			if info.ModTime().Before(startTime) {
+				break // entries are sorted, older ones come before
+			}
+			metaPath := filepath.Join(sessionDir, entry.Name(), "meta.json")
+			data, err := os.ReadFile(metaPath)
+			if err != nil {
+				continue
+			}
+			var meta struct {
+				SessionID string `json:"session_id"`
+			}
+			if json.Unmarshal(data, &meta) == nil && meta.SessionID != "" {
+				return meta.SessionID
+			}
 		}
 	}
 	return ""

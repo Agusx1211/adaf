@@ -42,6 +42,10 @@ type RunConfig struct {
 
 	// MaxCycles limits loop cycles. 0 means unlimited.
 	MaxCycles int
+
+	// ResumeSessionID is the agent-level session ID to resume (e.g. Claude --resume).
+	// Used by standalone chat to continue a previous conversation.
+	ResumeSessionID string
 }
 
 const spawnCleanupGracePeriod = 12 * time.Second
@@ -203,13 +207,22 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				GlobalCfg:   cfg.GlobalCfg,
 				PlanID:      cfg.PlanID,
 				LoopContext: loopCtx,
-				Delegation:  stepDef.Delegation,
-				Handoffs:    handoffs,
+				Delegation:     stepDef.Delegation,
+				Handoffs:       handoffs,
+				StandaloneChat: stepDef.StandaloneChat,
 			}
 
-			prompt, err := promptpkg.Build(promptOpts)
-			if err != nil {
-				return fmt.Errorf("building prompt for step %d: %w", stepIdx, err)
+			// When resuming a standalone chat, the agent already has full context.
+			// Just send the user message (step instructions) as the prompt.
+			var prompt string
+			if cfg.ResumeSessionID != "" && stepDef.StandaloneChat {
+				prompt = stepDef.Instructions
+			} else {
+				var err error
+				prompt, err = promptpkg.Build(promptOpts)
+				if err != nil {
+					return fmt.Errorf("building prompt for step %d: %w", stepIdx, err)
+				}
 			}
 			agentCfg.Prompt = prompt
 			agentCfg.MaxTurns = turns
@@ -273,6 +286,11 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				LoopRunHexID: run.HexID,
 				StepHexID:    stepHexID,
 				PromptFunc: func(turnID int) string {
+					// When resuming a standalone chat, skip prompt building —
+					// the agent already has full context from the previous session.
+					if cfg.ResumeSessionID != "" && stepDef.StandaloneChat {
+						return basePrompt
+					}
 					opts := promptOpts
 					opts.CurrentTurnID = turnID
 					built, err := promptpkg.Build(opts)
@@ -615,11 +633,12 @@ func buildAgentConfig(cfg RunConfig, prof *config.Profile, runID, stepIndex int,
 	}
 
 	return agent.Config{
-		Name:    prof.Agent,
-		Command: launch.Command,
-		Args:    agentArgs,
-		Env:     agentEnv,
-		WorkDir: cfg.WorkDir,
+		Name:            prof.Agent,
+		Command:         launch.Command,
+		Args:            agentArgs,
+		Env:             agentEnv,
+		WorkDir:         cfg.WorkDir,
+		ResumeSessionID: cfg.ResumeSessionID,
 	}
 }
 

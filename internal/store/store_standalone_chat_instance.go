@@ -123,6 +123,22 @@ func (s *Store) UpdateChatInstanceTitle(id, title string) error {
 	return s.writeJSON(metaPath, &inst)
 }
 
+// UpdateChatInstanceLastSession stores the daemon session ID on a chat instance
+// so that follow-up messages can resume the agent session.
+func (s *Store) UpdateChatInstanceLastSession(id string, sessionID int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	metaPath := filepath.Join(s.instanceDir(id), "meta.json")
+	var inst StandaloneChatInstance
+	if err := s.readJSON(metaPath, &inst); err != nil {
+		return err
+	}
+	inst.LastSessionID = sessionID
+	inst.UpdatedAt = time.Now().UTC()
+	return s.writeJSON(metaPath, &inst)
+}
+
 // ListChatInstanceMessages returns all messages for a chat instance.
 func (s *Store) ListChatInstanceMessages(instanceID string) ([]StandaloneChatMessage, error) {
 	s.mu.RLock()

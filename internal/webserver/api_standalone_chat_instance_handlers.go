@@ -145,18 +145,26 @@ func handleSendChatInstanceMessage(s *store.Store, w http.ResponseWriter, r *htt
 		}
 	}
 
-	history, err := s.ListChatInstanceMessages(id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load chat history")
-		return
+	// Check if we can resume a previous agent session for this chat instance.
+	var resumeSessionID string
+	if inst.LastSessionID > 0 {
+		resumeSessionID = session.ReadAgentSessionID(inst.LastSessionID)
 	}
 
-	fullPrompt := buildStandaloneChatInstancePrompt(sp, req.Message, history)
+	// When resuming, just pass the user message directly — the agent already
+	// has the full context from its previous session.
+	var fullPrompt string
+	if resumeSessionID != "" {
+		fullPrompt = req.Message
+	} else {
+		fullPrompt = buildStandaloneChatInstancePrompt(sp, req.Message)
+	}
 
 	step := config.LoopStep{
-		Profile:      prof.Name,
-		Turns:        1,
-		Instructions: fullPrompt,
+		Profile:        prof.Name,
+		Turns:          1,
+		Instructions:   fullPrompt,
+		StandaloneChat: true,
 	}
 	if sp.Delegation != nil {
 		step.Delegation = sp.Delegation
@@ -177,14 +185,15 @@ func handleSendChatInstanceMessage(s *store.Store, w http.ResponseWriter, r *htt
 	}
 
 	dcfg := session.DaemonConfig{
-		ProjectDir:  projDir,
-		ProjectName: projCfg.Name,
-		WorkDir:     projDir,
-		ProfileName: prof.Name,
-		AgentName:   prof.Agent,
-		Loop:        loopDef,
-		Profiles:    allProfiles,
-		MaxCycles:   1,
+		ProjectDir:      projDir,
+		ProjectName:     projCfg.Name,
+		WorkDir:         projDir,
+		ProfileName:     prof.Name,
+		AgentName:       prof.Agent,
+		Loop:            loopDef,
+		Profiles:        allProfiles,
+		MaxCycles:       1,
+		ResumeSessionID: resumeSessionID,
 	}
 
 	sessionID, err := session.CreateSession(dcfg)
@@ -192,6 +201,9 @@ func handleSendChatInstanceMessage(s *store.Store, w http.ResponseWriter, r *htt
 		writeError(w, http.StatusInternalServerError, "failed to create session")
 		return
 	}
+
+	// Store this session ID on the instance so follow-ups can resume.
+	_ = s.UpdateChatInstanceLastSession(id, sessionID)
 
 	if err := session.StartDaemon(sessionID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start daemon")
@@ -264,17 +276,8 @@ func handleDeleteChatInstance(s *store.Store, w http.ResponseWriter, r *http.Req
 
 // buildStandaloneChatInstancePrompt is analogous to buildStandaloneChatPrompt
 // but works with messages from a chat instance.
-func buildStandaloneChatInstancePrompt(sp *config.StandaloneProfile, userMessage string, history []store.StandaloneChatMessage) string {
+func buildStandaloneChatInstancePrompt(sp *config.StandaloneProfile, userMessage string) string {
 	var b strings.Builder
-	b.WriteString("# OVERRIDE — Interactive Chat Mode\n\n")
-	b.WriteString("**IMPORTANT: Ignore the autonomous agent instructions above.** You are NOT running autonomously. ")
-	b.WriteString("You are in a LIVE INTERACTIVE CHAT with the user. A human IS in the loop — they are typing messages to you.\n\n")
-	b.WriteString("## Rules for this chat session\n\n")
-	b.WriteString("1. RESPOND DIRECTLY to the user's message. Be conversational.\n")
-	b.WriteString("2. Do NOT start exploring the codebase or working on tasks unless the user asks you to.\n")
-	b.WriteString("3. Do NOT give unsolicited project status reports.\n")
-	b.WriteString("4. Keep responses concise unless the user asks for detail.\n")
-	b.WriteString("5. When the user asks you to do work (write code, fix bugs, etc.), then use your tools to do it.\n\n")
 
 	if sp.Instructions != "" {
 		b.WriteString("## Standalone Profile Instructions\n\n")
@@ -282,25 +285,10 @@ func buildStandaloneChatInstancePrompt(sp *config.StandaloneProfile, userMessage
 		b.WriteString("\n\n")
 	}
 
-	if len(history) > 0 {
-		b.WriteString("## Conversation History\n\n")
-		for _, msg := range history {
-			if msg.Role == "user" {
-				b.WriteString("User: ")
-			} else {
-				b.WriteString("Assistant: ")
-			}
-			b.WriteString(msg.Content)
-			b.WriteString("\n\n")
-		}
-	}
-
 	if userMessage != "" {
-		b.WriteString("## Current User Message\n\n")
 		b.WriteString(userMessage)
-		b.WriteString("\n\nRespond directly to the message above.\n")
+		b.WriteString("\n")
 	} else {
-		b.WriteString("## Task\n\n")
 		b.WriteString("Begin working on the project using the context and instructions above.\n")
 	}
 

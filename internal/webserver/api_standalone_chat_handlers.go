@@ -97,18 +97,26 @@ func handleSendStandaloneChatMessageP(s *store.Store, w http.ResponseWriter, r *
 		}
 	}
 
-	history, err := s.ListStandaloneChatMessages(profileParam)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load chat history")
-		return
+	// Check if we can resume a previous agent session for this profile chat.
+	var resumeSessionID string
+	if lastSID := s.ReadStandaloneChatLastSession(profileParam); lastSID > 0 {
+		resumeSessionID = session.ReadAgentSessionID(lastSID)
 	}
 
-	fullPrompt := buildStandaloneChatPrompt(sp, req.Message, history)
+	// When resuming, just pass the user message directly — the agent already
+	// has the full context from its previous session.
+	var fullPrompt string
+	if resumeSessionID != "" {
+		fullPrompt = req.Message
+	} else {
+		fullPrompt = buildStandaloneChatPrompt(sp, req.Message)
+	}
 
 	step := config.LoopStep{
-		Profile:      prof.Name,
-		Turns:        1,
-		Instructions: fullPrompt,
+		Profile:        prof.Name,
+		Turns:          1,
+		Instructions:   fullPrompt,
+		StandaloneChat: true,
 	}
 	if sp.Delegation != nil {
 		step.Delegation = sp.Delegation
@@ -130,14 +138,15 @@ func handleSendStandaloneChatMessageP(s *store.Store, w http.ResponseWriter, r *
 	}
 
 	dcfg := session.DaemonConfig{
-		ProjectDir:  projDir,
-		ProjectName: projCfg.Name,
-		WorkDir:     projDir,
-		ProfileName: prof.Name,
-		AgentName:   prof.Agent,
-		Loop:        loopDef,
-		Profiles:    allProfiles,
-		MaxCycles:   1,
+		ProjectDir:      projDir,
+		ProjectName:     projCfg.Name,
+		WorkDir:         projDir,
+		ProfileName:     prof.Name,
+		AgentName:       prof.Agent,
+		Loop:            loopDef,
+		Profiles:        allProfiles,
+		MaxCycles:       1,
+		ResumeSessionID: resumeSessionID,
 	}
 
 	sessionID, err := session.CreateSession(dcfg)
@@ -145,6 +154,9 @@ func handleSendStandaloneChatMessageP(s *store.Store, w http.ResponseWriter, r *
 		writeError(w, http.StatusInternalServerError, "failed to create session")
 		return
 	}
+
+	// Store this session ID so follow-ups can resume.
+	_ = s.WriteStandaloneChatLastSession(profileParam, sessionID)
 
 	if err := session.StartDaemon(sessionID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start daemon")
@@ -162,23 +174,8 @@ func handleSendStandaloneChatMessageP(s *store.Store, w http.ResponseWriter, r *
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-func buildStandaloneChatPrompt(sp *config.StandaloneProfile, userMessage string, history []store.StandaloneChatMessage) string {
-	// NOTE: Do NOT call promptpkg.Build here. The looprun runner already builds
-	// the full project context (including role, rules, session logs, delegation
-	// instructions) and prepends it to the step instructions. Including it here
-	// would duplicate the context and create contradictions (e.g. "no spawning"
-	// from a no-delegation Build vs delegation instructions from the looprun).
-
+func buildStandaloneChatPrompt(sp *config.StandaloneProfile, userMessage string) string {
 	var b strings.Builder
-	b.WriteString("# OVERRIDE — Interactive Chat Mode\n\n")
-	b.WriteString("**IMPORTANT: Ignore the autonomous agent instructions above.** You are NOT running autonomously. ")
-	b.WriteString("You are in a LIVE INTERACTIVE CHAT with the user. A human IS in the loop — they are typing messages to you.\n\n")
-	b.WriteString("## Rules for this chat session\n\n")
-	b.WriteString("1. RESPOND DIRECTLY to the user's message. Be conversational.\n")
-	b.WriteString("2. Do NOT start exploring the codebase or working on tasks unless the user asks you to.\n")
-	b.WriteString("3. Do NOT give unsolicited project status reports.\n")
-	b.WriteString("4. Keep responses concise unless the user asks for detail.\n")
-	b.WriteString("5. When the user asks you to do work (write code, fix bugs, etc.), then use your tools to do it.\n\n")
 
 	if sp.Instructions != "" {
 		b.WriteString("## Standalone Profile Instructions\n\n")
@@ -186,25 +183,10 @@ func buildStandaloneChatPrompt(sp *config.StandaloneProfile, userMessage string,
 		b.WriteString("\n\n")
 	}
 
-	if len(history) > 0 {
-		b.WriteString("## Conversation History\n\n")
-		for _, msg := range history {
-			if msg.Role == "user" {
-				b.WriteString("User: ")
-			} else {
-				b.WriteString("Assistant: ")
-			}
-			b.WriteString(msg.Content)
-			b.WriteString("\n\n")
-		}
-	}
-
 	if userMessage != "" {
-		b.WriteString("## Current User Message\n\n")
 		b.WriteString(userMessage)
-		b.WriteString("\n\nRespond directly to the message above.\n")
+		b.WriteString("\n")
 	} else {
-		b.WriteString("## Task\n\n")
 		b.WriteString("Begin working on the project using the context and instructions above.\n")
 	}
 

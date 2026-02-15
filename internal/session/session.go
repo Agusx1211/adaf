@@ -73,6 +73,10 @@ type DaemonConfig struct {
 
 	// Optional one-off command path overrides keyed by agent name.
 	AgentCommandOverrides map[string]string `json:"agent_command_overrides,omitempty"`
+
+	// ResumeSessionID is the agent-level session ID to resume (e.g. Claude --resume).
+	// When set, the agent continues the previous session instead of starting fresh.
+	ResumeSessionID string `json:"resume_session_id,omitempty"`
 }
 
 // Dir returns the global sessions directory (~/.adaf/sessions/), creating it if needed.
@@ -419,6 +423,26 @@ func IsAgentContext() bool {
 	return strings.TrimSpace(os.Getenv("ADAF_TURN_ID")) != "" ||
 		strings.TrimSpace(os.Getenv("ADAF_SESSION_ID")) != "" ||
 		os.Getenv("ADAF_AGENT") == "1"
+}
+
+// AgentSessionIDPath returns the path to the file storing the agent session ID for a daemon session.
+func AgentSessionIDPath(sessionID int) string {
+	return filepath.Join(SessionDir(sessionID), "agent_session_id")
+}
+
+// WriteAgentSessionID persists the agent-level session ID (e.g. Claude's session ID)
+// to the daemon session directory so it can be used for --resume on follow-up messages.
+func WriteAgentSessionID(sessionID int, agentSessionID string) error {
+	return os.WriteFile(AgentSessionIDPath(sessionID), []byte(agentSessionID), 0644)
+}
+
+// ReadAgentSessionID reads a previously stored agent session ID. Returns empty string if not found.
+func ReadAgentSessionID(sessionID int) string {
+	data, err := os.ReadFile(AgentSessionIDPath(sessionID))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // isProcessAlive checks if a process with the given PID is still running.

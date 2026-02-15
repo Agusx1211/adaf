@@ -1239,6 +1239,9 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 				if ev.Result != nil {
 					wf.ExitCode = ev.Result.ExitCode
 					wf.DurationNS = int64(ev.Result.Duration)
+					if ev.Result.AgentSessionID != "" {
+						_ = WriteAgentSessionID(b.meta.SessionID, ev.Result.AgentSessionID)
+					}
 				}
 				if ev.Err != nil {
 					wf.Error = ev.Err.Error()
@@ -1307,15 +1310,16 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 	}()
 
 	runErr := looprun.Run(ctx, looprun.RunConfig{
-		Store:     s,
-		GlobalCfg: globalCfg,
-		LoopDef:   &loopDef,
-		Project:   projCfg,
-		AgentsCfg: agentsCfg,
-		PlanID:    cfg.PlanID,
-		SessionID: b.meta.SessionID,
-		WorkDir:   workDir,
-		MaxCycles: cfg.MaxCycles,
+		Store:           s,
+		GlobalCfg:       globalCfg,
+		LoopDef:         &loopDef,
+		Project:         projCfg,
+		AgentsCfg:       agentsCfg,
+		PlanID:          cfg.PlanID,
+		SessionID:       b.meta.SessionID,
+		WorkDir:         workDir,
+		MaxCycles:       cfg.MaxCycles,
+		ResumeSessionID: cfg.ResumeSessionID,
 	}, eventCh)
 
 	close(eventCh)

@@ -104,6 +104,11 @@ type BuildOpts struct {
 
 	// Handoffs from previous loop step, injected into the prompt.
 	Handoffs []store.HandoffInfo
+
+	// StandaloneChat enables the minimal interactive chat prompt path.
+	// When true, Build() short-circuits to a focused prompt without
+	// autonomous rules, session logs, or loop context.
+	StandaloneChat bool
 }
 
 // WaitResultInfo describes the result of a spawn that was waited on.
@@ -122,6 +127,10 @@ type WaitResultInfo struct {
 func Build(opts BuildOpts) (string, error) {
 	if opts.ParentTurnID > 0 {
 		return buildSubAgentPrompt(opts)
+	}
+
+	if opts.StandaloneChat {
+		return buildStandaloneChatContext(opts)
 	}
 
 	var b strings.Builder
@@ -488,6 +497,71 @@ func formatWaitResultInfo(wr WaitResultInfo) string {
 	}
 
 	return b.String()
+}
+
+// buildStandaloneChatContext generates a minimal prompt for interactive chat sessions.
+// It includes only role identity, project name, tool pointers, and the conversation —
+// no autonomous rules, session logs, issues, loop context, or delegation docs.
+func buildStandaloneChatContext(opts BuildOpts) (string, error) {
+	var b strings.Builder
+
+	// Wrap context in a supra-code block so the model clearly distinguishes
+	// system context from the conversation / instructions that follow.
+	b.WriteString("Context: `````\n")
+
+	// Role identity (brief).
+	if opts.Profile != nil {
+		role := config.EffectiveStepRole(opts.Role, opts.GlobalCfg)
+		roles := config.DefaultRoleDefinitions()
+		if opts.GlobalCfg != nil {
+			config.EnsureDefaultRoleCatalog(opts.GlobalCfg)
+			roles = opts.GlobalCfg.Roles
+		}
+		roleTitle := strings.ToUpper(role)
+		roleIdentity := ""
+		for _, def := range roles {
+			if strings.EqualFold(def.Name, role) {
+				if strings.TrimSpace(def.Title) != "" {
+					roleTitle = strings.TrimSpace(def.Title)
+				}
+				roleIdentity = strings.TrimSpace(def.Identity)
+				break
+			}
+		}
+		fmt.Fprintf(&b, "# %s\n", roleTitle)
+		if roleIdentity != "" {
+			b.WriteString(roleIdentity + "\n")
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("You are in an interactive chat session with the user. Respond directly to their messages.\n")
+	b.WriteString("When asked to do work (write code, fix bugs, explore the codebase, etc.), use your tools.\n\n")
+
+	// Project name.
+	if opts.Project != nil && opts.Project.Name != "" {
+		fmt.Fprintf(&b, "Project: %s\n\n", opts.Project.Name)
+	}
+
+	// Tools pointer.
+	b.WriteString("## Tools\n")
+	b.WriteString("The `adaf` CLI provides project management tools. Run `adaf --help` for available commands.\n")
+	b.WriteString("Do not access the `.adaf/` directory directly — use `adaf` commands.\n\n")
+
+	// Delegation pointer (brief).
+	if opts.Delegation != nil && len(opts.Delegation.Profiles) > 0 {
+		b.WriteString("You can delegate work to sub-agents. Run `adaf spawn --help` for details.\n\n")
+	}
+
+	b.WriteString("`````\n\n")
+
+	// Step instructions (standalone profile instructions + current message).
+	if lc := opts.LoopContext; lc != nil && lc.Instructions != "" {
+		b.WriteString(lc.Instructions)
+		b.WriteString("\n")
+	}
+
+	return b.String(), nil
 }
 
 func isDelegationActiveSpawnStatus(status string) bool {

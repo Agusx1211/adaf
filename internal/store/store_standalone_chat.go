@@ -60,6 +60,33 @@ func (s *Store) CreateStandaloneChatMessage(profileName string, msg *StandaloneC
 	return s.writeJSON(filepath.Join(dir, filename), msg)
 }
 
+// ReadStandaloneChatLastSession returns the last daemon session ID for a profile-level chat.
+func (s *Store) ReadStandaloneChatLastSession(profileName string) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	p := filepath.Join(s.localDir("standalonechat", safeDirName(profileName)), "last_session_id")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return 0
+	}
+	var id int
+	fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &id)
+	return id
+}
+
+// WriteStandaloneChatLastSession stores the last daemon session ID for a profile-level chat.
+func (s *Store) WriteStandaloneChatLastSession(profileName string, sessionID int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dir := s.localDir("standalonechat", safeDirName(profileName))
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "last_session_id"), []byte(fmt.Sprintf("%d", sessionID)), 0644)
+}
+
 func (s *Store) ClearStandaloneChatMessages(profileName string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -74,7 +101,7 @@ func (s *Store) ClearStandaloneChatMessages(profileName string) error {
 	}
 
 	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".json") {
+		if strings.HasSuffix(e.Name(), ".json") || e.Name() == "last_session_id" {
 			os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}

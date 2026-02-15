@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/agusx1211/adaf/internal/recording"
 	"github.com/agusx1211/adaf/internal/store"
@@ -162,73 +163,112 @@ exit 42
 	})
 }
 
+func TestVibeHomeDir_PersistentWhenWorkDirSet(t *testing.T) {
+	workDir := t.TempDir()
+
+	dir, isTmp := vibeHomeDir(workDir)
+	if isTmp {
+		t.Fatal("vibeHomeDir with workDir should return persistent dir, got temp")
+	}
+
+	expected := filepath.Join(workDir, ".adaf", "local", "vibe_home")
+	if dir != expected {
+		t.Fatalf("vibeHomeDir = %q, want %q", dir, expected)
+	}
+
+	// Directory should exist.
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("persistent vibeHome dir should exist: %v", err)
+	}
+}
+
+func TestVibeHomeDir_TempWhenNoWorkDir(t *testing.T) {
+	dir, isTmp := vibeHomeDir("")
+	if !isTmp {
+		t.Fatal("vibeHomeDir with empty workDir should return temp dir")
+	}
+	defer os.RemoveAll(dir)
+
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("temp vibeHome dir should exist: %v", err)
+	}
+}
+
 func TestExtractVibeSessionID(t *testing.T) {
-	tests := []struct {
-		name  string
-		setup func(t *testing.T, dir string)
-		want  string
-	}{
-		{
-			name:  "empty directory",
-			setup: func(t *testing.T, dir string) {},
-			want:  "",
-		},
-		{
-			name: "valid session with meta.json",
-			setup: func(t *testing.T, dir string) {
-				sessDir := filepath.Join(dir, "session_20250101_abcd1234")
-				if err := os.MkdirAll(sessDir, 0o755); err != nil {
-					t.Fatal(err)
-				}
-				meta := `{"session_id": "abcd1234-5678-9abc-def0-123456789abc"}`
-				if err := os.WriteFile(filepath.Join(sessDir, "meta.json"), []byte(meta), 0o644); err != nil {
-					t.Fatal(err)
-				}
-			},
-			want: "abcd1234-5678-9abc-def0-123456789abc",
-		},
-		{
-			name: "no session_prefix directory",
-			setup: func(t *testing.T, dir string) {
-				otherDir := filepath.Join(dir, "other_dir")
-				if err := os.MkdirAll(otherDir, 0o755); err != nil {
-					t.Fatal(err)
-				}
-			},
-			want: "",
-		},
-		{
-			name: "session directory without meta.json",
-			setup: func(t *testing.T, dir string) {
-				sessDir := filepath.Join(dir, "session_20250101_abcd1234")
-				if err := os.MkdirAll(sessDir, 0o755); err != nil {
-					t.Fatal(err)
-				}
-			},
-			want: "",
-		},
-		{
-			name: "invalid JSON in meta.json",
-			setup: func(t *testing.T, dir string) {
-				sessDir := filepath.Join(dir, "session_20250101_abcd1234")
-				if err := os.MkdirAll(sessDir, 0o755); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(sessDir, "meta.json"), []byte("not json"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-			},
-			want: "",
-		},
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	sessionDir := filepath.Join(home, ".vibe", "logs", "session")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			tt.setup(t, dir)
-			got := extractVibeSessionID(dir)
-			if got != tt.want {
-				t.Errorf("extractVibeSessionID() = %q, want %q", got, tt.want)
-			}
-		})
-	}
+
+	t.Run("empty directory", func(t *testing.T) {
+		got := extractVibeSessionID(time.Now().Add(-time.Hour), filepath.Join(home, ".vibe"))
+		if got != "" {
+			t.Errorf("extractVibeSessionID() = %q, want empty", got)
+		}
+	})
+
+	t.Run("custom vibe home is preferred", func(t *testing.T) {
+		before := time.Now().Add(-time.Second)
+		customHome := filepath.Join(home, "custom_vibe_home")
+		customSessionDir := filepath.Join(customHome, "logs", "session")
+		if err := os.MkdirAll(customSessionDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		sessDir := filepath.Join(customSessionDir, "session_20260215_120000_abcd")
+		if err := os.MkdirAll(sessDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		meta := `{"session_id": "deadbeef-1111-2222-3333-444444444444"}`
+		if err := os.WriteFile(filepath.Join(sessDir, "meta.json"), []byte(meta), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		got := extractVibeSessionID(before, customHome)
+		if got != "deadbeef-1111-2222-3333-444444444444" {
+			t.Errorf("extractVibeSessionID() = %q, want custom home session", got)
+		}
+	})
+
+	t.Run("valid session after start time", func(t *testing.T) {
+		before := time.Now().Add(-time.Second)
+		sessDir := filepath.Join(sessionDir, "session_20260215_100000_abcd1234")
+		if err := os.MkdirAll(sessDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		meta := `{"session_id": "abcd1234-5678-9abc-def0-123456789abc"}`
+		if err := os.WriteFile(filepath.Join(sessDir, "meta.json"), []byte(meta), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got := extractVibeSessionID(before, filepath.Join(home, ".vibe"))
+		if got != "abcd1234-5678-9abc-def0-123456789abc" {
+			t.Errorf("extractVibeSessionID() = %q, want %q", got, "abcd1234-5678-9abc-def0-123456789abc")
+		}
+	})
+
+	t.Run("session before start time is skipped", func(t *testing.T) {
+		got := extractVibeSessionID(time.Now().Add(time.Hour), filepath.Join(home, ".vibe"))
+		if got != "" {
+			t.Errorf("extractVibeSessionID(future) = %q, want empty", got)
+		}
+	})
+
+	t.Run("invalid JSON in meta.json", func(t *testing.T) {
+		before := time.Now().Add(-time.Second)
+		sessDir := filepath.Join(sessionDir, "session_20260215_110000_bad12345")
+		if err := os.MkdirAll(sessDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sessDir, "meta.json"), []byte("not json"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// Should still find the valid session from the previous subtest.
+		got := extractVibeSessionID(before, filepath.Join(home, ".vibe"))
+		if got != "abcd1234-5678-9abc-def0-123456789abc" {
+			t.Errorf("extractVibeSessionID() = %q, want valid session from earlier", got)
+		}
+	})
 }
