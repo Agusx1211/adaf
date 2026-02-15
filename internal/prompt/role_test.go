@@ -37,13 +37,13 @@ func TestDelegationSection_IncludesQuickstartWhenDelegationEnabled(t *testing.T)
 
 func TestDelegationSection_NoDelegation(t *testing.T) {
 	got := delegationSection(nil, nil, nil)
-	if got != "You cannot spawn sub-agents.\n\n" {
-		t.Fatalf("delegationSection(nil) = %q, want %q", got, "You cannot spawn sub-agents.\n\n")
+	if got != "" {
+		t.Fatalf("delegationSection(nil) = %q, want empty", got)
 	}
 
 	got = delegationSection(&config.DelegationConfig{}, nil, nil)
-	if got != "You cannot spawn sub-agents.\n\n" {
-		t.Fatalf("delegationSection(empty) = %q, want %q", got, "You cannot spawn sub-agents.\n\n")
+	if got != "" {
+		t.Fatalf("delegationSection(empty) = %q, want empty", got)
 	}
 }
 

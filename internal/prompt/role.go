@@ -88,7 +88,7 @@ func ReadOnlyPrompt() string {
 // delegationSection builds the delegation/spawning prompt section from a DelegationConfig.
 func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalConfig, runningSpawns []store.SpawnRecord) string {
 	if deleg == nil || len(deleg.Profiles) == 0 {
-		return "You cannot spawn sub-agents.\n\n"
+		return ""
 	}
 
 	var b strings.Builder
