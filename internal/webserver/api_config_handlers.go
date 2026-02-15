@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/agusx1211/adaf/internal/agent"
+	"github.com/agusx1211/adaf/internal/agentmeta"
 	"github.com/agusx1211/adaf/internal/config"
 )
 
@@ -491,6 +493,76 @@ func (srv *Server) handleGetPushover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, cfg.Pushover)
+}
+
+type agentInfoDTO struct {
+	Name            string                     `json:"name"`
+	Detected        bool                       `json:"detected"`
+	DefaultModel    string                     `json:"default_model"`
+	SupportedModels []string                   `json:"supported_models"`
+	ReasoningLevels []agentmeta.ReasoningLevel `json:"reasoning_levels"`
+}
+
+func buildAgentInfoList(agentsCfg *agent.AgentsConfig) []agentInfoDTO {
+	var result []agentInfoDTO
+	for _, name := range agentmeta.Names() {
+		info, _ := agentmeta.InfoFor(name)
+		ai := agentInfoDTO{
+			Name:            name,
+			DefaultModel:    info.DefaultModel,
+			SupportedModels: info.SupportedModels,
+			ReasoningLevels: info.ReasoningLevels,
+		}
+		if ai.SupportedModels == nil {
+			ai.SupportedModels = []string{}
+		}
+		if ai.ReasoningLevels == nil {
+			ai.ReasoningLevels = []agentmeta.ReasoningLevel{}
+		}
+
+		if agentsCfg != nil {
+			if rec, ok := agentsCfg.Agents[name]; ok {
+				ai.Detected = rec.Detected
+				if len(rec.SupportedModels) > 0 {
+					ai.SupportedModels = rec.SupportedModels
+				}
+				if len(rec.ReasoningLevels) > 0 {
+					ai.ReasoningLevels = rec.ReasoningLevels
+				}
+				if rec.DefaultModel != "" {
+					ai.DefaultModel = rec.DefaultModel
+				}
+			}
+		}
+
+		result = append(result, ai)
+	}
+	return result
+}
+
+func (srv *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
+	// Try cached detection data first; if empty, trigger a fresh scan so the
+	// dropdown gets full model IDs (e.g. "claude-opus-4-6") instead of just
+	// the short aliases from the built-in catalog.
+	agentsCfg, _ := agent.LoadAgentsConfig()
+	if len(agentsCfg.Agents) == 0 {
+		globalCfg, _ := config.Load()
+		if synced, err := agent.LoadAndSyncAgentsConfig(globalCfg); err == nil {
+			agentsCfg = synced
+		}
+	}
+
+	writeJSON(w, http.StatusOK, buildAgentInfoList(agentsCfg))
+}
+
+func (srv *Server) handleDetectAgents(w http.ResponseWriter, r *http.Request) {
+	globalCfg, _ := config.Load()
+	agentsCfg, err := agent.LoadAndSyncAgentsConfig(globalCfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "detection failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, buildAgentInfoList(agentsCfg))
 }
 
 func (srv *Server) handleUpdatePushover(w http.ResponseWriter, r *http.Request) {

@@ -3,8 +3,7 @@ import { useAppState, useDispatch } from '../../state/store.js';
 import { apiCall } from '../../api/client.js';
 import { useToast } from '../common/Toast.jsx';
 
-var AGENTS = ['claude', 'codex', 'gemini', 'vibe', 'opencode', 'generic'];
-var REASONING_LEVELS = ['', 'low', 'medium', 'high', 'xhigh'];
+var AGENTS_FALLBACK = ['claude', 'codex', 'gemini', 'vibe', 'opencode', 'generic'];
 var SPEED_OPTIONS = ['', 'fast', 'medium', 'slow'];
 var STYLE_PRESETS = ['', 'manager', 'parallel', 'scout', 'sequential'];
 var ROLES = ['developer', 'lead-developer', 'manager', 'supervisor', 'ui-designer', 'qa', 'backend-designer'];
@@ -53,7 +52,16 @@ export default function ConfigDetailPanel() {
 
   var [data, setData] = useState(null);
   var [profiles, setProfiles] = useState([]);
+  var [agentsMeta, setAgentsMeta] = useState(null);
   var [saving, setSaving] = useState(false);
+
+  // Fetch agents metadata once on mount.
+  var fetchAgentsMeta = useCallback(function () {
+    return apiCall('/api/config/agents', 'GET', null, { allow404: true })
+      .then(function (res) { if (res) setAgentsMeta(res); })
+      .catch(function () {});
+  }, []);
+  useEffect(function () { fetchAgentsMeta(); }, [fetchAgentsMeta]);
 
   // Load current item data
   var loadItem = useCallback(async function () {
@@ -204,7 +212,7 @@ export default function ConfigDetailPanel() {
 
       {/* Body */}
       <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px' }}>
-        {sel.type === 'profile' && <ProfileEditor data={data} set={set} isNew={sel.isNew} />}
+        {sel.type === 'profile' && <ProfileEditor data={data} set={set} setData={setData} isNew={sel.isNew} agentsMeta={agentsMeta} onRefreshAgents={fetchAgentsMeta} showToast={showToast} />}
         {sel.type === 'loop' && <LoopEditor data={data} setData={setData} profiles={profiles} isNew={sel.isNew} />}
         {sel.type === 'standalone' && <StandaloneEditor data={data} set={set} setData={setData} profiles={profiles} isNew={sel.isNew} />}
       </div>
@@ -214,24 +222,72 @@ export default function ConfigDetailPanel() {
 
 // ── Profile Editor ──
 
-function ProfileEditor({ data, set, isNew }) {
+function ProfileEditor({ data, set, setData, isNew, agentsMeta, onRefreshAgents, showToast }) {
+  var [detecting, setDetecting] = useState(false);
+  var agentNames = agentsMeta ? agentsMeta.map(function (a) { return a.name; }) : AGENTS_FALLBACK;
+  var currentAgentMeta = agentsMeta ? agentsMeta.find(function (a) { return a.name === data.agent; }) : null;
+  var models = currentAgentMeta ? (currentAgentMeta.supported_models || []) : [];
+  var reasoningLevels = currentAgentMeta ? (currentAgentMeta.reasoning_levels || []) : [];
+
+  function handleAgentChange(newAgent) {
+    setData(function (prev) { return { ...prev, agent: newAgent, model: '', reasoning_level: '' }; });
+  }
+
+  function handleRedetect() {
+    setDetecting(true);
+    apiCall('/api/config/agents/detect', 'POST')
+      .then(function () {
+        return onRefreshAgents();
+      })
+      .then(function () {
+        showToast('Detection complete', 'success');
+      })
+      .catch(function (err) {
+        if (!err.authRequired) showToast('Detection failed: ' + (err.message || err), 'error');
+      })
+      .finally(function () { setDetecting(false); });
+  }
+
   return (
     <div style={{ maxWidth: 600, display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Field label="Name" value={data.name} onChange={function (v) { set('name', v); }} disabled={!isNew} placeholder="my-profile" />
       <div>
         <label style={labelStyle}>Agent</label>
-        <select value={data.agent || ''} onChange={function (e) { set('agent', e.target.value); }} style={selectStyle}>
-          {AGENTS.map(function (a) { return <option key={a} value={a}>{a}</option>; })}
+        <select value={data.agent || ''} onChange={function (e) { handleAgentChange(e.target.value); }} style={selectStyle}>
+          {agentNames.map(function (a) { return <option key={a} value={a}>{a}</option>; })}
         </select>
       </div>
-      <Field label="Model (optional)" value={data.model || ''} onChange={function (v) { set('model', v); }} placeholder="e.g. claude-sonnet-4-5-20250929" />
       <div>
-        <label style={labelStyle}>Reasoning Level</label>
-        <select value={data.reasoning_level || ''} onChange={function (e) { set('reasoning_level', e.target.value); }} style={selectStyle}>
-          <option value="">Default</option>
-          {REASONING_LEVELS.filter(Boolean).map(function (l) { return <option key={l} value={l}>{l}</option>; })}
-        </select>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <label style={{ ...labelStyle, marginBottom: 0 }}>Model (optional)</label>
+          <button onClick={handleRedetect} disabled={detecting} style={{ ...btnStyle, fontSize: 9, padding: '2px 8px', opacity: detecting ? 0.6 : 1 }}>
+            {detecting ? 'Scanning...' : 'Re-detect models'}
+          </button>
+        </div>
+        {models.length > 0 ? (
+          <select value={data.model || ''} onChange={function (e) { set('model', e.target.value); }} style={selectStyle}>
+            <option value="">Agent default{currentAgentMeta && currentAgentMeta.default_model ? ' (' + currentAgentMeta.default_model + ')' : ''}</option>
+            {models.map(function (m) { return <option key={m} value={m}>{m}</option>; })}
+          </select>
+        ) : (
+          <input
+            type="text"
+            value={data.model || ''}
+            onChange={function (e) { set('model', e.target.value); }}
+            placeholder="e.g. model-name"
+            style={inputStyle}
+          />
+        )}
       </div>
+      {reasoningLevels.length > 0 && (
+        <div>
+          <label style={labelStyle}>Reasoning Level</label>
+          <select value={data.reasoning_level || ''} onChange={function (e) { set('reasoning_level', e.target.value); }} style={selectStyle}>
+            <option value="">Default</option>
+            {reasoningLevels.map(function (l) { return <option key={l.name} value={l.name}>{l.name}</option>; })}
+          </select>
+        </div>
+      )}
       <div>
         <label style={labelStyle}>Speed</label>
         <select value={data.speed || ''} onChange={function (e) { set('speed', e.target.value); }} style={selectStyle}>

@@ -233,6 +233,8 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/config/standalone-profiles/{name}", srv.handleDeleteStandaloneProfile)
 	mux.HandleFunc("GET /api/config/pushover", srv.handleGetPushover)
 	mux.HandleFunc("PUT /api/config/pushover", srv.handleUpdatePushover)
+	mux.HandleFunc("GET /api/config/agents", srv.handleListAgents)
+	mux.HandleFunc("POST /api/config/agents/detect", srv.handleDetectAgents)
 
 	// WebSocket endpoints
 	mux.HandleFunc("GET /ws/sessions/{id}", srv.handleSessionWebSocket)
