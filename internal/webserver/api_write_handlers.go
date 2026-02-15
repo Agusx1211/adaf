@@ -72,6 +72,25 @@ type docWriteRequest struct {
 	Content string `json:"content"`
 }
 
+type turnWriteRequest struct {
+	Objective      string `json:"objective"`
+	WhatWasBuilt   string `json:"what_was_built"`
+	KeyDecisions   string `json:"key_decisions"`
+	Challenges     string `json:"challenges"`
+	CurrentState   string `json:"current_state"`
+	KnownIssues    string `json:"known_issues"`
+	NextSteps      string `json:"next_steps"`
+	BuildState     string `json:"build_state"`
+	DurationSecs   int    `json:"duration_secs"`
+	CommitHash     string `json:"commit_hash"`
+	AgentModel     string `json:"agent_model"`
+	ProfileName    string `json:"profile_name"`
+	PlanID         string `json:"plan_id"`
+	Agent          string `json:"agent"`
+	LoopRunHexID   string `json:"loop_run_hex_id"`
+	StepHexID      string `json:"step_hex_id"`
+}
+
 func (srv *Server) handleCreateIssue(w http.ResponseWriter, r *http.Request) {
 	handleCreateIssueP(srv.store, w, r)
 }
@@ -597,6 +616,58 @@ func handleDeleteDocP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (srv *Server) handleUpdateTurn(w http.ResponseWriter, r *http.Request) {
+	handleUpdateTurnP(srv.store, w, r)
+}
+
+func handleUpdateTurnP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	turnID, err := parsePathID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "turn not found")
+		return
+	}
+
+	turn, err := s.GetTurn(turnID)
+	if err != nil {
+		if isNotFoundErr(err) {
+			writeError(w, http.StatusNotFound, "turn not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to load turn")
+		return
+	}
+
+	var req turnWriteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	turn.Objective = req.Objective
+	turn.WhatWasBuilt = req.WhatWasBuilt
+	turn.KeyDecisions = req.KeyDecisions
+	turn.Challenges = req.Challenges
+	turn.CurrentState = req.CurrentState
+	turn.KnownIssues = req.KnownIssues
+	turn.NextSteps = req.NextSteps
+	turn.BuildState = req.BuildState
+	turn.CommitHash = req.CommitHash
+	turn.AgentModel = req.AgentModel
+	turn.ProfileName = req.ProfileName
+	turn.PlanID = strings.TrimSpace(req.PlanID)
+	turn.Agent = strings.TrimSpace(req.Agent)
+	turn.LoopRunHexID = req.LoopRunHexID
+	turn.StepHexID = req.StepHexID
+	turn.DurationSecs = req.DurationSecs
+
+	if err := s.UpdateTurn(turn); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update turn")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, turn)
 }
 
 func normalizeLower(raw string) string {

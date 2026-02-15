@@ -63,9 +63,9 @@ function truncate(str, max) {
 
 /* ── Components ─────────────────────────────────────────────────── */
 
-export function MarkdownContent({ text }) {
+export function MarkdownContent({ text, style }) {
   var html = useMemo(function () { return renderMarkdown(text); }, [text]);
-  return <div className="pm-md-content" dangerouslySetInnerHTML={{ __html: html }} />;
+  return <div className="pm-md-content" style={style || {}} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 export function ThinkingBlock({ content }) {
@@ -300,7 +300,7 @@ export function injectEventBlockStyles() {
   style.textContent = [
     '@keyframes slideIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }',
     '@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }',
-    '.pm-md-content { font-size: 13px; line-height: 1.7; color: var(--text-0); word-break: break-word; }',
+    '.pm-md-content { margin: 0; padding: 0; font-size: 13px; line-height: 1.7; color: var(--text-0); word-break: break-word; }',
     '.pm-md-content p { margin: 0 0 8px 0; }',
     '.pm-md-content p:last-child { margin-bottom: 0; }',
     '.pm-md-content h1, .pm-md-content h2, .pm-md-content h3, .pm-md-content h4 { margin: 16px 0 8px 0; color: var(--text-0); }',

@@ -21,12 +21,13 @@ export default function PlanView() {
           return (
             <div key={plan.id}
               onClick={function () { dispatch({ type: 'SET_SELECTED_PLAN', payload: plan.id }); }}
-              style={{
-                padding: '10px 14px', borderBottom: '1px solid var(--border)', cursor: 'pointer',
-                background: selected ? 'var(--bg-3)' : 'transparent',
-              }}
-              onMouseEnter={function (e) { e.currentTarget.style.background = 'var(--bg-2)'; }}
-              onMouseLeave={function (e) { e.currentTarget.style.background = 'transparent'; }}
+            style={{
+              padding: '10px 14px', borderBottom: '1px solid var(--border)', cursor: 'pointer',
+              background: selected ? 'var(--bg-3)' : 'transparent',
+              transition: 'background 0.15s ease',
+            }}
+            onMouseEnter={function (e) { if (!selected) e.currentTarget.style.background = 'var(--bg-2)'; }}
+            onMouseLeave={function (e) { if (!selected) e.currentTarget.style.background = 'transparent'; }}
             >
               <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>{plan.id}</span>
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', marginLeft: 8 }}>{plan.title || plan.id}</span>
@@ -40,6 +41,7 @@ export default function PlanView() {
   var phases = activePlan.phases || [];
   var completeCount = phases.filter(function (p) { return normalizeStatus(p.status) === 'complete'; }).length;
   var percent = phases.length ? Math.round((completeCount / phases.length) * 100) : 0;
+  var activePlanID = activePlan && activePlan.id ? activePlan.id : '';
 
   return (
     <div style={{ overflow: 'auto', flex: 1 }}>
@@ -54,14 +56,17 @@ export default function PlanView() {
 
       {/* Plan selector if multiple */}
       {plans.length > 1 && plans.map(function (plan) {
-        var selected = selectedPlan === plan.id;
+        var selected = (selectedPlan || activePlanID) === plan.id;
         return (
           <div key={plan.id}
             onClick={function () { dispatch({ type: 'SET_SELECTED_PLAN', payload: plan.id }); }}
             style={{
               padding: '6px 14px', borderBottom: '1px solid var(--bg-3)', cursor: 'pointer',
               background: selected ? 'var(--bg-3)' : 'transparent', fontSize: 11,
+              transition: 'background 0.15s ease',
             }}
+            onMouseEnter={function (e) { if (!selected) e.currentTarget.style.background = 'var(--bg-2)'; }}
+            onMouseLeave={function (e) { if (!selected) e.currentTarget.style.background = 'transparent'; }}
           >
             <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)' }}>{plan.id}</span>
             <span style={{ marginLeft: 6, color: 'var(--text-1)' }}>{plan.title || plan.id}</span>

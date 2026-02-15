@@ -27,6 +27,8 @@ var initialState = {
   selectedScope: null,
   selectedIssue: null,
   selectedPlan: null,
+  selectedDoc: null,
+  selectedTurn: null,
   expandedNodes: {},
   leftView: 'agents',
   rightLayer: 'raw',
@@ -71,6 +73,12 @@ function reducer(state, action) {
 
     case 'SET_SELECTED_PLAN':
       return { ...state, selectedPlan: action.payload };
+
+    case 'SET_SELECTED_DOC':
+      return { ...state, selectedDoc: action.payload };
+
+    case 'SET_SELECTED_TURN':
+      return { ...state, selectedTurn: action.payload };
 
     case 'TOGGLE_NODE': {
       var nodeID = action.payload;
@@ -125,7 +133,7 @@ function reducer(state, action) {
         ...state,
         sessions: [], spawns: [], messages: [], streamEvents: [], activity: [], activityLast: null,
         issues: [], plans: [], activePlan: null, docs: [], turns: [], loopRun: null, usage: null,
-        selectedIssue: null, selectedPlan: null, selectedScope: null,
+        selectedIssue: null, selectedPlan: null, selectedDoc: null, selectedTurn: null, selectedScope: null,
         expandedNodes: {}, projectMeta: null, activeLoopIDForMessages: 0,
         viewLoaded: { issues: false, docs: false, plan: false, logs: false },
       };
@@ -286,12 +294,21 @@ export function normalizeTurns(rawTurns) {
     return {
       id: Number(turn && turn.id) || 0,
       hex_id: turn && turn.hex_id ? String(turn.hex_id) : '',
+      loop_run_hex_id: turn && turn.loop_run_hex_id ? String(turn.loop_run_hex_id) : '',
+      step_hex_id: turn && turn.step_hex_id ? String(turn.step_hex_id) : '',
       profile_name: turn && turn.profile_name ? String(turn.profile_name) : '',
       agent: turn && turn.agent ? String(turn.agent) : '',
+      agent_model: turn && turn.agent_model ? String(turn.agent_model) : '',
+      plan_id: turn && turn.plan_id ? String(turn.plan_id) : '',
+      commit_hash: turn && turn.commit_hash ? String(turn.commit_hash) : '',
       build_state: turn && turn.build_state ? String(turn.build_state) : 'unknown',
       objective: turn && turn.objective ? String(turn.objective) : '',
       what_was_built: turn && turn.what_was_built ? String(turn.what_was_built) : '',
-      agent_model: turn && turn.agent_model ? String(turn.agent_model) : '',
+      key_decisions: turn && turn.key_decisions ? String(turn.key_decisions) : '',
+      challenges: turn && turn.challenges ? String(turn.challenges) : '',
+      current_state: turn && turn.current_state ? String(turn.current_state) : '',
+      known_issues: turn && turn.known_issues ? String(turn.known_issues) : '',
+      next_steps: turn && turn.next_steps ? String(turn.next_steps) : '',
       duration_secs: Number(turn && turn.duration_secs) || 0,
     };
   }).filter(function (t) { return t.id > 0; }).sort(function (a, b) { return b.id - a.id; });

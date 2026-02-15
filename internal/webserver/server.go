@@ -287,6 +287,7 @@ func (srv *Server) registerProjectRoutes(mux *http.ServeMux, prefix string) {
 
 	mux.HandleFunc("GET "+prefix+"/turns", srv.projectHandler(handleTurnsP))
 	mux.HandleFunc("GET "+prefix+"/turns/{id}", srv.projectHandler(handleTurnByIDP))
+	mux.HandleFunc("PUT "+prefix+"/turns/{id}", srv.projectHandler(handleUpdateTurnP))
 	mux.HandleFunc("GET "+prefix+"/spawns", srv.projectHandler(handleSpawnsP))
 	mux.HandleFunc("GET "+prefix+"/spawns/{id}", srv.projectHandler(handleSpawnByIDP))
 

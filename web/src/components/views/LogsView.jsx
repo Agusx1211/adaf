@@ -1,9 +1,11 @@
-import { useAppState } from '../../state/store.js';
+import { useAppState, useDispatch } from '../../state/store.js';
 import { normalizeStatus } from '../../utils/format.js';
 
 export default function LogsView() {
   var state = useAppState();
+  var dispatch = useDispatch();
   var { turns } = state;
+  var selectedTurn = state.selectedTurn;
 
   if (!turns.length) {
     return <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>No turns recorded yet.</div>;
@@ -14,12 +16,20 @@ export default function LogsView() {
       {turns.map(function (turn) {
         var status = normalizeStatus(turn.build_state || 'unknown');
         var border = status === 'passing' ? '#a6e3a1' : '#f38ba8';
+        var selected = selectedTurn === turn.id;
 
         return (
-          <div key={turn.id} style={{
-            padding: '10px 14px', borderBottom: '1px solid var(--border)',
-            borderLeft: '3px solid ' + border,
-          }}>
+          <div
+            key={turn.id}
+            onClick={function () { dispatch({ type: 'SET_SELECTED_TURN', payload: turn.id }); }}
+            style={{
+              padding: '10px 14px', borderBottom: '1px solid var(--border)',
+              borderLeft: '3px solid ' + border, cursor: 'pointer',
+              background: selected ? 'var(--bg-3)' : 'transparent', transition: 'background 0.15s ease',
+            }}
+            onMouseEnter={function (e) { if (!selected) e.currentTarget.style.background = 'var(--bg-2)'; }}
+            onMouseLeave={function (e) { if (!selected) e.currentTarget.style.background = 'transparent'; }}
+          >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
               <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>
                 #{turn.id} [{turn.hex_id || '-'}]
