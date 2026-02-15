@@ -45,7 +45,7 @@ export default function Modal({ title, children, onClose, maxWidth }) {
             }}
             aria-label="Close"
           >
-            \u00D7
+            X
           </button>
         </div>
         <div style={{ padding: 16 }}>{children}</div>
