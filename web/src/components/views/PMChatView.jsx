@@ -198,7 +198,7 @@ export default function PMChatView() {
     };
     setMessages(function (prev) { return prev.concat([assistantMsg]); });
     try {
-      await apiCall(base + '/pm/chat/response', 'POST', { content: content });
+      await apiCall(base + '/pm/chat/response', 'POST', { content: content, events: structuredEvents || null });
     } catch (err) {
       console.error('Failed to save assistant response:', err);
     }
@@ -355,8 +355,8 @@ export default function PMChatView() {
                         fontSize: 13, color: 'var(--text-0)', lineHeight: 1.6,
                         whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                       }}>{msg.content}</div>
-                    ) : msg._events && msg._events.length > 0 ? (
-                      <EventBlockList events={msg._events} />
+                    ) : (msg._events || msg.events) && (msg._events || msg.events).length > 0 ? (
+                      <EventBlockList events={msg._events || msg.events} />
                     ) : (
                       <MarkdownContent text={msg.content} />
                     )}

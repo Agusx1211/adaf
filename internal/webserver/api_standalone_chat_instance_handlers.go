@@ -235,7 +235,8 @@ func handleSaveChatInstanceResponse(s *store.Store, w http.ResponseWriter, r *ht
 	}
 
 	var req struct {
-		Content string `json:"content"`
+		Content string          `json:"content"`
+		Events  json.RawMessage `json:"events,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -250,6 +251,7 @@ func handleSaveChatInstanceResponse(s *store.Store, w http.ResponseWriter, r *ht
 		Profile: inst.Profile,
 		Role:    "assistant",
 		Content: req.Content,
+		Events:  req.Events,
 	}
 	if err := s.CreateChatInstanceMessage(id, msg); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save response")

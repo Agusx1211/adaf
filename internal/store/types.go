@@ -1,6 +1,9 @@
 package store
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type ProjectConfig struct {
 	Name         string            `json:"name"`
@@ -93,20 +96,22 @@ type RecordingEvent struct {
 }
 
 type PMChatMessage struct {
-	ID        int       `json:"id"`
-	Role      string    `json:"role"` // "user" or "assistant"
-	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"created_at"`
-	SessionID int       `json:"session_id,omitempty"` // linked PM session if any
+	ID        int             `json:"id"`
+	Role      string          `json:"role"` // "user" or "assistant"
+	Content   string          `json:"content"`
+	Events    json.RawMessage `json:"events,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
+	SessionID int             `json:"session_id,omitempty"` // linked PM session if any
 }
 
 type StandaloneChatMessage struct {
-	ID        int       `json:"id"`
-	Profile   string    `json:"profile"`
-	Role      string    `json:"role"` // "user" or "assistant"
-	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"created_at"`
-	SessionID int       `json:"session_id,omitempty"`
+	ID        int             `json:"id"`
+	Profile   string          `json:"profile"`
+	Role      string          `json:"role"` // "user" or "assistant"
+	Content   string          `json:"content"`
+	Events    json.RawMessage `json:"events,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
+	SessionID int             `json:"session_id,omitempty"`
 }
 
 // StandaloneChatInstance is an independent conversation thread backed by a

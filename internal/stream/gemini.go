@@ -110,8 +110,26 @@ func GeminiToClaudeEvent(ge GeminiEvent) (ClaudeEvent, bool) {
 		}, true
 
 	case "tool_result":
-		// Tool results are user-side events; skip for display purposes.
-		return ClaudeEvent{}, false
+		output := ge.Output
+		isError := ge.Status == "error"
+		if isError && ge.Error != nil && ge.Error.Message != "" {
+			output = ge.Error.Message
+		}
+		content, _ := json.Marshal(output)
+		return ClaudeEvent{
+			Type: "user",
+			AssistantMessage: &AssistantMessage{
+				Role: "user",
+				Content: []ContentBlock{
+					{
+						Type:        "tool_result",
+						ToolUseID:   ge.ToolID,
+						ToolContent: content,
+						IsError:     isError,
+					},
+				},
+			},
+		}, true
 
 	case "result":
 		ev := ClaudeEvent{

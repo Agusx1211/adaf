@@ -296,7 +296,7 @@ export default function StandaloneChatView() {
     if (window.__reloadChatInstances) window.__reloadChatInstances();
 
     try {
-      await apiCall((capturedBase || base) + '/chat-instances/' + encodeURIComponent(forChatID) + '/response', 'POST', { content: content });
+      await apiCall((capturedBase || base) + '/chat-instances/' + encodeURIComponent(forChatID) + '/response', 'POST', { content: content, events: structuredEvents || null });
     } catch (err) {
       console.error('Failed to save assistant response:', err);
     }
@@ -461,7 +461,8 @@ export default function StandaloneChatView() {
           <div style={{ maxWidth: 800, margin: '0 auto' }}>
             {messages.map(function (msg) {
               var isUser = msg.role === 'user';
-              var hasInspectData = !isUser && (msg._prompt || (msg._events && msg._events.length > 0));
+              var msgEvents = msg._events || msg.events;
+              var hasInspectData = !isUser && (msg._prompt || (msgEvents && msgEvents.length > 0));
               return (
                 <div key={msg.id} style={{ marginBottom: 16, animation: 'slideIn 0.15s ease-out' }}>
                   <div
@@ -495,8 +496,8 @@ export default function StandaloneChatView() {
                         fontSize: 13, color: 'var(--text-0)', lineHeight: 1.6,
                         whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                       }}>{msg.content}</div>
-                    ) : msg._events && msg._events.length > 0 ? (
-                      <EventBlockList events={msg._events} />
+                    ) : msgEvents && msgEvents.length > 0 ? (
+                      <EventBlockList events={msgEvents} />
                     ) : (
                       <MarkdownContent text={msg.content} />
                     )}
@@ -624,16 +625,16 @@ export default function StandaloneChatView() {
                 }}>{inspectedMessage._prompt.text}</pre>
               </div>
             ) : null}
-            {inspectedMessage._events && inspectedMessage._events.length > 0 && (
+            {((inspectedMessage._events && inspectedMessage._events.length > 0) || (inspectedMessage.events && inspectedMessage.events.length > 0)) && (
               <div style={{ marginTop: inspectedMessage._prompt ? 16 : 0 }}>
                 <div style={{
                   fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
                   color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '0.05em',
                   marginBottom: 8,
                 }}>
-                  Structured Events ({inspectedMessage._events.length})
+                  Structured Events ({(inspectedMessage._events || inspectedMessage.events).length})
                 </div>
-                <EventBlockList events={inspectedMessage._events} />
+                <EventBlockList events={inspectedMessage._events || inspectedMessage.events} />
               </div>
             )}
           </div>

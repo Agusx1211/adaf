@@ -222,9 +222,15 @@ func TestParseGeminiToolUse(t *testing.T) {
 		t.Errorf("tool name = %q, want %q", tool.AssistantMessage.Content[0].Name, "shell")
 	}
 
-	// tool_result line should have empty Parsed.Type (skipped) but still have raw data.
-	if events[2].Parsed.Type != "" {
-		t.Errorf("tool_result should be skipped, got type = %q", events[2].Parsed.Type)
+	// tool_result line should now be parsed as a "user" event with tool_result content.
+	if events[2].Parsed.Type != "user" {
+		t.Errorf("tool_result should be parsed as user event, got type = %q", events[2].Parsed.Type)
+	}
+	if events[2].Parsed.AssistantMessage == nil || len(events[2].Parsed.AssistantMessage.Content) == 0 {
+		t.Fatal("tool_result should have content blocks")
+	}
+	if events[2].Parsed.AssistantMessage.Content[0].Type != "tool_result" {
+		t.Errorf("tool_result content type = %q, want %q", events[2].Parsed.AssistantMessage.Content[0].Type, "tool_result")
 	}
 	if len(events[2].Raw) == 0 {
 		t.Error("tool_result raw data should be preserved")

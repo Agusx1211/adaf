@@ -50,8 +50,9 @@ function stringify(val) {
 function formatToolInput(tool, input) {
   if (typeof input === 'object' && input) {
     var lc = (tool || '').toLowerCase();
-    if (lc === 'bash' && input.command) return input.command;
-    if ((lc === 'read' || lc === 'write' || lc === 'edit' || lc === 'glob' || lc === 'grep') && input.file_path) return input.file_path;
+    if ((lc === 'bash' || lc === 'run_shell_command' || lc === 'shell') && input.command) return input.command;
+    if ((lc === 'read' || lc === 'write' || lc === 'edit' || lc === 'glob' || lc === 'grep' ||
+         lc === 'read_file' || lc === 'write_file' || lc === 'edit_file') && input.file_path) return input.file_path;
   }
   return stringify(input);
 }
