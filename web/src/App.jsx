@@ -9,7 +9,6 @@ import TopBar from './components/layout/TopBar.jsx';
 import LeftPanel from './components/layout/LeftPanel.jsx';
 import CenterPanel from './components/layout/CenterPanel.jsx';
 import RightSidebar from './components/layout/RightSidebar.jsx';
-import BottomBar from './components/layout/BottomBar.jsx';
 import Modal from './components/common/Modal.jsx';
 
 export default function App() {
@@ -118,7 +117,6 @@ export default function App() {
             <CenterPanel />
             {leftView === 'agents' && <RightSidebar />}
           </div>
-          <BottomBar />
         </div>
       </div>
 

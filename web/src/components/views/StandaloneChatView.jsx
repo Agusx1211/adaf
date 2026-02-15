@@ -394,11 +394,8 @@ export default function StandaloneChatView() {
     return (
       <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-0)' }}>
         <div style={{ textAlign: 'center', color: 'var(--text-3)' }}>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, marginBottom: 12, color: 'var(--text-1)' }}>
-            Standalone Chat
-          </div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, opacity: 0.7, maxWidth: 400, margin: '0 auto', lineHeight: 1.6 }}>
-            Select a chat from the sidebar or create a new one with + New Chat.
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, marginBottom: 8, color: 'var(--text-2)' }}>
+            Select a chat or create a new one.
           </div>
         </div>
       </div>
@@ -406,21 +403,21 @@ export default function StandaloneChatView() {
   }
 
   var headerTitle = chatMeta ? chatMeta.title : 'Chat';
-  if (headerTitle.length > 40) headerTitle = headerTitle.slice(0, 40) + '\u2026';
+  if (headerTitle.length > 60) headerTitle = headerTitle.slice(0, 60) + '\u2026';
   var headerProfile = chatMeta ? chatMeta.profile : '';
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg-0)' }}>
       {/* Header */}
       <div style={{
-        padding: '8px 16px', borderBottom: '1px solid var(--border)',
+        padding: '4px 12px', borderBottom: '1px solid var(--border)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         background: 'var(--bg-1)', flexShrink: 0,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {sending && (
             <span style={{
-              width: 7, height: 7, borderRadius: '50%',
+              width: 6, height: 6, borderRadius: '50%',
               background: streamEvents.length > 0 ? 'var(--green)' : 'var(--accent)',
               animation: 'pulse 1.5s ease-in-out infinite',
               flexShrink: 0,
@@ -430,70 +427,66 @@ export default function StandaloneChatView() {
             {headerTitle}
           </span>
           {headerProfile && (
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)' }}>
               {headerProfile}
             </span>
           )}
         </div>
-        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)' }}>
           {sending
             ? (streamEvents.length > 0 ? 'responding\u2026' : 'thinking\u2026')
-            : messages.length + ' messages'}
+            : messages.length + ' msgs'}
         </span>
       </div>
 
       {/* Messages area */}
-      <div ref={listRef} style={{ flex: 1, overflow: 'auto', padding: '16px 20px' }}>
+      <div ref={listRef} style={{ flex: 1, overflow: 'auto', padding: '6px 12px' }}>
         {loading ? (
-          <div style={{ textAlign: 'center', color: 'var(--text-3)', padding: 60 }}>
+          <div style={{ textAlign: 'center', color: 'var(--text-3)', padding: 40 }}>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>Loading...</div>
           </div>
         ) : messages.length === 0 && !sending ? (
-          <div style={{ textAlign: 'center', color: 'var(--text-3)', padding: 60 }}>
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, marginBottom: 12, color: 'var(--text-1)' }}>
-              New Chat
-            </div>
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, opacity: 0.7, maxWidth: 400, margin: '0 auto', lineHeight: 1.6 }}>
-              Type a message or press Enter to start agent work.
+          <div style={{ textAlign: 'center', color: 'var(--text-3)', padding: 40 }}>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: 'var(--text-2)' }}>
+              Type a message to begin.
             </div>
           </div>
         ) : (
-          <div style={{ maxWidth: 800, margin: '0 auto' }}>
+          <div>
             {messages.map(function (msg) {
               var isUser = msg.role === 'user';
               var msgEvents = msg._events || msg.events;
               var hasInspectData = !isUser && (msg._prompt || (msgEvents && msgEvents.length > 0));
               return (
-                <div key={msg.id} style={{ marginBottom: 16, animation: 'slideIn 0.15s ease-out' }}>
+                <div key={msg.id} style={{ marginBottom: 4 }}>
                   <div
                     onClick={function () { if (hasInspectData) setInspectedMessage(msg); }}
                     style={{
-                      padding: '12px 16px', borderRadius: 8,
-                      background: isUser ? 'var(--bg-2)' : 'var(--bg-1)',
-                      border: '1px solid var(--border)',
-                      borderLeft: isUser ? '3px solid var(--accent)' : '3px solid var(--green)',
+                      padding: '6px 10px', borderRadius: 2,
+                      background: isUser ? 'var(--bg-2)' : 'transparent',
+                      borderLeft: isUser ? '2px solid var(--accent)' : '2px solid var(--green)40',
                       cursor: hasInspectData ? 'pointer' : 'default',
                     }}>
                     <div style={{
-                      fontSize: 10, fontWeight: 600,
+                      fontSize: 9, fontWeight: 600,
                       color: isUser ? 'var(--accent)' : 'var(--green)',
-                      marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8,
+                      marginBottom: 3, display: 'flex', alignItems: 'center', gap: 6,
                       textTransform: 'uppercase', letterSpacing: '0.05em',
                       fontFamily: "'JetBrains Mono', monospace",
                     }}>
                       <span>{isUser ? 'You' : 'Agent'}</span>
-                      <span style={{ fontWeight: 400, color: 'var(--text-3)', textTransform: 'none', letterSpacing: 'normal' }}>
+                      <span style={{ fontWeight: 400, color: 'var(--text-3)', textTransform: 'none', letterSpacing: 'normal', fontSize: 9 }}>
                         {timeAgo(msg.created_at)}
                       </span>
                       {hasInspectData && (
-                        <span style={{ fontWeight: 400, color: 'var(--text-3)', textTransform: 'none', letterSpacing: 'normal', marginLeft: 'auto', fontSize: 9, opacity: 0.6 }}>
-                          click to inspect
+                        <span style={{ fontWeight: 400, color: 'var(--text-3)', textTransform: 'none', letterSpacing: 'normal', marginLeft: 'auto', fontSize: 8, opacity: 0.5 }}>
+                          inspect
                         </span>
                       )}
                     </div>
                     {isUser ? (
                       <div style={{
-                        fontSize: 13, color: 'var(--text-0)', lineHeight: 1.6,
+                        fontSize: 13, color: 'var(--text-0)', lineHeight: 1.5,
                         whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                       }}>{msg.content}</div>
                     ) : msgEvents && msgEvents.length > 0 ? (
@@ -508,15 +501,15 @@ export default function StandaloneChatView() {
 
             {/* Streaming response bubble */}
             {sending && (
-              <div style={{ marginBottom: 16, animation: 'slideIn 0.15s ease-out' }}>
+              <div style={{ marginBottom: 4 }}>
                 <div style={{
-                  padding: '12px 16px', borderRadius: 8,
-                  background: 'var(--bg-1)', border: '1px solid var(--border)',
-                  borderLeft: '3px solid var(--green)',
+                  padding: '6px 10px', borderRadius: 2,
+                  background: 'transparent',
+                  borderLeft: '2px solid var(--green)',
                 }}>
                   <div style={{
-                    fontSize: 10, fontWeight: 600, color: 'var(--green)',
-                    marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8,
+                    fontSize: 9, fontWeight: 600, color: 'var(--green)',
+                    marginBottom: 3, display: 'flex', alignItems: 'center', gap: 6,
                     textTransform: 'uppercase', letterSpacing: '0.05em',
                     fontFamily: "'JetBrains Mono', monospace",
                   }}>
@@ -533,7 +526,7 @@ export default function StandaloneChatView() {
                     <EventBlockList events={streamEvents} />
                   ) : (
                     <div style={{
-                      fontSize: 12, color: 'var(--text-3)',
+                      fontSize: 11, color: 'var(--text-3)',
                       fontFamily: "'JetBrains Mono', monospace",
                     }}>
                       Waiting for response...
@@ -548,24 +541,28 @@ export default function StandaloneChatView() {
 
       {/* Input area */}
       <div style={{
-        padding: '12px 20px', borderTop: '1px solid var(--border)',
+        padding: '6px 12px', borderTop: '1px solid var(--border)',
         background: 'var(--bg-1)', flexShrink: 0,
       }}>
         <form onSubmit={handleSend} style={{
-          maxWidth: 800, margin: '0 auto',
-          display: 'flex', gap: 8, alignItems: 'center',
+          display: 'flex', gap: 6, alignItems: 'center',
         }}>
+          <span style={{
+            fontFamily: "'JetBrains Mono', monospace", fontSize: 13,
+            color: sending ? 'var(--text-3)' : 'var(--accent)', fontWeight: 700,
+            flexShrink: 0, userSelect: 'none',
+          }}>&gt;</span>
           <input
             ref={inputRef}
             type="text"
             value={input}
             onChange={function (e) { setInput(e.target.value); }}
             onKeyDown={handleKeyDown}
-            placeholder="Type a message or press Enter to start agent work..."
+            placeholder={sending ? 'Agent is working...' : 'Message...'}
             disabled={sending}
             style={{
-              flex: 1, padding: '10px 14px',
-              background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 6,
+              flex: 1, padding: '7px 10px',
+              background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 3,
               color: 'var(--text-0)', fontFamily: "'JetBrains Mono', monospace", fontSize: 12,
               outline: 'none',
             }}
@@ -576,22 +573,22 @@ export default function StandaloneChatView() {
               type="button"
               onClick={handleStop}
               style={{
-                padding: '10px 16px', background: 'transparent',
-                border: '1px solid var(--red)', borderRadius: 6,
+                padding: '7px 12px', background: 'transparent',
+                border: '1px solid var(--red)', borderRadius: 3,
                 color: 'var(--red)', fontFamily: "'JetBrains Mono', monospace",
-                fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 6,
+                fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 4,
               }}
             >{'\u25A0'} Stop</button>
           ) : (
             <button
               type="submit"
               style={{
-                padding: '10px 16px',
+                padding: '7px 12px',
                 background: 'var(--accent)',
-                border: 'none', borderRadius: 6,
+                border: 'none', borderRadius: 3,
                 color: '#000',
-                fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600,
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
                 cursor: 'pointer',
               }}
             >Send</button>
