@@ -135,30 +135,6 @@ func (s *Store) ListMessages(spawnID int) ([]SpawnMessage, error) {
 	return msgs, nil
 }
 
-// GetMessage loads a single message by spawn and message ID.
-
-func (s *Store) GetMessage(spawnID, msgID int) (*SpawnMessage, error) {
-	var msg SpawnMessage
-	if err := s.readJSONLocked(filepath.Join(s.messagesDir(spawnID), fmt.Sprintf("%d.json", msgID)), &msg); err != nil {
-		return nil, err
-	}
-	return &msg, nil
-}
-
-// MarkMessageRead sets the ReadAt timestamp on a message.
-
-func (s *Store) MarkMessageRead(spawnID, msgID int) error {
-	msg, err := s.GetMessage(spawnID, msgID)
-	if err != nil {
-		return err
-	}
-	if msg.ReadAt.IsZero() {
-		msg.ReadAt = time.Now().UTC()
-		return s.writeJSONLocked(filepath.Join(s.messagesDir(spawnID), fmt.Sprintf("%d.json", msgID)), msg)
-	}
-	return nil
-}
-
 // PendingAsk finds an unanswered ask (type=ask with no reply) for a spawn.
 
 func (s *Store) PendingAsk(spawnID int) (*SpawnMessage, error) {
@@ -182,22 +158,6 @@ func (s *Store) PendingAsk(spawnID int) (*SpawnMessage, error) {
 		}
 	}
 	return nil, nil
-}
-
-// UnreadMessages returns unread messages for a spawn in the given direction.
-
-func (s *Store) UnreadMessages(spawnID int, direction string) ([]SpawnMessage, error) {
-	msgs, err := s.ListMessages(spawnID)
-	if err != nil {
-		return nil, err
-	}
-	var unread []SpawnMessage
-	for _, m := range msgs {
-		if m.Direction == direction && m.ReadAt.IsZero() {
-			unread = append(unread, m)
-		}
-	}
-	return unread, nil
 }
 
 // EnsureDirs creates directories that may be missing from older projects.

@@ -32,10 +32,8 @@ type SpawnMessage struct {
 	ID        int       `json:"id"`
 	SpawnID   int       `json:"spawn_id"`
 	Direction string    `json:"direction"` // "child_to_parent" or "parent_to_child"
-	Type      string    `json:"type"`      // "ask", "reply", "message", "notify"
+	Type      string    `json:"type"`      // "ask" or "reply"
 	Content   string    `json:"content"`
 	ReplyToID int       `json:"reply_to_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
-	ReadAt    time.Time `json:"read_at,omitempty"`
-	Interrupt bool      `json:"interrupt,omitempty"` // interrupt child's current turn
 }

@@ -246,15 +246,12 @@ func delegationCommands() string {
 	b.WriteString("- `adaf spawn-diff --spawn-id N` — View diff of spawn's changes\n")
 	b.WriteString("- `adaf spawn-merge --spawn-id N [--squash]` — Merge spawn's changes\n")
 	b.WriteString("- `adaf spawn-reject --spawn-id N` — Reject spawn's changes (destroys branch — see below)\n\n")
-	b.WriteString("**Mid-flight guidance (while child is still running):**\n")
-	b.WriteString("- `adaf spawn-message --spawn-id N \"guidance\"` — Send async guidance to child\n")
-	b.WriteString("- `adaf spawn-message --spawn-id N --interrupt \"new priority\"` — Interrupt child's current turn with new instructions\n")
+	b.WriteString("**Replying to child questions:**\n")
 	b.WriteString("- `adaf spawn-reply --spawn-id N \"answer\"` — Reply to child's question\n\n")
 
 	// Reject guidance.
 	b.WriteString("### On Rejecting Work\n\n")
 	b.WriteString("`spawn-reject` destroys the branch entirely. The next spawn starts from scratch. Before rejecting, consider:\n")
-	b.WriteString("- If the child is still running, use `spawn-message --interrupt` to course-correct instead\n")
 	b.WriteString("- If the issue is minor (e.g. stale files in diff), write a more detailed task description for the next spawn rather than iterating blindly\n")
 	b.WriteString("- If you've already rejected the same task twice, stop and rethink your task description — you are wasting resources\n\n")
 

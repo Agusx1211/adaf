@@ -27,6 +27,18 @@ func buildSubAgentPrompt(opts BuildOpts) (string, error) {
 		b.WriteString(delegationSection(opts.Delegation, opts.GlobalCfg, nil))
 	}
 
+	if len(opts.IssueIDs) > 0 && opts.Store != nil {
+		b.WriteString("## Assigned Issues\n\n")
+		for _, issID := range opts.IssueIDs {
+			iss, err := opts.Store.GetIssue(issID)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(&b, "- #%d [%s] %s: %s\n", iss.ID, iss.Priority, iss.Title, iss.Description)
+		}
+		b.WriteString("\n")
+	}
+
 	b.WriteString(opts.Task)
 
 	return b.String(), nil
@@ -76,6 +88,9 @@ type BuildOpts struct {
 
 	// CurrentTurnID, when >0, enables live runtime spawn context in prompts.
 	CurrentTurnID int
+
+	// IssueIDs are specific issues assigned to this sub-agent by the parent.
+	IssueIDs []int
 
 	// LoopContext provides loop-specific context (nil if not in a loop).
 	LoopContext *LoopPromptContext

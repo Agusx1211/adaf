@@ -334,12 +334,12 @@ func TestSpawnMessages(t *testing.T) {
 	spawn := &SpawnRecord{ParentTurnID: 1, ParentProfile: "a", ChildProfile: "b", Task: "x", Status: "running"}
 	s.CreateSpawn(spawn)
 
-	// Send a message.
+	// Create an ask message.
 	msg := &SpawnMessage{
 		SpawnID:   spawn.ID,
-		Direction: "parent_to_child",
-		Type:      "message",
-		Content:   "hello child",
+		Direction: "child_to_parent",
+		Type:      "ask",
+		Content:   "what should I do?",
 	}
 	if err := s.CreateMessage(msg); err != nil {
 		t.Fatal(err)
@@ -357,23 +357,37 @@ func TestSpawnMessages(t *testing.T) {
 		t.Errorf("expected 1 message, got %d", len(msgs))
 	}
 
-	// Unread.
-	unread, err := s.UnreadMessages(spawn.ID, "child_to_parent")
+	// PendingAsk should find the unanswered ask.
+	pending, err := s.PendingAsk(spawn.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The message was parent_to_child, so child_to_parent unread should be 0.
-	if len(unread) != 0 {
-		t.Errorf("expected 0 unread child_to_parent, got %d", len(unread))
+	if pending == nil {
+		t.Fatal("expected pending ask, got nil")
+	}
+	if pending.Content != "what should I do?" {
+		t.Errorf("pending content = %q", pending.Content)
 	}
 
-	// But unread from parent perspective should have 1.
-	unreadP, err := s.UnreadMessages(spawn.ID, "parent_to_child")
+	// Reply to the ask.
+	reply := &SpawnMessage{
+		SpawnID:   spawn.ID,
+		Direction: "parent_to_child",
+		Type:      "reply",
+		Content:   "do X",
+		ReplyToID: msg.ID,
+	}
+	if err := s.CreateMessage(reply); err != nil {
+		t.Fatal(err)
+	}
+
+	// PendingAsk should now return nil.
+	pending, err = s.PendingAsk(spawn.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(unreadP) != 1 {
-		t.Errorf("expected 1 unread parent_to_child, got %d", len(unreadP))
+	if pending != nil {
+		t.Errorf("expected no pending ask after reply, got message #%d", pending.ID)
 	}
 }
 
