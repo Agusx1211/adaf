@@ -126,13 +126,6 @@ func handleSendChatInstanceMessage(s *store.Store, w http.ResponseWriter, r *htt
 		writeError(w, http.StatusBadRequest, "profile not found: "+inst.Profile)
 		return
 	}
-	var delegation *config.DelegationConfig
-	if inst.Team != "" {
-		if team := cfg.FindTeam(inst.Team); team != nil {
-			delegation = team.Delegation
-		}
-	}
-
 	projCfg, err := s.LoadProject()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load project")
@@ -160,16 +153,12 @@ func handleSendChatInstanceMessage(s *store.Store, w http.ResponseWriter, r *htt
 		resumeSessionID = session.ReadAgentSessionID(inst.LastSessionID)
 	}
 
-	fullPrompt := req.Message
-
 	step := config.LoopStep{
 		Profile:        prof.Name,
 		Turns:          1,
-		Instructions:   fullPrompt,
+		Instructions:   req.Message,
 		StandaloneChat: true,
-	}
-	if delegation != nil {
-		step.Delegation = delegation
+		Team:           inst.Team,
 	}
 
 	loopDef := config.LoopDef{
@@ -178,10 +167,12 @@ func handleSendChatInstanceMessage(s *store.Store, w http.ResponseWriter, r *htt
 	}
 
 	allProfiles := []config.Profile{*prof}
-	if delegation != nil {
-		for _, dp := range delegation.Profiles {
-			if p := cfg.FindProfile(dp.Name); p != nil {
-				allProfiles = append(allProfiles, *p)
+	if inst.Team != "" {
+		if team := cfg.FindTeam(inst.Team); team != nil && team.Delegation != nil {
+			for _, dp := range team.Delegation.Profiles {
+				if p := cfg.FindProfile(dp.Name); p != nil {
+					allProfiles = append(allProfiles, *p)
+				}
 			}
 		}
 	}

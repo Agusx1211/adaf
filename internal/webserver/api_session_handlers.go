@@ -208,12 +208,14 @@ func collectLoopProfiles(cfg *config.GlobalConfig, loopDef *config.LoopDef) []co
 				seen[step.Profile] = true
 			}
 		}
-		if step.Delegation != nil {
-			for _, dp := range step.Delegation.Profiles {
-				if !seen[dp.Name] {
-					if p := cfg.FindProfile(dp.Name); p != nil {
-						profiles = append(profiles, *p)
-						seen[dp.Name] = true
+		if step.Team != "" {
+			if t := cfg.FindTeam(step.Team); t != nil && t.Delegation != nil {
+				for _, dp := range t.Delegation.Profiles {
+					if !seen[dp.Name] {
+						if p := cfg.FindProfile(dp.Name); p != nil {
+							profiles = append(profiles, *p)
+							seen[dp.Name] = true
+						}
 					}
 				}
 			}

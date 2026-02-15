@@ -16,13 +16,13 @@ import (
 //   - "tool":      tool result, has name and tool_call_id
 //   - "system":    system prompt (usually skipped)
 type VibeMessage struct {
-	Role             string          `json:"role"`
-	Content          string          `json:"content,omitempty"`
-	ReasoningContent string          `json:"reasoning_content,omitempty"`
-	ToolCalls        []VibeToolCall  `json:"tool_calls,omitempty"`
-	Name             string          `json:"name,omitempty"`
-	ToolCallID       string          `json:"tool_call_id,omitempty"`
-	MessageID        string          `json:"message_id,omitempty"`
+	Role             string         `json:"role"`
+	Content          string         `json:"content,omitempty"`
+	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	ToolCalls        []VibeToolCall `json:"tool_calls,omitempty"`
+	Name             string         `json:"name,omitempty"`
+	ToolCallID       string         `json:"tool_call_id,omitempty"`
+	MessageID        string         `json:"message_id,omitempty"`
 }
 
 // VibeToolCall represents a tool invocation inside an assistant message.

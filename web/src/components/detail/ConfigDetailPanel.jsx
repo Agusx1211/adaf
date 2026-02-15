@@ -336,10 +336,6 @@ function LoopEditor({ data, setData, profiles, teams, isNew }) {
     setData(function (prev) { return { ...prev, steps: prev.steps.filter(function (_, i) { return i !== idx; }) }; });
   }
 
-  function setStepDelegation(idx, deleg) {
-    setStep(idx, 'delegation', deleg);
-  }
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Field label="Loop Name" value={data.name} onChange={function (v) { setName(v); }} disabled={!isNew} placeholder="my-loop" />
@@ -385,7 +381,7 @@ function LoopEditor({ data, setData, profiles, teams, isNew }) {
               <div>
                 <label style={labelStyle}>Team (optional)</label>
                 <select value={step.team || ''} onChange={function (e) { setStep(idx, 'team', e.target.value); }} style={selectStyle}>
-                  <option value="">None (use inline delegation)</option>
+                  <option value="">No team</option>
                   {(teams || []).map(function (t) {
                     var subCount = t.delegation && t.delegation.profiles ? t.delegation.profiles.length : 0;
                     return <option key={t.name} value={t.name}>{t.name} ({subCount} sub-agents)</option>;
@@ -402,23 +398,6 @@ function LoopEditor({ data, setData, profiles, teams, isNew }) {
                 <Checkbox label="can_message" checked={!!step.can_message} onChange={function (v) { setStep(idx, 'can_message', v); }} />
                 <Checkbox label="can_pushover" checked={!!step.can_pushover} onChange={function (v) { setStep(idx, 'can_pushover', v); }} />
               </div>
-
-              {/* Delegation (only show if no team selected) */}
-              {!step.team && (
-                <DelegationEditor
-                  delegation={step.delegation}
-                  onChange={function (d) { setStepDelegation(idx, d); }}
-                  profiles={profiles}
-                  label={'Step ' + (idx + 1) + ' Sub-Agent Delegation'}
-                />
-              )}
-              {step.team && (
-                <div style={{ padding: 8, border: '1px solid var(--green)30', borderRadius: 4, background: 'var(--green)08' }}>
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--green)' }}>
-                    Delegation provided by team "{step.team}". Remove team to use inline delegation.
-                  </span>
-                </div>
-              )}
             </div>
           </div>
         );
@@ -637,7 +616,7 @@ function Checkbox({ label, checked, onChange }) {
 // ── Helpers ──
 
 function emptyStep() {
-  return { profile: '', role: '', turns: 1, instructions: '', can_stop: false, can_message: false, can_pushover: false, delegation: null, team: '' };
+  return { profile: '', role: '', turns: 1, instructions: '', can_stop: false, can_message: false, can_pushover: false, team: '' };
 }
 
 function emptyDelegationProfile() {
@@ -653,9 +632,6 @@ function cleanStep(s) {
   if (s.can_message) out.can_message = true;
   if (s.can_pushover) out.can_pushover = true;
   if (s.team) out.team = s.team;
-  if (s.delegation && s.delegation.profiles && s.delegation.profiles.length > 0) {
-    out.delegation = cleanDelegation(s.delegation);
-  }
   return out;
 }
 

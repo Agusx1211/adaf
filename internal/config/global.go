@@ -26,16 +26,15 @@ type Profile struct {
 
 // LoopStep defines one step in a loop cycle.
 type LoopStep struct {
-	Profile        string            `json:"profile"`                   // profile name reference
-	Role           string            `json:"role,omitempty"`            // role name from global roles catalog
-	Turns          int               `json:"turns,omitempty"`           // turns per step (0 = 1 turn)
-	Instructions   string            `json:"instructions,omitempty"`    // custom instructions appended to prompt
-	CanStop        bool              `json:"can_stop,omitempty"`        // can this step signal loop stop?
-	CanMessage     bool              `json:"can_message,omitempty"`     // can this step send messages to subsequent steps?
-	CanPushover    bool              `json:"can_pushover,omitempty"`    // can this step send Pushover notifications?
-	Delegation     *DelegationConfig `json:"delegation,omitempty"`      // spawn capabilities for this step
-	Team           string            `json:"team,omitempty"`            // team name reference (resolved to delegation if Delegation is nil)
-	StandaloneChat bool              `json:"standalone_chat,omitempty"` // interactive chat mode (minimal prompt)
+	Profile        string `json:"profile"`                   // profile name reference
+	Role           string `json:"role,omitempty"`            // role name from global roles catalog
+	Turns          int    `json:"turns,omitempty"`           // turns per step (0 = 1 turn)
+	Instructions   string `json:"instructions,omitempty"`    // custom instructions appended to prompt
+	CanStop        bool   `json:"can_stop,omitempty"`        // can this step signal loop stop?
+	CanMessage     bool   `json:"can_message,omitempty"`     // can this step send messages to subsequent steps?
+	CanPushover    bool   `json:"can_pushover,omitempty"`    // can this step send Pushover notifications?
+	Team           string `json:"team,omitempty"`            // team name reference (resolved to delegation at runtime)
+	StandaloneChat bool   `json:"standalone_chat,omitempty"` // interactive chat mode (minimal prompt)
 }
 
 // LoopDef defines a loop as a cyclic template of profile steps.

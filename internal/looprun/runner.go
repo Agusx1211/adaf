@@ -199,9 +199,9 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			run.PendingHandoffs = nil
 			cfg.Store.UpdateLoopRun(run)
 
-			// Resolve team to delegation if step has a team reference but no inline delegation.
-			effectiveDelegation := stepDef.Delegation
-			if effectiveDelegation == nil && stepDef.Team != "" {
+			// Resolve team to delegation config.
+			var effectiveDelegation *config.DelegationConfig
+			if stepDef.Team != "" {
 				if team := cfg.GlobalCfg.FindTeam(stepDef.Team); team != nil {
 					effectiveDelegation = team.Delegation
 				}

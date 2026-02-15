@@ -222,11 +222,14 @@ func resolveCurrentDelegation(parentProfile string) (*config.DelegationConfig, e
 	if step.Profile != "" && !strings.EqualFold(step.Profile, parentProfile) {
 		return nil, fmt.Errorf("loop step %d profile mismatch: env profile=%q, loop profile=%q", stepIdx, parentProfile, step.Profile)
 	}
-	if step.Delegation == nil {
+	if step.Team == "" {
 		return &config.DelegationConfig{}, nil
 	}
-
-	return step.Delegation.Clone(), nil
+	team := globalCfg.FindTeam(step.Team)
+	if team == nil || team.Delegation == nil {
+		return &config.DelegationConfig{}, nil
+	}
+	return team.Delegation.Clone(), nil
 }
 
 func getTurnContext() (int, string, error) {

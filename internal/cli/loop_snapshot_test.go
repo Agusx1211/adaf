@@ -6,7 +6,7 @@ import (
 	"github.com/agusx1211/adaf/internal/config"
 )
 
-func TestLoopProfilesSnapshot_CollectsNestedDelegationProfiles(t *testing.T) {
+func TestLoopProfilesSnapshot_CollectsTeamDelegationProfiles(t *testing.T) {
 	globalCfg := &config.GlobalConfig{
 		Profiles: []config.Profile{
 			{Name: "manager", Agent: "codex"},
@@ -14,12 +14,9 @@ func TestLoopProfilesSnapshot_CollectsNestedDelegationProfiles(t *testing.T) {
 			{Name: "developer", Agent: "codex"},
 			{Name: "scout", Agent: "codex"},
 		},
-	}
-	loopDef := &config.LoopDef{
-		Name: "nested",
-		Steps: []config.LoopStep{
+		Teams: []config.Team{
 			{
-				Profile: "manager",
+				Name: "dev-team",
 				Delegation: &config.DelegationConfig{
 					Profiles: []config.DelegationProfile{
 						{
@@ -34,6 +31,15 @@ func TestLoopProfilesSnapshot_CollectsNestedDelegationProfiles(t *testing.T) {
 						{Name: "developer", Role: config.RoleDeveloper},
 					},
 				},
+			},
+		},
+	}
+	loopDef := &config.LoopDef{
+		Name: "nested",
+		Steps: []config.LoopStep{
+			{
+				Profile: "manager",
+				Team:    "dev-team",
 			},
 		},
 	}
@@ -54,10 +60,20 @@ func TestLoopProfilesSnapshot_CollectsNestedDelegationProfiles(t *testing.T) {
 	}
 }
 
-func TestLoopProfilesSnapshot_ErrorsOnMissingNestedProfile(t *testing.T) {
+func TestLoopProfilesSnapshot_ErrorsOnMissingTeamProfile(t *testing.T) {
 	globalCfg := &config.GlobalConfig{
 		Profiles: []config.Profile{
 			{Name: "manager", Agent: "codex"},
+		},
+		Teams: []config.Team{
+			{
+				Name: "bad-team",
+				Delegation: &config.DelegationConfig{
+					Profiles: []config.DelegationProfile{
+						{Name: "missing"},
+					},
+				},
+			},
 		},
 	}
 	loopDef := &config.LoopDef{
@@ -65,11 +81,7 @@ func TestLoopProfilesSnapshot_ErrorsOnMissingNestedProfile(t *testing.T) {
 		Steps: []config.LoopStep{
 			{
 				Profile: "manager",
-				Delegation: &config.DelegationConfig{
-					Profiles: []config.DelegationProfile{
-						{Name: "missing"},
-					},
-				},
+				Team:    "bad-team",
 			},
 		},
 	}

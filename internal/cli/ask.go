@@ -95,7 +95,6 @@ func runAsk(cmd *cobra.Command, args []string) error {
 
 	var prof *config.Profile
 	var commandOverride string
-	var delegation *config.DelegationConfig
 	var extraProfiles []config.Profile
 
 	prof, commandOverride, err = resolveAskProfile(cmd)
@@ -103,7 +102,7 @@ func runAsk(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// If --team is set, load team and use its delegation.
+	// If --team is set, validate and collect extra profiles.
 	if teamName != "" {
 		cfg, err := config.Load()
 		if err != nil {
@@ -113,7 +112,6 @@ func runAsk(cmd *cobra.Command, args []string) error {
 		if team == nil {
 			return fmt.Errorf("team not found: %s", teamName)
 		}
-		delegation = team.Delegation
 		if team.Delegation != nil {
 			for _, dp := range team.Delegation.Profiles {
 				if ep := cfg.FindProfile(dp.Name); ep != nil {
@@ -155,9 +153,9 @@ func runAsk(cmd *cobra.Command, args []string) error {
 
 		loopDef, maxCycles := buildAskLoopDefinition(prof.Name, iterPrompt)
 
-		// Attach delegation from standalone profile if present.
-		if delegation != nil && len(loopDef.Steps) > 0 {
-			loopDef.Steps[0].Delegation = delegation
+		// Attach team to the loop step so the runner can resolve delegation.
+		if teamName != "" && len(loopDef.Steps) > 0 {
+			loopDef.Steps[0].Team = teamName
 		}
 
 		allProfiles := []config.Profile{*prof}

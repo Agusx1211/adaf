@@ -42,8 +42,7 @@ var initialState = {
   activeLoopIDForMessages: 0,
   viewLoaded: { issues: false, docs: false, plan: false, logs: false },
 
-  configSelection: null, // { type: 'profile'|'loop'|'standalone', name: string } or null
-  standaloneProfile: '',
+  configSelection: null, // { type: 'profile'|'loop'|'team', name: string } or null
   standaloneChatID: '', // active chat instance ID
   standaloneChatStatuses: {}, // { [chatID]: 'thinking' | 'responding' }
 };
@@ -87,9 +86,6 @@ function reducer(state, action) {
 
     case 'SET_CONFIG_SELECTION':
       return { ...state, configSelection: action.payload };
-
-    case 'SET_STANDALONE_PROFILE':
-      return { ...state, standaloneProfile: action.payload || '' };
 
     case 'SET_STANDALONE_CHAT_ID':
       return { ...state, standaloneChatID: action.payload || '' };

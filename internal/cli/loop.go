@@ -128,8 +128,10 @@ func loopList(cmd *cobra.Command, args []string) error {
 			}
 			role := config.EffectiveStepRole(step.Role, globalCfg)
 			spawnCount := 0
-			if step.Delegation != nil {
-				spawnCount = len(step.Delegation.Profiles)
+			if step.Team != "" {
+				if t := globalCfg.FindTeam(step.Team); t != nil && t.Delegation != nil {
+					spawnCount = len(t.Delegation.Profiles)
+				}
 			}
 			flags := ""
 			if step.CanStop {
@@ -407,11 +409,15 @@ func loopProfilesSnapshot(globalCfg *config.GlobalConfig, loopDef *config.LoopDe
 		if err := addProfile(step.Profile); err != nil {
 			return nil, err
 		}
-		// Include all profiles from the full delegation tree so the daemon has
+		// Include all profiles from the team's delegation tree so the daemon has
 		// everything needed for nested spawn resolution and prompt rendering.
-		for _, name := range config.CollectDelegationProfileNames(step.Delegation) {
-			if err := addProfile(name); err != nil {
-				return nil, err
+		if step.Team != "" {
+			if t := globalCfg.FindTeam(step.Team); t != nil && t.Delegation != nil {
+				for _, name := range config.CollectDelegationProfileNames(t.Delegation) {
+					if err := addProfile(name); err != nil {
+						return nil, err
+					}
+				}
 			}
 		}
 	}
