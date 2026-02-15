@@ -1,59 +1,66 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useAppState } from '../../state/store.js';
+import { useAppState, useDispatch } from '../../state/store.js';
 import { apiCall, apiBase, buildWSURL } from '../../api/client.js';
 import { useToast } from '../common/Toast.jsx';
 import { timeAgo } from '../../utils/format.js';
 import { EventBlockList, MarkdownContent, injectEventBlockStyles, cleanResponse } from '../common/EventBlocks.jsx';
+import Modal from '../common/Modal.jsx';
 
 export default function StandaloneChatView() {
   var state = useAppState();
+  var dispatch = useDispatch();
   var showToast = useToast();
+  var chatID = state.standaloneChatID || '';
+  var [chatMeta, setChatMeta] = useState(null);
   var [messages, setMessages] = useState([]);
   var [loading, setLoading] = useState(false);
   var [sending, setSending] = useState(false);
   var [input, setInput] = useState('');
-  var [standaloneProfiles, setStandaloneProfiles] = useState([]);
-  var [selectedProfile, setSelectedProfile] = useState('');
   var [activeSessionID, setActiveSessionID] = useState(null);
   var [streamEvents, setStreamEvents] = useState([]);
+  var [inspectedMessage, setInspectedMessage] = useState(null);
   var listRef = useRef(null);
   var wsRef = useRef(null);
   var inputRef = useRef(null);
+  var promptRef = useRef(null);
   var base = apiBase(state.currentProjectID);
 
   useEffect(function () { injectEventBlockStyles(); }, []);
 
-  // Load standalone profiles
-  useEffect(function () {
-    apiCall('/api/config/standalone-profiles', 'GET', null, { allow404: true })
-      .then(function (list) {
-        var procs = (list || []).filter(function (p) { return p && p.name; });
-        setStandaloneProfiles(procs);
-        if (procs.length > 0 && !selectedProfile) {
-          setSelectedProfile(procs[0].name);
-        }
-      })
-      .catch(function () {});
-  }, []);
-
-  // Load messages when profile changes
+  // Load messages when chat instance changes
   var loadMessages = useCallback(async function () {
-    if (!state.currentProjectID || !selectedProfile) {
+    if (!state.currentProjectID || !chatID) {
       setMessages([]);
+      setChatMeta(null);
       return;
     }
     setLoading(true);
     try {
-      var data = await apiCall(base + '/standalone-chat/' + encodeURIComponent(selectedProfile), 'GET', null, { allow404: true });
+      var data = await apiCall(base + '/chat-instances/' + encodeURIComponent(chatID), 'GET', null, { allow404: true });
       setMessages(data || []);
     } catch (err) {
-      if (!err.authRequired) console.error('Failed to load standalone chat:', err);
+      if (!err.authRequired) console.error('Failed to load chat messages:', err);
+      setMessages([]);
     } finally {
       setLoading(false);
     }
-  }, [base, state.currentProjectID, selectedProfile]);
+  }, [base, state.currentProjectID, chatID]);
 
   useEffect(function () { loadMessages(); }, [loadMessages]);
+
+  // Load chat instance metadata
+  useEffect(function () {
+    if (!chatID || !state.currentProjectID) {
+      setChatMeta(null);
+      return;
+    }
+    apiCall(base + '/chat-instances', 'GET', null, { allow404: true })
+      .then(function (list) {
+        var found = (list || []).find(function (i) { return i.id === chatID; });
+        setChatMeta(found || null);
+      })
+      .catch(function () {});
+  }, [chatID, base, state.currentProjectID]);
 
   // Auto-scroll on new content
   useEffect(function () {
@@ -78,6 +85,7 @@ export default function StandaloneChatView() {
     var isStreaming = false;
     var hasRawText = false;
     var finalized = false;
+    promptRef.current = null;
 
     function pushEvent(evt) {
       var last = events.length > 0 ? events[events.length - 1] : null;
@@ -96,6 +104,16 @@ export default function StandaloneChatView() {
         var envelope = JSON.parse(wsEvent.data);
         var type = envelope.type;
         var data = envelope.data;
+
+        if (type === 'prompt' && data) {
+          promptRef.current = {
+            text: data.text || data.prompt || '',
+            truncated: !!data.truncated,
+            turn_id: data.turn_id || null,
+            session_id: data.session_id || null,
+          };
+          return;
+        }
 
         if (type === 'event' && data) {
           var ev = data.event || data;
@@ -189,7 +207,6 @@ export default function StandaloneChatView() {
       wsRef.current = null;
       if (!finalized) {
         finalized = true;
-        // WS closed without done/loop_done — save whatever we have
         var textParts = [];
         events.forEach(function (e) {
           if (e.type === 'text') textParts.push(e.content);
@@ -217,11 +234,15 @@ export default function StandaloneChatView() {
       role: 'assistant',
       content: content,
       _events: structuredEvents || null,
+      _prompt: promptRef.current || null,
       created_at: new Date().toISOString(),
     };
+    promptRef.current = null;
     setMessages(function (prev) { return prev.concat([assistantMsg]); });
+    // Refresh conversation list to update title/timestamp
+    if (window.__reloadChatInstances) window.__reloadChatInstances();
     try {
-      await apiCall(base + '/standalone-chat/' + encodeURIComponent(selectedProfile) + '/response', 'POST', { content: content });
+      await apiCall(base + '/chat-instances/' + encodeURIComponent(chatID) + '/response', 'POST', { content: content });
     } catch (err) {
       console.error('Failed to save assistant response:', err);
     }
@@ -229,11 +250,7 @@ export default function StandaloneChatView() {
 
   async function handleSend(e) {
     e.preventDefault();
-    if (sending) return;
-    if (!selectedProfile) {
-      showToast('Please select a standalone profile first', 'error');
-      return;
-    }
+    if (sending || !chatID) return;
 
     var msg = input.trim();
     setInput('');
@@ -251,7 +268,7 @@ export default function StandaloneChatView() {
     }
 
     try {
-      var result = await apiCall(base + '/standalone-chat/' + encodeURIComponent(selectedProfile), 'POST', {
+      var result = await apiCall(base + '/chat-instances/' + encodeURIComponent(chatID), 'POST', {
         message: msg,
       });
       if (result && result.session_id) {
@@ -259,6 +276,8 @@ export default function StandaloneChatView() {
       } else {
         setSending(false);
       }
+      // Refresh conversation list to update title after first message
+      if (window.__reloadChatInstances) window.__reloadChatInstances();
     } catch (err) {
       if (err.authRequired) return;
       showToast('Failed to send message: ' + (err.message || err), 'error');
@@ -277,24 +296,30 @@ export default function StandaloneChatView() {
     }
   }
 
-  async function handleClear() {
-    if (!selectedProfile) return;
-    if (!window.confirm('Clear all standalone chat history for "' + selectedProfile + '"?')) return;
-    try {
-      await apiCall(base + '/standalone-chat/' + encodeURIComponent(selectedProfile), 'DELETE');
-      setMessages([]);
-      showToast('Chat history cleared', 'success');
-    } catch (err) {
-      if (err.authRequired) return;
-      showToast('Failed to clear chat: ' + (err.message || err), 'error');
-    }
-  }
-
   function handleKeyDown(e) {
     if (e.key === 'Enter' && !e.shiftKey) handleSend(e);
   }
 
   // Render
+
+  if (!chatID) {
+    return (
+      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-0)' }}>
+        <div style={{ textAlign: 'center', color: 'var(--text-3)' }}>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, marginBottom: 12, color: 'var(--text-1)' }}>
+            Standalone Chat
+          </div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, opacity: 0.7, maxWidth: 400, margin: '0 auto', lineHeight: 1.6 }}>
+            Select a chat from the sidebar or create a new one with + New Chat.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  var headerTitle = chatMeta ? chatMeta.title : 'Chat';
+  if (headerTitle.length > 40) headerTitle = headerTitle.slice(0, 40) + '\u2026';
+  var headerProfile = chatMeta ? chatMeta.profile : '';
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg-0)' }}>
@@ -305,35 +330,18 @@ export default function StandaloneChatView() {
         background: 'var(--bg-1)', flexShrink: 0,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: 'var(--text-1)' }}>Standalone</span>
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>{messages.length} messages</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <select
-            value={selectedProfile}
-            onChange={function (e) { setSelectedProfile(e.target.value); }}
-            disabled={sending}
-            style={{
-              padding: '4px 8px', background: 'var(--bg-3)', border: '1px solid var(--border)',
-              borderRadius: 4, color: 'var(--text-0)',
-              fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
-            }}
-          >
-            <option value="">Select standalone profile</option>
-            {standaloneProfiles.map(function (p) { return <option key={p.name} value={p.name}>{p.name}</option>; })}
-          </select>
-          {messages.length > 0 && (
-            <button
-              onClick={handleClear} disabled={sending}
-              style={{
-                padding: '4px 8px', border: '1px solid var(--border)',
-                background: 'transparent', color: 'var(--text-3)', borderRadius: 4,
-                cursor: sending ? 'not-allowed' : 'pointer',
-                fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
-              }}
-            >Clear</button>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: 'var(--text-1)' }}>
+            {headerTitle}
+          </span>
+          {headerProfile && (
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>
+              {headerProfile}
+            </span>
           )}
         </div>
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>
+          {messages.length} messages
+        </span>
       </div>
 
       {/* Messages area */}
@@ -345,24 +353,28 @@ export default function StandaloneChatView() {
         ) : messages.length === 0 && !sending ? (
           <div style={{ textAlign: 'center', color: 'var(--text-3)', padding: 60 }}>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, marginBottom: 12, color: 'var(--text-1)' }}>
-              Standalone Chat
+              New Chat
             </div>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, opacity: 0.7, maxWidth: 400, margin: '0 auto', lineHeight: 1.6 }}>
-              Chat with your standalone agent. Select a standalone profile above and type a message or press Enter to start agent work.
+              Type a message or press Enter to start agent work.
             </div>
           </div>
         ) : (
           <div style={{ maxWidth: 800, margin: '0 auto' }}>
             {messages.map(function (msg) {
               var isUser = msg.role === 'user';
+              var hasInspectData = !isUser && (msg._prompt || (msg._events && msg._events.length > 0));
               return (
                 <div key={msg.id} style={{ marginBottom: 16, animation: 'slideIn 0.15s ease-out' }}>
-                  <div style={{
-                    padding: '12px 16px', borderRadius: 8,
-                    background: isUser ? 'var(--bg-2)' : 'var(--bg-1)',
-                    border: '1px solid var(--border)',
-                    borderLeft: isUser ? '3px solid var(--accent)' : '3px solid var(--green)',
-                  }}>
+                  <div
+                    onClick={function () { if (hasInspectData) setInspectedMessage(msg); }}
+                    style={{
+                      padding: '12px 16px', borderRadius: 8,
+                      background: isUser ? 'var(--bg-2)' : 'var(--bg-1)',
+                      border: '1px solid var(--border)',
+                      borderLeft: isUser ? '3px solid var(--accent)' : '3px solid var(--green)',
+                      cursor: hasInspectData ? 'pointer' : 'default',
+                    }}>
                     <div style={{
                       fontSize: 10, fontWeight: 600,
                       color: isUser ? 'var(--accent)' : 'var(--green)',
@@ -374,6 +386,11 @@ export default function StandaloneChatView() {
                       <span style={{ fontWeight: 400, color: 'var(--text-3)', textTransform: 'none', letterSpacing: 'normal' }}>
                         {timeAgo(msg.created_at)}
                       </span>
+                      {hasInspectData && (
+                        <span style={{ fontWeight: 400, color: 'var(--text-3)', textTransform: 'none', letterSpacing: 'normal', marginLeft: 'auto', fontSize: 9, opacity: 0.6 }}>
+                          click to inspect
+                        </span>
+                      )}
                     </div>
                     {isUser ? (
                       <div style={{
@@ -445,8 +462,8 @@ export default function StandaloneChatView() {
             value={input}
             onChange={function (e) { setInput(e.target.value); }}
             onKeyDown={handleKeyDown}
-            placeholder={selectedProfile ? 'Type a message or press Enter to start agent work...' : 'Select a standalone profile first...'}
-            disabled={sending || !selectedProfile}
+            placeholder="Type a message or press Enter to start agent work..."
+            disabled={sending}
             style={{
               flex: 1, padding: '10px 14px',
               background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 6,
@@ -470,19 +487,60 @@ export default function StandaloneChatView() {
           ) : (
             <button
               type="submit"
-              disabled={!selectedProfile}
               style={{
                 padding: '10px 16px',
-                background: !selectedProfile ? 'var(--bg-3)' : 'var(--accent)',
+                background: 'var(--accent)',
                 border: 'none', borderRadius: 6,
-                color: !selectedProfile ? 'var(--text-3)' : '#000',
+                color: '#000',
                 fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600,
-                cursor: !selectedProfile ? 'not-allowed' : 'pointer',
+                cursor: 'pointer',
               }}
             >Send</button>
           )}
         </form>
       </div>
+
+      {/* Prompt Inspector Modal */}
+      {inspectedMessage && (
+        <Modal title="Prompt Inspector" maxWidth={900} onClose={function () { setInspectedMessage(null); }}>
+          <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
+            {inspectedMessage._prompt && inspectedMessage._prompt.text ? (
+              <div>
+                <div style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
+                  color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em',
+                  marginBottom: 8,
+                }}>
+                  System Prompt
+                  {inspectedMessage._prompt.truncated && (
+                    <span style={{ color: 'var(--text-3)', fontWeight: 400, textTransform: 'none', marginLeft: 8 }}>(truncated)</span>
+                  )}
+                </div>
+                <pre style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+                  color: 'var(--text-1)', background: 'var(--bg-2)',
+                  padding: 12, borderRadius: 6, border: '1px solid var(--border)',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  lineHeight: 1.5, maxHeight: 500, overflow: 'auto',
+                  margin: 0,
+                }}>{inspectedMessage._prompt.text}</pre>
+              </div>
+            ) : null}
+            {inspectedMessage._events && inspectedMessage._events.length > 0 && (
+              <div style={{ marginTop: inspectedMessage._prompt ? 16 : 0 }}>
+                <div style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
+                  color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '0.05em',
+                  marginBottom: 8,
+                }}>
+                  Structured Events ({inspectedMessage._events.length})
+                </div>
+                <EventBlockList events={inspectedMessage._events} />
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

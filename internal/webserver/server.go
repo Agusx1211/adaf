@@ -317,11 +317,19 @@ func (srv *Server) registerProjectRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("POST "+prefix+"/pm/chat/response", srv.projectHandler(handleSavePMChatResponseP))
 	mux.HandleFunc("DELETE "+prefix+"/pm/chat", srv.projectHandler(handleClearPMChatP))
 
-	// Standalone Chat
+	// Standalone Chat (legacy per-profile)
 	mux.HandleFunc("GET "+prefix+"/standalone-chat/{profile}", srv.projectHandler(handleGetStandaloneChatP))
 	mux.HandleFunc("POST "+prefix+"/standalone-chat/{profile}", srv.projectHandler(handleSendStandaloneChatMessageP))
 	mux.HandleFunc("POST "+prefix+"/standalone-chat/{profile}/response", srv.projectHandler(handleSaveStandaloneChatResponseP))
 	mux.HandleFunc("DELETE "+prefix+"/standalone-chat/{profile}", srv.projectHandler(handleClearStandaloneChatP))
+
+	// Chat Instances (multi-chat per profile)
+	mux.HandleFunc("GET "+prefix+"/chat-instances", srv.projectHandler(handleListChatInstances))
+	mux.HandleFunc("POST "+prefix+"/chat-instances", srv.projectHandler(handleCreateChatInstance))
+	mux.HandleFunc("GET "+prefix+"/chat-instances/{id}", srv.projectHandler(handleGetChatInstanceMessages))
+	mux.HandleFunc("POST "+prefix+"/chat-instances/{id}", srv.projectHandler(handleSendChatInstanceMessage))
+	mux.HandleFunc("POST "+prefix+"/chat-instances/{id}/response", srv.projectHandler(handleSaveChatInstanceResponse))
+	mux.HandleFunc("DELETE "+prefix+"/chat-instances/{id}", srv.projectHandler(handleDeleteChatInstance))
 
 	// Stats
 	mux.HandleFunc("GET "+prefix+"/stats/loops", srv.projectHandler(handleLoopStatsP))

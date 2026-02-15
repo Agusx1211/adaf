@@ -1,6 +1,6 @@
 import { useEffect, useCallback } from 'react';
 
-export default function Modal({ title, children, onClose }) {
+export default function Modal({ title, children, onClose, maxWidth }) {
   var handleKeyDown = useCallback(function (e) {
     if (e.key === 'Escape') onClose();
   }, [onClose]);
@@ -24,7 +24,7 @@ export default function Modal({ title, children, onClose }) {
           position: 'fixed', top: '50%', left: '50%',
           transform: 'translate(-50%, -50%)',
           background: 'var(--bg-1)', border: '1px solid var(--border)',
-          borderRadius: 8, minWidth: 400, maxWidth: 560, width: '90%',
+          borderRadius: 8, minWidth: 400, maxWidth: maxWidth || 560, width: '90%',
           zIndex: 1001, animation: 'slideIn 0.2s ease-out',
           boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
         }}

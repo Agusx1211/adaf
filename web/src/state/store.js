@@ -43,6 +43,8 @@ var initialState = {
   viewLoaded: { issues: false, docs: false, plan: false, logs: false },
 
   configSelection: null, // { type: 'profile'|'loop'|'standalone', name: string } or null
+  standaloneProfile: '',
+  standaloneChatID: '', // active chat instance ID
 };
 
 function reducer(state, action) {
@@ -84,6 +86,12 @@ function reducer(state, action) {
 
     case 'SET_CONFIG_SELECTION':
       return { ...state, configSelection: action.payload };
+
+    case 'SET_STANDALONE_PROFILE':
+      return { ...state, standaloneProfile: action.payload || '' };
+
+    case 'SET_STANDALONE_CHAT_ID':
+      return { ...state, standaloneChatID: action.payload || '' };
 
     case 'TOGGLE_NODE': {
       var nodeID = action.payload;
