@@ -11,6 +11,27 @@ import (
 
 const maxRecentTurns = 5
 
+func buildSubAgentPrompt(opts BuildOpts) (string, error) {
+	role := config.EffectiveRole(opts.Role, opts.GlobalCfg)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are a sub-agent working as a %s. If you need to communicate with your parent agent use `adaf parent-ask \"question\"`.\n\n", role)
+
+	if opts.ReadOnly {
+		b.WriteString("You are in READ-ONLY mode. Do NOT create, modify, or delete any files. Only read and analyze.\n\n")
+	} else {
+		b.WriteString("Commit your work when you finish.\n\n")
+	}
+
+	if opts.Delegation != nil && len(opts.Delegation.Profiles) > 0 {
+		b.WriteString(delegationSection(opts.Delegation, opts.GlobalCfg, nil))
+	}
+
+	b.WriteString(opts.Task)
+
+	return b.String(), nil
+}
+
 // LoopPromptContext provides loop-specific context for prompt generation.
 type LoopPromptContext struct {
 	LoopName     string
@@ -56,12 +77,6 @@ type BuildOpts struct {
 	// CurrentTurnID, when >0, enables live runtime spawn context in prompts.
 	CurrentTurnID int
 
-	// Messages from parent agent (for child prompts).
-	Messages []store.SpawnMessage
-
-	// IssueIDs are specific issues assigned to this sub-agent by the parent.
-	IssueIDs []int
-
 	// LoopContext provides loop-specific context (nil if not in a loop).
 	LoopContext *LoopPromptContext
 
@@ -90,6 +105,10 @@ type WaitResultInfo struct {
 
 // Build constructs a prompt from project context and role configuration.
 func Build(opts BuildOpts) (string, error) {
+	if opts.ParentTurnID > 0 {
+		return buildSubAgentPrompt(opts)
+	}
+
 	var b strings.Builder
 
 	s := opts.Store
@@ -184,10 +203,8 @@ func Build(opts BuildOpts) (string, error) {
 	// Context.
 	b.WriteString("# Context\n\n")
 
-	isSubAgent := opts.ParentTurnID > 0
-
 	// Recent session logs — only for top-level agents, not sub-agents.
-	if !isSubAgent && len(allTurns) > 0 {
+	if len(allTurns) > 0 {
 		totalTurns := len(allTurns)
 		start := totalTurns - maxRecentTurns
 		if start < 0 {
@@ -253,18 +270,7 @@ func Build(opts BuildOpts) (string, error) {
 	}
 
 	// Issues section.
-	if isSubAgent && len(opts.IssueIDs) > 0 {
-		// Sub-agent with assigned issues: show only those.
-		b.WriteString("## Assigned Issues\n")
-		for _, issID := range opts.IssueIDs {
-			iss, err := s.GetIssue(issID)
-			if err != nil {
-				continue
-			}
-			fmt.Fprintf(&b, "- #%d [%s] %s: %s\n", iss.ID, iss.Priority, iss.Title, iss.Description)
-		}
-		b.WriteString("\n")
-	} else if !isSubAgent {
+	{
 		// Top-level agent: show all open issues.
 		var issues []store.Issue
 		if effectivePlanID != "" {
@@ -288,19 +294,7 @@ func Build(opts BuildOpts) (string, error) {
 	}
 
 	// Messages from parent.
-	if len(opts.Messages) > 0 {
-		b.WriteString("## Messages from Parent\n\n")
-		for _, msg := range opts.Messages {
-			fmt.Fprintf(&b, "- [%s] %s\n", msg.CreatedAt.Format("15:04:05"), msg.Content)
-		}
-		b.WriteString("\n")
-	}
-
 	// Parent communication commands are available whenever this session is a spawned sub-agent.
-	if opts.ParentTurnID > 0 {
-		b.WriteString(parentCommunicationSection())
-	}
-
 	// Loop context.
 	if lc := opts.LoopContext; lc != nil {
 		b.WriteString("# Loop Context\n\n")

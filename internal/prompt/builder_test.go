@@ -120,14 +120,11 @@ func TestBuild_SubAgentIncludesParentCommunicationCommands(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
+	if !strings.Contains(got, "You are a sub-agent working as a") {
+		t.Fatalf("missing sub-agent intro in prompt\nprompt:\n%s", got)
+	}
 	if !strings.Contains(got, "`adaf parent-ask \"question\"`") {
 		t.Fatalf("missing parent-ask guidance in sub-agent prompt\nprompt:\n%s", got)
-	}
-	if !strings.Contains(got, "`adaf parent-notify \"status update\"`") {
-		t.Fatalf("missing parent-notify guidance in sub-agent prompt\nprompt:\n%s", got)
-	}
-	if !strings.Contains(got, "`adaf spawn-read-messages`") {
-		t.Fatalf("missing spawn-read-messages guidance in sub-agent prompt\nprompt:\n%s", got)
 	}
 }
 
@@ -350,64 +347,6 @@ func TestBuild_SubAgentSkipsSessionLogsAndIssues(t *testing.T) {
 	}
 	if strings.Contains(got, "Some open issue") {
 		t.Fatalf("sub-agent should not see issue content\nprompt:\n%s", got)
-	}
-}
-
-func TestBuild_SubAgentShowsAssignedIssues(t *testing.T) {
-	s, project := initPromptTestStore(t)
-
-	// Create issues.
-	issue1 := &store.Issue{Title: "Auth bug", Status: "open", Priority: "high", Description: "Login fails"}
-	issue2 := &store.Issue{Title: "Perf issue", Status: "open", Priority: "medium", Description: "Slow query"}
-	issue3 := &store.Issue{Title: "Unrelated", Status: "open", Priority: "low", Description: "Other thing"}
-	if err := s.CreateIssue(issue1); err != nil {
-		t.Fatalf("CreateIssue: %v", err)
-	}
-	if err := s.CreateIssue(issue2); err != nil {
-		t.Fatalf("CreateIssue: %v", err)
-	}
-	if err := s.CreateIssue(issue3); err != nil {
-		t.Fatalf("CreateIssue: %v", err)
-	}
-
-	profile := &config.Profile{
-		Name:  "dev",
-		Agent: "claude",
-	}
-
-	got, err := Build(BuildOpts{
-		Store:        s,
-		Project:      project,
-		Profile:      profile,
-		ParentTurnID: 100,
-		Task:         "Fix assigned issues",
-		IssueIDs:     []int{issue1.ID, issue2.ID},
-	})
-	if err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-
-	// Should show Assigned Issues section.
-	if !strings.Contains(got, "Assigned Issues") {
-		t.Fatalf("missing Assigned Issues section\nprompt:\n%s", got)
-	}
-
-	// Should include assigned issues.
-	if !strings.Contains(got, "Auth bug") {
-		t.Fatalf("missing assigned issue 'Auth bug'\nprompt:\n%s", got)
-	}
-	if !strings.Contains(got, "Perf issue") {
-		t.Fatalf("missing assigned issue 'Perf issue'\nprompt:\n%s", got)
-	}
-
-	// Should NOT include unassigned issue.
-	if strings.Contains(got, "Unrelated") {
-		t.Fatalf("should not include unassigned issue\nprompt:\n%s", got)
-	}
-
-	// Should NOT show the general "Open Issues" section.
-	if strings.Contains(got, "Open Issues") {
-		t.Fatalf("sub-agent with assigned issues should not show Open Issues\nprompt:\n%s", got)
 	}
 }
 

@@ -312,6 +312,10 @@ func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error)
 		return 0, fmt.Errorf("parent profile %q not found", req.ParentProfile)
 	}
 
+	if strings.TrimSpace(req.Task) == "" {
+		return 0, fmt.Errorf("task is required for spawning a sub-agent")
+	}
+
 	deleg := req.Delegation
 	if deleg == nil {
 		return 0, fmt.Errorf("spawning requires explicit delegation rules in the current loop/agent context")
@@ -496,7 +500,6 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 		ReadOnly:     req.ReadOnly,
 		ParentTurnID: req.ParentTurnID,
 		Delegation:   req.ChildDelegation,
-		IssueIDs:     req.IssueIDs,
 	})
 
 	workDir := o.repoRoot
@@ -682,24 +685,16 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 				})
 			},
 			PromptFunc: func(turnID int) string {
-				msgs, _ := o.store.UnreadMessages(rec.ID, "parent_to_child")
-				for _, m := range msgs {
-					o.store.MarkMessageRead(m.SpawnID, m.ID)
-				}
 				newPrompt, _ := promptpkg.Build(promptpkg.BuildOpts{
-					Store:         o.store,
-					Project:       projCfg,
-					Profile:       childProf,
-					Role:          req.ChildRole,
-					GlobalCfg:     o.globalCfg,
-					PlanID:        parentPlanID,
-					Task:          req.Task,
-					ReadOnly:      req.ReadOnly,
-					ParentTurnID:  req.ParentTurnID,
-					CurrentTurnID: turnID,
-					Delegation:    req.ChildDelegation,
-					Messages:      msgs,
-					IssueIDs:      req.IssueIDs,
+					Store:        o.store,
+					Project:      projCfg,
+					Profile:      childProf,
+					Role:         req.ChildRole,
+					GlobalCfg:    o.globalCfg,
+					Task:         req.Task,
+					ReadOnly:     req.ReadOnly,
+					ParentTurnID: req.ParentTurnID,
+					Delegation:   req.ChildDelegation,
 				})
 				return newPrompt
 			},
