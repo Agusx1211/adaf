@@ -99,3 +99,12 @@ type PMChatMessage struct {
 	CreatedAt time.Time `json:"created_at"`
 	SessionID int       `json:"session_id,omitempty"` // linked PM session if any
 }
+
+type StandaloneChatMessage struct {
+	ID        int       `json:"id"`
+	Profile   string    `json:"profile"`
+	Role      string    `json:"role"` // "user" or "assistant"
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+	SessionID int       `json:"session_id,omitempty"`
+}

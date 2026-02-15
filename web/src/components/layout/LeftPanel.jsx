@@ -1,44 +1,30 @@
 import { useAppState, useDispatch } from '../../state/store.js';
-import { formatNumber } from '../../utils/format.js';
 import ProjectStatus from '../project/ProjectStatus.jsx';
 import AgentTree from '../tree/AgentTree.jsx';
-import SectionHeader from '../common/SectionHeader.jsx';
 import IssuesView from '../views/IssuesView.jsx';
 import DocsView from '../views/DocsView.jsx';
 import PlanView from '../views/PlanView.jsx';
 import LogsView from '../views/LogsView.jsx';
+import ConfigView from '../views/ConfigView.jsx';
 import { NewSessionButton } from '../session/SessionControls.jsx';
 import { STATUSES } from '../../utils/colors.js';
 
-var LEFT_VIEWS = [
-  { id: 'agents', label: 'Agents', icon: '\u2699' },
-  { id: 'pm', label: 'PM', icon: '\u26A1' },
-  { id: 'issues', label: 'Issues', icon: '\u26A0' },
-  { id: 'docs', label: 'Docs', icon: '\u2630' },
-  { id: 'plan', label: 'Plan', icon: '\u2261' },
-  { id: 'logs', label: 'Logs', icon: '\u2263' },
-];
-
 export default function LeftPanel() {
   var state = useAppState();
-  var dispatch = useDispatch();
-  var { leftView, sessions, spawns, issues, docs, plans, activePlan, turns } = state;
-
-  var counts = {
-    agents: sessions.length + spawns.length,
-    pm: 0,
-    issues: issues.length,
-    docs: docs.length,
-    plan: activePlan && activePlan.phases ? activePlan.phases.length : plans.length,
-    logs: turns.length,
-  };
-
-  function setView(view) {
-    dispatch({ type: 'SET_LEFT_VIEW', payload: view });
-  }
+  var { leftView, sessions, spawns } = state;
 
   function renderContent() {
     if (leftView === 'agents') return <AgentTree />;
+    if (leftView === 'standalone') return (
+      <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-3)' }}>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, marginBottom: 8 }}>
+          Standalone Chat
+        </div>
+        <div style={{ fontSize: 10, lineHeight: 1.5, opacity: 0.7 }}>
+          Chat with your standalone agent in the center panel. Select a standalone profile and start working.
+        </div>
+      </div>
+    );
     if (leftView === 'pm') return (
       <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-3)' }}>
         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, marginBottom: 8 }}>
@@ -53,6 +39,7 @@ export default function LeftPanel() {
     if (leftView === 'docs') return <DocsView />;
     if (leftView === 'plan') return <PlanView />;
     if (leftView === 'logs') return <LogsView />;
+    if (leftView === 'config') return <ConfigView />;
     return null;
   }
 
@@ -62,37 +49,6 @@ export default function LeftPanel() {
       borderRight: '1px solid var(--border)', background: 'var(--bg-1)',
     }}>
       <ProjectStatus />
-
-      {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--bg-2)' }}>
-        {LEFT_VIEWS.map(function (tab, idx) {
-          var active = tab.id === leftView;
-          return (
-            <button
-              key={tab.id}
-              onClick={function () { setView(tab.id); }}
-              style={{
-                flex: 1, padding: '7px 4px', border: 'none',
-                background: active ? 'var(--bg-1)' : 'transparent',
-                color: active ? 'var(--text-0)' : 'var(--text-3)',
-                fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
-                cursor: 'pointer',
-                borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <span style={{ fontSize: 8, opacity: 0.5 }}>{idx + 1}</span>
-              <span>{tab.label}</span>
-              <span style={{
-                fontSize: 9, padding: '0 3px', borderRadius: 2,
-                background: active ? 'var(--accent)30' : 'var(--bg-4)',
-                color: active ? 'var(--accent)' : 'var(--text-3)',
-              }}>{formatNumber(counts[tab.id] || 0)}</span>
-            </button>
-          );
-        })}
-      </div>
 
       {/* View header for agents */}
       {leftView === 'agents' && (

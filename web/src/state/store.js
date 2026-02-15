@@ -41,6 +41,8 @@ var initialState = {
   sessionMessageDraft: '',
   activeLoopIDForMessages: 0,
   viewLoaded: { issues: false, docs: false, plan: false, logs: false },
+
+  configSelection: null, // { type: 'profile'|'loop'|'standalone', name: string } or null
 };
 
 function reducer(state, action) {
@@ -79,6 +81,9 @@ function reducer(state, action) {
 
     case 'SET_SELECTED_TURN':
       return { ...state, selectedTurn: action.payload };
+
+    case 'SET_CONFIG_SELECTION':
+      return { ...state, configSelection: action.payload };
 
     case 'TOGGLE_NODE': {
       var nodeID = action.payload;

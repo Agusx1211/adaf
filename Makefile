@@ -19,7 +19,7 @@ web-watch:
 build: web
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/adaf
 
-install:
+install: web
 	go install $(LDFLAGS) ./cmd/adaf
 
 test:

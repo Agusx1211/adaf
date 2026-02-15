@@ -3,6 +3,7 @@ import { useAppState, useDispatch } from '../../state/store.js';
 import { statusColor, STATUS_RUNNING } from '../../utils/colors.js';
 import { normalizeStatus, formatElapsed, parseTimestamp } from '../../utils/format.js';
 import StatusDot from '../common/StatusDot.jsx';
+import { StopSessionButton } from '../session/SessionControls.jsx';
 
 export default function AgentTree({ onSelectScope }) {
   var state = useAppState();
@@ -102,10 +103,13 @@ export default function AgentTree({ onSelectScope }) {
               </div>
 
               {isRunning && (
-                <span style={{
-                  width: 10, height: 10, border: '2px solid ' + agentI.color, borderTopColor: 'transparent',
-                  borderRadius: '50%', animation: 'spin 1s linear infinite', flexShrink: 0,
-                }} />
+                <>
+                  <StopSessionButton sessionID={session.id} />
+                  <span style={{
+                    width: 10, height: 10, border: '2px solid ' + agentI.color, borderTopColor: 'transparent',
+                    borderRadius: '50%', animation: 'spin 1s linear infinite', flexShrink: 0,
+                  }} />
+                </>
               )}
 
               {rootSpawns.length > 0 && (

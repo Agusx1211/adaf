@@ -370,6 +370,120 @@ func (srv *Server) handleDeleteRule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (srv *Server) handleListStandaloneProfiles(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load config")
+		return
+	}
+	profiles := cfg.StandaloneProfiles
+	if profiles == nil {
+		profiles = []config.StandaloneProfile{}
+	}
+	writeJSON(w, http.StatusOK, profiles)
+}
+
+func (srv *Server) handleCreateStandaloneProfile(w http.ResponseWriter, r *http.Request) {
+	var sp config.StandaloneProfile
+	if err := json.NewDecoder(r.Body).Decode(&sp); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if sp.Name == "" || sp.Profile == "" {
+		writeError(w, http.StatusBadRequest, "name and profile are required")
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load config")
+		return
+	}
+
+	if cfg.FindProfile(sp.Profile) == nil {
+		writeError(w, http.StatusBadRequest, "referenced profile not found: "+sp.Profile)
+		return
+	}
+
+	if err := cfg.AddStandaloneProfile(sp); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := config.Save(cfg); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save config")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, sp)
+}
+
+func (srv *Server) handleUpdateStandaloneProfile(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load config")
+		return
+	}
+
+	found := false
+	for i := range cfg.StandaloneProfiles {
+		if cfg.StandaloneProfiles[i].Name == name {
+			if err := json.NewDecoder(r.Body).Decode(&cfg.StandaloneProfiles[i]); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid request body")
+				return
+			}
+			cfg.StandaloneProfiles[i].Name = name
+			if cfg.StandaloneProfiles[i].Profile != "" && cfg.FindProfile(cfg.StandaloneProfiles[i].Profile) == nil {
+				writeError(w, http.StatusBadRequest, "referenced profile not found: "+cfg.StandaloneProfiles[i].Profile)
+				return
+			}
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		writeError(w, http.StatusNotFound, "standalone profile not found")
+		return
+	}
+
+	if err := config.Save(cfg); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save config")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (srv *Server) handleDeleteStandaloneProfile(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load config")
+		return
+	}
+
+	cfg.RemoveStandaloneProfile(name)
+
+	if err := config.Save(cfg); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save config")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 func (srv *Server) handleGetPushover(w http.ResponseWriter, r *http.Request) {
 	cfg, err := config.Load()
 	if err != nil {

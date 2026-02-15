@@ -1,84 +1,83 @@
-import { useState } from 'react';
-import { useAppState, useDispatch } from '../../state/store.js';
-import TabBar from '../common/TabBar.jsx';
-import EventStream from '../feed/EventStream.jsx';
-import { SessionMessageBar } from '../session/SessionControls.jsx';
-import { normalizeStatus, formatNumber } from '../../utils/format.js';
-import { scopeColor, scopeShortLabel, STATUS_RUNNING } from '../../utils/colors.js';
-import { withAlpha } from '../../utils/format.js';
+import { useAppState } from '../../state/store.js';
+import { SessionMessageBar, StopSessionButton } from '../session/SessionControls.jsx';
+import { normalizeStatus, formatElapsed } from '../../utils/format.js';
+import { statusColor, STATUS_RUNNING } from '../../utils/colors.js';
 
 export default function BottomBar() {
   var state = useAppState();
-  var dispatch = useDispatch();
-  var [activeTab, setActiveTab] = useState('events');
-  var { streamEvents, selectedScope, autoScroll, spawns, rightLayer } = state;
+  var { sessions } = state;
 
-  var tabs = [
-    { id: 'events', label: 'Event Stream', icon: '\u25B8', color: 'var(--green)', count: streamEvents.length },
-    { id: 'activity', label: 'Activity', icon: '\u25AA', color: 'var(--text-2)' },
-  ];
-
-  function renderActivityFeed() {
-    var entries = (state.activity || []).slice().reverse().slice(0, 80);
-    if (!entries.length) {
-      return <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-3)', fontSize: 11 }}>No activity yet.</div>;
-    }
-
-    return (
-      <div style={{ flex: 1, overflow: 'auto', padding: '4px 0' }}>
-        {entries.map(function (entry, idx) {
-          var type = normalizeStatus(entry.type || 'text');
-          var color = type === 'tool_use' ? '#f9e2af' : type === 'tool_result' ? '#a6e3a1' : '#b4befe';
-          var icon = type === 'tool_use' ? '\u2699' : type === 'tool_result' ? '\u2713' : '\u2022';
-          return (
-            <div key={entry.id || idx} style={{
-              display: 'flex', gap: 8, padding: '3px 12px', fontSize: 11,
-              fontFamily: "'JetBrains Mono', monospace",
-            }}>
-              <span style={{ color: color, flexShrink: 0 }}>{icon}</span>
-              <span style={{ color: scopeColor(entry.scope), fontSize: 9, flexShrink: 0 }}>{scopeShortLabel(entry.scope)}</span>
-              <span style={{ color: 'var(--text-1)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.text}</span>
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
+  var runningSessions = sessions.filter(function (s) {
+    return !!STATUS_RUNNING[normalizeStatus(s.status)];
+  });
 
   return (
     <div style={{
       height: 200, flexShrink: 0, display: 'flex', flexDirection: 'column',
       borderTop: '1px solid var(--border)', background: 'var(--bg-1)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <TabBar tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px' }}>
-          {selectedScope && (
-            <span style={{
-              fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)',
-              display: 'flex', alignItems: 'center', gap: 4,
-            }}>
-              scope: <b style={{ color: scopeColor(selectedScope) }}>{scopeShortLabel(selectedScope)}</b>
-              <button
-                onClick={function () { dispatch({ type: 'SET_SELECTED_SCOPE', payload: null }); }}
-                style={{ background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: 10 }}
-                title="Clear scope"
-              >{'\u00D7'}</button>
-            </span>
-          )}
-          <button
-            onClick={function () { dispatch({ type: 'TOGGLE_AUTO_SCROLL' }); }}
-            style={{
-              fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-              background: autoScroll ? 'var(--accent)15' : 'var(--bg-3)',
-              border: '1px solid ' + (autoScroll ? 'var(--accent)40' : 'var(--border)'),
-              color: autoScroll ? 'var(--accent)' : 'var(--text-3)',
-              padding: '2px 6px', borderRadius: 3, cursor: 'pointer',
-            }}
-          >auto-scroll {autoScroll ? 'on' : 'off'}</button>
-        </div>
+      <div style={{
+        padding: '6px 12px', borderBottom: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', gap: 8,
+      }}>
+        <span style={{
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600,
+          color: 'var(--text-1)',
+        }}>Running Sessions</span>
+        <span style={{
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+          padding: '1px 5px', borderRadius: 3,
+          background: runningSessions.length > 0 ? 'var(--green)20' : 'var(--bg-3)',
+          color: runningSessions.length > 0 ? 'var(--green)' : 'var(--text-3)',
+        }}>{runningSessions.length}</span>
       </div>
-      {activeTab === 'events' ? <EventStream /> : renderActivityFeed()}
+
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        {runningSessions.length === 0 ? (
+          <div style={{
+            padding: 24, textAlign: 'center', color: 'var(--text-3)',
+            fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+          }}>No running sessions</div>
+        ) : (
+          runningSessions.map(function (session) {
+            var sColor = statusColor(session.status);
+            return (
+              <div key={session.id} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '6px 12px', borderBottom: '1px solid var(--bg-3)',
+              }}
+              onMouseEnter={function (e) { e.currentTarget.style.background = 'var(--bg-2)'; }}
+              onMouseLeave={function (e) { e.currentTarget.style.background = 'transparent'; }}
+              >
+                <span style={{
+                  width: 6, height: 6, borderRadius: '50%', background: sColor, flexShrink: 0,
+                  boxShadow: '0 0 6px ' + sColor,
+                  animation: 'pulse 2s ease-in-out infinite',
+                }} />
+                <span style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)',
+                  flexShrink: 0,
+                }}>#{session.id}</span>
+                <span style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600,
+                  color: 'var(--text-0)', flex: 1, overflow: 'hidden',
+                  textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>{session.profile || 'unknown'}</span>
+                <span style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)',
+                  flexShrink: 0,
+                }}>({session.agent || 'agent'})</span>
+                <span style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)',
+                  flexShrink: 0,
+                }}>{formatElapsed(session.started_at, session.ended_at)}</span>
+                <StopSessionButton sessionID={session.id} />
+              </div>
+            );
+          })
+        )}
+      </div>
+
       <SessionMessageBar />
     </div>
   );

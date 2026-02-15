@@ -5,10 +5,12 @@ import AgentDetail from '../detail/AgentDetail.jsx';
 import AgentOutput from '../detail/AgentOutput.jsx';
 import LoopVisualizer from '../loop/LoopVisualizer.jsx';
 import PMChatView from '../views/PMChatView.jsx';
+import StandaloneChatView from '../views/StandaloneChatView.jsx';
 import IssueDetailPanel from '../detail/IssueDetailPanel.jsx';
 import DocsDetailPanel from '../detail/DocsDetailPanel.jsx';
 import PlanDetailPanel from '../detail/PlanDetailPanel.jsx';
 import LogDetailPanel from '../detail/LogDetailPanel.jsx';
+import ConfigDetailPanel from '../detail/ConfigDetailPanel.jsx';
 
 export default function CenterPanel() {
   var state = useAppState();
@@ -16,6 +18,7 @@ export default function CenterPanel() {
   var { selectedScope, loopRun, leftView } = state;
 
   var isPM = leftView === 'pm';
+  var isStandalone = leftView === 'standalone';
   var isAgents = leftView === 'agents';
 
   var loopName = loopRun ? (loopRun.loop_name || 'loop') : null;
@@ -44,6 +47,11 @@ export default function CenterPanel() {
         <PMChatView />
       </div>
 
+      {/* Standalone Chat - stays mounted, hidden when not active */}
+      <div style={{ display: isStandalone ? 'flex' : 'none', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+        <StandaloneChatView />
+      </div>
+
       {/* Normal agent view - only for agents view */}
       {isAgents && (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
@@ -65,6 +73,7 @@ export default function CenterPanel() {
       {leftView === 'docs' && <DocsDetailPanel />}
       {leftView === 'plan' && <PlanDetailPanel />}
       {leftView === 'logs' && <LogDetailPanel />}
+      {leftView === 'config' && <ConfigDetailPanel />}
     </div>
   );
 }

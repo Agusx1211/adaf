@@ -46,15 +46,24 @@ type PushoverConfig struct {
 	AppToken string `json:"app_token,omitempty"` // Pushover application API token
 }
 
+// StandaloneProfile is a named bundle of profile + instructions + delegation for standalone mode.
+type StandaloneProfile struct {
+	Name         string            `json:"name"`
+	Profile      string            `json:"profile"` // references a Profile.Name
+	Instructions string            `json:"instructions,omitempty"`
+	Delegation   *DelegationConfig `json:"delegation,omitempty"`
+}
+
 // GlobalConfig holds user-level preferences stored in ~/.adaf/config.json.
 type GlobalConfig struct {
-	Agents      map[string]GlobalAgentConfig `json:"agents,omitempty"`
-	Profiles    []Profile                    `json:"profiles,omitempty"`
-	Loops       []LoopDef                    `json:"loops,omitempty"`
-	Pushover    PushoverConfig               `json:"pushover,omitempty"`
-	PromptRules []PromptRule                 `json:"prompt_rules,omitempty"`
-	Roles       []RoleDefinition             `json:"roles,omitempty"`
-	DefaultRole string                       `json:"default_role,omitempty"`
+	Agents             map[string]GlobalAgentConfig `json:"agents,omitempty"`
+	Profiles           []Profile                    `json:"profiles,omitempty"`
+	Loops              []LoopDef                    `json:"loops,omitempty"`
+	StandaloneProfiles []StandaloneProfile          `json:"standalone_profiles,omitempty"`
+	Pushover           PushoverConfig               `json:"pushover,omitempty"`
+	PromptRules        []PromptRule                 `json:"prompt_rules,omitempty"`
+	Roles              []RoleDefinition             `json:"roles,omitempty"`
+	DefaultRole        string                       `json:"default_role,omitempty"`
 }
 
 // GlobalAgentConfig holds per-agent overrides at the global (user) level.
@@ -178,6 +187,38 @@ func (c *GlobalConfig) FindLoop(name string) *LoopDef {
 	for i := range c.Loops {
 		if strings.EqualFold(c.Loops[i].Name, name) {
 			return &c.Loops[i]
+		}
+	}
+	return nil
+}
+
+// AddStandaloneProfile appends a standalone profile. Returns an error if the name already exists.
+func (c *GlobalConfig) AddStandaloneProfile(sp StandaloneProfile) error {
+	for _, existing := range c.StandaloneProfiles {
+		if strings.EqualFold(existing.Name, sp.Name) {
+			return errors.New("standalone profile already exists: " + sp.Name)
+		}
+	}
+	c.StandaloneProfiles = append(c.StandaloneProfiles, sp)
+	return nil
+}
+
+// RemoveStandaloneProfile removes a standalone profile by name (case-insensitive).
+func (c *GlobalConfig) RemoveStandaloneProfile(name string) {
+	out := c.StandaloneProfiles[:0]
+	for _, sp := range c.StandaloneProfiles {
+		if !strings.EqualFold(sp.Name, name) {
+			out = append(out, sp)
+		}
+	}
+	c.StandaloneProfiles = out
+}
+
+// FindStandaloneProfile returns a pointer to a standalone profile by name, or nil if not found.
+func (c *GlobalConfig) FindStandaloneProfile(name string) *StandaloneProfile {
+	for i := range c.StandaloneProfiles {
+		if strings.EqualFold(c.StandaloneProfiles[i].Name, name) {
+			return &c.StandaloneProfiles[i]
 		}
 	}
 	return nil

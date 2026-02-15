@@ -4,10 +4,21 @@ import { normalizeStatus, formatNumber } from '../../utils/format.js';
 import { STATUS_RUNNING } from '../../utils/colors.js';
 import StatusDot from '../common/StatusDot.jsx';
 
+var NAV_ITEMS = [
+  { id: 'agents', label: 'Agents' },
+  { id: 'standalone', label: 'Standalone' },
+  { id: 'pm', label: 'PM' },
+  { id: 'issues', label: 'Issues' },
+  { id: 'docs', label: 'Docs' },
+  { id: 'plan', label: 'Plan' },
+  { id: 'logs', label: 'Logs' },
+  { id: 'config', label: 'Config' },
+];
+
 export default function TopBar() {
   var state = useAppState();
   var dispatch = useDispatch();
-  var { sessions, spawns, projects, currentProjectID, wsConnected, termWSConnected, usage, loopRun } = state;
+  var { sessions, spawns, projects, currentProjectID, wsConnected, termWSConnected, usage, loopRun, leftView } = state;
 
   var counts = useMemo(function () {
     var running = 0;
@@ -36,13 +47,19 @@ export default function TopBar() {
     try { localStorage.setItem('adaf_project_id', nextID); } catch (_) {}
   }
 
+  function setView(view) {
+    dispatch({ type: 'SET_LEFT_VIEW', payload: view });
+  }
+
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      display: 'flex', alignItems: 'center',
       padding: '0 16px', height: 42, background: 'var(--bg-1)',
       borderBottom: '1px solid var(--border)', flexShrink: 0,
+      gap: 12,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      {/* Brand + Project */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
         <span style={{
           fontFamily: "'JetBrains Mono', monospace", fontWeight: 800, fontSize: 15,
           background: 'linear-gradient(135deg, var(--accent), #FFD700)',
@@ -73,15 +90,39 @@ export default function TopBar() {
         )}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        {/* Usage stats */}
+      {/* Navigation */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 2,
+        flex: 1, justifyContent: 'center',
+      }}>
+        {NAV_ITEMS.map(function (item) {
+          var active = item.id === leftView;
+          return (
+            <button
+              key={item.id}
+              onClick={function () { setView(item.id); }}
+              style={{
+                padding: '4px 10px', border: 'none',
+                background: active ? 'var(--accent)15' : 'transparent',
+                color: active ? 'var(--accent)' : 'var(--text-3)',
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+                fontWeight: active ? 600 : 400,
+                cursor: 'pointer', borderRadius: 4,
+                transition: 'all 0.15s ease',
+              }}
+            >{item.label}</button>
+          );
+        })}
+      </div>
+
+      {/* Right stats */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0 }}>
         <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'flex', gap: 8 }}>
           <span>in={formatNumber(u.input_tokens || 0)}</span>
           <span>out={formatNumber(u.output_tokens || 0)}</span>
           <span style={{ color: 'var(--green)' }}>${Number(u.cost_usd || 0).toFixed(4)}</span>
         </span>
 
-        {/* Live indicators */}
         {counts.running > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <StatusDot status="running" size={6} />
@@ -94,7 +135,6 @@ export default function TopBar() {
           {counts.total} agents
         </span>
 
-        {/* Loop indicator */}
         {loopRun && normalizeStatus(loopRun.status) === 'running' && (
           <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--purple)', display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ animation: 'spin 2s linear infinite', display: 'inline-block' }}>{'\u21BB'}</span>
@@ -102,7 +142,6 @@ export default function TopBar() {
           </span>
         )}
 
-        {/* WS status */}
         <span style={{
           display: 'flex', alignItems: 'center', gap: 4, padding: '2px 8px',
           background: wsOnline ? 'rgba(74,230,138,0.1)' : 'var(--bg-3)',
@@ -117,10 +156,6 @@ export default function TopBar() {
           <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: wsOnline ? 'var(--green)' : 'var(--text-3)' }}>
             {wsOnline ? 'live' : 'offline'}
           </span>
-        </span>
-
-        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>
-          {new Date().toLocaleTimeString('en-US', { hour12: false })}
         </span>
       </div>
     </div>

@@ -26,6 +26,8 @@ var communicationSidebarStyle = {
 
 export default function RightSidebar() {
   var state = useAppState();
+  if (state.leftView === 'standalone') return null;
+  if (state.leftView === 'config') return null;
   if (state.leftView === 'issues') {
     return <div style={detailSidebarStyle}><IssueDetailPanel /></div>;
   }

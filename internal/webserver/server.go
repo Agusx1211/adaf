@@ -227,6 +227,10 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/config/rules", srv.handleListRules)
 	mux.HandleFunc("POST /api/config/rules", srv.handleCreateRule)
 	mux.HandleFunc("DELETE /api/config/rules/{id}", srv.handleDeleteRule)
+	mux.HandleFunc("GET /api/config/standalone-profiles", srv.handleListStandaloneProfiles)
+	mux.HandleFunc("POST /api/config/standalone-profiles", srv.handleCreateStandaloneProfile)
+	mux.HandleFunc("PUT /api/config/standalone-profiles/{name}", srv.handleUpdateStandaloneProfile)
+	mux.HandleFunc("DELETE /api/config/standalone-profiles/{name}", srv.handleDeleteStandaloneProfile)
 	mux.HandleFunc("GET /api/config/pushover", srv.handleGetPushover)
 	mux.HandleFunc("PUT /api/config/pushover", srv.handleUpdatePushover)
 
@@ -312,6 +316,12 @@ func (srv *Server) registerProjectRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("POST "+prefix+"/pm/chat", srv.projectHandler(handleSendPMChatMessageP))
 	mux.HandleFunc("POST "+prefix+"/pm/chat/response", srv.projectHandler(handleSavePMChatResponseP))
 	mux.HandleFunc("DELETE "+prefix+"/pm/chat", srv.projectHandler(handleClearPMChatP))
+
+	// Standalone Chat
+	mux.HandleFunc("GET "+prefix+"/standalone-chat/{profile}", srv.projectHandler(handleGetStandaloneChatP))
+	mux.HandleFunc("POST "+prefix+"/standalone-chat/{profile}", srv.projectHandler(handleSendStandaloneChatMessageP))
+	mux.HandleFunc("POST "+prefix+"/standalone-chat/{profile}/response", srv.projectHandler(handleSaveStandaloneChatResponseP))
+	mux.HandleFunc("DELETE "+prefix+"/standalone-chat/{profile}", srv.projectHandler(handleClearStandaloneChatP))
 
 	// Stats
 	mux.HandleFunc("GET "+prefix+"/stats/loops", srv.projectHandler(handleLoopStatsP))
