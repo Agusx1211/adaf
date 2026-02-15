@@ -85,15 +85,6 @@ func ReadOnlyPrompt() string {
 	return "# READ-ONLY MODE\n\nYou are in READ-ONLY mode. Do NOT create, modify, or delete any files. Only read and analyze.\n\nDo NOT write reports into repository files (for example `*.md`, `*.txt`, or TODO files). Return your report in your final assistant message.\n"
 }
 
-// parentCommunicationSection is included only when running as a spawned sub-agent.
-func parentCommunicationSection() string {
-	return "## Parent Communication\n\n" +
-		"You are running as a sub-agent. Use these commands to communicate with your parent session:\n\n" +
-		"- `adaf parent-ask \"question\"` — Ask your parent a question (blocks until answered)\n" +
-		"- `adaf parent-notify \"status update\"` — Send a non-blocking notification to parent\n" +
-		"- `adaf spawn-read-messages` — Read messages from parent\n\n"
-}
-
 // delegationSection builds the delegation/spawning prompt section from a DelegationConfig.
 func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalConfig, runningSpawns []store.SpawnRecord) string {
 	if deleg == nil || len(deleg.Profiles) == 0 {
