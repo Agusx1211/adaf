@@ -73,22 +73,22 @@ type docWriteRequest struct {
 }
 
 type turnWriteRequest struct {
-	Objective      string `json:"objective"`
-	WhatWasBuilt   string `json:"what_was_built"`
-	KeyDecisions   string `json:"key_decisions"`
-	Challenges     string `json:"challenges"`
-	CurrentState   string `json:"current_state"`
-	KnownIssues    string `json:"known_issues"`
-	NextSteps      string `json:"next_steps"`
-	BuildState     string `json:"build_state"`
-	DurationSecs   int    `json:"duration_secs"`
-	CommitHash     string `json:"commit_hash"`
-	AgentModel     string `json:"agent_model"`
-	ProfileName    string `json:"profile_name"`
-	PlanID         string `json:"plan_id"`
-	Agent          string `json:"agent"`
-	LoopRunHexID   string `json:"loop_run_hex_id"`
-	StepHexID      string `json:"step_hex_id"`
+	Objective    string `json:"objective"`
+	WhatWasBuilt string `json:"what_was_built"`
+	KeyDecisions string `json:"key_decisions"`
+	Challenges   string `json:"challenges"`
+	CurrentState string `json:"current_state"`
+	KnownIssues  string `json:"known_issues"`
+	NextSteps    string `json:"next_steps"`
+	BuildState   string `json:"build_state"`
+	DurationSecs int    `json:"duration_secs"`
+	CommitHash   string `json:"commit_hash"`
+	AgentModel   string `json:"agent_model"`
+	ProfileName  string `json:"profile_name"`
+	PlanID       string `json:"plan_id"`
+	Agent        string `json:"agent"`
+	LoopRunHexID string `json:"loop_run_hex_id"`
+	StepHexID    string `json:"step_hex_id"`
 }
 
 func (srv *Server) handleCreateIssue(w http.ResponseWriter, r *http.Request) {

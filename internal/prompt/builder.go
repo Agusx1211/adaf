@@ -11,6 +11,36 @@ import (
 
 const maxRecentTurns = 5
 
+func buildSubAgentPrompt(opts BuildOpts) string {
+	role := config.EffectiveRole(opts.Role, opts.GlobalCfg)
+	if opts.Profile != nil && opts.Profile.Description != "" {
+		role = opts.Profile.Description
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are a sub-agent working as a %s. If you need to communicate with your parent agent use `adaf parent-ask \"question\"`.\n\n", role)
+
+	if opts.ReadOnly {
+		b.WriteString("You are in READ-ONLY mode. Do NOT create, modify, or delete any files. Only read and analyze.\n\n")
+	}
+
+	if len(opts.IssueIDs) > 0 && opts.Store != nil {
+		b.WriteString("## Assigned Issues\n\n")
+		for _, issID := range opts.IssueIDs {
+			iss, err := opts.Store.GetIssue(issID)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(&b, "- #%d [%s] %s: %s\n", iss.ID, iss.Priority, iss.Title, iss.Description)
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString(opts.Task)
+
+	return b.String()
+}
+
 // LoopPromptContext provides loop-specific context for prompt generation.
 type LoopPromptContext struct {
 	LoopName     string
@@ -90,6 +120,10 @@ type WaitResultInfo struct {
 
 // Build constructs a prompt from project context and role configuration.
 func Build(opts BuildOpts) (string, error) {
+	if opts.ParentTurnID > 0 {
+		return buildSubAgentPrompt(opts), nil
+	}
+
 	var b strings.Builder
 
 	s := opts.Store

@@ -312,6 +312,10 @@ func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error)
 		return 0, fmt.Errorf("parent profile %q not found", req.ParentProfile)
 	}
 
+	if strings.TrimSpace(req.Task) == "" {
+		return 0, fmt.Errorf("task is required for spawning a sub-agent")
+	}
+
 	deleg := req.Delegation
 	if deleg == nil {
 		return 0, fmt.Errorf("spawning requires explicit delegation rules in the current loop/agent context")
