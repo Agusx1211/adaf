@@ -14,7 +14,7 @@ import Modal from './components/common/Modal.jsx';
 export default function App() {
   var state = useAppState();
   var dispatch = useDispatch();
-  var { currentProjectID, leftView, selectedScope, sessions, loopRun, authRequired } = state;
+  var { currentProjectID, leftView, selectedScope, sessions, spawns, loopRun, authRequired, projects } = state;
 
   // Ref to suppress hash→state→hash circular updates
   var suppressHashUpdate = useRef(false);
@@ -155,6 +155,48 @@ export default function App() {
     var defaultScope = running ? 'session-' + running.id : 'session-' + sessions[0].id;
     dispatch({ type: 'SET_SELECTED_SCOPE', payload: defaultScope });
   }, [sessions, selectedScope, dispatch]);
+
+  var projectMetaName = state.projectMeta && state.projectMeta.name ? state.projectMeta.name : '';
+  var titleProjectName = useMemo(function () {
+    if (currentProjectID) {
+      var selected = projects.find(function (p) { return p && String(p.id || '') === currentProjectID; });
+      if (selected && selected.name) return selected.name;
+    }
+    if (projectMetaName) return projectMetaName;
+    if (!currentProjectID && projects.length) {
+      var defaultProject = projects.find(function (p) { return p && p.is_default; }) || projects[0];
+      if (defaultProject && defaultProject.name) return defaultProject.name;
+    }
+    return 'project';
+  }, [currentProjectID, projects, projectMetaName]);
+
+  var runningAgents = useMemo(function () {
+    var runningCount = 0;
+    sessions.forEach(function (s) {
+      if (STATUS_RUNNING[normalizeStatus(s.status)]) runningCount++;
+    });
+    spawns.forEach(function (s) {
+      if (STATUS_RUNNING[normalizeStatus(s.status)]) runningCount++;
+    });
+    return runningCount;
+  }, [sessions, spawns]);
+
+  useEffect(function () {
+    var baseTitle = titleProjectName + ' - ' + runningAgents + ' running';
+    if (runningAgents <= 0) {
+      document.title = baseTitle;
+      return;
+    }
+
+    var frames = ['|', '/', '-', '\\'];
+    var frameIndex = 0;
+    document.title = baseTitle + ' ' + frames[frameIndex];
+    var intervalID = setInterval(function () {
+      frameIndex = (frameIndex + 1) % frames.length;
+      document.title = baseTitle + ' ' + frames[frameIndex];
+    }, 500);
+    return function () { clearInterval(intervalID); };
+  }, [titleProjectName, runningAgents]);
 
   // Live clock for elapsed times
   var [, setTick] = useState(0);

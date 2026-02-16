@@ -5,6 +5,7 @@ import { STATUS_RUNNING, statusColor } from '../../utils/colors.js';
 import StatusDot from '../common/StatusDot.jsx';
 import { StopSessionButton, SessionMessageBar } from '../session/SessionControls.jsx';
 import { useUsageLimits } from '../../api/hooks.js';
+import { persistProjectSelection } from '../../utils/projectLink.js';
 import ProjectBrowser from './ProjectBrowser.jsx';
 
 var NAV_ITEMS = [
@@ -81,7 +82,7 @@ export default function TopBar() {
     var nextID = e.target.value || '';
     dispatch({ type: 'SET_PROJECT_ID', payload: nextID });
     dispatch({ type: 'RESET_PROJECT_STATE' });
-    try { localStorage.setItem('adaf_project_id', nextID); } catch (_) {}
+    persistProjectSelection(nextID);
   }
 
   function setView(view) {
