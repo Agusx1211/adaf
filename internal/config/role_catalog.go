@@ -108,7 +108,7 @@ var defaultPromptRules = []PromptRule{
 	{
 		ID: RuleManagerAnti,
 		Body: "## Anti-Patterns (avoid these)\n\n" +
-			"- Spawning one agent at a time with `--wait` — this burns tokens while you idle. Use `wait-for-spawns`\n" +
+			"- Spawning one agent at a time sequentially — spawn all independent tasks at once, then `wait-for-spawns`\n" +
 			"- Doing 3 sequential spawn-reject-respawn cycles for the same issue — give better instructions upfront, or use `spawn-message` mid-flight\n" +
 			"- Writing or editing any file yourself\n\n" +
 			"Use the Delegation section below for available profiles and commands.",

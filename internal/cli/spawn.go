@@ -27,11 +27,9 @@ The child agent runs in its own branch and can be monitored, messaged,
 and eventually merged or rejected. Use --read-only for analysis tasks
 that don't need a separate worktree.
 
-Must be called from within an adaf agent turn (ADAF_TURN_ID or ADAF_SESSION_ID set).
-
 Examples:
   adaf spawn --profile developer --task "Write unit tests for auth.go"
-  adaf spawn --profile developer --task-file task.md --wait
+  adaf spawn --profile developer --task-file task.md
   adaf spawn --profile lead-dev --task "Review PR #42" --read-only
   adaf spawn-status                       # Check all spawns
   adaf spawn-diff --spawn-id 3            # View changes
@@ -46,7 +44,6 @@ func init() {
 	spawnCmd.Flags().String("task-file", "", "Path to file containing task description (mutually exclusive with --task)")
 	spawnCmd.Flags().IntSlice("issue", nil, "Issue ID(s) to assign to the sub-agent (can be repeated)")
 	spawnCmd.Flags().Bool("read-only", false, "Run sub-agent in read-only mode (no worktree)")
-	spawnCmd.Flags().Bool("wait", false, "Block until the sub-agent completes")
 	rootCmd.AddCommand(spawnCmd)
 }
 
@@ -57,7 +54,6 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	taskFile, _ := cmd.Flags().GetString("task-file")
 	issueIDs, _ := cmd.Flags().GetIntSlice("issue")
 	readOnly, _ := cmd.Flags().GetBool("read-only")
-	wait, _ := cmd.Flags().GetBool("wait")
 	childRole = strings.ToLower(strings.TrimSpace(childRole))
 
 	if profileName == "" {
@@ -107,7 +103,6 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 			Task:          task,
 			IssueIDs:      issueIDs,
 			ReadOnly:      readOnly,
-			Wait:          wait,
 			Delegation:    delegation,
 		})
 		if err != nil {
@@ -125,12 +120,6 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 			roleSuffix = ", role=" + childRole
 		}
 		fmt.Printf("Spawned sub-agent #%d (profile=%s%s)\n", resp.SpawnID, profileName, roleSuffix)
-		if wait {
-			fmt.Printf("Spawn #%d completed: status=%s exit_code=%d\n", resp.SpawnID, resp.Status, resp.ExitCode)
-			if strings.TrimSpace(resp.Result) != "" {
-				fmt.Printf("Result: %s\n", resp.Result)
-			}
-		}
 		return nil
 	}
 
@@ -148,7 +137,6 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		Task:          task,
 		IssueIDs:      issueIDs,
 		ReadOnly:      readOnly,
-		Wait:          wait,
 		Delegation:    delegation,
 	})
 	if err != nil {
@@ -160,13 +148,6 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		roleSuffix = ", role=" + childRole
 	}
 	fmt.Printf("Spawned sub-agent #%d (profile=%s%s)\n", spawnID, profileName, roleSuffix)
-	if wait {
-		result := o.WaitOne(spawnID)
-		fmt.Printf("Spawn #%d completed: status=%s exit_code=%d\n", spawnID, result.Status, result.ExitCode)
-		if result.Result != "" {
-			fmt.Printf("Result: %s\n", result.Result)
-		}
-	}
 	return nil
 }
 

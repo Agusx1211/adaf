@@ -109,12 +109,10 @@ func DefaultSkills() []Skill {
 			Long: "# Delegation\n\n" +
 				"## Spawn Flow\n\n" +
 				"**ALWAYS use this pattern:**\n" +
-				"1. Spawn ALL independent tasks at once (without `--wait`)\n" +
+				"1. Spawn ALL independent tasks at once\n" +
 				"2. Call `adaf wait-for-spawns` immediately after\n" +
 				"3. Stop immediately after that command. Do not run more commands in this turn — the loop will pause this turn and resume you automatically when children complete.\n\n" +
-				"This is critical: `wait-for-spawns` suspends your session with zero token cost. " +
-				"Using `--wait` keeps your session alive and burns tokens while you idle. " +
-				"**Only use `--wait` when you absolutely need a child's output before you can spawn the next task in the same turn** (rare).\n\n" +
+				"This is critical: `wait-for-spawns` suspends your session with zero token cost.\n\n" +
 				"## Communication Style: Downstream Only\n\n" +
 				"Communicate primarily to child sessions. Keep direction concrete and executable.\n\n" +
 				"- `adaf spawn-message --spawn-id N \"guidance\"` — Send async guidance to a child\n" +

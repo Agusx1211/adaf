@@ -97,6 +97,7 @@ var rootCmd = &cobra.Command{
 func init() {
 	rootCmd.CompletionOptions.HiddenDefaultCmd = true
 	rootCmd.PersistentFlags().Bool("debug", false, "Enable verbose debug logging to ~/.adaf/debug/")
+	rootCmd.PersistentFlags().MarkHidden("debug")
 	rootCmd.AddCommand(daemonLifecycleCmd)
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
