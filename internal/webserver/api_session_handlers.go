@@ -363,7 +363,69 @@ func handleLoopRunsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	if runs == nil {
 		runs = []store.LoopRun{}
 	}
+	backfillDaemonSessionIDs(runs)
 	writeJSON(w, http.StatusOK, runs)
+}
+
+// backfillDaemonSessionIDs fills in DaemonSessionID for loop runs created
+// before the field was added, by matching against daemon sessions via
+// loop_name and start timestamp (within 2 seconds).
+func backfillDaemonSessionIDs(runs []store.LoopRun) {
+	// Collect runs that need backfill.
+	needsBackfill := false
+	for i := range runs {
+		if runs[i].DaemonSessionID == 0 {
+			needsBackfill = true
+			break
+		}
+	}
+	if !needsBackfill {
+		return
+	}
+
+	sessions, err := session.ListSessions()
+	if err != nil || len(sessions) == 0 {
+		return
+	}
+
+	// Build a lookup: claimed daemon session IDs (already assigned).
+	claimed := make(map[int]struct{})
+	for _, run := range runs {
+		if run.DaemonSessionID > 0 {
+			claimed[run.DaemonSessionID] = struct{}{}
+		}
+	}
+
+	for i := range runs {
+		if runs[i].DaemonSessionID > 0 {
+			continue
+		}
+		runStart := runs[i].StartedAt
+		runLoop := runs[i].LoopName
+		var bestSession *session.SessionMeta
+		var bestDiff time.Duration
+		for j := range sessions {
+			sess := &sessions[j]
+			if _, ok := claimed[sess.ID]; ok {
+				continue
+			}
+			if sess.LoopName != runLoop {
+				continue
+			}
+			diff := runStart.Sub(sess.StartedAt)
+			if diff < 0 {
+				diff = -diff
+			}
+			if diff <= 2*time.Second && (bestSession == nil || diff < bestDiff) {
+				bestSession = sess
+				bestDiff = diff
+			}
+		}
+		if bestSession != nil {
+			runs[i].DaemonSessionID = bestSession.ID
+			claimed[bestSession.ID] = struct{}{}
+		}
+	}
 }
 
 func (srv *Server) handleLoopRunByID(w http.ResponseWriter, r *http.Request) {
@@ -385,6 +447,12 @@ func handleLoopRunByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) 
 		}
 		writeError(w, http.StatusInternalServerError, "failed to load loop run")
 		return
+	}
+
+	if run.DaemonSessionID == 0 {
+		runs := []store.LoopRun{*run}
+		backfillDaemonSessionIDs(runs)
+		*run = runs[0]
 	}
 
 	writeJSON(w, http.StatusOK, run)

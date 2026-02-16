@@ -99,6 +99,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 		StepLastSeenMsg: make(map[int]int),
 		HexID:           hexid.New(),
 		StepHexIDs:      make(map[string]string),
+		DaemonSessionID: cfg.SessionID,
 	}
 
 	if err := cfg.Store.CreateLoopRun(run); err != nil {

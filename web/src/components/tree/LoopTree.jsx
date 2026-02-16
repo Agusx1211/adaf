@@ -15,10 +15,13 @@ export default function LoopTree() {
       return lr.loop_name !== 'standalone-chat';
     });
 
-    // Build a set of session IDs claimed by each loop run via turn_ids
+    // Build a set of session IDs claimed by each loop run.
+    // Prefer daemon_session_id (maps directly to session.id) over turn_ids (store IDs).
     var sessionToRun = {}; // session.id -> loopRun
     filteredRuns.forEach(function (lr) {
-      if (lr.turn_ids && lr.turn_ids.length) {
+      if (lr.daemon_session_id > 0) {
+        sessionToRun[lr.daemon_session_id] = lr;
+      } else if (lr.turn_ids && lr.turn_ids.length) {
         lr.turn_ids.forEach(function (tid) {
           if (tid > 0) sessionToRun[tid] = lr;
         });
@@ -107,6 +110,17 @@ export default function LoopTree() {
       return bTime - aTime;
     });
 
+    // Build store-turn-ID -> daemon-session-ID mapping so spawns
+    // (which reference store turn IDs) can be keyed by daemon session IDs.
+    var storeTurnToDaemonSession = {};
+    filteredRuns.forEach(function (lr) {
+      if (lr.daemon_session_id > 0 && lr.turn_ids) {
+        lr.turn_ids.forEach(function (tid) {
+          if (tid > 0) storeTurnToDaemonSession[tid] = lr.daemon_session_id;
+        });
+      }
+    });
+
     // Build spawn hierarchy
     var childrenByParent = {};
     var rootsBySession = {};
@@ -115,7 +129,8 @@ export default function LoopTree() {
         if (!childrenByParent[spawn.parent_spawn_id]) childrenByParent[spawn.parent_spawn_id] = [];
         childrenByParent[spawn.parent_spawn_id].push(spawn);
       } else {
-        var sessionKey = spawn.parent_turn_id || 0;
+        var storeTurnID = spawn.parent_turn_id || 0;
+        var sessionKey = storeTurnToDaemonSession[storeTurnID] || storeTurnID;
         if (!rootsBySession[sessionKey]) rootsBySession[sessionKey] = [];
         rootsBySession[sessionKey].push(spawn);
       }

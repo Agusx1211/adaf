@@ -8,9 +8,20 @@ import { StopSessionButton } from '../session/SessionControls.jsx';
 export default function AgentTree({ onSelectScope }) {
   var state = useAppState();
   var dispatch = useDispatch();
-  var { sessions, spawns, selectedScope, expandedNodes } = state;
+  var { sessions, spawns, loopRuns, selectedScope, expandedNodes } = state;
 
   var tree = useMemo(function () {
+    // Build store-turn-ID -> daemon-session-ID mapping so spawns
+    // (which reference store turn IDs) can be keyed by daemon session IDs.
+    var storeTurnToDaemonSession = {};
+    (loopRuns || []).forEach(function (lr) {
+      if (lr.daemon_session_id > 0 && lr.turn_ids) {
+        lr.turn_ids.forEach(function (tid) {
+          if (tid > 0) storeTurnToDaemonSession[tid] = lr.daemon_session_id;
+        });
+      }
+    });
+
     var childrenByParent = {};
     var rootsBySession = {};
 
@@ -19,14 +30,15 @@ export default function AgentTree({ onSelectScope }) {
         if (!childrenByParent[spawn.parent_spawn_id]) childrenByParent[spawn.parent_spawn_id] = [];
         childrenByParent[spawn.parent_spawn_id].push(spawn);
       } else {
-        var sessionKey = spawn.parent_turn_id || 0;
+        var storeTurnID = spawn.parent_turn_id || 0;
+        var sessionKey = storeTurnToDaemonSession[storeTurnID] || storeTurnID;
         if (!rootsBySession[sessionKey]) rootsBySession[sessionKey] = [];
         rootsBySession[sessionKey].push(spawn);
       }
     });
 
     return { childrenByParent, rootsBySession };
-  }, [spawns]);
+  }, [spawns, loopRuns]);
 
   function toggleNode(nodeID) {
     dispatch({ type: 'TOGGLE_NODE', payload: nodeID });

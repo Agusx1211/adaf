@@ -18,6 +18,7 @@ type LoopRun struct {
 	StepLastSeenMsg map[int]int       `json:"step_last_seen_msg"`         // step_index -> last seen msg index
 	PendingHandoffs []HandoffInfo     `json:"pending_handoffs,omitempty"` // spawns handed off to next step
 	StepHexIDs      map[string]string `json:"step_hex_ids,omitempty"`     // "cycle:step" -> hex ID
+	DaemonSessionID int               `json:"daemon_session_id,omitempty"`
 }
 
 // HandoffInfo describes a spawn handed off from a previous loop step.

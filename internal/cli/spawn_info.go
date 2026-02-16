@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -16,8 +15,9 @@ var spawnInfoCmd = &cobra.Command{
 	Short: "Show available profiles, roles, and delegation capacity",
 	Long: `Display delegation info for the current agent context.
 
-Reads ADAF_DELEGATION_JSON to show available profiles, roles, max instances,
-and the maximum parallel spawn limit. Use this to discover what you can spawn.`,
+Reads ADAF_DELEGATION_JSON (or falls back to ADAF_LOOP_RUN_ID + ADAF_LOOP_STEP_INDEX)
+to show available profiles, roles, max instances, and the maximum parallel spawn limit.
+Use this to discover what you can spawn.`,
 	Aliases: []string{"spawn_info", "spawninfo"},
 	RunE:    runSpawnInfo,
 }
@@ -27,16 +27,13 @@ func init() {
 }
 
 func runSpawnInfo(cmd *cobra.Command, args []string) error {
-	raw := strings.TrimSpace(os.Getenv("ADAF_DELEGATION_JSON"))
-	if raw == "" {
-		fmt.Println("No delegation context available (ADAF_DELEGATION_JSON not set).")
+	parentProfile := os.Getenv("ADAF_PROFILE")
+	deleg, err := resolveCurrentDelegation(parentProfile)
+	if err != nil {
+		fmt.Println("No delegation context available.")
+		fmt.Printf("  %v\n", err)
 		fmt.Println("This command is intended to be run from within an adaf agent session with delegation capabilities.")
 		return nil
-	}
-
-	var deleg config.DelegationConfig
-	if err := json.Unmarshal([]byte(raw), &deleg); err != nil {
-		return fmt.Errorf("invalid ADAF_DELEGATION_JSON: %w", err)
 	}
 
 	globalCfg, err := config.Load()

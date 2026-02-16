@@ -362,6 +362,7 @@ export function normalizeLoopRun(run) {
     step_index: Number(run && run.step_index) || 0,
     started_at: run && run.started_at ? run.started_at : '',
     stopped_at: run && run.stopped_at ? run.stopped_at : '',
+    daemon_session_id: Number(run && run.daemon_session_id) || 0,
     turn_ids: arrayOrEmpty(run && (run.turn_ids || run.session_ids)).map(function (id) { return Number(id) || 0; }),
     steps: arrayOrEmpty(run && run.steps).map(function (step) {
       return { profile: step && step.profile ? String(step.profile) : '', role: step && step.role ? String(step.role) : '' };
