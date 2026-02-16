@@ -12,6 +12,7 @@ export default function ChatMessageList({
   emptyMessage,
   autoScroll,
   showSourceLabels,
+  scrollContextKey,
 }) {
   var evts = streamEvents || [];
   var msgs = messages || [];
@@ -20,176 +21,240 @@ export default function ChatMessageList({
   var status = streamStatus || (evts.length > 0 ? 'responding' : 'thinking');
 
   var [inspectedMessage, setInspectedMessage] = useState(null);
+  var [isPinnedBottom, setIsPinnedBottom] = useState(true);
   var listRef = useRef(null);
+  var pinnedBottomRef = useRef(true);
 
   useEffect(function () { injectEventBlockStyles(); }, []);
 
   useEffect(function () {
-    if (shouldAutoScroll && listRef.current) {
+    pinnedBottomRef.current = true;
+    setIsPinnedBottom(true);
+    if (listRef.current) {
       listRef.current.scrollTop = listRef.current.scrollHeight;
     }
-  }, [msgs, evts, shouldAutoScroll]);
+  }, [scrollContextKey]);
+
+  function nearBottom(el) {
+    if (!el) return true;
+    var distance = el.scrollHeight - (el.scrollTop + el.clientHeight);
+    return distance <= 24;
+  }
+
+  function updatePinnedBottom(next) {
+    if (pinnedBottomRef.current === next) return;
+    pinnedBottomRef.current = next;
+    setIsPinnedBottom(next);
+  }
+
+  function handleScroll() {
+    updatePinnedBottom(nearBottom(listRef.current));
+  }
+
+  useEffect(function () {
+    if (shouldAutoScroll && listRef.current && pinnedBottomRef.current) {
+      listRef.current.scrollTop = listRef.current.scrollHeight;
+    }
+  }, [msgs, evts, shouldAutoScroll, isStreaming]);
+
+  var wrapperStyle = { flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' };
+  var listStyle = { flex: 1, minHeight: 0, overflow: 'auto', padding: '6px 12px' };
+  var scrollHintVisible = shouldAutoScroll && !isPinnedBottom;
+
+  var scrollHint = (
+    <button
+      type="button"
+      onClick={function () {
+        if (!listRef.current) return;
+        listRef.current.scrollTop = listRef.current.scrollHeight;
+        updatePinnedBottom(true);
+      }}
+      style={{
+        position: 'absolute', right: 12, bottom: 10,
+        fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+        padding: '4px 8px', borderRadius: 4, border: '1px solid var(--accent)40',
+        background: 'var(--bg-2)', color: 'var(--accent)', cursor: 'pointer',
+        zIndex: 3,
+      }}
+    >
+      Jump to latest
+    </button>
+  );
 
   if (loading) {
     return (
-      <div ref={listRef} style={{ flex: 1, overflow: 'auto', padding: '6px 12px' }}>
-        <div style={{ textAlign: 'center', color: 'var(--text-3)', padding: 40 }}>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>Loading...</div>
+      <div style={wrapperStyle}>
+        <div ref={listRef} onScroll={handleScroll} style={listStyle}>
+          <div style={{ textAlign: 'center', color: 'var(--text-3)', padding: 40 }}>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>Loading...</div>
+          </div>
         </div>
+        {scrollHintVisible && scrollHint}
       </div>
     );
   }
 
   if (msgs.length === 0 && !isStreaming) {
     return (
-      <div ref={listRef} style={{ flex: 1, overflow: 'auto', padding: '6px 12px' }}>
-        <div style={{ textAlign: 'center', color: 'var(--text-3)', padding: 40 }}>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: 'var(--text-2)' }}>
-            {empty}
+      <div style={wrapperStyle}>
+        <div ref={listRef} onScroll={handleScroll} style={listStyle}>
+          <div style={{ textAlign: 'center', color: 'var(--text-3)', padding: 40 }}>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: 'var(--text-2)' }}>
+              {empty}
+            </div>
           </div>
         </div>
+        {scrollHintVisible && scrollHint}
       </div>
     );
   }
 
   return (
-    <div ref={listRef} style={{ flex: 1, overflow: 'auto', padding: '6px 12px' }}>
-      <div>
-        {msgs.map(function (msg) {
-          var isUser = msg.role === 'user';
-          var msgEvents = msg._events || msg.events;
-          var hasInspectData = !isUser && (msg._prompt || (msgEvents && msgEvents.length > 0));
-          return (
-            <div key={msg.id} style={{ marginBottom: 4 }}>
+    <div style={wrapperStyle}>
+      <div ref={listRef} onScroll={handleScroll} style={listStyle}>
+        <div>
+          {msgs.map(function (msg) {
+            var isUser = msg.role === 'user';
+            var msgEvents = Array.isArray(msg._events) ? msg._events : (Array.isArray(msg.events) ? msg.events : []);
+            var hasPromptEvent = msgEvents.some(function (e) { return e && e.type === 'initial_prompt'; });
+            var renderEvents = msgEvents;
+            if (!isUser && msg._prompt && msg._prompt.text && !hasPromptEvent) {
+              renderEvents = [{ type: 'initial_prompt', content: msg._prompt.text }].concat(msgEvents);
+            }
+            var hasInspectData = !isUser && (msg._prompt || renderEvents.length > 0);
+            return (
+              <div key={msg.id} style={{ marginBottom: 4 }}>
+                <div style={{
+                  padding: '6px 10px', borderRadius: 2,
+                  background: isUser ? 'var(--bg-2)' : 'transparent',
+                  borderLeft: isUser ? '2px solid var(--accent)' : '2px solid var(--green)40',
+                }}>
+                  <div style={{
+                    fontSize: 9, fontWeight: 600,
+                    color: isUser ? 'var(--accent)' : 'var(--green)',
+                    marginBottom: 3, display: 'flex', alignItems: 'center', gap: 6,
+                    textTransform: 'uppercase', letterSpacing: '0.05em',
+                    fontFamily: "'JetBrains Mono', monospace",
+                  }}>
+                    <span>{isUser ? 'You' : 'Agent'}</span>
+                    <span style={{ fontWeight: 400, color: 'var(--text-3)', textTransform: 'none', letterSpacing: 'normal', fontSize: 9 }}>
+                      {timeAgo(msg.created_at)}
+                    </span>
+                    {hasInspectData && (
+                      <button
+                        onClick={function (e) { e.stopPropagation(); setInspectedMessage(msg); }}
+                        style={{
+                          marginLeft: 'auto',
+                          background: 'none',
+                          border: '1px solid var(--border)',
+                          borderRadius: 3,
+                          padding: '2px 6px',
+                          fontSize: 9,
+                          color: 'var(--text-3)',
+                          cursor: 'pointer',
+                          fontFamily: "'JetBrains Mono', monospace",
+                          textTransform: 'none',
+                          letterSpacing: 'normal',
+                        }}
+                        title="View prompt and events"
+                      >
+                        inspect
+                      </button>
+                    )}
+                  </div>
+                  {isUser ? (
+                    <MarkdownContent text={msg.content} style={{ fontSize: 13, color: 'var(--text-0)', lineHeight: 1.5 }} />
+                  ) : renderEvents.length > 0 ? (
+                    showSourceLabels ? renderLabeledEvents(renderEvents) : <EventBlockList events={renderEvents} />
+                  ) : (
+                    <MarkdownContent text={msg.content} />
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Streaming response bubble */}
+          {isStreaming && (
+            <div style={{ marginBottom: 4 }}>
               <div style={{
                 padding: '6px 10px', borderRadius: 2,
-                background: isUser ? 'var(--bg-2)' : 'transparent',
-                borderLeft: isUser ? '2px solid var(--accent)' : '2px solid var(--green)40',
+                background: 'transparent',
+                borderLeft: '2px solid var(--green)',
               }}>
                 <div style={{
-                  fontSize: 9, fontWeight: 600,
-                  color: isUser ? 'var(--accent)' : 'var(--green)',
+                  fontSize: 9, fontWeight: 600, color: 'var(--green)',
                   marginBottom: 3, display: 'flex', alignItems: 'center', gap: 6,
                   textTransform: 'uppercase', letterSpacing: '0.05em',
                   fontFamily: "'JetBrains Mono', monospace",
                 }}>
-                  <span>{isUser ? 'You' : 'Agent'}</span>
-                  <span style={{ fontWeight: 400, color: 'var(--text-3)', textTransform: 'none', letterSpacing: 'normal', fontSize: 9 }}>
-                    {timeAgo(msg.created_at)}
+                  <span>Agent</span>
+                  <span style={{
+                    fontWeight: 400, color: 'var(--accent)',
+                    textTransform: 'none', letterSpacing: 'normal',
+                    animation: 'pulse 1.5s ease-in-out infinite',
+                  }}>
+                    {status === 'responding' ? 'responding\u2026' : 'thinking\u2026'}
                   </span>
-                  {hasInspectData && (
-                    <button
-                      onClick={function (e) { e.stopPropagation(); setInspectedMessage(msg); }}
-                      style={{
-                        marginLeft: 'auto',
-                        background: 'none',
-                        border: '1px solid var(--border)',
-                        borderRadius: 3,
-                        padding: '2px 6px',
-                        fontSize: 9,
-                        color: 'var(--text-3)',
-                        cursor: 'pointer',
-                        fontFamily: "'JetBrains Mono', monospace",
-                        textTransform: 'none',
-                        letterSpacing: 'normal',
-                      }}
-                      title="View prompt and events"
-                    >
-                      inspect
-                    </button>
-                  )}
                 </div>
-                {isUser ? (
-                  <MarkdownContent text={msg.content} style={{ fontSize: 13, color: 'var(--text-0)', lineHeight: 1.5 }} />
-                ) : msgEvents && msgEvents.length > 0 ? (
-                  showSourceLabels ? renderLabeledEvents(msgEvents) : <EventBlockList events={msgEvents} />
+                {evts.length > 0 ? (
+                  showSourceLabels ? renderLabeledEvents(evts) : <EventBlockList events={evts} />
                 ) : (
-                  <MarkdownContent text={msg.content} />
+                  <div style={{
+                    fontSize: 11, color: 'var(--text-3)',
+                    fontFamily: "'JetBrains Mono', monospace",
+                  }}>
+                    Waiting for response...
+                  </div>
                 )}
               </div>
             </div>
-          );
-        })}
+          )}
+        </div>
 
-        {/* Streaming response bubble */}
-        {isStreaming && (
-          <div style={{ marginBottom: 4 }}>
-            <div style={{
-              padding: '6px 10px', borderRadius: 2,
-              background: 'transparent',
-              borderLeft: '2px solid var(--green)',
-            }}>
-              <div style={{
-                fontSize: 9, fontWeight: 600, color: 'var(--green)',
-                marginBottom: 3, display: 'flex', alignItems: 'center', gap: 6,
-                textTransform: 'uppercase', letterSpacing: '0.05em',
-                fontFamily: "'JetBrains Mono', monospace",
-              }}>
-                <span>Agent</span>
-                <span style={{
-                  fontWeight: 400, color: 'var(--accent)',
-                  textTransform: 'none', letterSpacing: 'normal',
-                  animation: 'pulse 1.5s ease-in-out infinite',
-                }}>
-                  {status === 'responding' ? 'responding\u2026' : 'thinking\u2026'}
-                </span>
-              </div>
-              {evts.length > 0 ? (
-                showSourceLabels ? renderLabeledEvents(evts) : <EventBlockList events={evts} />
-              ) : (
-                <div style={{
-                  fontSize: 11, color: 'var(--text-3)',
-                  fontFamily: "'JetBrains Mono', monospace",
-                }}>
-                  Waiting for response...
+        {/* Prompt Inspector Modal */}
+        {inspectedMessage && (
+          <Modal title="Prompt Inspector" maxWidth={900} onClose={function () { setInspectedMessage(null); }}>
+            <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
+              {inspectedMessage._prompt && inspectedMessage._prompt.text ? (
+                <div>
+                  <div style={{
+                    fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
+                    color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em',
+                    marginBottom: 8,
+                  }}>
+                    System Prompt
+                    {inspectedMessage._prompt.truncated && (
+                      <span style={{ color: 'var(--text-3)', fontWeight: 400, textTransform: 'none', marginLeft: 8 }}>(truncated)</span>
+                    )}
+                  </div>
+                  <pre style={{
+                    fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+                    color: 'var(--text-1)', background: 'var(--bg-2)',
+                    padding: 12, borderRadius: 6, border: '1px solid var(--border)',
+                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                    lineHeight: 1.5, maxHeight: 500, overflow: 'auto',
+                    margin: 0,
+                  }}>{inspectedMessage._prompt.text}</pre>
+                </div>
+              ) : null}
+              {((inspectedMessage._events && inspectedMessage._events.length > 0) || (inspectedMessage.events && inspectedMessage.events.length > 0)) && (
+                <div style={{ marginTop: inspectedMessage._prompt ? 16 : 0 }}>
+                  <div style={{
+                    fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
+                    color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '0.05em',
+                    marginBottom: 8,
+                  }}>
+                    Structured Events ({(inspectedMessage._events || inspectedMessage.events).length})
+                  </div>
+                  <EventBlockList events={inspectedMessage._events || inspectedMessage.events} />
                 </div>
               )}
             </div>
-          </div>
+          </Modal>
         )}
       </div>
-
-      {/* Prompt Inspector Modal */}
-      {inspectedMessage && (
-        <Modal title="Prompt Inspector" maxWidth={900} onClose={function () { setInspectedMessage(null); }}>
-          <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
-            {inspectedMessage._prompt && inspectedMessage._prompt.text ? (
-              <div>
-                <div style={{
-                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
-                  color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em',
-                  marginBottom: 8,
-                }}>
-                  System Prompt
-                  {inspectedMessage._prompt.truncated && (
-                    <span style={{ color: 'var(--text-3)', fontWeight: 400, textTransform: 'none', marginLeft: 8 }}>(truncated)</span>
-                  )}
-                </div>
-                <pre style={{
-                  fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
-                  color: 'var(--text-1)', background: 'var(--bg-2)',
-                  padding: 12, borderRadius: 6, border: '1px solid var(--border)',
-                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                  lineHeight: 1.5, maxHeight: 500, overflow: 'auto',
-                  margin: 0,
-                }}>{inspectedMessage._prompt.text}</pre>
-              </div>
-            ) : null}
-            {((inspectedMessage._events && inspectedMessage._events.length > 0) || (inspectedMessage.events && inspectedMessage.events.length > 0)) && (
-              <div style={{ marginTop: inspectedMessage._prompt ? 16 : 0 }}>
-                <div style={{
-                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
-                  color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '0.05em',
-                  marginBottom: 8,
-                }}>
-                  Structured Events ({(inspectedMessage._events || inspectedMessage.events).length})
-                </div>
-                <EventBlockList events={inspectedMessage._events || inspectedMessage.events} />
-              </div>
-            )}
-          </div>
-        </Modal>
-      )}
+      {scrollHintVisible && scrollHint}
     </div>
   );
 }

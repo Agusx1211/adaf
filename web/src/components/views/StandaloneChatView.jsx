@@ -6,6 +6,7 @@ import { useToast } from '../common/Toast.jsx';
 import { injectEventBlockStyles, cleanResponse } from '../common/EventBlocks.jsx';
 import ChatMessageList from '../common/ChatMessageList.jsx';
 import { agentInfo, statusColor, STATUS_RUNNING } from '../../utils/colors.js';
+import { normalizeStatus } from '../../utils/format.js';
 
 export default function StandaloneChatView() {
   var state = useAppState();
@@ -29,7 +30,7 @@ export default function StandaloneChatView() {
 
   // Refs for per-chat session management
   var currentChatIDRef = useRef(chatID);
-  var chatSessionsRef = useRef({}); // { [chatID]: { sessionID, events, spawnEvents, allEvents, spawns, ws, sending, finalized, promptData, base, parentProfile } }
+  var chatSessionsRef = useRef({}); // { [chatID]: { sessionID, events, spawnEvents, allEvents, spawns, ws, sending, finalized, promptData, promptsByScope, base, parentProfile } }
   var dispatchRef = useRef(dispatch);
   dispatchRef.current = dispatch;
   var focusScopeRef = useRef('parent');
@@ -203,11 +204,28 @@ export default function StandaloneChatView() {
     }
   }
 
-  function finalizeChat(forChatID) {
+  function isSpawnStillActiveStatus(status) {
+    var normalized = normalizeStatus(status);
+    return !!STATUS_RUNNING[normalized] || normalized === 'awaiting_input';
+  }
+
+  function markSpawnsAsStopped(spawnList) {
+    var list = Array.isArray(spawnList) ? spawnList : [];
+    return list.map(function (spawn) {
+      if (!spawn || !isSpawnStillActiveStatus(spawn.status)) return spawn;
+      return Object.assign({}, spawn, { status: 'canceled' });
+    });
+  }
+
+  function finalizeChat(forChatID, reason) {
     var entry = chatSessionsRef.current[forChatID];
     if (!entry || entry.finalized) return;
     entry.finalized = true;
     entry.sending = false;
+
+    if (reason === 'stopped') {
+      entry.spawns = markSpawnsAsStopped(entry.spawns);
+    }
 
     // Some resumed sessions do not replay previous assistant turns. In that case,
     // the skip counter can hide the only assistant event; recover it as fallback.
@@ -244,6 +262,7 @@ export default function StandaloneChatView() {
       setSending(false);
       setActiveSessionID(null);
       setStreamEvents([]);
+      setSpawns(entry.spawns ? entry.spawns.slice() : []);
     }
   }
 
@@ -305,12 +324,23 @@ export default function StandaloneChatView() {
         }
 
         if (type === 'prompt' && data) {
-          entry.promptData = {
-            text: data.text || data.prompt || '',
+          var promptText = data.text || data.prompt || '';
+          var promptSessionID = Number(data.session_id || data.sessionID || 0) || 0;
+          var promptSpawnID = promptSessionID < 0 ? -promptSessionID : 0;
+          var promptPayload = {
+            text: promptText,
             truncated: !!data.truncated,
             turn_id: data.turn_id || null,
-            session_id: data.session_id || null,
+            session_id: promptSessionID || null,
           };
+          if (!entry.promptsByScope) entry.promptsByScope = {};
+          entry.promptsByScope[promptSpawnID > 0 ? ('spawn-' + promptSpawnID) : 'parent'] = promptPayload;
+          if (promptSpawnID === 0) {
+            entry.promptData = promptPayload;
+          }
+          if (promptText) {
+            pushEventForChat(forChatID, { type: 'initial_prompt', content: promptText }, promptSpawnID);
+          }
           return;
         }
 
@@ -475,7 +505,7 @@ export default function StandaloneChatView() {
         }
 
         if (type === 'done' || type === 'loop_done') {
-          finalizeChat(forChatID);
+          finalizeChat(forChatID, 'done');
           return;
         }
 
@@ -498,11 +528,11 @@ export default function StandaloneChatView() {
     });
 
     ws.addEventListener('error', function () {
-      finalizeChat(forChatID);
+      finalizeChat(forChatID, 'closed');
     });
 
     ws.addEventListener('close', function () {
-      finalizeChat(forChatID);
+      finalizeChat(forChatID, 'closed');
     });
   }
 
@@ -565,6 +595,7 @@ export default function StandaloneChatView() {
       sending: true,
       finalized: false,
       promptData: null,
+      promptsByScope: {},
       base: base,
       assistantTurnsToSkip: existingAssistantCount,
     };
@@ -624,6 +655,7 @@ export default function StandaloneChatView() {
     try {
       await apiCall(base + '/sessions/' + encodeURIComponent(String(activeSessionID)) + '/stop', 'POST', {});
       showToast('Stop signal sent', 'success');
+      finalizeChat(chatID, 'stopped');
     } catch (err) {
       if (err && err.authRequired) return;
       showToast('Failed to stop: ' + (err.message || err), 'error');
@@ -868,6 +900,7 @@ export default function StandaloneChatView() {
           loading={loading}
           emptyMessage="Type a message to begin."
           showSourceLabels={focusScope === 'all'}
+          scrollContextKey={chatID + ':' + focusScope}
         />
 
         {/* Input area */}

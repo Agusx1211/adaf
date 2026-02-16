@@ -256,6 +256,9 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 						emitLoopEvent(eventCh, "agent_raw_output", events.AgentRawOutputMsg{Data: ev.Text, SessionID: ev.TurnID})
 						continue
 					}
+					if ev.Parsed.Type == "" {
+						continue
+					}
 					emitLoopEvent(eventCh, "agent_event", events.AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw})
 				}
 				close(bridgeDone)
@@ -585,8 +588,10 @@ func emitSpawnOutput(records []store.SpawnRecord, s *store.Store, offsets map[in
 				data = ev.Data
 			case "stderr":
 				data = "[stderr] " + ev.Data
-			case "claude_stream":
-				data = ev.Data + "\n"
+			// Skip claude_stream events: stream agents (claude, vibe, gemini)
+			// already forward parsed events in real-time via the orchestrator's
+			// EventSink bridge. Re-emitting the raw NDJSON lines here causes
+			// duplicate output and leaks system/user messages as raw text.
 			default:
 				continue
 			}

@@ -170,14 +170,22 @@ export default function App() {
 
   var runningAgents = useMemo(function () {
     var runningCount = 0;
+    var runningSessionsByID = {};
     sessions.forEach(function (s) {
-      if (STATUS_RUNNING[normalizeStatus(s.status)]) runningCount++;
+      if (STATUS_RUNNING[normalizeStatus(s.status)]) {
+        runningCount++;
+        runningSessionsByID[s.id] = true;
+      }
     });
     spawns.forEach(function (s) {
-      if (STATUS_RUNNING[normalizeStatus(s.status)]) runningCount++;
+      if (!STATUS_RUNNING[normalizeStatus(s.status)]) return;
+      var owningSessionID = spawnScopeMaps.spawnToSession[s.id] || 0;
+      if (owningSessionID <= 0) return;
+      if (!runningSessionsByID[owningSessionID]) return;
+      runningCount++;
     });
     return runningCount;
-  }, [sessions, spawns]);
+  }, [sessions, spawns, spawnScopeMaps]);
 
   useEffect(function () {
     var baseTitle = titleProjectName + ' - ' + runningAgents + ' running';

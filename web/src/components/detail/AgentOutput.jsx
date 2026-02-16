@@ -194,6 +194,7 @@ export default function AgentOutput({ scope }) {
       emptyMessage="No output yet"
       autoScroll={autoScroll}
       showSourceLabels={scopeInfo.kind === 'session'}
+      scrollContextKey={scope || ''}
     />
   );
 }

@@ -593,6 +593,9 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 				o.emitEvent("agent_raw_output", events.AgentRawOutputMsg{Data: ev.Text, SessionID: -rec.ID})
 				continue
 			}
+			if ev.Parsed.Type == "" {
+				continue
+			}
 			o.emitEvent("agent_event", events.AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw, SpawnID: rec.ID})
 		}
 	}()

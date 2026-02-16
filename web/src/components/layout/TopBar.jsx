@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useAppState, useDispatch } from '../../state/store.js';
 import { normalizeStatus, formatNumber, formatElapsed } from '../../utils/format.js';
 import { STATUS_RUNNING, statusColor } from '../../utils/colors.js';
+import { buildSpawnScopeMaps } from '../../utils/scopes.js';
 import StatusDot from '../common/StatusDot.jsx';
 import { StopSessionButton, SessionMessageBar } from '../session/SessionControls.jsx';
 import { useUsageLimits } from '../../api/hooks.js';
@@ -21,7 +22,7 @@ var NAV_ITEMS = [
 export default function TopBar() {
   var state = useAppState();
   var dispatch = useDispatch();
-  var { sessions, spawns, projects, currentProjectID, wsConnected, termWSConnected, usage, loopRun, leftView, usageLimits } = state;
+  var { sessions, spawns, loopRuns, projects, currentProjectID, wsConnected, termWSConnected, usage, loopRun, leftView, usageLimits } = state;
   var [showRunning, setShowRunning] = useState(false);
   var [showUsage, setShowUsage] = useState(false);
   var [showProjectBrowser, setShowProjectBrowser] = useState(false);
@@ -30,13 +31,29 @@ export default function TopBar() {
 
   useUsageLimits();
 
+  var spawnScopeMaps = useMemo(function () {
+    return buildSpawnScopeMaps(spawns, loopRuns);
+  }, [spawns, loopRuns]);
+
   var counts = useMemo(function () {
     var running = 0;
     var total = sessions.length + spawns.length;
-    sessions.forEach(function (s) { if (STATUS_RUNNING[normalizeStatus(s.status)]) running++; });
-    spawns.forEach(function (s) { if (STATUS_RUNNING[normalizeStatus(s.status)]) running++; });
+    var runningSessionsByID = {};
+    sessions.forEach(function (s) {
+      if (STATUS_RUNNING[normalizeStatus(s.status)]) {
+        running++;
+        runningSessionsByID[s.id] = true;
+      }
+    });
+    spawns.forEach(function (s) {
+      if (!STATUS_RUNNING[normalizeStatus(s.status)]) return;
+      var owningSessionID = spawnScopeMaps.spawnToSession[s.id] || 0;
+      if (owningSessionID <= 0) return;
+      if (!runningSessionsByID[owningSessionID]) return;
+      running++;
+    });
     return { running, total };
-  }, [sessions, spawns]);
+  }, [sessions, spawns, spawnScopeMaps]);
 
   var runningSessions = useMemo(function () {
     return sessions.filter(function (s) { return !!STATUS_RUNNING[normalizeStatus(s.status)]; });

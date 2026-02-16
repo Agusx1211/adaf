@@ -103,6 +103,42 @@ export function ThinkingBlock({ content }) {
   );
 }
 
+export function PromptBlock({ content }) {
+  var [expanded, setExpanded] = useState(false);
+  var text = String(content || '');
+  if (!text) return null;
+  return (
+    <div
+      style={{
+        margin: '6px 0', padding: '6px 10px',
+        background: 'var(--accent)10', borderRadius: 4,
+        borderLeft: '2px solid var(--accent)', cursor: 'pointer',
+      }}
+      onClick={function () { setExpanded(!expanded); }}
+    >
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        fontSize: 10, color: 'var(--accent)',
+        fontFamily: "'JetBrains Mono', monospace", fontWeight: 600,
+      }}>
+        <span style={{ fontSize: 8 }}>{expanded ? '\u25BE' : '\u25B8'}</span>
+        <span>PROMPT</span>
+      </div>
+      {expanded ? (
+        <div style={{
+          marginTop: 6, fontSize: 11, color: 'var(--text-2)',
+          lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        }}>{text}</div>
+      ) : (
+        <div style={{
+          marginTop: 2, fontSize: 11, color: 'var(--text-3)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{truncate(text, 140)}</div>
+      )}
+    </div>
+  );
+}
+
 export function ToolCallBlock({ tool, input }) {
   var [expanded, setExpanded] = useState(false);
   var displayInput = formatToolInput(tool, input);
@@ -259,6 +295,7 @@ export function EventBlockList({ events }) {
     <div>
       {groups.map(function (g, i) {
         if (g.type === 'text') return <MarkdownContent key={i} text={g.content} />;
+        if (g.type === 'initial_prompt') return <PromptBlock key={i} content={g.content} />;
         if (g.type === 'thinking') return <ThinkingBlock key={i} content={g.content} />;
         if (g.type === 'tool_use') return <ToolCallBlock key={i} tool={g.tool} input={g.input} />;
         if (g.type === 'tool_result') return <ToolResultBlock key={i} tool={g.tool} result={g.result} isError={g.isError} />;
