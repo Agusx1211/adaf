@@ -2,9 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAppState, useDispatch } from '../../state/store.js';
 import { apiCall, apiBase, buildWSURL } from '../../api/client.js';
 import { useToast } from '../common/Toast.jsx';
-import { timeAgo } from '../../utils/format.js';
-import { EventBlockList, MarkdownContent, injectEventBlockStyles, cleanResponse } from '../common/EventBlocks.jsx';
-import Modal from '../common/Modal.jsx';
+import { injectEventBlockStyles, cleanResponse } from '../common/EventBlocks.jsx';
+import ChatMessageList from '../common/ChatMessageList.jsx';
 
 export default function StandaloneChatView() {
   var state = useAppState();
@@ -18,8 +17,6 @@ export default function StandaloneChatView() {
   var [input, setInput] = useState('');
   var [activeSessionID, setActiveSessionID] = useState(null);
   var [streamEvents, setStreamEvents] = useState([]);
-  var [inspectedMessage, setInspectedMessage] = useState(null);
-  var listRef = useRef(null);
   var inputRef = useRef(null);
   var base = apiBase(state.currentProjectID);
 
@@ -94,11 +91,6 @@ export default function StandaloneChatView() {
       })
       .catch(function () {});
   }, [chatID, base, state.currentProjectID]);
-
-  // Auto-scroll on new content
-  useEffect(function () {
-    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [messages, streamEvents]);
 
   // --- Per-chat WebSocket management ---
 
@@ -457,104 +449,13 @@ export default function StandaloneChatView() {
       </div>
 
       {/* Messages area */}
-      <div ref={listRef} style={{ flex: 1, overflow: 'auto', padding: '6px 12px' }}>
-        {loading ? (
-          <div style={{ textAlign: 'center', color: 'var(--text-3)', padding: 40 }}>
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>Loading...</div>
-          </div>
-        ) : messages.length === 0 && !sending ? (
-          <div style={{ textAlign: 'center', color: 'var(--text-3)', padding: 40 }}>
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: 'var(--text-2)' }}>
-              Type a message to begin.
-            </div>
-          </div>
-        ) : (
-          <div>
-            {messages.map(function (msg) {
-              var isUser = msg.role === 'user';
-              var msgEvents = msg._events || msg.events;
-              var hasInspectData = !isUser && (msg._prompt || (msgEvents && msgEvents.length > 0));
-              return (
-                <div key={msg.id} style={{ marginBottom: 4 }}>
-                  <div
-                    onClick={function () { if (hasInspectData) setInspectedMessage(msg); }}
-                    style={{
-                      padding: '6px 10px', borderRadius: 2,
-                      background: isUser ? 'var(--bg-2)' : 'transparent',
-                      borderLeft: isUser ? '2px solid var(--accent)' : '2px solid var(--green)40',
-                      cursor: hasInspectData ? 'pointer' : 'default',
-                    }}>
-                    <div style={{
-                      fontSize: 9, fontWeight: 600,
-                      color: isUser ? 'var(--accent)' : 'var(--green)',
-                      marginBottom: 3, display: 'flex', alignItems: 'center', gap: 6,
-                      textTransform: 'uppercase', letterSpacing: '0.05em',
-                      fontFamily: "'JetBrains Mono', monospace",
-                    }}>
-                      <span>{isUser ? 'You' : 'Agent'}</span>
-                      <span style={{ fontWeight: 400, color: 'var(--text-3)', textTransform: 'none', letterSpacing: 'normal', fontSize: 9 }}>
-                        {timeAgo(msg.created_at)}
-                      </span>
-                      {hasInspectData && (
-                        <span style={{ fontWeight: 400, color: 'var(--text-3)', textTransform: 'none', letterSpacing: 'normal', marginLeft: 'auto', fontSize: 8, opacity: 0.5 }}>
-                          inspect
-                        </span>
-                      )}
-                    </div>
-                    {isUser ? (
-                      <div style={{
-                        fontSize: 13, color: 'var(--text-0)', lineHeight: 1.5,
-                        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                      }}>{msg.content}</div>
-                    ) : msgEvents && msgEvents.length > 0 ? (
-                      <EventBlockList events={msgEvents} />
-                    ) : (
-                      <MarkdownContent text={msg.content} />
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* Streaming response bubble */}
-            {sending && (
-              <div style={{ marginBottom: 4 }}>
-                <div style={{
-                  padding: '6px 10px', borderRadius: 2,
-                  background: 'transparent',
-                  borderLeft: '2px solid var(--green)',
-                }}>
-                  <div style={{
-                    fontSize: 9, fontWeight: 600, color: 'var(--green)',
-                    marginBottom: 3, display: 'flex', alignItems: 'center', gap: 6,
-                    textTransform: 'uppercase', letterSpacing: '0.05em',
-                    fontFamily: "'JetBrains Mono', monospace",
-                  }}>
-                    <span>Agent</span>
-                    <span style={{
-                      fontWeight: 400, color: 'var(--accent)',
-                      textTransform: 'none', letterSpacing: 'normal',
-                      animation: 'pulse 1.5s ease-in-out infinite',
-                    }}>
-                      {streamEvents.length > 0 ? 'responding\u2026' : 'thinking\u2026'}
-                    </span>
-                  </div>
-                  {streamEvents.length > 0 ? (
-                    <EventBlockList events={streamEvents} />
-                  ) : (
-                    <div style={{
-                      fontSize: 11, color: 'var(--text-3)',
-                      fontFamily: "'JetBrains Mono', monospace",
-                    }}>
-                      Waiting for response...
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      <ChatMessageList
+        messages={messages}
+        streamEvents={streamEvents}
+        isStreaming={sending}
+        loading={loading}
+        emptyMessage="Type a message to begin."
+      />
 
       {/* Input area */}
       <div style={{
@@ -613,47 +514,6 @@ export default function StandaloneChatView() {
         </form>
       </div>
 
-      {/* Prompt Inspector Modal */}
-      {inspectedMessage && (
-        <Modal title="Prompt Inspector" maxWidth={900} onClose={function () { setInspectedMessage(null); }}>
-          <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
-            {inspectedMessage._prompt && inspectedMessage._prompt.text ? (
-              <div>
-                <div style={{
-                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
-                  color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em',
-                  marginBottom: 8,
-                }}>
-                  System Prompt
-                  {inspectedMessage._prompt.truncated && (
-                    <span style={{ color: 'var(--text-3)', fontWeight: 400, textTransform: 'none', marginLeft: 8 }}>(truncated)</span>
-                  )}
-                </div>
-                <pre style={{
-                  fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
-                  color: 'var(--text-1)', background: 'var(--bg-2)',
-                  padding: 12, borderRadius: 6, border: '1px solid var(--border)',
-                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                  lineHeight: 1.5, maxHeight: 500, overflow: 'auto',
-                  margin: 0,
-                }}>{inspectedMessage._prompt.text}</pre>
-              </div>
-            ) : null}
-            {((inspectedMessage._events && inspectedMessage._events.length > 0) || (inspectedMessage.events && inspectedMessage.events.length > 0)) && (
-              <div style={{ marginTop: inspectedMessage._prompt ? 16 : 0 }}>
-                <div style={{
-                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
-                  color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '0.05em',
-                  marginBottom: 8,
-                }}>
-                  Structured Events ({(inspectedMessage._events || inspectedMessage.events).length})
-                </div>
-                <EventBlockList events={inspectedMessage._events || inspectedMessage.events} />
-              </div>
-            )}
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }

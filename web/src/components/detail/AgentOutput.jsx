@@ -1,15 +1,15 @@
-import { useMemo, useRef, useEffect, useState } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import { useAppState, useDispatch } from '../../state/store.js';
 import { fetchTurnRecordingEvents } from '../../api/hooks.js';
 import { normalizeStatus } from '../../utils/format.js';
 import { STATUS_RUNNING } from '../../utils/colors.js';
-import { EventBlockList, MarkdownContent, injectEventBlockStyles, stateEventsToBlocks } from '../common/EventBlocks.jsx';
+import { injectEventBlockStyles, stateEventsToBlocks } from '../common/EventBlocks.jsx';
+import ChatMessageList from '../common/ChatMessageList.jsx';
 
 export default function AgentOutput({ scope }) {
   var state = useAppState();
   var dispatch = useDispatch();
   var { streamEvents, autoScroll, sessions, historicalEvents, currentProjectID } = state;
-  var containerRef = useRef(null);
   var [loadingHistory, setLoadingHistory] = useState(false);
 
   useEffect(function () { injectEventBlockStyles(); }, []);
@@ -23,13 +23,14 @@ export default function AgentOutput({ scope }) {
     return 0;
   }, [scope]);
 
-  // Check if session is completed (not running)
+  // Check if session is running
   var sessionInfo = useMemo(function () {
     if (!turnID) return null;
     return sessions.find(function (s) { return s.id === turnID; }) || null;
   }, [turnID, sessions]);
 
-  var isCompleted = sessionInfo && !STATUS_RUNNING[normalizeStatus(sessionInfo.status)];
+  var isRunning = sessionInfo && STATUS_RUNNING[normalizeStatus(sessionInfo.status)];
+  var isCompleted = sessionInfo && !isRunning;
 
   // Live stream events for this scope
   var filteredEvents = useMemo(function () {
@@ -52,8 +53,8 @@ export default function AgentOutput({ scope }) {
   // Load historical events for completed sessions that have no live events
   useEffect(function () {
     if (!turnID || !isCompleted) return;
-    if (blockEvents.length > 0) return; // already have live events
-    if (historicalEvents[turnID]) return; // already loaded
+    if (blockEvents.length > 0) return;
+    if (historicalEvents[turnID]) return;
     setLoadingHistory(true);
     fetchTurnRecordingEvents(turnID, currentProjectID, dispatch)
       .then(function () { setLoadingHistory(false); })
@@ -121,14 +122,49 @@ export default function AgentOutput({ scope }) {
   // Use historical blocks if we have no live events
   var displayBlocks = blockEvents.length > 0 ? blockEvents : historicalBlocks;
 
-  // Check if there's already a prompt in the blocks
-  var hasPromptBlock = displayBlocks.some(function (b) { return b.type === 'initial_prompt'; });
+  // Transform flat blocks into ChatMessageList messages format
+  var transformed = useMemo(function () {
+    var msgs = [];
+    var assistantEvents = [];
 
-  useEffect(function () {
-    if (autoScroll && containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    displayBlocks.forEach(function (block) {
+      if (block.type === 'initial_prompt') {
+        // Flush any accumulated assistant events before the prompt
+        if (assistantEvents.length > 0) {
+          msgs.push({
+            id: 'assistant-' + msgs.length,
+            role: 'assistant',
+            content: '',
+            events: assistantEvents,
+            created_at: null,
+          });
+          assistantEvents = [];
+        }
+        msgs.push({
+          id: 'prompt-' + msgs.length,
+          role: 'user',
+          content: block.content,
+          created_at: null,
+        });
+      } else {
+        assistantEvents.push(block);
+      }
+    });
+
+    // For completed sessions, flush remaining events into a final assistant message
+    if (!isRunning && assistantEvents.length > 0) {
+      msgs.push({
+        id: 'assistant-' + msgs.length,
+        role: 'assistant',
+        content: '',
+        events: assistantEvents,
+        created_at: null,
+      });
+      assistantEvents = [];
     }
-  }, [displayBlocks, autoScroll]);
+
+    return { messages: msgs, pendingStreamEvents: isRunning ? assistantEvents : [] };
+  }, [displayBlocks, isRunning]);
 
   if (!scope) {
     return (
@@ -142,60 +178,14 @@ export default function AgentOutput({ scope }) {
     );
   }
 
-  if (loadingHistory) {
-    return (
-      <div style={{
-        height: '100%', display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center', gap: 12, color: 'var(--text-3)',
-      }}>
-        <span style={{ fontSize: 16, animation: 'spin 1s linear infinite', display: 'inline-block' }}>{'\u21BB'}</span>
-        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>Loading session recording...</span>
-      </div>
-    );
-  }
-
-  if (displayBlocks.length === 0) {
-    return (
-      <div style={{
-        height: '100%', display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center', gap: 12, color: 'var(--text-3)',
-      }}>
-        <span style={{ fontSize: 32, opacity: 0.3 }}>{'\u25A3'}</span>
-        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>No output yet</span>
-        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, opacity: 0.5 }}>Events will appear here as the agent runs</span>
-      </div>
-    );
-  }
-
-  // Split blocks: prompts first, then everything else
-  var promptBlocks = displayBlocks.filter(function (b) { return b.type === 'initial_prompt'; });
-  var contentBlocks = displayBlocks.filter(function (b) { return b.type !== 'initial_prompt'; });
-
   return (
-    <div ref={containerRef} style={{ height: '100%', overflow: 'auto', padding: '16px 20px' }}>
-      <div style={{ maxWidth: 800, margin: '0 auto' }}>
-        {/* Render prompt blocks at the top */}
-        {promptBlocks.map(function (block, i) {
-          return (
-            <div key={'prompt-' + i} style={{
-              marginBottom: 16, padding: '12px 16px',
-              background: 'var(--bg-2)', borderRadius: 8,
-              border: '1px solid var(--border)',
-              borderLeft: '3px solid var(--accent)',
-            }}>
-              <div style={{
-                fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-                color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.1em',
-                fontWeight: 700, marginBottom: 8,
-              }}>Prompt</div>
-              <MarkdownContent text={block.content} />
-            </div>
-          );
-        })}
-
-        {/* Regular event blocks */}
-        <EventBlockList events={contentBlocks} />
-      </div>
-    </div>
+    <ChatMessageList
+      messages={transformed.messages}
+      streamEvents={transformed.pendingStreamEvents}
+      isStreaming={!!isRunning}
+      loading={loadingHistory}
+      emptyMessage="No output yet"
+      autoScroll={autoScroll}
+    />
   );
 }
