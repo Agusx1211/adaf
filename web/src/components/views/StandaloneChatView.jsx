@@ -295,6 +295,11 @@ export default function StandaloneChatView() {
         var type = envelope.type;
         var data = envelope.data;
 
+        // Debug: log all WS message types and any spawn_id present
+        if (type !== 'event' && type !== 'raw') {
+          console.log('[ADAF-DEBUG] ws msg type=' + type, data && typeof data === 'object' ? JSON.stringify(data).slice(0, 300) : '');
+        }
+
         if (type === 'prompt' && data) {
           entry.promptData = {
             text: data.text || data.prompt || '',
@@ -361,6 +366,7 @@ export default function StandaloneChatView() {
 
         if (type === 'event' && data) {
           var spawnID = data.spawn_id || 0;
+          if (spawnID > 0) console.log('[ADAF-DEBUG] event with spawn_id=' + spawnID, JSON.stringify(data).slice(0, 200));
           var ss = getStreamState(spawnID);
           var ev = data.event || data;
           if (typeof ev === 'string') {
@@ -451,6 +457,7 @@ export default function StandaloneChatView() {
 
         if (type === 'raw' && data) {
           var rawSpawnID = (typeof data === 'object') ? (data.spawn_id || 0) : 0;
+          if (rawSpawnID > 0) console.log('[ADAF-DEBUG] raw with spawn_id=' + rawSpawnID, JSON.stringify(data).slice(0, 200));
           var rawSS = getStreamState(rawSpawnID);
           var rawText = typeof data === 'string' ? data : (data.data || '');
           if (rawText && rawText.indexOf('\x1b') === -1 && rawText.indexOf('[stderr]') === -1) {
