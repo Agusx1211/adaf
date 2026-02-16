@@ -5,7 +5,7 @@ import { reportMissingUISample } from '../../api/missingUISamples.js';
 import { useToast } from '../common/Toast.jsx';
 import { injectEventBlockStyles, cleanResponse } from '../common/EventBlocks.jsx';
 import ChatMessageList from '../common/ChatMessageList.jsx';
-import { agentInfo } from '../../utils/colors.js';
+import { agentInfo, statusColor, STATUS_RUNNING } from '../../utils/colors.js';
 
 export default function StandaloneChatView() {
   var state = useAppState();
@@ -21,15 +21,18 @@ export default function StandaloneChatView() {
   var [streamEvents, setStreamEvents] = useState([]);
   var [teams, setTeams] = useState([]);
   var [showTeamDropdown, setShowTeamDropdown] = useState(false);
+  var [spawns, setSpawns] = useState([]);
+  var [focusScope, setFocusScope] = useState('parent');
   var inputRef = useRef(null);
   var teamDropdownRef = useRef(null);
   var base = apiBase(state.currentProjectID);
 
   // Refs for per-chat session management
   var currentChatIDRef = useRef(chatID);
-  var chatSessionsRef = useRef({}); // { [chatID]: { sessionID, events, ws, sending, finalized, promptData, base } }
+  var chatSessionsRef = useRef({}); // { [chatID]: { sessionID, events, spawnEvents, allEvents, spawns, ws, sending, finalized, promptData, base, parentProfile } }
   var dispatchRef = useRef(dispatch);
   dispatchRef.current = dispatch;
+  var focusScopeRef = useRef('parent');
 
   useEffect(function () { injectEventBlockStyles(); }, []);
 
@@ -43,11 +46,15 @@ export default function StandaloneChatView() {
       setSending(true);
       setStreamEvents(entry.events.slice());
       setActiveSessionID(entry.sessionID);
+      setSpawns(entry.spawns ? entry.spawns.slice() : []);
     } else {
       setSending(false);
       setStreamEvents([]);
       setActiveSessionID(null);
+      setSpawns([]);
     }
+    setFocusScope('parent');
+    focusScopeRef.current = 'parent';
   }, [chatID]);
 
   // Cleanup all WebSockets on unmount
@@ -130,11 +137,19 @@ export default function StandaloneChatView() {
 
   // --- Per-chat WebSocket management ---
 
-  function pushEventForChat(forChatID, evt) {
+  function pushEventForChat(forChatID, evt, spawnID) {
     var entry = chatSessionsRef.current[forChatID];
     if (!entry) return;
 
-    var events = entry.events;
+    // Route to correct events array
+    var events;
+    if (spawnID && spawnID > 0) {
+      if (!entry.spawnEvents[spawnID]) entry.spawnEvents[spawnID] = [];
+      events = entry.spawnEvents[spawnID];
+    } else {
+      events = entry.events;
+    }
+
     var last = events.length > 0 ? events[events.length - 1] : null;
     if (evt.type === 'text' && last && last.type === 'text') {
       last.content += evt.content;
@@ -144,9 +159,40 @@ export default function StandaloneChatView() {
       events.push(evt);
     }
 
-    // Update React state only if this is the currently viewed chat
+    // Also push to allEvents with source tag
+    var sourceLabel = '';
+    var sourceColor = '';
+    if (spawnID && spawnID > 0) {
+      var spawnInfo = (entry.spawns || []).find(function (s) { return s.id === spawnID; });
+      sourceLabel = spawnInfo ? spawnInfo.profile : ('spawn-' + spawnID);
+      sourceColor = agentInfo(sourceLabel).color;
+    } else {
+      sourceLabel = entry.parentProfile || 'parent';
+      sourceColor = agentInfo(entry.parentProfile || '').color;
+    }
+    var taggedEvt = Object.assign({}, evt, { _sourceLabel: sourceLabel, _sourceColor: sourceColor, _spawnID: spawnID || 0 });
+    var allLast = entry.allEvents.length > 0 ? entry.allEvents[entry.allEvents.length - 1] : null;
+    if (taggedEvt.type === 'text' && allLast && allLast.type === 'text' && allLast._spawnID === taggedEvt._spawnID) {
+      allLast.content += taggedEvt.content;
+    } else if (taggedEvt.type === 'thinking' && allLast && allLast.type === 'thinking' && allLast._spawnID === taggedEvt._spawnID) {
+      allLast.content += taggedEvt.content;
+    } else {
+      entry.allEvents.push(taggedEvt);
+    }
+
+    // Update React state if this is the currently viewed chat
     if (forChatID === currentChatIDRef.current) {
-      setStreamEvents(events.slice());
+      var scope = focusScopeRef.current;
+      if (scope === 'parent' && (!spawnID || spawnID === 0)) {
+        setStreamEvents(entry.events.slice());
+      } else if (scope === 'all') {
+        setStreamEvents(entry.allEvents.slice());
+      } else if (scope.indexOf('spawn-') === 0 && spawnID && spawnID > 0) {
+        var scopeSID = parseInt(scope.slice(6));
+        if (scopeSID === spawnID) {
+          setStreamEvents(entry.spawnEvents[spawnID].slice());
+        }
+      }
     }
 
     // Update global status to 'responding' once we have content
@@ -183,6 +229,7 @@ export default function StandaloneChatView() {
     dispatchRef.current({ type: 'SET_STANDALONE_CHAT_STATUS', payload: { chatID: forChatID, status: 'idle' } });
 
     // Update React state if current chat
+    // Keep spawns visible so user can see final state — cleared on next message send
     if (forChatID === currentChatIDRef.current) {
       setSending(false);
       setActiveSessionID(null);
@@ -209,8 +256,14 @@ export default function StandaloneChatView() {
       return;
     }
 
-    var isStreaming = false;
-    var hasRawText = false;
+    // Per-spawn streaming state to avoid double-counting
+    var streamState = {}; // { [spawnID]: { isStreaming, hasRawText } }
+    function getStreamState(sid) {
+      var key = sid || 0;
+      if (!streamState[key]) streamState[key] = { isStreaming: false, hasRawText: false };
+      return streamState[key];
+    }
+
     // Track how many assistant turns we've seen to skip replayed old turns.
     var assistantTurnsSeen = 0;
     var turnsToSkip = entry.assistantTurnsToSkip || 0;
@@ -246,7 +299,63 @@ export default function StandaloneChatView() {
           return;
         }
 
+        // Handle spawn hierarchy updates
+        if (type === 'spawn' && data && data.spawns) {
+          var oldSpawns = entry.spawns || [];
+          var newSpawns = data.spawns;
+
+          // Inject status change events into allEvents for the "all" view
+          newSpawns.forEach(function (ns) {
+            var old = oldSpawns.find(function (os) { return os.id === ns.id; });
+            if (!old) {
+              // New spawn started
+              entry.allEvents.push({
+                type: '_spawn_status', _spawnID: ns.id,
+                _action: 'started', _profile: ns.profile, _role: ns.role || '',
+                _sourceLabel: ns.profile, _sourceColor: agentInfo(ns.profile).color,
+              });
+            } else if (old.status !== ns.status) {
+              if (ns.status === 'completed' || ns.status === 'failed') {
+                entry.allEvents.push({
+                  type: '_spawn_status', _spawnID: ns.id,
+                  _action: ns.status, _profile: ns.profile, _role: ns.role || '',
+                  _sourceLabel: ns.profile, _sourceColor: agentInfo(ns.profile).color,
+                });
+              }
+              if (ns.status === 'awaiting_input' && ns.question) {
+                entry.allEvents.push({
+                  type: '_spawn_status', _spawnID: ns.id,
+                  _action: 'asking', _profile: ns.profile, _question: ns.question,
+                  _sourceLabel: ns.profile, _sourceColor: agentInfo(ns.profile).color,
+                });
+              }
+            }
+          });
+
+          entry.spawns = newSpawns;
+          if (forChatID === currentChatIDRef.current) {
+            setSpawns(newSpawns.slice());
+            if (focusScopeRef.current === 'all') {
+              setStreamEvents(entry.allEvents.slice());
+            }
+          }
+          return;
+        }
+
+        // Handle snapshot (extract spawns if present)
+        if (type === 'snapshot' && data) {
+          if (data.spawns && data.spawns.length > 0) {
+            entry.spawns = data.spawns;
+            if (forChatID === currentChatIDRef.current) {
+              setSpawns(data.spawns.slice());
+            }
+          }
+          return;
+        }
+
         if (type === 'event' && data) {
+          var spawnID = data.spawn_id || 0;
+          var ss = getStreamState(spawnID);
           var ev = data.event || data;
           if (typeof ev === 'string') {
             try { ev = JSON.parse(ev); } catch (_) { return; }
@@ -254,32 +363,34 @@ export default function StandaloneChatView() {
           if (!ev || typeof ev !== 'object') return;
 
           if (ev.type === 'content_block_delta' && ev.delta) {
-            isStreaming = true;
-            if (ev.delta.text) pushEventForChat(forChatID, { type: 'text', content: ev.delta.text });
-            if (ev.delta.thinking) pushEventForChat(forChatID, { type: 'thinking', content: ev.delta.thinking });
+            ss.isStreaming = true;
+            if (ev.delta.text) pushEventForChat(forChatID, { type: 'text', content: ev.delta.text }, spawnID);
+            if (ev.delta.thinking) pushEventForChat(forChatID, { type: 'thinking', content: ev.delta.thinking }, spawnID);
             return;
           }
 
           if (ev.type === 'assistant') {
-            assistantTurnsSeen++;
-            // Skip replayed assistant turns from previous conversation rounds
-            if (assistantTurnsSeen <= turnsToSkip) return;
+            // Turn skipping only applies to parent events (replay on reconnect)
+            if (spawnID === 0) {
+              assistantTurnsSeen++;
+              if (assistantTurnsSeen <= turnsToSkip) return;
+            }
 
             var blocks = (ev.message && Array.isArray(ev.message.content)) ? ev.message.content : (Array.isArray(ev.content) ? ev.content : []);
             blocks.forEach(function (block) {
               if (!block) return;
               if (block.type === 'text' && block.text) {
-                if (!isStreaming && !hasRawText) pushEventForChat(forChatID, { type: 'text', content: block.text });
+                if (!ss.isStreaming && !ss.hasRawText) pushEventForChat(forChatID, { type: 'text', content: block.text }, spawnID);
               } else if (block.type === 'thinking' && block.text) {
-                if (!isStreaming) pushEventForChat(forChatID, { type: 'thinking', content: block.text });
+                if (!ss.isStreaming) pushEventForChat(forChatID, { type: 'thinking', content: block.text }, spawnID);
               } else if (block.type === 'tool_use') {
-                pushEventForChat(forChatID, { type: 'tool_use', tool: block.name || 'tool', input: block.input || {} });
+                pushEventForChat(forChatID, { type: 'tool_use', tool: block.name || 'tool', input: block.input || {} }, spawnID);
               } else if (block.type === 'tool_result') {
                 pushEventForChat(forChatID, {
                   type: 'tool_result', tool: block.name || '',
                   result: block.content || block.tool_content || block.output || block.text || '',
                   isError: !!block.is_error,
-                });
+                }, spawnID);
               } else if (block && typeof block === 'object') {
                 reportMissing({
                   reason: 'unknown_assistant_block',
@@ -292,8 +403,8 @@ export default function StandaloneChatView() {
           }
 
           if (ev.type === 'user') {
-            // Skip user events that belong to already-saved turns
-            if (assistantTurnsSeen < turnsToSkip) return;
+            // Skip user events that belong to already-saved turns (parent only)
+            if (spawnID === 0 && assistantTurnsSeen < turnsToSkip) return;
 
             var userBlocks = (ev.message && Array.isArray(ev.message.content)) ? ev.message.content : (Array.isArray(ev.content) ? ev.content : []);
             userBlocks.forEach(function (block) {
@@ -302,7 +413,7 @@ export default function StandaloneChatView() {
                   type: 'tool_result', tool: block.name || '',
                   result: block.content || block.tool_content || block.output || block.text || '',
                   isError: !!block.is_error,
-                });
+                }, spawnID);
               } else if (block && typeof block === 'object') {
                 reportMissing({
                   reason: 'unknown_user_block',
@@ -322,10 +433,12 @@ export default function StandaloneChatView() {
         }
 
         if (type === 'raw' && data) {
+          var rawSpawnID = (typeof data === 'object') ? (data.spawn_id || 0) : 0;
+          var rawSS = getStreamState(rawSpawnID);
           var rawText = typeof data === 'string' ? data : (data.data || '');
           if (rawText && rawText.indexOf('\x1b') === -1 && rawText.indexOf('[stderr]') === -1) {
-            hasRawText = true;
-            pushEventForChat(forChatID, { type: 'text', content: rawText });
+            rawSS.hasRawText = true;
+            pushEventForChat(forChatID, { type: 'text', content: rawText }, rawSpawnID);
           }
           return;
         }
@@ -401,8 +514,6 @@ export default function StandaloneChatView() {
     setInput('');
 
     // Count existing assistant messages so we can skip replayed turns on resume.
-    // When an agent resumes a session it re-streams ALL previous conversation
-    // turns before the new response; we need to ignore those duplicates.
     var existingAssistantCount = 0;
     messages.forEach(function (m) { if (m.role === 'assistant') existingAssistantCount++; });
 
@@ -410,6 +521,10 @@ export default function StandaloneChatView() {
     var entry = {
       sessionID: null,
       events: [],
+      spawnEvents: {},
+      allEvents: [],
+      spawns: [],
+      parentProfile: (chatMeta && chatMeta.profile) || '',
       ws: null,
       sending: true,
       finalized: false,
@@ -421,6 +536,9 @@ export default function StandaloneChatView() {
 
     setSending(true);
     setStreamEvents([]);
+    setSpawns([]);
+    setFocusScope('parent');
+    focusScopeRef.current = 'parent';
     dispatch({ type: 'SET_STANDALONE_CHAT_STATUS', payload: { chatID: chatID, status: 'thinking' } });
 
     if (msg) {
@@ -480,6 +598,21 @@ export default function StandaloneChatView() {
     if (e.key === 'Enter' && !e.shiftKey) handleSend(e);
   }
 
+  function switchFocusScope(newScope) {
+    setFocusScope(newScope);
+    focusScopeRef.current = newScope;
+    var entry = chatSessionsRef.current[chatID];
+    if (!entry) { setStreamEvents([]); return; }
+    if (newScope === 'parent') {
+      setStreamEvents(entry.events.slice());
+    } else if (newScope === 'all') {
+      setStreamEvents(entry.allEvents.slice());
+    } else if (newScope.indexOf('spawn-') === 0) {
+      var sid = parseInt(newScope.slice(6));
+      setStreamEvents((entry.spawnEvents[sid] || []).slice());
+    }
+  }
+
   // Render
 
   if (!chatID) {
@@ -501,196 +634,491 @@ export default function StandaloneChatView() {
   var headerAgent = chatMeta ? chatMeta.agent : '';
   var agentColor = headerAgent ? agentInfo(headerAgent) : (headerProfile ? agentInfo(headerProfile) : null);
 
+  // Determine focused spawn info for header bar
+  var focusedSpawn = null;
+  if (focusScope.indexOf('spawn-') === 0) {
+    var focusedSID = parseInt(focusScope.slice(6));
+    focusedSpawn = spawns.find(function (s) { return s.id === focusedSID; }) || null;
+  }
+
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg-0)' }}>
-      {/* Header */}
-      <div style={{
-        padding: '10px 16px', borderBottom: '1px solid var(--border)',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        background: 'var(--bg-1)', flexShrink: 0, gap: 10,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
-          {sending && (
+    <div style={{ height: '100%', display: 'flex' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--bg-0)', minWidth: 0 }}>
+        {/* Header */}
+        <div style={{
+          padding: '10px 16px', borderBottom: '1px solid var(--border)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: 'var(--bg-1)', flexShrink: 0, gap: 10,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+            {sending && (
+              <span style={{
+                width: 7, height: 7, borderRadius: '50%',
+                background: streamEvents.length > 0 ? 'var(--green)' : 'var(--accent)',
+                animation: 'pulse 1.5s ease-in-out infinite',
+                flexShrink: 0,
+              }} />
+            )}
             <span style={{
-              width: 7, height: 7, borderRadius: '50%',
-              background: streamEvents.length > 0 ? 'var(--green)' : 'var(--accent)',
-              animation: 'pulse 1.5s ease-in-out infinite',
-              flexShrink: 0,
-            }} />
-          )}
-          <span style={{
-            fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600,
-            color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {headerTitle}
-          </span>
-          {headerProfile && (
-            <span style={{
-              fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
-              padding: '1px 7px', borderRadius: 8, flexShrink: 0,
-              background: agentColor ? agentColor.color + '18' : 'var(--bg-3)',
-              color: agentColor ? agentColor.color : 'var(--text-2)',
-              border: '1px solid ' + (agentColor ? agentColor.color + '30' : 'var(--border)'),
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600,
+              color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>
-              {headerProfile}
+              {headerTitle}
             </span>
-          )}
-          <span ref={teamDropdownRef} style={{ position: 'relative', flexShrink: 0 }}>
-            <span
-              onClick={function () { if (!sending) setShowTeamDropdown(!showTeamDropdown); }}
-              style={{
+            {headerProfile && (
+              <span style={{
                 fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
-                padding: '1px 7px', borderRadius: 8, cursor: sending ? 'default' : 'pointer',
-                background: headerTeam ? 'var(--green)18' : 'var(--bg-3)',
-                color: headerTeam ? 'var(--green)' : 'var(--text-3)',
-                border: '1px solid ' + (headerTeam ? 'var(--green)30' : 'var(--border)'),
-              }}
-            >
-              {headerTeam ? headerTeam + (function () {
-                var t = teams.find(function (t) { return t.name === headerTeam; });
-                return t && t.delegation && t.delegation.profiles ? ' (' + t.delegation.profiles.length + ')' : '';
-              })() : '+ team'}
-            </span>
-            {showTeamDropdown && (
-              <div style={{
-                position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 100,
-                background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 6,
-                boxShadow: '0 4px 12px rgba(0,0,0,0.3)', minWidth: 140, padding: '4px 0',
+                padding: '1px 7px', borderRadius: 8, flexShrink: 0,
+                background: agentColor ? agentColor.color + '18' : 'var(--bg-3)',
+                color: agentColor ? agentColor.color : 'var(--text-2)',
+                border: '1px solid ' + (agentColor ? agentColor.color + '30' : 'var(--border)'),
               }}>
-                {headerTeam && (
-                  <div
-                    onClick={function () { handleTeamChange(''); }}
-                    style={{
-                      padding: '5px 12px', cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace",
-                      fontSize: 11, color: 'var(--text-3)',
-                    }}
-                    onMouseEnter={function (e) { e.currentTarget.style.background = 'var(--bg-3)'; }}
-                    onMouseLeave={function (e) { e.currentTarget.style.background = 'transparent'; }}
-                  >
-                    (none)
-                  </div>
-                )}
-                {teams.map(function (t) {
-                  var isCurrent = t.name === headerTeam;
-                  var profileCount = t.delegation && t.delegation.profiles ? t.delegation.profiles.length : 0;
-                  return (
+                {headerProfile}
+              </span>
+            )}
+            <span ref={teamDropdownRef} style={{ position: 'relative', flexShrink: 0 }}>
+              <span
+                onClick={function () { if (!sending) setShowTeamDropdown(!showTeamDropdown); }}
+                style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+                  padding: '1px 7px', borderRadius: 8, cursor: sending ? 'default' : 'pointer',
+                  background: headerTeam ? 'var(--green)18' : 'var(--bg-3)',
+                  color: headerTeam ? 'var(--green)' : 'var(--text-3)',
+                  border: '1px solid ' + (headerTeam ? 'var(--green)30' : 'var(--border)'),
+                }}
+              >
+                {headerTeam ? headerTeam + (function () {
+                  var t = teams.find(function (t) { return t.name === headerTeam; });
+                  return t && t.delegation && t.delegation.profiles ? ' (' + t.delegation.profiles.length + ')' : '';
+                })() : '+ team'}
+              </span>
+              {showTeamDropdown && (
+                <div style={{
+                  position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 100,
+                  background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 6,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.3)', minWidth: 140, padding: '4px 0',
+                }}>
+                  {headerTeam && (
                     <div
-                      key={t.name}
-                      onClick={function () { if (!isCurrent) handleTeamChange(t.name); }}
+                      onClick={function () { handleTeamChange(''); }}
                       style={{
-                        padding: '5px 12px', cursor: isCurrent ? 'default' : 'pointer',
-                        fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
-                        color: isCurrent ? 'var(--green)' : 'var(--text-1)',
-                        fontWeight: isCurrent ? 600 : 400,
+                        padding: '5px 12px', cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace",
+                        fontSize: 11, color: 'var(--text-3)',
                       }}
-                      onMouseEnter={function (e) { if (!isCurrent) e.currentTarget.style.background = 'var(--bg-3)'; }}
+                      onMouseEnter={function (e) { e.currentTarget.style.background = 'var(--bg-3)'; }}
                       onMouseLeave={function (e) { e.currentTarget.style.background = 'transparent'; }}
                     >
-                      {t.name}{profileCount > 0 ? ' (' + profileCount + ')' : ''}
+                      (none)
                     </div>
-                  );
-                })}
-                {teams.length === 0 && (
-                  <div style={{
-                    padding: '5px 12px', fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: 11, color: 'var(--text-3)',
-                  }}>
-                    No teams configured
-                  </div>
-                )}
-              </div>
+                  )}
+                  {teams.map(function (t) {
+                    var isCurrent = t.name === headerTeam;
+                    var profileCount = t.delegation && t.delegation.profiles ? t.delegation.profiles.length : 0;
+                    return (
+                      <div
+                        key={t.name}
+                        onClick={function () { if (!isCurrent) handleTeamChange(t.name); }}
+                        style={{
+                          padding: '5px 12px', cursor: isCurrent ? 'default' : 'pointer',
+                          fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+                          color: isCurrent ? 'var(--green)' : 'var(--text-1)',
+                          fontWeight: isCurrent ? 600 : 400,
+                        }}
+                        onMouseEnter={function (e) { if (!isCurrent) e.currentTarget.style.background = 'var(--bg-3)'; }}
+                        onMouseLeave={function (e) { e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        {t.name}{profileCount > 0 ? ' (' + profileCount + ')' : ''}
+                      </div>
+                    );
+                  })}
+                  {teams.length === 0 && (
+                    <div style={{
+                      padding: '5px 12px', fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: 11, color: 'var(--text-3)',
+                    }}>
+                      No teams configured
+                    </div>
+                  )}
+                </div>
+              )}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            {sending ? (
+              <span style={{
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+                padding: '2px 8px', borderRadius: 8,
+                background: streamEvents.length > 0 ? 'var(--green)18' : 'var(--accent)18',
+                color: streamEvents.length > 0 ? 'var(--green)' : 'var(--accent)',
+                animation: 'pulse 1.5s ease-in-out infinite',
+              }}>
+                {streamEvents.length > 0 ? 'responding\u2026' : 'thinking\u2026'}
+              </span>
+            ) : (
+              <span style={{
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+                padding: '2px 8px', borderRadius: 8,
+                background: 'var(--bg-3)', color: 'var(--text-3)',
+              }}>
+                {messages.length} msg{messages.length !== 1 ? 's' : ''}
+              </span>
             )}
-          </span>
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          {sending ? (
-            <span style={{
-              fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
-              padding: '2px 8px', borderRadius: 8,
-              background: streamEvents.length > 0 ? 'var(--green)18' : 'var(--accent)18',
-              color: streamEvents.length > 0 ? 'var(--green)' : 'var(--accent)',
-              animation: 'pulse 1.5s ease-in-out infinite',
-            }}>
-              {streamEvents.length > 0 ? 'responding\u2026' : 'thinking\u2026'}
-            </span>
-          ) : (
-            <span style={{
-              fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
-              padding: '2px 8px', borderRadius: 8,
-              background: 'var(--bg-3)', color: 'var(--text-3)',
-            }}>
-              {messages.length} msg{messages.length !== 1 ? 's' : ''}
-            </span>
-          )}
-        </div>
-      </div>
 
-      {/* Messages area */}
-      <ChatMessageList
-        messages={messages}
-        streamEvents={streamEvents}
-        isStreaming={sending}
-        loading={loading}
-        emptyMessage="Type a message to begin."
-      />
+        {/* Focus header bar when viewing a specific spawn */}
+        {focusedSpawn && (
+          <div style={{
+            padding: '6px 12px', borderBottom: '1px solid var(--border)',
+            background: statusColor(focusedSpawn.status) + '10',
+            display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
+          }}>
+            <span
+              onClick={function () { switchFocusScope('parent'); }}
+              style={{
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+                padding: '2px 6px', borderRadius: 3, cursor: 'pointer',
+                background: 'var(--bg-3)', color: 'var(--text-2)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              {'\u2190'} Back
+            </span>
+            <span style={{
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+              color: 'var(--text-1)',
+            }}>
+              Viewing spawn #{focusedSpawn.id}
+              {' \u2014 '}
+              <span style={{ fontWeight: 600, color: statusColor(focusedSpawn.status) }}>{focusedSpawn.profile}</span>
+              {focusedSpawn.role ? ' as ' + focusedSpawn.role : ''}
+            </span>
+          </div>
+        )}
 
-      {/* Input area */}
-      <div style={{
-        padding: '6px 12px', borderTop: '1px solid var(--border)',
-        background: 'var(--bg-1)', flexShrink: 0,
-      }}>
-        <form onSubmit={handleSend} style={{
-          display: 'flex', gap: 6, alignItems: 'center',
+        {/* Focus header bar when viewing all agents */}
+        {focusScope === 'all' && spawns.length > 0 && (
+          <div style={{
+            padding: '6px 12px', borderBottom: '1px solid var(--border)',
+            background: 'var(--accent)08',
+            display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
+          }}>
+            <span
+              onClick={function () { switchFocusScope('parent'); }}
+              style={{
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+                padding: '2px 6px', borderRadius: 3, cursor: 'pointer',
+                background: 'var(--bg-3)', color: 'var(--text-2)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              {'\u2190'} Back
+            </span>
+            <span style={{
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+              color: 'var(--text-2)',
+            }}>
+              All agents ({spawns.length + 1})
+            </span>
+          </div>
+        )}
+
+        {/* Messages area */}
+        <ChatMessageList
+          messages={messages}
+          streamEvents={streamEvents}
+          isStreaming={sending}
+          loading={loading}
+          emptyMessage="Type a message to begin."
+          showSourceLabels={focusScope === 'all'}
+        />
+
+        {/* Input area */}
+        <div style={{
+          padding: '6px 12px', borderTop: '1px solid var(--border)',
+          background: 'var(--bg-1)', flexShrink: 0,
         }}>
-          <span style={{
-            fontFamily: "'JetBrains Mono', monospace", fontSize: 13,
-            color: sending ? 'var(--text-3)' : 'var(--accent)', fontWeight: 700,
-            flexShrink: 0, userSelect: 'none',
-          }}>&gt;</span>
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={function (e) { setInput(e.target.value); }}
-            onKeyDown={handleKeyDown}
-            placeholder={sending ? 'Agent is working...' : 'Message...'}
-            disabled={sending}
-            style={{
-              flex: 1, padding: '7px 10px',
-              background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 3,
-              color: 'var(--text-0)', fontFamily: "'JetBrains Mono', monospace", fontSize: 12,
-              outline: 'none',
-            }}
-            autoComplete="off"
-          />
-          {sending ? (
-            <button
-              type="button"
-              onClick={handleStop}
+          <form onSubmit={handleSend} style={{
+            display: 'flex', gap: 6, alignItems: 'center',
+          }}>
+            <span style={{
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 13,
+              color: sending ? 'var(--text-3)' : 'var(--accent)', fontWeight: 700,
+              flexShrink: 0, userSelect: 'none',
+            }}>&gt;</span>
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={function (e) { setInput(e.target.value); }}
+              onKeyDown={handleKeyDown}
+              placeholder={sending ? 'Agent is working...' : 'Message...'}
+              disabled={sending}
               style={{
-                padding: '7px 12px', background: 'transparent',
-                border: '1px solid var(--red)', borderRadius: 3,
-                color: 'var(--red)', fontFamily: "'JetBrains Mono', monospace",
-                fontSize: 10, fontWeight: 600, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 4,
+                flex: 1, padding: '7px 10px',
+                background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 3,
+                color: 'var(--text-0)', fontFamily: "'JetBrains Mono', monospace", fontSize: 12,
+                outline: 'none',
               }}
+              autoComplete="off"
+            />
+            {sending ? (
+              <button
+                type="button"
+                onClick={handleStop}
+                style={{
+                  padding: '7px 12px', background: 'transparent',
+                  border: '1px solid var(--red)', borderRadius: 3,
+                  color: 'var(--red)', fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 4,
+                }}
             >{'\u25A0'} Stop</button>
-          ) : (
-            <button
-              type="submit"
-              style={{
-                padding: '7px 12px',
-                background: 'var(--accent)',
-                border: 'none', borderRadius: 3,
-                color: '#000',
-                fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >Send</button>
-          )}
-        </form>
+            ) : (
+              <button
+                type="submit"
+                style={{
+                  padding: '7px 12px',
+                  background: 'var(--accent)',
+                  border: 'none', borderRadius: 3,
+                  color: '#000',
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >Send</button>
+            )}
+          </form>
+        </div>
+
       </div>
 
+      {/* Spawn sidebar */}
+      {spawns.length > 0 && (
+        <SpawnSidebar
+          spawns={spawns}
+          focusScope={focusScope}
+          onSwitchScope={switchFocusScope}
+          parentProfile={headerProfile}
+          sending={sending}
+        />
+      )}
+    </div>
+  );
+}
+
+// --- SpawnSidebar component ---
+
+function SpawnSidebar({ spawns, focusScope, onSwitchScope, parentProfile, sending }) {
+  // Build tree from spawns using parent_spawn_id
+  var childrenByParent = {};
+  var roots = [];
+  spawns.forEach(function (s) {
+    if (s.parent_spawn_id > 0) {
+      if (!childrenByParent[s.parent_spawn_id]) childrenByParent[s.parent_spawn_id] = [];
+      childrenByParent[s.parent_spawn_id].push(s);
+    } else {
+      roots.push(s);
+    }
+  });
+
+  var parentColor = agentInfo(parentProfile || '').color;
+  var parentSelected = focusScope === 'parent';
+  var allSelected = focusScope === 'all';
+
+  return (
+    <div style={{
+      width: 240, borderLeft: '1px solid var(--border)',
+      background: 'var(--bg-1)', overflow: 'auto', flexShrink: 0,
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: '8px 12px', borderBottom: '1px solid var(--border)',
+        fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 600,
+        color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.1em',
+      }}>
+        Agents
+      </div>
+
+      {/* Parent node */}
+      <div
+        onClick={function () { onSwitchScope('parent'); }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '8px 12px', cursor: 'pointer',
+          background: parentSelected ? (parentColor + '12') : 'transparent',
+          borderLeft: parentSelected ? ('2px solid ' + parentColor) : '2px solid transparent',
+          transition: 'all 0.15s ease',
+        }}
+        onMouseEnter={function (e) { if (!parentSelected) e.currentTarget.style.background = 'var(--bg-3)'; }}
+        onMouseLeave={function (e) { if (!parentSelected) e.currentTarget.style.background = 'transparent'; }}
+      >
+        <span style={{
+          width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+          background: sending ? '#a6e3a1' : 'var(--text-3)',
+          boxShadow: sending ? '0 0 6px #a6e3a1' : 'none',
+          animation: sending ? 'pulse 2s ease-in-out infinite' : 'none',
+        }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600,
+              color: 'var(--text-0)',
+            }}>
+              {parentProfile || 'Parent'}
+            </span>
+          </div>
+          <div style={{
+            fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+            color: 'var(--text-3)', marginTop: 1,
+          }}>
+            main agent
+          </div>
+        </div>
+      </div>
+
+      {/* All node */}
+      <div
+        onClick={function () { onSwitchScope('all'); }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '8px 12px', cursor: 'pointer',
+          background: allSelected ? 'var(--accent)12' : 'transparent',
+          borderLeft: allSelected ? '2px solid var(--accent)' : '2px solid transparent',
+          transition: 'all 0.15s ease',
+        }}
+        onMouseEnter={function (e) { if (!allSelected) e.currentTarget.style.background = 'var(--bg-3)'; }}
+        onMouseLeave={function (e) { if (!allSelected) e.currentTarget.style.background = 'transparent'; }}
+      >
+        <span style={{
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+          color: 'var(--text-2)', flexShrink: 0,
+        }}>{'\u2261'}</span>
+        <span style={{
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+          color: 'var(--text-1)',
+        }}>
+          All agents
+        </span>
+        <span style={{
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+          color: 'var(--text-3)', padding: '1px 5px',
+          background: 'var(--bg-3)', borderRadius: 3, marginLeft: 'auto',
+        }}>
+          {spawns.length + 1}
+        </span>
+      </div>
+
+      {/* Divider */}
+      <div style={{ borderBottom: '1px solid var(--border)', margin: '4px 0' }} />
+
+      {/* Spawn tree */}
+      {roots.map(function (spawn) {
+        return (
+          <SpawnTreeNode
+            key={spawn.id}
+            spawn={spawn}
+            depth={0}
+            childrenByParent={childrenByParent}
+            focusScope={focusScope}
+            onSelect={onSwitchScope}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+// --- SpawnTreeNode component ---
+
+function SpawnTreeNode({ spawn, depth, childrenByParent, focusScope, onSelect }) {
+  var children = childrenByParent[spawn.id] || [];
+  var selected = focusScope === 'spawn-' + spawn.id;
+  var sColor = statusColor(spawn.status);
+  var statusLower = (spawn.status || '').toLowerCase().replace(/[^a-z0-9_]+/g, '_');
+  var isRunning = !!STATUS_RUNNING[statusLower];
+  var hasPendingQuestion = statusLower === 'awaiting_input' && !!spawn.question;
+
+  return (
+    <div style={{ marginLeft: depth * 14 }}>
+      <div
+        onClick={function () { onSelect('spawn-' + spawn.id); }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 7,
+          padding: '6px 12px', cursor: 'pointer',
+          background: selected ? (sColor + '12') : 'transparent',
+          borderLeft: selected ? ('2px solid ' + sColor) : '2px solid transparent',
+          transition: 'all 0.15s ease',
+        }}
+        onMouseEnter={function (e) { if (!selected) e.currentTarget.style.background = 'var(--bg-3)'; }}
+        onMouseLeave={function (e) { if (!selected) e.currentTarget.style.background = 'transparent'; }}
+      >
+        <span style={{
+          width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+          background: sColor,
+          boxShadow: isRunning ? '0 0 6px ' + sColor : 'none',
+          animation: isRunning ? 'pulse 2s ease-in-out infinite' : 'none',
+        }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+              color: 'var(--text-3)',
+            }}>
+              #{spawn.id}
+            </span>
+            <span style={{
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
+              color: 'var(--text-0)',
+            }}>
+              {spawn.profile || 'spawn'}
+            </span>
+            {spawn.role && (
+              <span style={{
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+                color: 'var(--text-3)',
+              }}>
+                as {spawn.role}
+              </span>
+            )}
+          </div>
+          {hasPendingQuestion && (
+            <div style={{
+              marginTop: 3, display: 'flex', alignItems: 'center', gap: 4,
+            }}>
+              <span style={{
+                width: 5, height: 5, borderRadius: '50%',
+                background: '#89b4fa',
+                animation: 'pulse 1.5s ease-in-out infinite',
+              }} />
+              <span style={{
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 8,
+                color: '#89b4fa', fontWeight: 600,
+              }}>
+                AWAITING RESPONSE
+              </span>
+            </div>
+          )}
+        </div>
+        {isRunning && (
+          <span style={{
+            width: 8, height: 8, border: '1.5px solid ' + sColor, borderTopColor: 'transparent',
+            borderRadius: '50%', animation: 'spin 1s linear infinite', flexShrink: 0,
+          }} />
+        )}
+      </div>
+
+      {children.map(function (child) {
+        return (
+          <SpawnTreeNode
+            key={child.id}
+            spawn={child}
+            depth={depth + 1}
+            childrenByParent={childrenByParent}
+            focusScope={focusScope}
+            onSelect={onSelect}
+          />
+        );
+      })}
     </div>
   );
 }
