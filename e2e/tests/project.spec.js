@@ -42,6 +42,7 @@ test('project browser creates, initializes, opens, and switches projects', async
 
   const currentURL = new URL(page.url());
   expect(currentURL.searchParams.get('project')).toBe(String(openedProject.id));
+  await expect.poll(async () => page.evaluate(() => localStorage.getItem('adaf_project_id'))).toBe(String(openedProject.id));
 
   const dashboardResponse = await request.get(`${state.baseURL}/api/projects/dashboard`);
   expect(dashboardResponse.status()).toBe(200);
@@ -56,6 +57,7 @@ test('project browser creates, initializes, opens, and switches projects', async
   await dialogAgain.getByRole('button', { name: 'Open' }).nth(0).click();
 
   await expect(trigger).toContainText('E2E Replay Fixtures');
+  await expect.poll(async () => page.evaluate(() => localStorage.getItem('adaf_project_id'))).toBe(String(fixture.id));
 });
 
 test('filesystem browse and mkdir endpoints operate inside allowed root', async ({ request }) => {
@@ -78,6 +80,34 @@ test('filesystem browse and mkdir endpoints operate inside allowed root', async 
   const afterPayload = await browseAfter.json();
   const names = (afterPayload.entries || []).map((entry) => String(entry.name || ''));
   expect(names).toContain(folderName);
+});
+
+test('project browser supports nested navigation and parent up action', async ({ page, request }) => {
+  const state = loadState();
+  const fixture = await fixtureProject(request, state);
+  const parentDir = uniqueName('nav-parent');
+  const childDir = uniqueName('nav-child');
+  const nestedPath = path.join(state.workspaceRoot, parentDir, childDir);
+
+  const mkdirResponse = await request.post(`${state.baseURL}/api/fs/mkdir`, {
+    data: { path: nestedPath },
+  });
+  expect(mkdirResponse.status()).toBe(200);
+
+  await page.goto(projectAppURL(state, fixture.id));
+  await page.getByTitle('Browse projects').first().click();
+
+  const dialog = page.getByRole('dialog', { name: 'File Explorer' });
+  await expect(dialog).toBeVisible();
+
+  await dialog.getByText(parentDir, { exact: true }).first().click();
+  await expect(dialog.getByText(childDir, { exact: true }).first()).toBeVisible();
+
+  const upButton = dialog.getByRole('button', { name: '.. Up' });
+  await expect(upButton).toBeVisible();
+  await upButton.click();
+
+  await expect(dialog.getByText(parentDir, { exact: true }).first()).toBeVisible();
 });
 
 test('project-scoped routes isolate data per project', async ({ request }) => {

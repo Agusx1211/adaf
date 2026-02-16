@@ -154,35 +154,37 @@ test('config team and role CRUD persists', async ({ page, request }) => {
   const roleName = uniqueName('role');
 
   await clickSectionNew(page, /Teams \(\d+\)/);
+  await expect(page.getByText('New Team', { exact: false })).toBeVisible();
   await page.getByPlaceholder('my-team').fill(teamName);
   await page.getByPlaceholder('What this team is good at...').fill('Team created in e2e tests.');
   await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByText('Saved').first()).toBeVisible();
-
-  const teams = await readConfigList(request, state, '/api/config/teams');
-  expect(teams.find((team) => String(team.name || '') === teamName)).toBeTruthy();
+  await expect.poll(async () => {
+    const teams = await readConfigList(request, state, '/api/config/teams');
+    return teams.some((team) => String(team.name || '') === teamName);
+  }).toBe(true);
 
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Delete' }).click();
-  await expect(page.getByText('Deleted').first()).toBeVisible();
+  await expect.poll(async () => {
+    const teams = await readConfigList(request, state, '/api/config/teams');
+    return teams.some((team) => String(team.name || '') === teamName);
+  }).toBe(false);
 
   await clickSectionNew(page, /Roles \(\d+\)/);
+  await expect(page.getByText('New Role', { exact: false })).toBeVisible();
   await page.getByPlaceholder('my-role').fill(roleName);
   await page.getByPlaceholder('ROLE TITLE (uppercase)').fill('E2E ROLE');
   await page.getByPlaceholder('What this role does...').fill('Role created by e2e.');
   await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByText('Saved').first()).toBeVisible();
-
-  const roles = await readConfigList(request, state, '/api/config/roles');
-  expect(roles.find((role) => String(role.name || '') === roleName)).toBeTruthy();
+  await expect.poll(async () => {
+    const roles = await readConfigList(request, state, '/api/config/roles');
+    return roles.some((role) => String(role.name || '') === roleName);
+  }).toBe(true);
 
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Delete' }).click();
-  await expect(page.getByText('Deleted').first()).toBeVisible();
-
-  const finalTeams = await readConfigList(request, state, '/api/config/teams');
-  expect(finalTeams.find((team) => String(team.name || '') === teamName)).toBeFalsy();
-
-  const finalRoles = await readConfigList(request, state, '/api/config/roles');
-  expect(finalRoles.find((role) => String(role.name || '') === roleName)).toBeFalsy();
+  await expect.poll(async () => {
+    const roles = await readConfigList(request, state, '/api/config/roles');
+    return roles.some((role) => String(role.name || '') === roleName);
+  }).toBe(false);
 });

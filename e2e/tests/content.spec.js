@@ -59,6 +59,82 @@ test('standalone chat can be created and deleted with real backend data', async 
   await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(profileName)}`);
 });
 
+test('standalone chat can be created with profile, team, and skills', async ({ page, request }) => {
+  const { state, fixture } = await gotoFixture(page, request);
+  const primaryProfile = uniqueName('team-chat-profile');
+  const delegatedProfile = uniqueName('delegated-profile');
+  const teamName = uniqueName('chat-team');
+  const skillID = uniqueName('chat-skill').replace(/-/g, '_');
+
+  const createPrimary = await request.post(`${state.baseURL}/api/config/profiles`, {
+    data: { name: primaryProfile, agent: 'generic' },
+  });
+  expect(createPrimary.status()).toBe(201);
+
+  const createDelegated = await request.post(`${state.baseURL}/api/config/profiles`, {
+    data: { name: delegatedProfile, agent: 'generic' },
+  });
+  expect(createDelegated.status()).toBe(201);
+
+  const createTeam = await request.post(`${state.baseURL}/api/config/teams`, {
+    data: {
+      name: teamName,
+      description: 'e2e standalone team',
+      delegation: {
+        profiles: [
+          { name: delegatedProfile, role: 'developer', max_instances: 1 },
+        ],
+        max_parallel: 1,
+      },
+    },
+  });
+  expect(createTeam.status()).toBe(201);
+
+  const createSkill = await request.post(`${state.baseURL}/api/config/skills`, {
+    data: { id: skillID, short: 'Skill for standalone creation flow' },
+  });
+  expect(createSkill.status()).toBe(201);
+
+  const beforeResponse = await request.get(`${projectBaseURL(state, fixture.id)}/chat-instances`);
+  expect(beforeResponse.status()).toBe(200);
+  const beforeChats = await beforeResponse.json();
+  const beforeCount = Array.isArray(beforeChats) ? beforeChats.length : 0;
+
+  await page.getByRole('button', { name: 'Standalone' }).click();
+  await page.getByRole('button', { name: '+ New Chat' }).first().click();
+
+  const modal = page.getByRole('dialog', { name: 'New Chat' });
+  await expect(modal).toBeVisible();
+
+  const selects = modal.locator('select');
+  await selects.nth(0).selectOption(primaryProfile);
+  await selects.nth(1).selectOption(teamName);
+  await modal.getByText(skillID, { exact: true }).first().click();
+  await modal.getByRole('button', { name: 'Create' }).click();
+
+  const afterResponse = await request.get(`${projectBaseURL(state, fixture.id)}/chat-instances`);
+  expect(afterResponse.status()).toBe(200);
+  const afterChats = await afterResponse.json();
+  expect(Array.isArray(afterChats)).toBe(true);
+  expect(afterChats.length).toBe(beforeCount + 1);
+
+  const created = afterChats.find((chat) => (
+    String(chat.profile || '') === primaryProfile
+    && String(chat.team || '') === teamName
+    && Array.isArray(chat.skills)
+    && chat.skills.includes(skillID)
+  ));
+  expect(created).toBeTruthy();
+
+  const deleteChat = await request.delete(`${projectBaseURL(state, fixture.id)}/chat-instances/${encodeURIComponent(created.id)}`);
+  expect(deleteChat.status()).toBe(200);
+
+  await request.delete(`${state.baseURL}/api/config/skills/${encodeURIComponent(skillID)}`);
+  await request.delete(`${state.baseURL}/api/config/teams/${encodeURIComponent(teamName)}`);
+  await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(primaryProfile)}`);
+  await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(delegatedProfile)}`);
+});
+
 test('issues detail edit persists to backend store', async ({ page, request }) => {
   const { state, fixture } = await gotoFixture(page, request);
   const nextTitle = uniqueName('issue-title');

@@ -21,7 +21,7 @@ Priority legend:
 - [ ] `E2E-006 (P1)` global setup creates isolated HOME and does not touch host user state.
 - [x] `E2E-007 (P1)` global teardown kills server process and removes temp dirs.
 - [x] `E2E-008 (P1)` page reload keeps app usable with same base URL.
-- [ ] `E2E-009 (P1)` no uncaught browser exceptions during initial load.
+- [x] `E2E-009 (P1)` no uncaught browser exceptions during initial load.
 - [x] `E2E-010 (P1)` no failed network requests on clean boot path.
 
 ## B) Project Discovery, Picker, Init, Open, Switching
@@ -29,16 +29,16 @@ Priority legend:
 - [ ] `E2E-011 (P0)` project picker appears when no selected project exists.
 - [ ] `E2E-012 (P0)` unresolved `?project=<id>` shows "project not found" picker state.
 - [x] `E2E-013 (P0)` init new project via UI creates `.adaf/project.json`.
-- [ ] `E2E-014 (P0)` open existing project via path from picker.
-- [ ] `E2E-015 (P0)` select already registered project from picker.
+- [x] `E2E-014 (P0)` open existing project via path from picker.
+- [x] `E2E-015 (P0)` select already registered project from picker.
 - [x] `E2E-016 (P0)` switching project from top bar updates all views to new project data.
 - [x] `E2E-017 (P0)` selected project persists in URL query.
-- [ ] `E2E-018 (P0)` selected project persists in local storage.
+- [x] `E2E-018 (P0)` selected project persists in local storage.
 - [ ] `E2E-019 (P1)` recent projects API list is rendered and selectable.
 - [ ] `E2E-020 (P1)` invalid open path shows user-visible error.
 - [ ] `E2E-021 (P1)` init with duplicate existing project path shows expected error.
 - [x] `E2E-022 (P1)` project browser modal opens and closes correctly.
-- [ ] `E2E-023 (P1)` project browser path navigation works from filesystem root.
+- [x] `E2E-023 (P1)` project browser path navigation works from filesystem root.
 - [x] `E2E-024 (P1)` project dashboard `/api/projects/dashboard` includes all registered projects.
 - [x] `E2E-025 (P1)` project-scoped routes only return data for selected project.
 - [ ] `E2E-026 (P2)` auto-register project by URL project ID works on first request.
@@ -50,7 +50,7 @@ Priority legend:
 - [ ] `E2E-029 (P1)` running counter updates when session status changes.
 - [ ] `E2E-030 (P1)` running sessions dropdown lists active sessions with stop controls.
 - [ ] `E2E-031 (P1)` websocket live/offline indicator reflects socket state.
-- [ ] `E2E-032 (P1)` usage limits pill opens details dropdown.
+- [x] `E2E-032 (P1)` usage limits pill opens details dropdown.
 - [ ] `E2E-033 (P2)` top bar loop spinner appears during active loop runs.
 
 ## D) Loop Tree, Scope Selection, and Agent Pane
@@ -68,10 +68,10 @@ Priority legend:
 ## E) Historical Replay and Stream Rendering
 
 - [x] `E2E-043 (P0)` completed sessions load historical events from `/sessions/{id}/events`.
-- [ ] `E2E-044 (P0)` initial prompt block is rendered from metadata.
+- [x] `E2E-044 (P0)` initial prompt block is rendered from metadata.
 - [x] `E2E-045 (P0)` assistant text blocks render from recorded stream events.
-- [ ] `E2E-046 (P0)` thinking blocks render and can be expanded/collapsed.
-- [ ] `E2E-047 (P0)` tool call blocks render name + arguments.
+- [x] `E2E-046 (P0)` thinking blocks render and can be expanded/collapsed.
+- [x] `E2E-047 (P0)` tool call blocks render name + arguments.
 - [ ] `E2E-048 (P0)` tool result blocks render success and error states.
 - [x] `E2E-049 (P0)` provider fixture replay renders expected completion token per provider.
 - [ ] `E2E-050 (P1)` source labels show per-agent/per-spawn attribution in all-agents view.
@@ -81,7 +81,7 @@ Priority legend:
 - [ ] `E2E-054 (P1)` unknown event types trigger graceful fallback and continue rendering.
 - [ ] `E2E-055 (P1)` auto-scroll follows stream when pinned to bottom.
 - [ ] `E2E-056 (P1)` "Jump to latest" appears when user scrolls up.
-- [ ] `E2E-057 (P2)` inspect modal opens for agent messages with prompt/event payload.
+- [x] `E2E-057 (P2)` inspect modal opens for agent messages with prompt/event payload.
 
 ## F) Session and Loop Actions
 
@@ -100,9 +100,9 @@ Priority legend:
 ## G) Standalone Chat Instances
 
 - [x] `E2E-069 (P0)` create standalone chat with profile only.
-- [ ] `E2E-070 (P0)` create standalone chat with profile + team.
-- [ ] `E2E-071 (P0)` create standalone chat with selected skills.
-- [ ] `E2E-072 (P0)` chat list updates immediately after creation.
+- [x] `E2E-070 (P0)` create standalone chat with profile + team.
+- [x] `E2E-071 (P0)` create standalone chat with selected skills.
+- [x] `E2E-072 (P0)` chat list updates immediately after creation.
 - [ ] `E2E-073 (P0)` selecting a chat loads message history.
 - [x] `E2E-074 (P0)` delete chat removes it from list and clears selection if active.
 - [ ] `E2E-075 (P1)` quick-pick recent profile/team combinations in new chat modal.
@@ -176,7 +176,7 @@ Priority legend:
 ## M) Filesystem Endpoints and Browser Flows
 
 - [x] `E2E-127 (P0)` browse filesystem root via `/api/fs/browse`.
-- [ ] `E2E-128 (P0)` browse nested folder and parent navigation works.
+- [x] `E2E-128 (P0)` browse nested folder and parent navigation works.
 - [x] `E2E-129 (P0)` create folder via `/api/fs/mkdir`.
 - [ ] `E2E-130 (P1)` invalid mkdir path returns user-visible error.
 - [ ] `E2E-131 (P1)` path traversal attempts are blocked by allowed root.

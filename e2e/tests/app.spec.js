@@ -14,6 +14,12 @@ async function gotoFixture(page, request) {
   return { state, fixture };
 }
 
+async function openReplayLoop(page) {
+  const loopRow = page.getByText('fixture-replay', { exact: true }).first();
+  await expect(loopRow).toBeVisible();
+  await loopRow.click();
+}
+
 test('renders ADAF shell with replay fixtures', async ({ page, request }) => {
   await gotoFixture(page, request);
   await expect(page).toHaveTitle(/running/i);
@@ -76,11 +82,32 @@ test('serves global stylesheet', async ({ request }) => {
   expect(response.headers()['content-type'] || '').toContain('text/css');
 });
 
+test('serves usage endpoint payload shape', async ({ request }) => {
+  const state = loadState();
+  const response = await request.get(`${state.baseURL}/api/usage`);
+  expect(response.status()).toBe(200);
+  const payload = await response.json();
+  expect(payload).toBeTruthy();
+  if (Array.isArray(payload)) {
+    return;
+  }
+  if (payload.snapshots != null) {
+    expect(Array.isArray(payload.snapshots)).toBe(true);
+  }
+  if (payload.errors != null) {
+    expect(Array.isArray(payload.errors)).toBe(true);
+  }
+});
+
+test('usage limits dropdown opens from top bar', async ({ page, request }) => {
+  await gotoFixture(page, request);
+  await page.getByRole('button', { name: 'Limits' }).click();
+  await expect(page.getByText('Usage Limits', { exact: true })).toBeVisible();
+});
+
 test('replays captured fixture outputs in the UI', async ({ page, request }) => {
   const { state } = await gotoFixture(page, request);
-  const loopRow = page.getByText('fixture-replay', { exact: true }).first();
-  await expect(loopRow).toBeVisible();
-  await loopRow.click();
+  await openReplayLoop(page);
 
   for (const fixture of state.fixtures) {
     await page.getByText(String(fixture.profile), { exact: true }).first().click();
@@ -88,6 +115,42 @@ test('replays captured fixture outputs in the UI', async ({ page, request }) => 
     const expectedToken = normalizeExpectedToken(expectedOutput);
     await expect(page.getByText(expectedToken, { exact: false }).first()).toBeVisible({ timeout: 15_000 });
   }
+});
+
+test('replay renders prompt, thinking, and tool blocks for codex fixture', async ({ page, request }) => {
+  const { state } = await gotoFixture(page, request);
+  await openReplayLoop(page);
+
+  const codexFixture = state.fixtures.find((fixture) => fixture.provider === 'codex');
+  expect(codexFixture).toBeTruthy();
+
+  await page.getByText(String(codexFixture.profile), { exact: true }).first().click();
+  await expect(page.getByText('In the current directory, create a file named fixture_note.txt', { exact: false }).first()).toBeVisible();
+
+  const thinkingToggle = page.getByText('THINKING', { exact: true }).first();
+  await expect(thinkingToggle).toBeVisible();
+  await thinkingToggle.click();
+  await expect(page.getByText('Creating file with exact content', { exact: false }).first()).toBeVisible();
+
+  await expect(page.getByText('Bash', { exact: false }).first()).toBeVisible();
+});
+
+test('assistant inspect modal opens for replayed messages', async ({ page, request }) => {
+  const { state } = await gotoFixture(page, request);
+  await openReplayLoop(page);
+
+  const codexFixture = state.fixtures.find((fixture) => fixture.provider === 'codex');
+  expect(codexFixture).toBeTruthy();
+  await page.getByText(String(codexFixture.profile), { exact: true }).first().click();
+
+  const inspectButton = page.getByRole('button', { name: 'inspect' }).first();
+  await expect(inspectButton).toBeVisible();
+  await inspectButton.click();
+
+  const inspector = page.getByRole('dialog', { name: 'Prompt Inspector' });
+  await expect(inspector).toBeVisible();
+  await expect(inspector.getByText('Structured Events', { exact: false })).toBeVisible();
+  await inspector.getByRole('button', { name: 'Close' }).click();
 });
 
 test('navigation updates hash and survives reload', async ({ page, request }) => {
@@ -116,4 +179,19 @@ test('boot path has no failed HTTP requests', async ({ page, request }) => {
   await gotoFixture(page, request);
   await page.waitForTimeout(500);
   expect(failed).toEqual([]);
+});
+
+test('boot and initial interactions have no uncaught browser exceptions', async ({ page, request }) => {
+  const pageErrors = [];
+  page.on('pageerror', (err) => {
+    pageErrors.push(String(err || ''));
+  });
+
+  await gotoFixture(page, request);
+  await page.getByRole('button', { name: 'Docs' }).click();
+  await page.getByRole('button', { name: 'Plan' }).click();
+  await page.getByRole('button', { name: 'Loops' }).click();
+  await page.waitForTimeout(300);
+
+  expect(pageErrors).toEqual([]);
 });
