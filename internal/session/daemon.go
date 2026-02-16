@@ -1092,6 +1092,9 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 				globalCfg.Profiles = append(globalCfg.Profiles, p)
 			}
 		}
+		// Merge teams from disk — these are never in the DaemonConfig snapshot.
+		globalCfg.Teams = append(globalCfg.Teams, loaded.Teams...)
+
 		if globalCfg.Pushover.UserKey == "" && globalCfg.Pushover.AppToken == "" {
 			globalCfg.Pushover = loaded.Pushover
 		}

@@ -25,7 +25,7 @@ func TestBuildAgentConfig_ResumeSessionIDPassedThrough(t *testing.T) {
 		ResumeSessionID: "claude-session-xyz",
 	}
 
-	ac := buildAgentConfig(cfg, prof, 1, 0, "run-hex", "step-hex")
+	ac := buildAgentConfig(cfg, prof, 1, 0, "run-hex", "step-hex", nil)
 
 	if ac.ResumeSessionID != "claude-session-xyz" {
 		t.Fatalf("ResumeSessionID = %q, want %q", ac.ResumeSessionID, "claude-session-xyz")
@@ -45,7 +45,7 @@ func TestBuildAgentConfig_EmptyResumeSessionID(t *testing.T) {
 		AgentsCfg: agentsCfg,
 	}
 
-	ac := buildAgentConfig(cfg, prof, 1, 0, "", "")
+	ac := buildAgentConfig(cfg, prof, 1, 0, "", "", nil)
 
 	if ac.ResumeSessionID != "" {
 		t.Fatalf("ResumeSessionID = %q, want empty", ac.ResumeSessionID)

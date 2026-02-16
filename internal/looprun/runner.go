@@ -178,8 +178,16 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				TotalSteps: len(loopDef.Steps),
 			})
 
+			// Resolve team to delegation config.
+			var effectiveDelegation *config.DelegationConfig
+			if stepDef.Team != "" {
+				if team := cfg.GlobalCfg.FindTeam(stepDef.Team); team != nil {
+					effectiveDelegation = team.Delegation
+				}
+			}
+
 			// Build agent config.
-			agentCfg := buildAgentConfig(cfg, prof, run.ID, stepIdx, run.HexID, stepHexID)
+			agentCfg := buildAgentConfig(cfg, prof, run.ID, stepIdx, run.HexID, stepHexID, effectiveDelegation)
 
 			// Gather unseen messages for this step.
 			unseenMsgs := gatherUnseenMessages(cfg.Store, run, stepIdx)
@@ -203,14 +211,6 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			handoffs := run.PendingHandoffs
 			run.PendingHandoffs = nil
 			cfg.Store.UpdateLoopRun(run)
-
-			// Resolve team to delegation config.
-			var effectiveDelegation *config.DelegationConfig
-			if stepDef.Team != "" {
-				if team := cfg.GlobalCfg.FindTeam(stepDef.Team); team != nil {
-					effectiveDelegation = team.Delegation
-				}
-			}
 
 			promptOpts := promptpkg.BuildOpts{
 				Store:          cfg.Store,
@@ -645,7 +645,7 @@ func spawnSnapshotFingerprint(spawns []events.SpawnInfo) string {
 }
 
 // buildAgentConfig creates an agent.Config for a profile step.
-func buildAgentConfig(cfg RunConfig, prof *config.Profile, runID, stepIndex int, runHexID, stepHexID string) agent.Config {
+func buildAgentConfig(cfg RunConfig, prof *config.Profile, runID, stepIndex int, runHexID, stepHexID string, delegation *config.DelegationConfig) agent.Config {
 	launch := agent.BuildLaunchSpec(prof, cfg.AgentsCfg, "")
 	agentArgs := append([]string(nil), launch.Args...)
 	agentEnv := make(map[string]string)
@@ -661,6 +661,11 @@ func buildAgentConfig(cfg RunConfig, prof *config.Profile, runID, stepIndex int,
 	}
 	if stepHexID != "" {
 		agentEnv["ADAF_LOOP_STEP_HEX_ID"] = stepHexID
+	}
+	if delegation != nil {
+		if delegJSON, err := json.Marshal(delegation); err == nil {
+			agentEnv["ADAF_DELEGATION_JSON"] = string(delegJSON)
+		}
 	}
 
 	for k, v := range launch.Env {

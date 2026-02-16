@@ -117,6 +117,22 @@ func (s *Store) DeleteChatInstance(id string) error {
 	return os.RemoveAll(dir)
 }
 
+// UpdateChatInstance updates the team and skills on a chat instance.
+func (s *Store) UpdateChatInstance(id string, team string, skills []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	metaPath := filepath.Join(s.instanceDir(id), "meta.json")
+	var inst StandaloneChatInstance
+	if err := s.readJSON(metaPath, &inst); err != nil {
+		return err
+	}
+	inst.Team = team
+	inst.Skills = skills
+	inst.UpdatedAt = time.Now().UTC()
+	return s.writeJSON(metaPath, &inst)
+}
+
 // UpdateChatInstanceTitle sets the title on a chat instance.
 func (s *Store) UpdateChatInstanceTitle(id, title string) error {
 	s.mu.Lock()

@@ -256,6 +256,54 @@ func handleSaveChatInstanceResponse(s *store.Store, w http.ResponseWriter, r *ht
 	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "id": msg.ID})
 }
 
+// handleUpdateChatInstance updates team and skills on a chat instance.
+func handleUpdateChatInstance(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "id is required")
+		return
+	}
+
+	inst, err := s.GetChatInstance(id)
+	if err != nil || inst == nil {
+		writeError(w, http.StatusNotFound, "chat instance not found")
+		return
+	}
+
+	var req struct {
+		Team   string   `json:"team"`
+		Skills []string `json:"skills"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Team != "" {
+		cfg, err := config.Load()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load config")
+			return
+		}
+		if cfg.FindTeam(req.Team) == nil {
+			writeError(w, http.StatusBadRequest, "team not found: "+req.Team)
+			return
+		}
+	}
+
+	if err := s.UpdateChatInstance(id, req.Team, req.Skills); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update chat instance")
+		return
+	}
+
+	updated, err := s.GetChatInstance(id)
+	if err != nil || updated == nil {
+		writeError(w, http.StatusInternalServerError, "failed to reload chat instance")
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
 // handleDeleteChatInstance removes a chat instance and all its messages.
 func handleDeleteChatInstance(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

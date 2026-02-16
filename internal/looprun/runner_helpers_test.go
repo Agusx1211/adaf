@@ -1,6 +1,7 @@
 package looprun
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/agusx1211/adaf/internal/agent"
@@ -225,7 +226,7 @@ func TestBuildAgentConfig_SetsEnvironmentVariables(t *testing.T) {
 		SessionID: 42,
 	}
 
-	ac := buildAgentConfig(cfg, prof, 7, 2, "run-hex", "step-hex")
+	ac := buildAgentConfig(cfg, prof, 7, 2, "run-hex", "step-hex", nil)
 
 	if ac.WorkDir != "/tmp/workdir" {
 		t.Fatalf("WorkDir = %q, want %q", ac.WorkDir, "/tmp/workdir")
@@ -263,9 +264,61 @@ func TestBuildAgentConfig_OmitsSessionIDWhenZero(t *testing.T) {
 		SessionID: 0,
 	}
 
-	ac := buildAgentConfig(cfg, prof, 1, 0, "", "")
+	ac := buildAgentConfig(cfg, prof, 1, 0, "", "", nil)
 	if _, ok := ac.Env["ADAF_SESSION_ID"]; ok {
 		t.Fatalf("ADAF_SESSION_ID should not be set when SessionID is 0")
+	}
+}
+
+func TestBuildAgentConfig_SetsDelegationJSON(t *testing.T) {
+	prof := &config.Profile{Name: "test", Agent: "generic"}
+	agentsCfg := &agent.AgentsConfig{
+		Agents: map[string]agent.AgentRecord{
+			"generic": {Name: "generic", Path: "/bin/echo"},
+		},
+	}
+	cfg := RunConfig{
+		WorkDir:   "/tmp",
+		AgentsCfg: agentsCfg,
+	}
+
+	deleg := &config.DelegationConfig{
+		Profiles: []config.DelegationProfile{
+			{Name: "worker", Role: "coder"},
+		},
+		MaxParallel: 2,
+	}
+
+	ac := buildAgentConfig(cfg, prof, 1, 0, "", "", deleg)
+	val, ok := ac.Env["ADAF_DELEGATION_JSON"]
+	if !ok {
+		t.Fatal("ADAF_DELEGATION_JSON not set when delegation is non-nil")
+	}
+	if val == "" {
+		t.Fatal("ADAF_DELEGATION_JSON is empty")
+	}
+
+	// Verify it's valid JSON containing expected data.
+	if !strings.Contains(val, "worker") {
+		t.Fatalf("ADAF_DELEGATION_JSON = %q, want it to contain %q", val, "worker")
+	}
+}
+
+func TestBuildAgentConfig_NoDelegationJSON(t *testing.T) {
+	prof := &config.Profile{Name: "test", Agent: "generic"}
+	agentsCfg := &agent.AgentsConfig{
+		Agents: map[string]agent.AgentRecord{
+			"generic": {Name: "generic", Path: "/bin/echo"},
+		},
+	}
+	cfg := RunConfig{
+		WorkDir:   "/tmp",
+		AgentsCfg: agentsCfg,
+	}
+
+	ac := buildAgentConfig(cfg, prof, 1, 0, "", "", nil)
+	if _, ok := ac.Env["ADAF_DELEGATION_JSON"]; ok {
+		t.Fatal("ADAF_DELEGATION_JSON should not be set when delegation is nil")
 	}
 }
 

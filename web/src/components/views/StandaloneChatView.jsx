@@ -18,7 +18,10 @@ export default function StandaloneChatView() {
   var [input, setInput] = useState('');
   var [activeSessionID, setActiveSessionID] = useState(null);
   var [streamEvents, setStreamEvents] = useState([]);
+  var [teams, setTeams] = useState([]);
+  var [showTeamDropdown, setShowTeamDropdown] = useState(false);
   var inputRef = useRef(null);
+  var teamDropdownRef = useRef(null);
   var base = apiBase(state.currentProjectID);
 
   // Refs for per-chat session management
@@ -92,6 +95,37 @@ export default function StandaloneChatView() {
       })
       .catch(function () {});
   }, [chatID, base, state.currentProjectID]);
+
+  // Load available teams
+  useEffect(function () {
+    apiCall('/api/config/teams', 'GET', null, { allow404: true })
+      .then(function (list) { setTeams(list || []); })
+      .catch(function () {});
+  }, [state.currentProjectID]);
+
+  // Close team dropdown on outside click
+  useEffect(function () {
+    if (!showTeamDropdown) return;
+    function handleClick(e) {
+      if (teamDropdownRef.current && !teamDropdownRef.current.contains(e.target)) {
+        setShowTeamDropdown(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return function () { document.removeEventListener('mousedown', handleClick); };
+  }, [showTeamDropdown]);
+
+  async function handleTeamChange(newTeam) {
+    setShowTeamDropdown(false);
+    try {
+      var updated = await apiCall(base + '/chat-instances/' + encodeURIComponent(chatID), 'PATCH', { team: newTeam, skills: chatMeta ? chatMeta.skills || [] : [] });
+      setChatMeta(updated);
+      showToast('Team updated', 'success');
+    } catch (err) {
+      if (err && err.authRequired) return;
+      showToast('Failed to update team: ' + (err.message || err), 'error');
+    }
+  }
 
   // --- Per-chat WebSocket management ---
 
@@ -453,16 +487,72 @@ export default function StandaloneChatView() {
               {headerProfile}
             </span>
           )}
-          {headerTeam && (
-            <span style={{
-              fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
-              padding: '1px 7px', borderRadius: 8, flexShrink: 0,
-              background: 'var(--green)18', color: 'var(--green)',
-              border: '1px solid var(--green)30',
-            }}>
-              {headerTeam}
+          <span ref={teamDropdownRef} style={{ position: 'relative', flexShrink: 0 }}>
+            <span
+              onClick={function () { if (!sending) setShowTeamDropdown(!showTeamDropdown); }}
+              style={{
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+                padding: '1px 7px', borderRadius: 8, cursor: sending ? 'default' : 'pointer',
+                background: headerTeam ? 'var(--green)18' : 'var(--bg-3)',
+                color: headerTeam ? 'var(--green)' : 'var(--text-3)',
+                border: '1px solid ' + (headerTeam ? 'var(--green)30' : 'var(--border)'),
+              }}
+            >
+              {headerTeam ? headerTeam + (function () {
+                var t = teams.find(function (t) { return t.name === headerTeam; });
+                return t && t.delegation && t.delegation.profiles ? ' (' + t.delegation.profiles.length + ')' : '';
+              })() : '+ team'}
             </span>
-          )}
+            {showTeamDropdown && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 100,
+                background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 6,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)', minWidth: 140, padding: '4px 0',
+              }}>
+                {headerTeam && (
+                  <div
+                    onClick={function () { handleTeamChange(''); }}
+                    style={{
+                      padding: '5px 12px', cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: 11, color: 'var(--text-3)',
+                    }}
+                    onMouseEnter={function (e) { e.currentTarget.style.background = 'var(--bg-3)'; }}
+                    onMouseLeave={function (e) { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    (none)
+                  </div>
+                )}
+                {teams.map(function (t) {
+                  var isCurrent = t.name === headerTeam;
+                  var profileCount = t.delegation && t.delegation.profiles ? t.delegation.profiles.length : 0;
+                  return (
+                    <div
+                      key={t.name}
+                      onClick={function () { if (!isCurrent) handleTeamChange(t.name); }}
+                      style={{
+                        padding: '5px 12px', cursor: isCurrent ? 'default' : 'pointer',
+                        fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+                        color: isCurrent ? 'var(--green)' : 'var(--text-1)',
+                        fontWeight: isCurrent ? 600 : 400,
+                      }}
+                      onMouseEnter={function (e) { if (!isCurrent) e.currentTarget.style.background = 'var(--bg-3)'; }}
+                      onMouseLeave={function (e) { e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      {t.name}{profileCount > 0 ? ' (' + profileCount + ')' : ''}
+                    </div>
+                  );
+                })}
+                {teams.length === 0 && (
+                  <div style={{
+                    padding: '5px 12px', fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 11, color: 'var(--text-3)',
+                  }}>
+                    No teams configured
+                  </div>
+                )}
+              </div>
+            )}
+          </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           {sending ? (
