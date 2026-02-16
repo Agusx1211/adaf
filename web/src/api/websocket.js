@@ -24,31 +24,31 @@ export function useSessionSocket(sessionID) {
     });
   }, [dispatch]);
 
-  var handleAgentStreamEvent = useCallback(function (sid, rawEvent) {
+  var handleAgentStreamEvent = useCallback(function (scope, rawEvent) {
     var event = asObject(rawEvent);
     if (!event || typeof event !== 'object') {
-      addStreamEvent({ scope: 'session-' + sid, type: 'text', text: safeJSONString(rawEvent) });
+      addStreamEvent({ scope: scope, type: 'text', text: safeJSONString(rawEvent) });
       return;
     }
 
     if (event.type === 'assistant') {
       var blocks = extractContentBlocks(event);
       if (!blocks.length) {
-        addStreamEvent({ scope: 'session-' + sid, type: 'text', text: '[assistant event]' });
+        addStreamEvent({ scope: scope, type: 'text', text: '[assistant event]' });
         return;
       }
       blocks.forEach(function (block) {
         if (!block || typeof block !== 'object') return;
         if (block.type === 'text' && block.text) {
-          addStreamEvent({ scope: 'session-' + sid, type: 'text', text: String(block.text) });
+          addStreamEvent({ scope: scope, type: 'text', text: String(block.text) });
         } else if (block.type === 'thinking' && block.text) {
-          addStreamEvent({ scope: 'session-' + sid, type: 'thinking', text: String(block.text) });
+          addStreamEvent({ scope: scope, type: 'thinking', text: String(block.text) });
         } else if (block.type === 'tool_use') {
-          addStreamEvent({ scope: 'session-' + sid, type: 'tool_use', tool: block.name || 'tool', input: stringifyToolPayload(block.input || {}) });
+          addStreamEvent({ scope: scope, type: 'tool_use', tool: block.name || 'tool', input: stringifyToolPayload(block.input || {}) });
         } else if (block.type === 'tool_result') {
-          addStreamEvent({ scope: 'session-' + sid, type: 'tool_result', tool: block.name || 'tool_result', result: stringifyToolPayload(block.content || block.output || block.text || '') });
+          addStreamEvent({ scope: scope, type: 'tool_result', tool: block.name || 'tool_result', result: stringifyToolPayload(block.content || block.output || block.text || '') });
         } else {
-          addStreamEvent({ scope: 'session-' + sid, type: 'text', text: safeJSONString(block) });
+          addStreamEvent({ scope: scope, type: 'text', text: safeJSONString(block) });
         }
       });
       return;
@@ -58,7 +58,7 @@ export function useSessionSocket(sessionID) {
       var userBlocks = extractContentBlocks(event);
       userBlocks.forEach(function (block) {
         if (block && block.type === 'tool_result') {
-          addStreamEvent({ scope: 'session-' + sid, type: 'tool_result', tool: block.name || 'tool_result', result: stringifyToolPayload(block.content || block.output || block.text || safeJSONString(block)) });
+          addStreamEvent({ scope: scope, type: 'tool_result', tool: block.name || 'tool_result', result: stringifyToolPayload(block.content || block.output || block.text || safeJSONString(block)) });
         }
       });
       return;
@@ -66,16 +66,16 @@ export function useSessionSocket(sessionID) {
 
     if (event.type === 'content_block_delta') {
       var delta = event.delta && (event.delta.text || event.delta.partial_json);
-      if (delta) addStreamEvent({ scope: 'session-' + sid, type: 'text', text: String(delta) });
+      if (delta) addStreamEvent({ scope: scope, type: 'text', text: String(delta) });
       return;
     }
 
     if (event.type === 'result') {
-      addStreamEvent({ scope: 'session-' + sid, type: 'tool_result', text: 'Result received.' });
+      addStreamEvent({ scope: scope, type: 'tool_result', text: 'Result received.' });
       return;
     }
 
-    addStreamEvent({ scope: 'session-' + sid, type: 'text', text: '[' + (event.type || 'event') + '] ' + safeJSONString(event) });
+    addStreamEvent({ scope: scope, type: 'text', text: '[' + (event.type || 'event') + '] ' + safeJSONString(event) });
   }, [addStreamEvent]);
 
   var ingestEnvelope = useCallback(function (sid, envelope) {
@@ -108,13 +108,20 @@ export function useSessionSocket(sessionID) {
 
     if (type === 'event') {
       var wireEvent = data && data.event ? data.event : data;
-      handleAgentStreamEvent(sid, wireEvent);
+      var eventScope = (data && data.spawn_id > 0) ? 'spawn-' + data.spawn_id : 'session-' + sid;
+      handleAgentStreamEvent(eventScope, wireEvent);
       return;
     }
 
     if (type === 'raw') {
       var rawText = typeof data === 'string' ? data : (data && typeof data.data === 'string' ? data.data : safeJSONString(data));
-      addStreamEvent({ scope: 'session-' + sid, type: 'text', text: cropText(rawText) });
+      var rawScope = 'session-' + sid;
+      if (data && data.spawn_id > 0) {
+        rawScope = 'spawn-' + data.spawn_id;
+      } else if (data && data.session_id < 0) {
+        rawScope = 'spawn-' + (-data.session_id);
+      }
+      addStreamEvent({ scope: rawScope, type: 'text', text: cropText(rawText) });
       return;
     }
 

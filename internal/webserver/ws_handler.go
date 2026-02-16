@@ -147,16 +147,21 @@ func toWSEnvelope(event any) wsEnvelope {
 
 	case events.AgentEventMsg:
 		eventData, _ := json.Marshal(ev.Event)
-		wireEvent := session.WireEvent{Event: json.RawMessage(eventData)}
+		wireEvent := session.WireEvent{Event: json.RawMessage(eventData), SpawnID: ev.SpawnID}
 		if len(ev.Raw) > 0 {
 			wireEvent.Raw = json.RawMessage(ev.Raw)
 		}
 		return wsEnvelope{Type: session.MsgEvent, Data: wireEvent}
 
 	case events.AgentRawOutputMsg:
+		spawnID := 0
+		if ev.SessionID < 0 {
+			spawnID = -ev.SessionID
+		}
 		return wsEnvelope{Type: session.MsgRaw, Data: session.WireRaw{
 			Data:      ev.Data,
 			SessionID: ev.SessionID,
+			SpawnID:   spawnID,
 		}}
 
 	case events.AgentFinishedMsg:

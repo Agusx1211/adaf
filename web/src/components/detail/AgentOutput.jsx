@@ -30,7 +30,9 @@ export default function AgentOutput({ scope }) {
   }, [turnID, sessions]);
 
   var isRunning = sessionInfo && STATUS_RUNNING[normalizeStatus(sessionInfo.status)];
-  var isCompleted = sessionInfo && !isRunning;
+  // Treat missing sessions as completed – the session metadata may have been
+  // cleaned up, but recordings can still exist on disk.
+  var isCompleted = !isRunning;
 
   // Live stream events for this scope
   var filteredEvents = useMemo(function () {

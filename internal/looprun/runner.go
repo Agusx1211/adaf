@@ -474,22 +474,12 @@ func pollSpawnStatus(ctx context.Context, s *store.Store, parentTurnID int, even
 	spawnOffsets := make(map[int]int64)
 
 	poll := func(forceStatusEmit bool) {
-		records, err := s.SpawnsByParent(parentTurnID)
-		if err != nil {
-			return
-		}
+		records, turnToSpawn := collectDescendantSpawns(s, parentTurnID)
 		sort.Slice(records, func(i, j int) bool {
 			return records[i].ID < records[j].ID
 		})
 
 		emitSpawnOutput(records, s, spawnOffsets, eventCh)
-
-		turnToSpawn := make(map[int]int, len(records))
-		for _, rec := range records {
-			if rec.ChildTurnID > 0 {
-				turnToSpawn[rec.ChildTurnID] = rec.ID
-			}
-		}
 
 		spawns := make([]events.SpawnInfo, 0, len(records))
 		for _, rec := range records {
@@ -609,6 +599,37 @@ func emitSpawnOutput(records []store.SpawnRecord, s *store.Store, offsets map[in
 			})
 		}
 	}
+}
+
+// collectDescendantSpawns does a BFS from parentTurnID through ChildTurnID
+// links to collect all descendant spawn records and a turnToSpawn map.
+func collectDescendantSpawns(s *store.Store, parentTurnID int) ([]store.SpawnRecord, map[int]int) {
+	turnToSpawn := make(map[int]int)
+	var all []store.SpawnRecord
+	seen := make(map[int]struct{})
+
+	queue := []int{parentTurnID}
+	for len(queue) > 0 {
+		turnID := queue[0]
+		queue = queue[1:]
+
+		records, err := s.SpawnsByParent(turnID)
+		if err != nil {
+			continue
+		}
+		for _, rec := range records {
+			if _, ok := seen[rec.ID]; ok {
+				continue
+			}
+			seen[rec.ID] = struct{}{}
+			all = append(all, rec)
+			if rec.ChildTurnID > 0 {
+				turnToSpawn[rec.ChildTurnID] = rec.ID
+				queue = append(queue, rec.ChildTurnID)
+			}
+		}
+	}
+	return all, turnToSpawn
 }
 
 func spawnSnapshotFingerprint(spawns []events.SpawnInfo) string {

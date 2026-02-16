@@ -9,8 +9,9 @@ import (
 
 // AgentEventMsg wraps a parsed Claude stream event.
 type AgentEventMsg struct {
-	Event stream.ClaudeEvent
-	Raw   []byte
+	Event   stream.ClaudeEvent
+	Raw     []byte
+	SpawnID int // positive = sub-agent spawn, zero = parent session
 }
 
 // AgentRawOutputMsg carries raw text for non-Claude agents.

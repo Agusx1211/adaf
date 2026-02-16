@@ -107,14 +107,16 @@ type WirePrompt struct {
 
 // WireEvent carries a parsed Claude stream event.
 type WireEvent struct {
-	Event json.RawMessage `json:"event"`
-	Raw   json.RawMessage `json:"raw,omitempty"`
+	Event   json.RawMessage `json:"event"`
+	Raw     json.RawMessage `json:"raw,omitempty"`
+	SpawnID int             `json:"spawn_id,omitempty"`
 }
 
 // WireRaw carries raw text output for non-Claude agents.
 type WireRaw struct {
 	Data      string `json:"data"`
 	SessionID int    `json:"session_id,omitempty"`
+	SpawnID   int    `json:"spawn_id,omitempty"`
 }
 
 // WireFinished signals that a single agent session completed.

@@ -1248,13 +1248,17 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 				}
 				b.broadcastTyped(MsgFinished, wf)
 			case events.AgentRawOutputMsg:
-				b.broadcastTyped(MsgRaw, WireRaw{Data: ev.Data, SessionID: ev.SessionID})
+				spawnID := 0
+				if ev.SessionID < 0 {
+					spawnID = -ev.SessionID
+				}
+				b.broadcastTyped(MsgRaw, WireRaw{Data: ev.Data, SessionID: ev.SessionID, SpawnID: spawnID})
 			case events.AgentEventMsg:
 				eventJSON, err := json.Marshal(ev.Event)
 				if err != nil {
 					continue
 				}
-				b.broadcastTypedWithUpdate(MsgEvent, WireEvent{Event: eventJSON, Raw: ev.Raw}, snapshotUpdate{
+				b.broadcastTypedWithUpdate(MsgEvent, WireEvent{Event: eventJSON, Raw: ev.Raw, SpawnID: ev.SpawnID}, snapshotUpdate{
 					model: ev.Event.Model,
 				})
 			case events.SpawnStatusMsg:

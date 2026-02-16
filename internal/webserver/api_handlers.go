@@ -283,6 +283,34 @@ func handleTurnRecordingEventsP(s *store.Store, w http.ResponseWriter, r *http.R
 	_, _ = w.Write(data)
 }
 
+// enrichedSpawn extends SpawnRecord with a computed ParentSpawnID for tree rendering.
+type enrichedSpawn struct {
+	store.SpawnRecord
+	ParentSpawnID int `json:"parent_spawn_id,omitempty"`
+}
+
+func enrichSpawns(spawns []store.SpawnRecord) []enrichedSpawn {
+	// Build ChildTurnID -> SpawnID map so we can resolve ParentSpawnID.
+	turnToSpawn := make(map[int]int, len(spawns))
+	for _, rec := range spawns {
+		if rec.ChildTurnID > 0 {
+			turnToSpawn[rec.ChildTurnID] = rec.ID
+		}
+	}
+	result := make([]enrichedSpawn, len(spawns))
+	for i, rec := range spawns {
+		parentSpawnID := 0
+		if rec.ParentTurnID > 0 {
+			parentSpawnID = turnToSpawn[rec.ParentTurnID]
+		}
+		result[i] = enrichedSpawn{
+			SpawnRecord:   rec,
+			ParentSpawnID: parentSpawnID,
+		}
+	}
+	return result
+}
+
 func handleSpawnsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	spawns, err := s.ListSpawns()
 	if err != nil {
@@ -292,7 +320,7 @@ func handleSpawnsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	if spawns == nil {
 		spawns = []store.SpawnRecord{}
 	}
-	writeJSON(w, http.StatusOK, spawns)
+	writeJSON(w, http.StatusOK, enrichSpawns(spawns))
 }
 
 func handleSpawnByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) {
