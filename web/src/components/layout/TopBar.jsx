@@ -296,10 +296,10 @@ export default function TopBar() {
 }
 
 function getLevelColor(level) {
-  if (level === 'exhausted') return 'var(--red)';
-  if (level === 'critical') return 'var(--orange)';
-  if (level === 'warning') return 'var(--yellow)';
-  return 'var(--green)';
+  if (level === 'exhausted') return '#ef4444';
+  if (level === 'critical') return '#ef4444';
+  if (level === 'warning') return '#eab308';
+  return '#4ade80';
 }
 
 function formatResetTime(resetsAt) {
@@ -351,21 +351,29 @@ function UsagePill(props) {
         transition: 'all 0.15s ease',
       }}
     >
-      {hasLimits ? snapshots.map(function (s) {
-        var c = getLevelColor(s.level);
-        return (
-          <span key={s.provider} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-            <span style={{
-              width: 5, height: 5, borderRadius: '50%', background: c, flexShrink: 0,
-              animation: s.level !== 'normal' ? 'pulse 2s ease-in-out infinite' : 'none',
-            }} />
-            <span style={{ color: c }}>{s.provider.split(' ')[0]}</span>
-          </span>
-        );
-      }) : <span>Limits</span>}
+      <span style={{
+        width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0,
+        animation: highestLevel !== 'normal' ? 'pulse 2s ease-in-out infinite' : 'none',
+      }} />
+      <span>Limits</span>
       <span style={{ fontSize: 7, opacity: 0.6 }}>{'\u25BE'}</span>
     </button>
   );
+}
+
+function formatFetchedAgo(timestamp) {
+  if (!timestamp) return '';
+  var fetched = new Date(timestamp);
+  var now = new Date();
+  var diff = now - fetched;
+  if (diff < 0) return 'just now';
+  var secs = Math.floor(diff / 1000);
+  if (secs < 10) return 'just now';
+  if (secs < 60) return secs + 's ago';
+  var mins = Math.floor(secs / 60);
+  if (mins < 60) return mins + 'm ago';
+  var hours = Math.floor(mins / 60);
+  return hours + 'h ago';
 }
 
 function UsageDropdown(props) {
@@ -378,7 +386,7 @@ function UsageDropdown(props) {
   return (
     <div style={{
       position: 'absolute', top: 'calc(100% + 6px)', right: 0,
-      width: 380, maxHeight: 420,
+      width: 340, maxHeight: 420,
       background: 'var(--bg-1)', border: '1px solid var(--border)',
       borderRadius: 6, boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
       zIndex: 1000, display: 'flex', flexDirection: 'column',
@@ -394,7 +402,7 @@ function UsageDropdown(props) {
         }}>Usage Limits</span>
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: '4px 0' }}>
         {snapshots.length === 0 && errors.length === 0 && (
           <div style={{
             padding: 20, textAlign: 'center', color: 'var(--text-3)',
@@ -406,6 +414,7 @@ function UsageDropdown(props) {
         )}
 
         {snapshots.map(function (snapshot) {
+          var fetchedAgo = formatFetchedAgo(snapshot.timestamp);
           return (
             <div key={snapshot.provider} style={{
               padding: '8px 12px',
@@ -413,54 +422,60 @@ function UsageDropdown(props) {
             }}>
               <div style={{
                 fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
-                color: 'var(--text-1)', marginBottom: 6,
-                display: 'flex', alignItems: 'center', gap: 6,
+                color: 'var(--text-1)', marginBottom: 8,
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               }}>
-                <span style={{
-                  width: 6, height: 6, borderRadius: '50%',
-                  background: getLevelColor(snapshot.level),
-                }} />
-                {snapshot.provider}
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{
+                    width: 6, height: 6, borderRadius: '50%',
+                    background: getLevelColor(snapshot.level),
+                  }} />
+                  {snapshot.provider}
+                </span>
+                {fetchedAgo && (
+                  <span style={{
+                    fontFamily: "'JetBrains Mono', monospace", fontSize: 8,
+                    color: 'var(--text-3)', fontWeight: 400,
+                  }}>{fetchedAgo}</span>
+                )}
               </div>
               {snapshot.limits && snapshot.limits.map(function (limit) {
-                var pct = limit.utilization_pct;
-                var filled = Math.min(pct, 100);
-                var color = getLevelColor(limit.level);
+                var pct = Number(limit.utilization_pct) || 0;
+                var filled = Math.min(Math.max(pct, 0), 100);
+                var color = getLevelColor(limit.level || 'normal');
                 var resetText = formatResetTime(limit.resets_at);
                 return (
-                  <div key={limit.name} style={{ marginBottom: 6 }}>
+                  <div key={limit.name} style={{ marginBottom: 8 }}>
                     <div style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      marginBottom: 3,
+                      marginBottom: 4,
                     }}>
                       <span style={{
                         fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
                         color: 'var(--text-2)',
                       }}>{limit.name}</span>
-                      <span style={{
-                        fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-                        color: color, flexShrink: 0, marginLeft: 8,
-                      }}>{Math.round(pct)}%</span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{
+                          fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+                          color: color, fontWeight: 600,
+                        }}>{Math.round(pct)}%</span>
+                        {resetText && (
+                          <span style={{
+                            fontFamily: "'JetBrains Mono', monospace", fontSize: 8,
+                            color: 'var(--text-3)',
+                          }}>{resetText}</span>
+                        )}
+                      </span>
                     </div>
                     <div style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
+                      width: '100%', height: 6, background: 'var(--bg-3)', borderRadius: 3,
+                      overflow: 'hidden',
                     }}>
                       <div style={{
-                        flex: 1, height: 4, background: 'var(--bg-3)', borderRadius: 2,
-                        overflow: 'hidden',
-                      }}>
-                        <div style={{
-                          width: filled + '%', height: '100%',
-                          background: color, borderRadius: 2,
-                          transition: 'width 0.3s ease',
-                        }} />
-                      </div>
-                      {resetText && (
-                        <span style={{
-                          fontFamily: "'JetBrains Mono', monospace", fontSize: 8,
-                          color: 'var(--text-3)', flexShrink: 0,
-                        }}>{resetText}</span>
-                      )}
+                        width: filled + '%', height: '100%',
+                        background: color, borderRadius: 3,
+                        transition: 'width 0.3s ease',
+                      }} />
                     </div>
                   </div>
                 );
@@ -475,7 +490,7 @@ function UsageDropdown(props) {
               return (
                 <div key={i} style={{
                   fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-                  color: 'var(--text-3)', marginBottom: 2,
+                  color: '#ef4444', marginBottom: 2,
                 }}>{err}</div>
               );
             })}
@@ -492,7 +507,7 @@ function UsageDropdown(props) {
         }}>
           <span>in={formatNumber(usage.input_tokens || 0)}</span>
           <span>out={formatNumber(usage.output_tokens || 0)}</span>
-          <span style={{ color: 'var(--green)' }}>${Number(usage.cost_usd || 0).toFixed(4)}</span>
+          <span style={{ color: '#4ade80' }}>${Number(usage.cost_usd || 0).toFixed(4)}</span>
         </div>
       )}
     </div>
