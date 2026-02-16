@@ -150,7 +150,16 @@ export function useLoopMessages(loopID, projectID) {
 export function fetchTurnRecordingEvents(turnID, projectID, dispatch) {
   var base = apiBase(projectID);
   var url = base + '/turns/' + encodeURIComponent(String(turnID)) + '/events';
+  return fetchRecordingEvents(url, turnID, dispatch);
+}
 
+export function fetchSessionRecordingEvents(sessionID, projectID, dispatch) {
+  var base = apiBase(projectID);
+  var url = base + '/sessions/' + encodeURIComponent(String(sessionID)) + '/events';
+  return fetchRecordingEvents(url, sessionID, dispatch);
+}
+
+function fetchRecordingEvents(url, cacheID, dispatch) {
   var headers = { Accept: 'application/x-ndjson' };
   var token = '';
   try { token = localStorage.getItem('adaf_token') || ''; } catch (_) {}
@@ -173,7 +182,7 @@ export function fetchTurnRecordingEvents(turnID, projectID, dispatch) {
           events.push(ev);
         } catch (_) {}
       }
-      dispatch({ type: 'SET_HISTORICAL_EVENTS', payload: { turnID: turnID, events: events } });
+      dispatch({ type: 'SET_HISTORICAL_EVENTS', payload: { turnID: cacheID, events: events } });
     })
     .catch(function () {});
 }

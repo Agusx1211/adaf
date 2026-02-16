@@ -283,13 +283,63 @@ func handleTurnRecordingEventsP(s *store.Store, w http.ResponseWriter, r *http.R
 	_, _ = w.Write(data)
 }
 
+func handleSessionRecordingEventsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	id, err := parsePathID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	// For project-scoped routes, ensure the session belongs to this project.
+	if projectID := r.PathValue("projectID"); projectID != "" {
+		meta, err := session.LoadMeta(id)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "session not found")
+			return
+		}
+
+		expectedProjectID := session.ProjectIDFromDir(projectDir(s))
+		match := false
+		if meta.ProjectID == expectedProjectID {
+			match = true
+		} else if meta.ProjectID == "" && meta.ProjectDir != "" {
+			if session.ProjectIDFromDir(meta.ProjectDir) == expectedProjectID {
+				match = true
+			}
+		}
+
+		if !match {
+			writeError(w, http.StatusNotFound, "session not found in this project")
+			return
+		}
+	}
+
+	data, err := os.ReadFile(session.EventsPath(id))
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeError(w, http.StatusNotFound, "no recording found for this session")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to read recording")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
 // enrichedSpawn extends SpawnRecord with a computed ParentSpawnID for tree rendering.
 type enrichedSpawn struct {
 	store.SpawnRecord
 	ParentSpawnID int `json:"parent_spawn_id,omitempty"`
+	// ParentDaemonSessionID maps this spawn to the owning daemon session
+	// used by websocket/session-scoped filtering in the UI.
+	ParentDaemonSessionID int `json:"parent_daemon_session_id,omitempty"`
+	ChildDaemonSessionID  int `json:"child_daemon_session_id,omitempty"`
 }
 
-func enrichSpawns(spawns []store.SpawnRecord) []enrichedSpawn {
+func enrichSpawns(spawns []store.SpawnRecord, turnToDaemonSession map[int]int) []enrichedSpawn {
 	// Build ChildTurnID -> SpawnID map so we can resolve ParentSpawnID.
 	turnToSpawn := make(map[int]int, len(spawns))
 	for _, rec := range spawns {
@@ -304,8 +354,10 @@ func enrichSpawns(spawns []store.SpawnRecord) []enrichedSpawn {
 			parentSpawnID = turnToSpawn[rec.ParentTurnID]
 		}
 		result[i] = enrichedSpawn{
-			SpawnRecord:   rec,
-			ParentSpawnID: parentSpawnID,
+			SpawnRecord:           rec,
+			ParentSpawnID:         parentSpawnID,
+			ParentDaemonSessionID: turnToDaemonSession[rec.ParentTurnID],
+			ChildDaemonSessionID:  turnToDaemonSession[rec.ChildTurnID],
 		}
 	}
 	return result
@@ -320,7 +372,24 @@ func handleSpawnsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	if spawns == nil {
 		spawns = []store.SpawnRecord{}
 	}
-	writeJSON(w, http.StatusOK, enrichSpawns(spawns))
+
+	turnToDaemonSession := make(map[int]int)
+	loopRuns, err := s.ListLoopRuns()
+	if err == nil {
+		backfillDaemonSessionIDs(loopRuns)
+		for _, run := range loopRuns {
+			if run.DaemonSessionID <= 0 {
+				continue
+			}
+			for _, turnID := range run.TurnIDs {
+				if turnID > 0 {
+					turnToDaemonSession[turnID] = run.DaemonSessionID
+				}
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, enrichSpawns(spawns, turnToDaemonSession))
 }
 
 func handleSpawnByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) {

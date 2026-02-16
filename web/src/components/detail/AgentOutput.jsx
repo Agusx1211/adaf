@@ -1,216 +1,118 @@
 import { useMemo, useEffect, useState } from 'react';
 import { useAppState, useDispatch } from '../../state/store.js';
-import { fetchTurnRecordingEvents } from '../../api/hooks.js';
-import { normalizeStatus } from '../../utils/format.js';
-import { STATUS_RUNNING } from '../../utils/colors.js';
+import { fetchSessionRecordingEvents } from '../../api/hooks.js';
+import { normalizeStatus, cropText, safeJSONString } from '../../utils/format.js';
+import { STATUS_RUNNING, scopeColor } from '../../utils/colors.js';
 import { reportMissingUISample } from '../../api/missingUISamples.js';
 import { injectEventBlockStyles, stateEventsToBlocks } from '../common/EventBlocks.jsx';
 import ChatMessageList from '../common/ChatMessageList.jsx';
+import { buildSpawnScopeMaps, parseScope } from '../../utils/scopes.js';
 
 export default function AgentOutput({ scope }) {
   var state = useAppState();
   var dispatch = useDispatch();
-  var { streamEvents, autoScroll, sessions, historicalEvents, currentProjectID } = state;
+  var { streamEvents, autoScroll, sessions, spawns, loopRuns, historicalEvents, currentProjectID } = state;
   var [loadingHistory, setLoadingHistory] = useState(false);
 
   useEffect(function () { injectEventBlockStyles(); }, []);
 
-  // Determine the turn ID for this scope
-  var turnID = useMemo(function () {
-    if (!scope) return 0;
-    if (scope.indexOf('session-') === 0) {
-      return parseInt(scope.slice(8), 10) || 0;
-    }
-    return 0;
+  var scopeInfo = useMemo(function () {
+    return parseScope(scope);
   }, [scope]);
 
-  // Check if session is running
-  var sessionInfo = useMemo(function () {
-    if (!turnID) return null;
-    return sessions.find(function (s) { return s.id === turnID; }) || null;
-  }, [turnID, sessions]);
+  var scopeMaps = useMemo(function () {
+    return buildSpawnScopeMaps(spawns, loopRuns);
+  }, [spawns, loopRuns]);
 
-  var isRunning = sessionInfo && STATUS_RUNNING[normalizeStatus(sessionInfo.status)];
-  // Treat missing sessions as completed – the session metadata may have been
-  // cleaned up, but recordings can still exist on disk.
+  var selectedSessionID = useMemo(function () {
+    if (scopeInfo.kind === 'session') return scopeInfo.id;
+    if (scopeInfo.kind === 'spawn') return scopeMaps.spawnToSession[scopeInfo.id] || 0;
+    return 0;
+  }, [scopeInfo, scopeMaps]);
+
+  var selectedSession = useMemo(function () {
+    if (!selectedSessionID) return null;
+    return sessions.find(function (s) { return s.id === selectedSessionID; }) || null;
+  }, [selectedSessionID, sessions]);
+
+  var selectedSpawn = useMemo(function () {
+    if (scopeInfo.kind !== 'spawn') return null;
+    return spawns.find(function (s) { return s.id === scopeInfo.id; }) || null;
+  }, [scopeInfo, spawns]);
+
+  var descendantSpawnSet = useMemo(function () {
+    var result = {};
+    if (scopeInfo.kind !== 'session' || !selectedSessionID) return result;
+    var ids = scopeMaps.sessionToSpawnIDs[selectedSessionID] || [];
+    ids.forEach(function (id) { result[id] = true; });
+    return result;
+  }, [scopeInfo, selectedSessionID, scopeMaps]);
+
+  var sessionRunning = !!(selectedSession && STATUS_RUNNING[normalizeStatus(selectedSession.status)]);
+  var spawnRunning = !!(selectedSpawn && STATUS_RUNNING[normalizeStatus(selectedSpawn.status)]);
+  var isRunning = scopeInfo.kind === 'session' ? sessionRunning : (scopeInfo.kind === 'spawn' ? (sessionRunning || spawnRunning) : false);
   var isCompleted = !isRunning;
 
-  // Live stream events for this scope
+  var sessionsByID = useMemo(function () {
+    var index = {};
+    sessions.forEach(function (s) { if (s && s.id > 0) index[s.id] = s; });
+    return index;
+  }, [sessions]);
+
+  var spawnsByID = useMemo(function () {
+    var index = {};
+    spawns.forEach(function (s) { if (s && s.id > 0) index[s.id] = s; });
+    return index;
+  }, [spawns]);
+
   var filteredEvents = useMemo(function () {
     if (!scope) return [];
-    if (scope.indexOf('session-') === 0) {
-      return streamEvents.filter(function (e) {
-        return e.scope === scope || e.scope.indexOf('spawn-') === 0;
-      });
-    }
-    if (scope.indexOf('spawn-') === 0) {
-      return streamEvents.filter(function (e) { return e.scope === scope; });
-    }
-    return streamEvents;
-  }, [streamEvents, scope]);
+    return streamEvents.filter(function (e) {
+      return eventScopeMatches(scopeInfo, selectedSessionID, descendantSpawnSet, e.scope);
+    }).map(function (evt) {
+      return annotateSource(evt, sessionsByID, spawnsByID);
+    });
+  }, [streamEvents, scope, scopeInfo, selectedSessionID, descendantSpawnSet, sessionsByID, spawnsByID]);
 
   var blockEvents = useMemo(function () {
     return stateEventsToBlocks(filteredEvents);
   }, [filteredEvents]);
 
-  // Load historical events for completed sessions that have no live events
+  // Historical replay for completed sessions/spawns.
+  // Spawn replay is sourced from the owning daemon session event stream.
+  var historySessionID = selectedSessionID;
+
   useEffect(function () {
-    if (!turnID || !isCompleted) return;
+    if (!historySessionID || !isCompleted) return;
     if (blockEvents.length > 0) return;
-    if (historicalEvents[turnID]) return;
+    if (historicalEvents[historySessionID]) return;
     setLoadingHistory(true);
-    fetchTurnRecordingEvents(turnID, currentProjectID, dispatch)
+    fetchSessionRecordingEvents(historySessionID, currentProjectID, dispatch)
       .then(function () { setLoadingHistory(false); })
       .catch(function () { setLoadingHistory(false); });
-  }, [turnID, isCompleted, blockEvents.length, historicalEvents, currentProjectID, dispatch]);
+  }, [historySessionID, isCompleted, blockEvents.length, historicalEvents, currentProjectID, dispatch]);
 
-  // Convert historical recording events to display blocks.
-  // Handles two formats:
-  //   1. Store RecordingEvent: {type: "meta"|"claude_stream"|"stdout", data: "..."}
-  //   2. Wire protocol (session events): {type: "prompt"|"event"|"raw", data: {...}}
   var historicalData = useMemo(function () {
-    if (!turnID || !historicalEvents[turnID]) return { blocks: [], missingSamples: [] };
-    var events = historicalEvents[turnID];
-    var blocks = [];
-    var missingSamples = [];
-    var metaAgent = sessionInfo && sessionInfo.agent ? sessionInfo.agent : '';
-    var metaModel = sessionInfo && sessionInfo.model ? sessionInfo.model : '';
-
-    function queueMissingSample(reason, eventType, payload, fallbackText) {
-      missingSamples.push({
-        source: 'recording_history',
-        reason: reason,
-        scope: scope || ('session-' + turnID),
-        session_id: turnID,
-        event_type: eventType || '',
-        agent: metaAgent || '',
-        model: metaModel || '',
-        fallback_text: fallbackText || '',
-        payload: payload,
-      });
+    if (!historySessionID || !historicalEvents[historySessionID]) {
+      return { events: [], missingSamples: [] };
     }
 
-    function parseAgentEvent(parsed) {
-      if (parsed && parsed.type === 'assistant' && parsed.message && Array.isArray(parsed.message.content)) {
-        if (parsed.message.content.length === 0) {
-          queueMissingSample('assistant_without_content_blocks', parsed.type || 'assistant', parsed, '[assistant event]');
-          return true;
-        }
-        parsed.message.content.forEach(function (block) {
-          if (block.type === 'text' && block.text) {
-            blocks.push({ type: 'text', content: block.text });
-          } else if (block.type === 'thinking' && block.text) {
-            blocks.push({ type: 'thinking', content: block.text });
-          } else if (block.type === 'tool_use') {
-            blocks.push({ type: 'tool_use', tool: block.name || 'tool', input: block.input || '' });
-          } else if (block.type === 'tool_result') {
-            blocks.push({ type: 'tool_result', tool: block.name || '', result: block.content || block.output || block.text || '' });
-          } else if (block && typeof block === 'object') {
-            queueMissingSample('unknown_assistant_block', block.type || 'unknown', block, '');
-          }
-        });
-        return true;
-      }
-      if (parsed && parsed.type === 'user' && parsed.message && Array.isArray(parsed.message.content)) {
-        parsed.message.content.forEach(function (block) {
-          if (block.type === 'tool_result') {
-            blocks.push({ type: 'tool_result', tool: block.name || '', result: block.content || block.output || block.text || '', isError: !!block.is_error });
-          } else if (block && typeof block === 'object') {
-            queueMissingSample('unknown_user_block', block.type || 'unknown', block, '');
-          }
-        });
-        return true;
-      }
-      if (parsed && parsed.type === 'result') {
-        return true;
-      }
-      return false;
-    }
-
-    events.forEach(function (ev) {
-      // --- Store RecordingEvent format ---
-      if (ev.type === 'meta') {
-        if (ev.data && typeof ev.data === 'string') {
-          var sep = ev.data.indexOf('=');
-          if (sep > 0) {
-            var key = ev.data.slice(0, sep).trim().toLowerCase();
-            var value = ev.data.slice(sep + 1).trim();
-            if (key === 'agent' && value) metaAgent = value;
-            if (key === 'model' && value) metaModel = value;
-          }
-        }
-        try {
-          var metaData = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
-          if (metaData && metaData.prompt) {
-            blocks.push({ type: 'initial_prompt', content: metaData.prompt });
-          } else if (metaData && metaData.objective) {
-            blocks.push({ type: 'initial_prompt', content: metaData.objective });
-          }
-        } catch (_) {}
-        return;
-      }
-
-      if (ev.type === 'claude_stream' || ev.type === 'stdout') {
-        var parsedEvent = null;
-        var parsedOK = false;
-        try {
-          parsedEvent = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
-          parsedOK = true;
-          if (parseAgentEvent(parsedEvent)) return;
-        } catch (_) {
-          parsedOK = false;
-        }
-        if (parsedOK) {
-          queueMissingSample('unparsed_recording_event', parsedEvent && parsedEvent.type ? parsedEvent.type : ev.type, parsedEvent, '');
-        }
-        if (ev.data && typeof ev.data === 'string' && ev.data.trim()) {
-          blocks.push({ type: 'text', content: ev.data });
-        }
-        return;
-      }
-
-      // --- Wire protocol format (from session events file) ---
-      if (ev.type === 'prompt') {
-        var promptData = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
-        if (promptData && promptData.prompt) {
-          blocks.push({ type: 'initial_prompt', content: promptData.prompt });
-        }
-        return;
-      }
-
-      if (ev.type === 'event') {
-        try {
-          var wireData = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
-          var agentEvent = wireData && wireData.event ? wireData.event : wireData;
-          if (typeof agentEvent === 'string') agentEvent = JSON.parse(agentEvent);
-          if (parseAgentEvent(agentEvent)) return;
-          queueMissingSample('unparsed_wire_event', agentEvent && agentEvent.type ? agentEvent.type : ev.type, agentEvent, '');
-        } catch (_) {
-          queueMissingSample('invalid_wire_event_json', ev.type, ev.data, '');
-        }
-        return;
-      }
-
-      if (ev.type === 'raw') {
-        try {
-          var rawData = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
-          var rawText = typeof rawData === 'string' ? rawData : (rawData && rawData.data ? String(rawData.data) : '');
-          if (rawText.trim()) {
-            blocks.push({ type: 'text', content: rawText });
-          }
-        } catch (_) {
-          if (ev.data && typeof ev.data === 'string' && ev.data.trim()) {
-            blocks.push({ type: 'text', content: ev.data });
-          }
-        }
-        return;
-      }
-
-      // Ignore wire lifecycle messages (started, finished, done, etc.)
+    var parsedMissing = [];
+    var events = parseHistoricalEvents(historicalEvents[historySessionID], historySessionID, function (sample) {
+      if (!sample || typeof sample !== 'object') return;
+      sample.scope = sample.scope || scope || ('session-' + historySessionID);
+      sample.session_id = sample.session_id || historySessionID;
+      parsedMissing.push(sample);
     });
 
-    return { blocks: blocks, missingSamples: missingSamples };
-  }, [turnID, historicalEvents, sessionInfo, scope]);
+    var scoped = events.filter(function (ev) {
+      return eventScopeMatches(scopeInfo, selectedSessionID, descendantSpawnSet, ev.scope);
+    }).map(function (evt) {
+      return annotateSource(evt, sessionsByID, spawnsByID);
+    });
+
+    return { events: scoped, missingSamples: parsedMissing };
+  }, [historySessionID, historicalEvents, scope, scopeInfo, selectedSessionID, descendantSpawnSet, sessionsByID, spawnsByID]);
 
   useEffect(function () {
     if (!historicalData.missingSamples || historicalData.missingSamples.length === 0) return;
@@ -219,17 +121,20 @@ export default function AgentOutput({ scope }) {
     });
   }, [historicalData.missingSamples, currentProjectID]);
 
-  // Use historical blocks if we have no live events
-  var displayBlocks = blockEvents.length > 0 ? blockEvents : historicalData.blocks;
+  var historicalBlocks = useMemo(function () {
+    return stateEventsToBlocks(historicalData.events);
+  }, [historicalData.events]);
 
-  // Transform flat blocks into ChatMessageList messages format
+  // Use historical blocks only when no live stream blocks are available.
+  var displayBlocks = blockEvents.length > 0 ? blockEvents : historicalBlocks;
+
+  // Transform flat blocks into ChatMessageList messages format.
   var transformed = useMemo(function () {
     var msgs = [];
     var assistantEvents = [];
 
     displayBlocks.forEach(function (block) {
       if (block.type === 'initial_prompt') {
-        // Flush any accumulated assistant events before the prompt
         if (assistantEvents.length > 0) {
           msgs.push({
             id: 'assistant-' + msgs.length,
@@ -251,7 +156,6 @@ export default function AgentOutput({ scope }) {
       }
     });
 
-    // For completed sessions, flush remaining events into a final assistant message
     if (!isRunning && assistantEvents.length > 0) {
       msgs.push({
         id: 'assistant-' + msgs.length,
@@ -263,7 +167,10 @@ export default function AgentOutput({ scope }) {
       assistantEvents = [];
     }
 
-    return { messages: msgs, pendingStreamEvents: isRunning ? assistantEvents : [] };
+    return {
+      messages: msgs,
+      pendingStreamEvents: isRunning ? assistantEvents : [],
+    };
   }, [displayBlocks, isRunning]);
 
   if (!scope) {
@@ -286,6 +193,241 @@ export default function AgentOutput({ scope }) {
       loading={loadingHistory}
       emptyMessage="No output yet"
       autoScroll={autoScroll}
+      showSourceLabels={scopeInfo.kind === 'session'}
     />
   );
+}
+
+function eventScopeMatches(scopeInfo, selectedSessionID, descendantSpawnSet, eventScope) {
+  var scope = String(eventScope || '');
+  if (scopeInfo.kind === 'session') {
+    if (selectedSessionID <= 0) return false;
+    if (scope === 'session-' + selectedSessionID) return true;
+    if (scope.indexOf('spawn-') === 0) {
+      var spawnID = parseInt(scope.slice(6), 10);
+      return !Number.isNaN(spawnID) && !!descendantSpawnSet[spawnID];
+    }
+    return false;
+  }
+  if (scopeInfo.kind === 'spawn') {
+    return scope === 'spawn-' + scopeInfo.id;
+  }
+  return true;
+}
+
+function annotateSource(event, sessionsByID, spawnsByID) {
+  if (!event || typeof event !== 'object') return event;
+  if (event._sourceLabel && event._sourceColor) return event;
+
+  var scope = String(event.scope || event._scope || '');
+  var sourceLabel = 'agent';
+  var spawnID = 0;
+
+  if (scope.indexOf('session-') === 0) {
+    var sessionID = parseInt(scope.slice(8), 10);
+    if (!Number.isNaN(sessionID) && sessionID > 0) {
+      var session = sessionsByID[sessionID];
+      sourceLabel = session && session.profile ? session.profile : ('session-' + sessionID);
+    }
+  } else if (scope.indexOf('spawn-') === 0) {
+    spawnID = parseInt(scope.slice(6), 10);
+    if (!Number.isNaN(spawnID) && spawnID > 0) {
+      var spawn = spawnsByID[spawnID];
+      sourceLabel = spawn && spawn.profile ? spawn.profile : ('spawn-' + spawnID);
+    }
+  }
+
+  return Object.assign({}, event, {
+    _sourceLabel: sourceLabel,
+    _sourceColor: scopeColor(scope || 'session-0'),
+    _spawnID: spawnID,
+  });
+}
+
+function parseHistoricalEvents(events, sessionID, onMissing) {
+  var output = [];
+  var defaultScope = 'session-' + sessionID;
+  var list = Array.isArray(events) ? events : [];
+
+  function push(scope, type, payload) {
+    output.push(Object.assign({ scope: scope || defaultScope, type: type }, payload || {}));
+  }
+
+  function report(reason, eventType, payload, fallbackText, scope) {
+    if (!onMissing) return;
+    onMissing({
+      source: 'recording_history',
+      reason: reason,
+      scope: scope || defaultScope,
+      session_id: sessionID,
+      event_type: eventType || '',
+      fallback_text: fallbackText || '',
+      payload: payload,
+    });
+  }
+
+  function parseAssistant(scope, parsed) {
+    var blocks = extractContentBlocks(parsed);
+    if (!blocks.length) {
+      report('assistant_without_content_blocks', parsed && parsed.type ? parsed.type : 'assistant', parsed, '[assistant event]', scope);
+      push(scope, 'text', { text: '[assistant event]' });
+      return;
+    }
+    blocks.forEach(function (block) {
+      if (!block || typeof block !== 'object') return;
+      if (block.type === 'text' && block.text) {
+        push(scope, 'text', { text: String(block.text) });
+      } else if (block.type === 'thinking' && block.text) {
+        push(scope, 'thinking', { text: String(block.text) });
+      } else if (block.type === 'tool_use') {
+        push(scope, 'tool_use', { tool: block.name || 'tool', input: block.input || {} });
+      } else if (block.type === 'tool_result') {
+        push(scope, 'tool_result', {
+          tool: block.name || 'tool_result',
+          result: block.content || block.output || block.text || '',
+          isError: !!block.is_error,
+        });
+      } else {
+        report('unknown_assistant_block', block.type || 'unknown', block, cropText(safeJSONString(block), 400), scope);
+      }
+    });
+  }
+
+  function parseUser(scope, parsed) {
+    var blocks = extractContentBlocks(parsed);
+    blocks.forEach(function (block) {
+      if (block && block.type === 'tool_result') {
+        push(scope, 'tool_result', {
+          tool: block.name || 'tool_result',
+          result: block.content || block.output || block.text || safeJSONString(block),
+          isError: !!block.is_error,
+        });
+      } else if (block && typeof block === 'object') {
+        report('unknown_user_block', block.type || 'unknown', block, '', scope);
+      }
+    });
+  }
+
+  list.forEach(function (ev) {
+    if (!ev || typeof ev !== 'object') return;
+
+    if (ev.type === 'meta') {
+      var metaData = decodeData(ev.data);
+      if (metaData && metaData.prompt) {
+        push(defaultScope, 'initial_prompt', { text: String(metaData.prompt) });
+      } else if (metaData && metaData.objective) {
+        push(defaultScope, 'initial_prompt', { text: String(metaData.objective) });
+      }
+      return;
+    }
+
+    if (ev.type === 'claude_stream' || ev.type === 'stdout') {
+      var parsedStoreEvent = decodeData(ev.data);
+      if (parsedStoreEvent && typeof parsedStoreEvent === 'object' && parsedStoreEvent.type) {
+        if (parsedStoreEvent.type === 'assistant') {
+          parseAssistant(defaultScope, parsedStoreEvent);
+          return;
+        }
+        if (parsedStoreEvent.type === 'user') {
+          parseUser(defaultScope, parsedStoreEvent);
+          return;
+        }
+        if (parsedStoreEvent.type === 'content_block_delta' && parsedStoreEvent.delta && parsedStoreEvent.delta.text) {
+          push(defaultScope, 'text', { text: String(parsedStoreEvent.delta.text) });
+          return;
+        }
+      }
+      if (ev.data && String(ev.data).trim()) {
+        push(defaultScope, 'text', { text: String(ev.data) });
+      }
+      return;
+    }
+
+    if (ev.type === 'prompt') {
+      var promptData = decodeData(ev.data);
+      var promptScope = defaultScope;
+      if (promptData && Number(promptData.session_id) > 0) {
+        promptScope = 'session-' + Number(promptData.session_id);
+      }
+      if (promptData && promptData.prompt) {
+        push(promptScope, 'initial_prompt', { text: String(promptData.prompt) });
+      }
+      return;
+    }
+
+    if (ev.type === 'event') {
+      var wireData = decodeData(ev.data);
+      var eventScope = wireScope(wireData, sessionID);
+      var agentEvent = wireData && wireData.event ? wireData.event : wireData;
+      if (typeof agentEvent === 'string') {
+        agentEvent = decodeData(agentEvent);
+      }
+      if (!agentEvent || typeof agentEvent !== 'object') {
+        report('invalid_wire_event_json', 'event', ev.data, '', eventScope);
+        return;
+      }
+      if (agentEvent.type === 'assistant') {
+        parseAssistant(eventScope, agentEvent);
+      } else if (agentEvent.type === 'user') {
+        parseUser(eventScope, agentEvent);
+      } else if (agentEvent.type === 'content_block_delta' && agentEvent.delta && agentEvent.delta.text) {
+        push(eventScope, 'text', { text: String(agentEvent.delta.text) });
+      } else if (agentEvent.type === 'result') {
+        push(eventScope, 'tool_result', { text: 'Result received.' });
+      } else {
+        report('unknown_agent_event_type', agentEvent.type || 'event', agentEvent, cropText(safeJSONString(agentEvent), 400), eventScope);
+      }
+      return;
+    }
+
+    if (ev.type === 'raw') {
+      var rawData = decodeData(ev.data);
+      var rawScope = wireScope(rawData, sessionID);
+      var rawText = '';
+      if (typeof rawData === 'string') {
+        rawText = rawData;
+      } else if (rawData && typeof rawData.data === 'string') {
+        rawText = rawData.data;
+      } else if (ev.data && typeof ev.data === 'string') {
+        rawText = ev.data;
+      }
+      if (rawText.trim()) {
+        push(rawScope, 'text', { text: cropText(rawText) });
+      }
+    }
+  });
+
+  return output;
+}
+
+function decodeData(raw) {
+  if (raw == null) return null;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw); } catch (_) { return raw; }
+  }
+  return raw;
+}
+
+function wireScope(data, fallbackSessionID) {
+  var fallbackScope = 'session-' + fallbackSessionID;
+  if (!data || typeof data !== 'object') return fallbackScope;
+  var spawnID = Number(data.spawn_id || data.spawnID || 0);
+  if (Number.isFinite(spawnID) && spawnID > 0) {
+    return 'spawn-' + spawnID;
+  }
+  var sessionID = Number(data.session_id || data.sessionID || 0);
+  if (Number.isFinite(sessionID) && sessionID < 0) {
+    return 'spawn-' + (-sessionID);
+  }
+  if (Number.isFinite(sessionID) && sessionID > 0) {
+    return 'session-' + sessionID;
+  }
+  return fallbackScope;
+}
+
+function extractContentBlocks(event) {
+  if (!event || typeof event !== 'object') return [];
+  if (event.message && Array.isArray(event.message.content)) return event.message.content;
+  if (Array.isArray(event.content)) return event.content;
+  return [];
 }

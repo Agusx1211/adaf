@@ -274,23 +274,29 @@ export function EventBlockList({ events }) {
 export function stateEventsToBlocks(stateEvents) {
   if (!stateEvents || !stateEvents.length) return [];
   return stateEvents.map(function (evt) {
+    var meta = {
+      _sourceLabel: evt._sourceLabel || '',
+      _sourceColor: evt._sourceColor || '',
+      _spawnID: evt._spawnID || 0,
+      _scope: evt.scope || evt._scope || '',
+    };
     if (evt.type === 'initial_prompt') {
-      return { type: 'initial_prompt', content: evt.text || '' };
+      return { type: 'initial_prompt', content: evt.text || evt.content || '', _scope: meta._scope };
     }
     if (evt.type === 'tool_use') {
       var parsedInput = evt.input;
       if (typeof parsedInput === 'string' && parsedInput) {
         try { parsedInput = JSON.parse(parsedInput); } catch (_) {}
       }
-      return { type: 'tool_use', tool: evt.tool || 'tool', input: parsedInput || '' };
+      return Object.assign({ type: 'tool_use', tool: evt.tool || 'tool', input: parsedInput || '' }, meta);
     }
     if (evt.type === 'tool_result') {
-      return { type: 'tool_result', tool: evt.tool || '', result: evt.result || evt.text || '', isError: false };
+      return Object.assign({ type: 'tool_result', tool: evt.tool || '', result: evt.result || evt.text || evt.content || '', isError: !!evt.isError }, meta);
     }
     if (evt.type === 'thinking') {
-      return { type: 'thinking', content: evt.text || '' };
+      return Object.assign({ type: 'thinking', content: evt.text || evt.content || '' }, meta);
     }
-    return { type: 'text', content: evt.text || '' };
+    return Object.assign({ type: evt.type || 'text', content: evt.text || evt.content || '' }, meta);
   });
 }
 

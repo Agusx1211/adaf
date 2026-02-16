@@ -259,12 +259,18 @@ export function normalizeSpawns(rawSpawns) {
   return arrayOrEmpty(rawSpawns).map(function (spawn) {
     var parentTurn = numberOr(0, spawn && spawn.parent_turn_id, spawn && spawn.parent_session_id);
     var childTurn = numberOr(0, spawn && spawn.child_turn_id, spawn && spawn.child_session_id);
+    var parentDaemonSession = numberOr(0, spawn && spawn.parent_daemon_session_id);
+    var childDaemonSession = numberOr(0, spawn && spawn.child_daemon_session_id);
     var parentSpawn = numberOr(0, spawn && spawn.parent_spawn_id, spawn && spawn.parent_id);
     return {
       id: Number(spawn && spawn.id) || 0,
       parent_turn_id: parentTurn,
+      parent_session_id: numberOr(0, spawn && spawn.parent_session_id),
+      parent_daemon_session_id: parentDaemonSession,
       parent_spawn_id: parentSpawn,
       child_turn_id: childTurn,
+      child_session_id: numberOr(0, spawn && spawn.child_session_id),
+      child_daemon_session_id: childDaemonSession,
       profile: spawn && (spawn.profile || spawn.child_profile) ? String(spawn.profile || spawn.child_profile) : '',
       role: spawn && (spawn.role || spawn.child_role) ? String(spawn.role || spawn.child_role) : '',
       parent_profile: spawn && spawn.parent_profile ? String(spawn.parent_profile) : '',

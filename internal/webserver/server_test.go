@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -343,6 +344,30 @@ func TestSessionsEndpoint(t *testing.T) {
 	sessions := decodeResponse[[]session.SessionMeta](t, rec)
 	if len(sessions) != 0 {
 		t.Fatalf("sessions length = %d, want 0", len(sessions))
+	}
+}
+
+func TestSessionRecordingEventsEndpoint(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	sessionID := 42
+	if err := os.MkdirAll(session.SessionDir(sessionID), 0755); err != nil {
+		t.Fatalf("MkdirAll(session dir): %v", err)
+	}
+	want := "{\"type\":\"raw\",\"data\":\"hello\"}\n"
+	if err := os.WriteFile(session.EventsPath(sessionID), []byte(want), 0644); err != nil {
+		t.Fatalf("WriteFile(session events): %v", err)
+	}
+
+	rec := performRequest(t, srv, http.MethodGet, "/api/sessions/42/events")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/x-ndjson") {
+		t.Fatalf("content-type = %q, want application/x-ndjson", got)
+	}
+	if rec.Body.String() != want {
+		t.Fatalf("body = %q, want %q", rec.Body.String(), want)
 	}
 }
 
