@@ -25,7 +25,7 @@ export default function AgentOutput({ scope }) {
   }, [spawns, loopRuns]);
 
   var selectedSessionID = useMemo(function () {
-    if (scopeInfo.kind === 'session') return scopeInfo.id;
+    if (scopeInfo.kind === 'session' || scopeInfo.kind === 'session_main') return scopeInfo.id;
     if (scopeInfo.kind === 'spawn') return scopeMaps.spawnToSession[scopeInfo.id] || 0;
     return 0;
   }, [scopeInfo, scopeMaps]);
@@ -50,7 +50,9 @@ export default function AgentOutput({ scope }) {
 
   var sessionRunning = !!(selectedSession && STATUS_RUNNING[normalizeStatus(selectedSession.status)]);
   var spawnRunning = !!(selectedSpawn && STATUS_RUNNING[normalizeStatus(selectedSpawn.status)]);
-  var isRunning = scopeInfo.kind === 'session' ? sessionRunning : (scopeInfo.kind === 'spawn' ? (sessionRunning || spawnRunning) : false);
+  var isRunning = (scopeInfo.kind === 'session' || scopeInfo.kind === 'session_main')
+    ? sessionRunning
+    : (scopeInfo.kind === 'spawn' ? (sessionRunning || spawnRunning) : false);
   var isCompleted = !isRunning;
 
   var sessionsByID = useMemo(function () {
@@ -201,6 +203,10 @@ export default function AgentOutput({ scope }) {
 
 function eventScopeMatches(scopeInfo, selectedSessionID, descendantSpawnSet, eventScope) {
   var scope = String(eventScope || '');
+  if (scopeInfo.kind === 'session_main') {
+    if (selectedSessionID <= 0) return false;
+    return scope === 'session-' + selectedSessionID;
+  }
   if (scopeInfo.kind === 'session') {
     if (selectedSessionID <= 0) return false;
     if (scope === 'session-' + selectedSessionID) return true;
@@ -346,10 +352,7 @@ function parseHistoricalEvents(events, sessionID, onMissing) {
 
     if (ev.type === 'prompt') {
       var promptData = decodeData(ev.data);
-      var promptScope = defaultScope;
-      if (promptData && Number(promptData.session_id) > 0) {
-        promptScope = 'session-' + Number(promptData.session_id);
-      }
+      var promptScope = wireScope(promptData, sessionID);
       if (promptData && promptData.prompt) {
         push(promptScope, 'initial_prompt', { text: String(promptData.prompt) });
       }

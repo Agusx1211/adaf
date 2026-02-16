@@ -61,6 +61,12 @@ export function statusIcon(status) {
 
 export function scopeColor(scope) {
   var key = String(scope || 'session-0');
+  var mainParsed = key.match(/^session-main-(\d+)$/);
+  if (mainParsed) {
+    var mainIdx = parseInt(mainParsed[1], 10);
+    if (!Number.isNaN(mainIdx)) return SCOPE_COLOR_PALETTE[mainIdx % SCOPE_COLOR_PALETTE.length];
+    return '#7f849c';
+  }
   var parsed = key.match(/(session|spawn)-(\d+)/);
   if (!parsed) return '#7f849c';
   var idx = parseInt(parsed[2], 10);
@@ -70,6 +76,7 @@ export function scopeColor(scope) {
 
 export function scopeShortLabel(scope) {
   var value = String(scope || 'session-0');
+  if (value.indexOf('session-main-') === 0) return 's' + value.slice(13);
   if (value.indexOf('session-') === 0) return 's' + value.slice(8);
   if (value.indexOf('spawn-') === 0) return 'sp' + value.slice(6);
   return value;

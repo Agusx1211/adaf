@@ -5,6 +5,7 @@ import { reportMissingUISample } from '../../api/missingUISamples.js';
 import { useToast } from '../common/Toast.jsx';
 import { injectEventBlockStyles, cleanResponse } from '../common/EventBlocks.jsx';
 import ChatMessageList from '../common/ChatMessageList.jsx';
+import AgentScopeSidebar from '../common/AgentScopeSidebar.jsx';
 import { agentInfo, statusColor, STATUS_RUNNING } from '../../utils/colors.js';
 import { normalizeStatus } from '../../utils/format.js';
 
@@ -964,12 +965,18 @@ export default function StandaloneChatView() {
 
       {/* Spawn sidebar */}
       {spawns.length > 0 && (
-        <SpawnSidebar
+        <AgentScopeSidebar
           spawns={spawns}
-          focusScope={focusScope}
-          onSwitchScope={switchFocusScope}
-          parentProfile={headerProfile}
-          sending={sending}
+          selectedScope={focusScope}
+          onSelectScope={switchFocusScope}
+          parentLabel={headerProfile || 'Parent'}
+          parentSubLabel="main agent"
+          parentColor={agentInfo(headerAgent || '').color}
+          parentActive={sending}
+          title="Agents"
+          showAll
+          allLabel="All agents"
+          allCount={spawns.length + 1}
         />
       )}
     </div>
@@ -1074,221 +1081,4 @@ function filterStandaloneMessagesByScope(messages, focusScope) {
   });
 
   return filtered;
-}
-
-// --- SpawnSidebar component ---
-
-function SpawnSidebar({ spawns, focusScope, onSwitchScope, parentProfile, sending }) {
-  // Build tree from spawns using parent_spawn_id
-  var childrenByParent = {};
-  var roots = [];
-  spawns.forEach(function (s) {
-    if (s.parent_spawn_id > 0) {
-      if (!childrenByParent[s.parent_spawn_id]) childrenByParent[s.parent_spawn_id] = [];
-      childrenByParent[s.parent_spawn_id].push(s);
-    } else {
-      roots.push(s);
-    }
-  });
-
-  var parentColor = agentInfo(parentProfile || '').color;
-  var parentSelected = focusScope === 'parent';
-  var allSelected = focusScope === 'all';
-
-  return (
-    <div style={{
-      width: 240, borderLeft: '1px solid var(--border)',
-      background: 'var(--bg-1)', overflow: 'auto', flexShrink: 0,
-    }}>
-      {/* Header */}
-      <div style={{
-        padding: '8px 12px', borderBottom: '1px solid var(--border)',
-        fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 600,
-        color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.1em',
-      }}>
-        Agents
-      </div>
-
-      {/* Parent node */}
-      <div
-        onClick={function () { onSwitchScope('parent'); }}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '8px 12px', cursor: 'pointer',
-          background: parentSelected ? (parentColor + '12') : 'transparent',
-          borderLeft: parentSelected ? ('2px solid ' + parentColor) : '2px solid transparent',
-          transition: 'all 0.15s ease',
-        }}
-        onMouseEnter={function (e) { if (!parentSelected) e.currentTarget.style.background = 'var(--bg-3)'; }}
-        onMouseLeave={function (e) { if (!parentSelected) e.currentTarget.style.background = 'transparent'; }}
-      >
-        <span style={{
-          width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-          background: sending ? '#a6e3a1' : 'var(--text-3)',
-          boxShadow: sending ? '0 0 6px #a6e3a1' : 'none',
-          animation: sending ? 'pulse 2s ease-in-out infinite' : 'none',
-        }} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{
-              fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600,
-              color: 'var(--text-0)',
-            }}>
-              {parentProfile || 'Parent'}
-            </span>
-          </div>
-          <div style={{
-            fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-            color: 'var(--text-3)', marginTop: 1,
-          }}>
-            main agent
-          </div>
-        </div>
-      </div>
-
-      {/* All node */}
-      <div
-        onClick={function () { onSwitchScope('all'); }}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '8px 12px', cursor: 'pointer',
-          background: allSelected ? 'var(--accent)12' : 'transparent',
-          borderLeft: allSelected ? '2px solid var(--accent)' : '2px solid transparent',
-          transition: 'all 0.15s ease',
-        }}
-        onMouseEnter={function (e) { if (!allSelected) e.currentTarget.style.background = 'var(--bg-3)'; }}
-        onMouseLeave={function (e) { if (!allSelected) e.currentTarget.style.background = 'transparent'; }}
-      >
-        <span style={{
-          fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
-          color: 'var(--text-2)', flexShrink: 0,
-        }}>{'\u2261'}</span>
-        <span style={{
-          fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
-          color: 'var(--text-1)',
-        }}>
-          All agents
-        </span>
-        <span style={{
-          fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-          color: 'var(--text-3)', padding: '1px 5px',
-          background: 'var(--bg-3)', borderRadius: 3, marginLeft: 'auto',
-        }}>
-          {spawns.length + 1}
-        </span>
-      </div>
-
-      {/* Divider */}
-      <div style={{ borderBottom: '1px solid var(--border)', margin: '4px 0' }} />
-
-      {/* Spawn tree */}
-      {roots.map(function (spawn) {
-        return (
-          <SpawnTreeNode
-            key={spawn.id}
-            spawn={spawn}
-            depth={0}
-            childrenByParent={childrenByParent}
-            focusScope={focusScope}
-            onSelect={onSwitchScope}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-// --- SpawnTreeNode component ---
-
-function SpawnTreeNode({ spawn, depth, childrenByParent, focusScope, onSelect }) {
-  var children = childrenByParent[spawn.id] || [];
-  var selected = focusScope === 'spawn-' + spawn.id;
-  var sColor = statusColor(spawn.status);
-  var statusLower = (spawn.status || '').toLowerCase().replace(/[^a-z0-9_]+/g, '_');
-  var isRunning = !!STATUS_RUNNING[statusLower];
-  var hasPendingQuestion = statusLower === 'awaiting_input' && !!spawn.question;
-
-  return (
-    <div style={{ marginLeft: depth * 14 }}>
-      <div
-        onClick={function () { onSelect('spawn-' + spawn.id); }}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 7,
-          padding: '6px 12px', cursor: 'pointer',
-          background: selected ? (sColor + '12') : 'transparent',
-          borderLeft: selected ? ('2px solid ' + sColor) : '2px solid transparent',
-          transition: 'all 0.15s ease',
-        }}
-        onMouseEnter={function (e) { if (!selected) e.currentTarget.style.background = 'var(--bg-3)'; }}
-        onMouseLeave={function (e) { if (!selected) e.currentTarget.style.background = 'transparent'; }}
-      >
-        <span style={{
-          width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
-          background: sColor,
-          boxShadow: isRunning ? '0 0 6px ' + sColor : 'none',
-          animation: isRunning ? 'pulse 2s ease-in-out infinite' : 'none',
-        }} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{
-              fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-              color: 'var(--text-3)',
-            }}>
-              #{spawn.id}
-            </span>
-            <span style={{
-              fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
-              color: 'var(--text-0)',
-            }}>
-              {spawn.profile || 'spawn'}
-            </span>
-            {spawn.role && (
-              <span style={{
-                fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-                color: 'var(--text-3)',
-              }}>
-                as {spawn.role}
-              </span>
-            )}
-          </div>
-          {hasPendingQuestion && (
-            <div style={{
-              marginTop: 3, display: 'flex', alignItems: 'center', gap: 4,
-            }}>
-              <span style={{
-                width: 5, height: 5, borderRadius: '50%',
-                background: '#89b4fa',
-                animation: 'pulse 1.5s ease-in-out infinite',
-              }} />
-              <span style={{
-                fontFamily: "'JetBrains Mono', monospace", fontSize: 8,
-                color: '#89b4fa', fontWeight: 600,
-              }}>
-                AWAITING RESPONSE
-              </span>
-            </div>
-          )}
-        </div>
-        {isRunning && (
-          <span style={{
-            width: 8, height: 8, border: '1.5px solid ' + sColor, borderTopColor: 'transparent',
-            borderRadius: '50%', animation: 'spin 1s linear infinite', flexShrink: 0,
-          }} />
-        )}
-      </div>
-
-      {children.map(function (child) {
-        return (
-          <SpawnTreeNode
-            key={child.id}
-            spawn={child}
-            depth={depth + 1}
-            childrenByParent={childrenByParent}
-            focusScope={focusScope}
-            onSelect={onSelect}
-          />
-        );
-      })}
-    </div>
-  );
 }
