@@ -274,6 +274,9 @@ export function EventBlockList({ events }) {
 export function stateEventsToBlocks(stateEvents) {
   if (!stateEvents || !stateEvents.length) return [];
   return stateEvents.map(function (evt) {
+    if (evt.type === 'initial_prompt') {
+      return { type: 'initial_prompt', content: evt.text || '' };
+    }
     if (evt.type === 'tool_use') {
       var parsedInput = evt.input;
       if (typeof parsedInput === 'string' && parsedInput) {

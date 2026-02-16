@@ -87,7 +87,22 @@ export function useSessionSocket(sessionID) {
       if (data && Array.isArray(data.spawns)) {
         dispatch({ type: 'MERGE_SPAWNS', payload: normalizeSpawns(data.spawns) });
       }
-      addStreamEvent({ scope: 'session-' + sid, type: 'text', text: 'Snapshot received.' });
+      // Replay recent messages from snapshot (includes prompt, event, etc.)
+      if (data && Array.isArray(data.recent)) {
+        data.recent.forEach(function (recentMsg) {
+          if (recentMsg && recentMsg.type) {
+            ingestEnvelope(sid, recentMsg);
+          }
+        });
+      }
+      return;
+    }
+
+    if (type === 'prompt') {
+      // Extract and display the prompt as a formatted block
+      if (data && data.prompt) {
+        addStreamEvent({ scope: 'session-' + sid, type: 'initial_prompt', text: String(data.prompt) });
+      }
       return;
     }
 
@@ -110,17 +125,24 @@ export function useSessionSocket(sessionID) {
       return;
     }
 
-    if (type === 'finished' || type === 'done' || type === 'started' || type === 'error') {
-      addStreamEvent({ scope: 'session-' + sid, type: 'text', text: '[' + type + '] ' + safeJSONString(data) });
+    // Suppress noisy status messages from output
+    if (type === 'started' || type === 'finished' || type === 'done') {
       return;
     }
 
+    if (type === 'error') {
+      if (data && data.error) {
+        addStreamEvent({ scope: 'session-' + sid, type: 'text', text: 'Error: ' + String(data.error) });
+      }
+      return;
+    }
+
+    // Suppress loop lifecycle events from output
     if (type === 'loop_step_start' || type === 'loop_step_end' || type === 'loop_done') {
-      addStreamEvent({ scope: 'session-' + sid, type: 'text', text: '[' + type + '] ' + safeJSONString(data) });
       return;
     }
 
-    addStreamEvent({ scope: 'session-' + sid, type: 'text', text: '[' + type + '] ' + safeJSONString(data) });
+    // Unknown types - silently ignore
   }, [dispatch, addStreamEvent, handleAgentStreamEvent]);
 
   useEffect(function () {
@@ -141,7 +163,6 @@ export function useSessionSocket(sessionID) {
 
     wsRef.current.addEventListener('open', function () {
       dispatch({ type: 'SET', payload: { wsConnected: true, currentSessionSocketID: sessionID } });
-      addStreamEvent({ scope: 'session-' + sessionID, type: 'text', text: 'Connected to live session stream.' });
     });
 
     wsRef.current.addEventListener('message', function (event) {
@@ -159,7 +180,6 @@ export function useSessionSocket(sessionID) {
 
     wsRef.current.addEventListener('close', function () {
       dispatch({ type: 'SET', payload: { wsConnected: false } });
-      addStreamEvent({ scope: 'session-' + sessionID, type: 'text', text: 'Session stream disconnected.' });
       wsRef.current = null;
 
       reconnectRef.current = setTimeout(function () {

@@ -1,7 +1,6 @@
 import { useMemo, useRef, useEffect, useState } from 'react';
 import { useAppState, useDispatch } from '../../state/store.js';
 import { fetchTurnRecordingEvents } from '../../api/hooks.js';
-import { apiBase } from '../../api/client.js';
 import { normalizeStatus } from '../../utils/format.js';
 import { STATUS_RUNNING } from '../../utils/colors.js';
 import { EventBlockList, MarkdownContent, injectEventBlockStyles, stateEventsToBlocks } from '../common/EventBlocks.jsx';
@@ -69,13 +68,11 @@ export default function AgentOutput({ scope }) {
 
     events.forEach(function (ev) {
       if (ev.type === 'meta') {
-        // Check if this is the initial prompt/objective
         try {
           var metaData = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
           if (metaData && metaData.prompt) {
             blocks.push({ type: 'initial_prompt', content: metaData.prompt });
-          }
-          if (metaData && metaData.objective) {
+          } else if (metaData && metaData.objective) {
             blocks.push({ type: 'initial_prompt', content: metaData.objective });
           }
         } catch (_) {}
@@ -83,7 +80,6 @@ export default function AgentOutput({ scope }) {
       }
 
       if (ev.type === 'claude_stream' || ev.type === 'stdout') {
-        // Try to parse as structured event
         try {
           var parsed = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
           if (parsed && parsed.type === 'assistant' && parsed.message && Array.isArray(parsed.message.content)) {
@@ -109,11 +105,9 @@ export default function AgentOutput({ scope }) {
             return;
           }
           if (parsed && parsed.type === 'result') {
-            // Result event, skip
             return;
           }
         } catch (_) {}
-        // Raw text
         if (ev.data && typeof ev.data === 'string' && ev.data.trim()) {
           blocks.push({ type: 'text', content: ev.data });
         }
@@ -127,8 +121,8 @@ export default function AgentOutput({ scope }) {
   // Use historical blocks if we have no live events
   var displayBlocks = blockEvents.length > 0 ? blockEvents : historicalBlocks;
 
-  // Extract initial prompt from session info for display
-  var initialPrompt = sessionInfo ? (sessionInfo.action || '') : '';
+  // Check if there's already a prompt in the blocks
+  var hasPromptBlock = displayBlocks.some(function (b) { return b.type === 'initial_prompt'; });
 
   useEffect(function () {
     if (autoScroll && containerRef.current) {
@@ -160,7 +154,7 @@ export default function AgentOutput({ scope }) {
     );
   }
 
-  if (displayBlocks.length === 0 && !initialPrompt) {
+  if (displayBlocks.length === 0) {
     return (
       <div style={{
         height: '100%', display: 'flex', flexDirection: 'column',
@@ -173,50 +167,34 @@ export default function AgentOutput({ scope }) {
     );
   }
 
+  // Split blocks: prompts first, then everything else
+  var promptBlocks = displayBlocks.filter(function (b) { return b.type === 'initial_prompt'; });
+  var contentBlocks = displayBlocks.filter(function (b) { return b.type !== 'initial_prompt'; });
+
   return (
     <div ref={containerRef} style={{ height: '100%', overflow: 'auto', padding: '16px 20px' }}>
       <div style={{ maxWidth: 800, margin: '0 auto' }}>
-        {/* Initial prompt block - only show if we have a prompt and it's not already in the blocks */}
-        {initialPrompt && (
-          <div style={{
-            marginBottom: 20, padding: '12px 16px',
-            background: 'var(--bg-2)', borderRadius: 8,
-            border: '1px solid var(--border)',
-            borderLeft: '3px solid var(--accent)',
-          }}>
-            <div style={{
-              fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-              color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.1em',
-              fontWeight: 700, marginBottom: 8,
-            }}>Initial Prompt</div>
-            <MarkdownContent text={initialPrompt} />
-          </div>
-        )}
-
-        {/* Render event blocks, with special handling for initial_prompt type */}
-        {displayBlocks.map(function (block, i) {
-          if (block.type === 'initial_prompt') {
-            return (
-              <div key={i} style={{
-                marginBottom: 16, padding: '12px 16px',
-                background: 'var(--bg-2)', borderRadius: 8,
-                border: '1px solid var(--border)',
-                borderLeft: '3px solid var(--purple)',
-              }}>
-                <div style={{
-                  fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-                  color: 'var(--purple)', textTransform: 'uppercase', letterSpacing: '0.1em',
-                  fontWeight: 700, marginBottom: 8,
-                }}>Prompt</div>
-                <MarkdownContent text={block.content} />
-              </div>
-            );
-          }
-          return null;
+        {/* Render prompt blocks at the top */}
+        {promptBlocks.map(function (block, i) {
+          return (
+            <div key={'prompt-' + i} style={{
+              marginBottom: 16, padding: '12px 16px',
+              background: 'var(--bg-2)', borderRadius: 8,
+              border: '1px solid var(--border)',
+              borderLeft: '3px solid var(--accent)',
+            }}>
+              <div style={{
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+                color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.1em',
+                fontWeight: 700, marginBottom: 8,
+              }}>Prompt</div>
+              <MarkdownContent text={block.content} />
+            </div>
+          );
         })}
 
-        {/* Regular event blocks (filter out initial_prompt since we rendered them above) */}
-        <EventBlockList events={displayBlocks.filter(function (b) { return b.type !== 'initial_prompt'; })} />
+        {/* Regular event blocks */}
+        <EventBlockList events={contentBlocks} />
       </div>
     </div>
   );
