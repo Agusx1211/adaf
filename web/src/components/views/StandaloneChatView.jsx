@@ -183,6 +183,9 @@ export default function StandaloneChatView() {
 
     var isStreaming = false;
     var hasRawText = false;
+    // Track how many assistant turns we've seen to skip replayed old turns.
+    var assistantTurnsSeen = 0;
+    var turnsToSkip = entry.assistantTurnsToSkip || 0;
 
     ws.addEventListener('message', function (wsEvent) {
       try {
@@ -215,6 +218,10 @@ export default function StandaloneChatView() {
           }
 
           if (ev.type === 'assistant') {
+            assistantTurnsSeen++;
+            // Skip replayed assistant turns from previous conversation rounds
+            if (assistantTurnsSeen <= turnsToSkip) return;
+
             var blocks = (ev.message && Array.isArray(ev.message.content)) ? ev.message.content : (Array.isArray(ev.content) ? ev.content : []);
             blocks.forEach(function (block) {
               if (!block) return;
@@ -236,6 +243,9 @@ export default function StandaloneChatView() {
           }
 
           if (ev.type === 'user') {
+            // Skip user events that belong to already-saved turns
+            if (assistantTurnsSeen < turnsToSkip) return;
+
             var userBlocks = (ev.message && Array.isArray(ev.message.content)) ? ev.message.content : (Array.isArray(ev.content) ? ev.content : []);
             userBlocks.forEach(function (block) {
               if (block && block.type === 'tool_result') {
@@ -315,6 +325,12 @@ export default function StandaloneChatView() {
     var msg = input.trim();
     setInput('');
 
+    // Count existing assistant messages so we can skip replayed turns on resume.
+    // When an agent resumes a session it re-streams ALL previous conversation
+    // turns before the new response; we need to ignore those duplicates.
+    var existingAssistantCount = 0;
+    messages.forEach(function (m) { if (m.role === 'assistant') existingAssistantCount++; });
+
     // Create per-chat session entry
     var entry = {
       sessionID: null,
@@ -324,6 +340,7 @@ export default function StandaloneChatView() {
       finalized: false,
       promptData: null,
       base: base,
+      assistantTurnsToSkip: existingAssistantCount,
     };
     chatSessionsRef.current[chatID] = entry;
 
