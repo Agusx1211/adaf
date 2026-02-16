@@ -161,6 +161,12 @@ export default function StandaloneChatView() {
     entry.finalized = true;
     entry.sending = false;
 
+    // Some resumed sessions do not replay previous assistant turns. In that case,
+    // the skip counter can hide the only assistant event; recover it as fallback.
+    if (entry.events.length === 0 && entry.skippedAssistantFallback && entry.skippedAssistantFallback.length > 0) {
+      entry.events = entry.skippedAssistantFallback.slice();
+    }
+
     var textParts = [];
     entry.events.forEach(function (e) {
       if (e.type === 'text') textParts.push(e.content);
@@ -262,20 +268,18 @@ export default function StandaloneChatView() {
 
           if (ev.type === 'assistant') {
             assistantTurnsSeen++;
-            // Skip replayed assistant turns from previous conversation rounds
-            if (assistantTurnsSeen <= turnsToSkip) return;
-
             var blocks = (ev.message && Array.isArray(ev.message.content)) ? ev.message.content : (Array.isArray(ev.content) ? ev.content : []);
+            var parsedAssistantBlocks = [];
             blocks.forEach(function (block) {
               if (!block) return;
               if (block.type === 'text' && block.text) {
-                if (!isStreaming && !hasRawText) pushEventForChat(forChatID, { type: 'text', content: block.text });
+                if (!isStreaming && !hasRawText) parsedAssistantBlocks.push({ type: 'text', content: block.text });
               } else if (block.type === 'thinking' && block.text) {
-                if (!isStreaming) pushEventForChat(forChatID, { type: 'thinking', content: block.text });
+                if (!isStreaming) parsedAssistantBlocks.push({ type: 'thinking', content: block.text });
               } else if (block.type === 'tool_use') {
-                pushEventForChat(forChatID, { type: 'tool_use', tool: block.name || 'tool', input: block.input || {} });
+                parsedAssistantBlocks.push({ type: 'tool_use', tool: block.name || 'tool', input: block.input || {} });
               } else if (block.type === 'tool_result') {
-                pushEventForChat(forChatID, {
+                parsedAssistantBlocks.push({
                   type: 'tool_result', tool: block.name || '',
                   result: block.content || block.tool_content || block.output || block.text || '',
                   isError: !!block.is_error,
@@ -287,6 +291,17 @@ export default function StandaloneChatView() {
                   payload: block,
                 });
               }
+            });
+            // Skip replayed assistant turns from previous conversation rounds.
+            // Keep the most-recent skipped blocks so we can recover if skip was wrong.
+            if (assistantTurnsSeen <= turnsToSkip) {
+              if (parsedAssistantBlocks.length > 0) {
+                entry.skippedAssistantFallback = parsedAssistantBlocks.slice();
+              }
+              return;
+            }
+            parsedAssistantBlocks.forEach(function (evt) {
+              pushEventForChat(forChatID, evt);
             });
             return;
           }
@@ -410,6 +425,7 @@ export default function StandaloneChatView() {
     var entry = {
       sessionID: null,
       events: [],
+      skippedAssistantFallback: null,
       ws: null,
       sending: true,
       finalized: false,
