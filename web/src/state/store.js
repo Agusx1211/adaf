@@ -118,7 +118,8 @@ function reducer(state, action) {
     case 'TOGGLE_NODE': {
       var nodeID = action.payload;
       var next = { ...state.expandedNodes };
-      if (next[nodeID]) { delete next[nodeID]; } else { next[nodeID] = true; }
+      // Use explicit true/false so nodes with either default can be toggled.
+      next[nodeID] = !next[nodeID];
       return { ...state, expandedNodes: next };
     }
 

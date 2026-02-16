@@ -10,9 +10,14 @@ export default function LoopTree() {
   var { sessions, spawns, loopRuns, selectedScope, expandedNodes } = state;
 
   var tree = useMemo(function () {
+    // Filter out standalone-chat loop runs - they belong to the Chats view
+    var filteredRuns = loopRuns.filter(function (lr) {
+      return lr.loop_name !== 'standalone-chat';
+    });
+
     // Build a set of session IDs claimed by each loop run via turn_ids
     var sessionToRun = {}; // session.id -> loopRun
-    loopRuns.forEach(function (lr) {
+    filteredRuns.forEach(function (lr) {
       if (lr.turn_ids && lr.turn_ids.length) {
         lr.turn_ids.forEach(function (tid) {
           if (tid > 0) sessionToRun[tid] = lr;
@@ -26,6 +31,9 @@ export default function LoopTree() {
     var standaloneSessions = [];
 
     sessions.forEach(function (session) {
+      // Skip standalone-chat sessions - they belong to the Chats view
+      if (session.loop_name === 'standalone-chat') return;
+
       // Try matching by turn_ids first
       var matchedRun = sessionToRun[session.id];
       if (matchedRun) {
@@ -141,8 +149,10 @@ export default function LoopTree() {
         var lr = group.loopRun;
         var runKey = lr.id || lr.loop_name;
         var loopNodeID = 'looprun-' + runKey;
-        var expanded = expandedNodes[loopNodeID] !== false; // expanded by default
         var isRunning = !!STATUS_RUNNING[normalizeStatus(lr.status)];
+        // Running loops default expanded, completed loops default collapsed.
+        // Explicit toggles override either default.
+        var expanded = loopNodeID in expandedNodes ? !!expandedNodes[loopNodeID] : isRunning;
         var loopColor = isRunning ? 'var(--purple)' : 'var(--text-2)';
         var sColor = statusColor(lr.status);
 
