@@ -91,7 +91,9 @@ func printUsageHuman(snapshots []usage.UsageSnapshot, errors []error) error {
 	}
 
 	for _, snap := range snapshots {
-		printUsageSnapshot(snap)
+		if len(snap.Limits) > 0 {
+			printUsageSnapshot(snap)
+		}
 	}
 
 	for _, err := range errors {

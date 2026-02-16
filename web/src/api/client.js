@@ -4,7 +4,7 @@ export function loadAuthToken() {
   var hash = window.location.hash || '';
   if (hash.indexOf('#token=') === 0) {
     saveAuthToken(hash.slice(7));
-    window.location.hash = '';
+    history.replaceState(null, '', window.location.pathname + window.location.search);
     return;
   }
   try {

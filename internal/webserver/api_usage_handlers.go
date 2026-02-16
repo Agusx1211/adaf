@@ -46,6 +46,10 @@ func (srv *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		if len(snapshot.Limits) == 0 {
+			continue
+		}
+
 		var limits []usageLimitResponse
 		for _, l := range snapshot.Limits {
 			resetsAt := ""

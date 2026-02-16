@@ -13,5 +13,7 @@ func DefaultProviders() []Provider {
 	return []Provider{
 		NewClaudeProvider(),
 		NewCodexProvider(),
+		NewMistralProvider(),
+		NewZAIProvider(),
 	}
 }

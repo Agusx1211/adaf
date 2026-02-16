@@ -14,6 +14,8 @@ func TestProviderKindDisplayName(t *testing.T) {
 		{ProviderClaude, "Claude Code"},
 		{ProviderCodex, "Codex"},
 		{ProviderGemini, "Gemini"},
+		{ProviderMistral, "Mistral"},
+		{ProviderZAI, "Z.AI"},
 		{ProviderKind("unknown"), "unknown"},
 	}
 

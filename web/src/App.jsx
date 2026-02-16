@@ -1,10 +1,11 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useAppState, useDispatch } from './state/store.js';
 import { loadAuthToken, saveAuthToken, clearAuthToken, hasAuthToken } from './api/client.js';
 import { usePolling, useViewData, useInitProjects, useLoopMessages } from './api/hooks.js';
 import { useSessionSocket } from './api/websocket.js';
 import { normalizeStatus, parseTimestamp } from './utils/format.js';
 import { STATUS_RUNNING } from './utils/colors.js';
+import { stateToHash, hashToActions } from './utils/deeplink.js';
 import TopBar from './components/layout/TopBar.jsx';
 import LeftPanel from './components/layout/LeftPanel.jsx';
 import CenterPanel from './components/layout/CenterPanel.jsx';
@@ -16,10 +17,40 @@ export default function App() {
   var dispatch = useDispatch();
   var { currentProjectID, leftView, selectedScope, sessions, loopRun, authRequired } = state;
 
+  // Ref to suppress hash→state→hash circular updates
+  var suppressHashUpdate = useRef(false);
+  // Track previous view for pushState vs replaceState decision
+  var prevViewRef = useRef(null);
+
   // Init auth token on mount
   useEffect(function () {
     loadAuthToken();
   }, []);
+
+  // Deep link: parse initial hash on mount
+  useEffect(function () {
+    var actions = hashToActions(window.location.hash);
+    if (actions.length) {
+      suppressHashUpdate.current = true;
+      actions.forEach(function (a) { dispatch(a); });
+      // Allow state→hash sync to resume after this tick
+      requestAnimationFrame(function () { suppressHashUpdate.current = false; });
+    }
+  }, [dispatch]);
+
+  // Deep link: popstate listener for Back/Forward navigation
+  useEffect(function () {
+    function onPopState() {
+      var actions = hashToActions(window.location.hash);
+      if (actions.length) {
+        suppressHashUpdate.current = true;
+        actions.forEach(function (a) { dispatch(a); });
+        requestAnimationFrame(function () { suppressHashUpdate.current = false; });
+      }
+    }
+    window.addEventListener('popstate', onPopState);
+    return function () { window.removeEventListener('popstate', onPopState); };
+  }, [dispatch]);
 
   // Init projects
   useInitProjects();
@@ -29,6 +60,42 @@ export default function App() {
 
   // Load view data when switching views
   useViewData(leftView, currentProjectID);
+
+  // Deep link: sync state → URL hash
+  var selectedIssue = state.selectedIssue;
+  var selectedPlan = state.selectedPlan;
+  var selectedDoc = state.selectedDoc;
+  var selectedTurn = state.selectedTurn;
+  var configSelection = state.configSelection;
+  var standaloneChatID = state.standaloneChatID;
+
+  useEffect(function () {
+    if (suppressHashUpdate.current) return;
+    var hash = stateToHash({
+      leftView: leftView,
+      selectedScope: selectedScope,
+      selectedIssue: selectedIssue,
+      selectedPlan: selectedPlan,
+      selectedDoc: selectedDoc,
+      selectedTurn: selectedTurn,
+      configSelection: configSelection,
+      standaloneChatID: standaloneChatID,
+    });
+    // Use pushState when the view changes (enables Back/Forward between views),
+    // replaceState for selection changes within the same view.
+    var prevView = prevViewRef.current;
+    var currentHash = window.location.hash || '';
+    if (hash === currentHash) {
+      prevViewRef.current = leftView;
+      return;
+    }
+    if (prevView !== null && prevView !== leftView) {
+      history.pushState(null, '', hash);
+    } else {
+      history.replaceState(null, '', hash);
+    }
+    prevViewRef.current = leftView;
+  }, [leftView, selectedScope, selectedIssue, selectedPlan, selectedDoc, selectedTurn, configSelection, standaloneChatID]);
 
   // Load loop messages when loop changes
   var loopID = loopRun && loopRun.id ? loopRun.id : 0;
