@@ -1,4 +1,4 @@
-.PHONY: build install test race clean lint fmt web web-install web-watch
+.PHONY: build install test race clean lint fmt web web-install web-watch e2e-install e2e e2e-clean
 
 BINARY=adaf
 BUILD_DIR=bin
@@ -21,6 +21,16 @@ build: web
 
 install: web
 	go install $(LDFLAGS) ./cmd/adaf
+
+e2e-install:
+	cd e2e && npm install
+
+e2e: e2e-install
+	make web
+	cd e2e && npm run install:browsers && npm test
+
+e2e-clean:
+	cd e2e && rm -rf node_modules test-results playwright-report .state
 
 test:
 	go test ./...
