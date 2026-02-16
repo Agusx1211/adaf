@@ -3,6 +3,12 @@
 /bin/
 /dist/
 
+# Generated web app artifacts (rebuilt by `make web`)
+/internal/webserver/static/app.js
+/internal/webserver/static/app.js.map
+/internal/webserver/static/app.css
+/internal/webserver/static/app.css.map
+
 # Go
 *.exe
 *.exe~
