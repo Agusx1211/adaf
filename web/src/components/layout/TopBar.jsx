@@ -302,6 +302,20 @@ function getLevelColor(level) {
   return 'var(--green)';
 }
 
+function formatResetTime(resetsAt) {
+  if (!resetsAt) return '';
+  var reset = new Date(resetsAt);
+  var now = new Date();
+  var diff = reset - now;
+  if (diff <= 0) return 'resets soon';
+  var mins = Math.floor(diff / 60000);
+  if (mins < 60) return 'resets in ' + mins + 'm';
+  var hours = Math.floor(mins / 60);
+  if (hours < 24) return 'resets in ' + hours + 'h';
+  var days = Math.floor(hours / 24);
+  return 'resets in ' + days + 'd';
+}
+
 function getHighestLevel(snapshots) {
   if (!snapshots || !snapshots.length) return 'normal';
   var levels = { normal: 0, warning: 1, critical: 2, exhausted: 3 };
@@ -318,9 +332,10 @@ function UsagePill(props) {
   var showUsage = props.showUsage;
   var onClick = props.onClick;
 
-  var highestLevel = getHighestLevel(usageLimits && usageLimits.snapshots);
+  var snapshots = (usageLimits && usageLimits.snapshots) || [];
+  var highestLevel = getHighestLevel(snapshots);
   var color = getLevelColor(highestLevel);
-  var hasLimits = usageLimits && usageLimits.snapshots && usageLimits.snapshots.length > 0;
+  var hasLimits = snapshots.length > 0;
 
   return (
     <button
@@ -336,15 +351,18 @@ function UsagePill(props) {
         transition: 'all 0.15s ease',
       }}
     >
-      {highestLevel !== 'normal' && (
-        <span style={{
-          width: 5, height: 5, borderRadius: '50%',
-          background: color,
-          animation: 'pulse 2s ease-in-out infinite',
-          flexShrink: 0,
-        }} />
-      )}
-      <span>{hasLimits ? 'Usage' : 'Limits'}</span>
+      {hasLimits ? snapshots.map(function (s) {
+        var c = getLevelColor(s.level);
+        return (
+          <span key={s.provider} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            <span style={{
+              width: 5, height: 5, borderRadius: '50%', background: c, flexShrink: 0,
+              animation: s.level !== 'normal' ? 'pulse 2s ease-in-out infinite' : 'none',
+            }} />
+            <span style={{ color: c }}>{s.provider.split(' ')[0]}</span>
+          </span>
+        );
+      }) : <span>Limits</span>}
       <span style={{ fontSize: 7, opacity: 0.6 }}>{'\u25BE'}</span>
     </button>
   );
@@ -406,32 +424,44 @@ function UsageDropdown(props) {
               </div>
               {snapshot.limits && snapshot.limits.map(function (limit) {
                 var pct = limit.utilization_pct;
-                var barWidth = 100;
-                var filled = Math.min(pct, 100) * barWidth / 100;
+                var filled = Math.min(pct, 100);
                 var color = getLevelColor(limit.level);
+                var resetText = formatResetTime(limit.resets_at);
                 return (
-                  <div key={limit.name} style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    marginBottom: 4,
-                  }}>
-                    <span style={{
-                      fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-                      color: 'var(--text-3)', width: 90, flexShrink: 0,
-                    }}>{limit.name}</span>
+                  <div key={limit.name} style={{ marginBottom: 6 }}>
                     <div style={{
-                      flex: 1, height: 4, background: 'var(--bg-3)', borderRadius: 2,
-                      overflow: 'hidden',
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      marginBottom: 3,
+                    }}>
+                      <span style={{
+                        fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+                        color: 'var(--text-2)',
+                      }}>{limit.name}</span>
+                      <span style={{
+                        fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+                        color: color, flexShrink: 0, marginLeft: 8,
+                      }}>{Math.round(pct)}%</span>
+                    </div>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
                     }}>
                       <div style={{
-                        width: filled + '%', height: '100%',
-                        background: color, borderRadius: 2,
-                        transition: 'width 0.3s ease',
-                      }} />
+                        flex: 1, height: 4, background: 'var(--bg-3)', borderRadius: 2,
+                        overflow: 'hidden',
+                      }}>
+                        <div style={{
+                          width: filled + '%', height: '100%',
+                          background: color, borderRadius: 2,
+                          transition: 'width 0.3s ease',
+                        }} />
+                      </div>
+                      {resetText && (
+                        <span style={{
+                          fontFamily: "'JetBrains Mono', monospace", fontSize: 8,
+                          color: 'var(--text-3)', flexShrink: 0,
+                        }}>{resetText}</span>
+                      )}
                     </div>
-                    <span style={{
-                      fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-                      color: color, width: 40, textAlign: 'right',
-                    }}>{Math.round(pct)}%</span>
                   </div>
                 );
               })}

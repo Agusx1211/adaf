@@ -114,7 +114,6 @@ func (p *CodexProvider) FetchUsage(ctx context.Context) (UsageSnapshot, error) {
 
 	cmd := exec.CommandContext(ctx, binary, "app-server")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Stdin = nil
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return UsageSnapshot{}, &ProviderError{
@@ -139,8 +138,7 @@ func (p *CodexProvider) FetchUsage(ctx context.Context) (UsageSnapshot, error) {
 		}
 	}
 
-	initMsg := `{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"clientInfo":{"name":"adaf","version":"0.1.0"},"protocolVersion":"2"}}` + "\n"
-	rlMsg := `{"jsonrpc":"2.0","method":"account/rateLimits/read","id":2,"params":{}}` + "\n"
+	initMsg := `{"method":"initialize","id":1,"params":{"clientInfo":{"name":"adaf","version":"0.1.0"}}}` + "\n"
 
 	if _, err := stdin.Write([]byte(initMsg)); err != nil {
 		killCodexProcess(cmd)
@@ -150,18 +148,46 @@ func (p *CodexProvider) FetchUsage(ctx context.Context) (UsageSnapshot, error) {
 		}
 	}
 
-	if _, err := stdin.Write([]byte(rlMsg)); err != nil {
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+
+	// Wait for initialize response (id=1) before proceeding.
+	initOK := false
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var msg struct {
+			ID int `json:"id"`
+		}
+		if json.Unmarshal(line, &msg) == nil && msg.ID == 1 {
+			initOK = true
+			break
+		}
+	}
+
+	if !initOK {
+		killCodexProcess(cmd)
+		return UsageSnapshot{}, &ProviderError{
+			Provider: ProviderCodex,
+			Err:      fmt.Errorf("no initialize response from codex app-server"),
+		}
+	}
+
+	// Send initialized notification, then rate limits request.
+	initializedMsg := `{"method":"initialized"}` + "\n"
+	rlMsg := `{"method":"account/rateLimits/read","id":2}` + "\n"
+
+	if _, err := stdin.Write([]byte(initializedMsg + rlMsg)); err != nil {
 		killCodexProcess(cmd)
 		return UsageSnapshot{}, &ProviderError{
 			Provider: ProviderCodex,
 			Err:      fmt.Errorf("failed to write rateLimits request: %w", err),
 		}
 	}
-	stdin.Close()
 
 	var rateLimits *codexRateLimitsResponse
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -172,7 +198,7 @@ func (p *CodexProvider) FetchUsage(ctx context.Context) (UsageSnapshot, error) {
 		var msg struct {
 			ID     int             `json:"id"`
 			Result json.RawMessage `json:"result"`
-			Error  interface{}     `json:"error"`
+			Error  any             `json:"error"`
 		}
 
 		if err := json.Unmarshal(line, &msg); err != nil {
@@ -181,8 +207,7 @@ func (p *CodexProvider) FetchUsage(ctx context.Context) (UsageSnapshot, error) {
 
 		if msg.ID == 2 {
 			if msg.Error != nil {
-				cmd.Process.Kill()
-				cmd.Wait()
+				killCodexProcess(cmd)
 				return UsageSnapshot{}, &ProviderError{
 					Provider: ProviderCodex,
 					Err:      fmt.Errorf("app-server error: %v", msg.Error),
@@ -191,8 +216,7 @@ func (p *CodexProvider) FetchUsage(ctx context.Context) (UsageSnapshot, error) {
 
 			var resp codexRateLimitsResponse
 			if err := json.Unmarshal(msg.Result, &resp); err != nil {
-				cmd.Process.Kill()
-				cmd.Wait()
+				killCodexProcess(cmd)
 				return UsageSnapshot{}, &ProviderError{
 					Provider: ProviderCodex,
 					Err:      fmt.Errorf("failed to parse rate limits: %w", err),
@@ -218,7 +242,11 @@ func (p *CodexProvider) FetchUsage(ctx context.Context) (UsageSnapshot, error) {
 		for limitID, snap := range rateLimits.RateLimitsByLimitID {
 			prefix := ""
 			if limitID != "codex" {
-				prefix = limitID + " "
+				if snap.LimitName != nil && *snap.LimitName != "" {
+					prefix = *snap.LimitName + " "
+				} else {
+					prefix = limitID + " "
+				}
 			}
 
 			if snap.Primary != nil {
@@ -249,10 +277,7 @@ func (p *CodexProvider) FetchUsage(ctx context.Context) (UsageSnapshot, error) {
 
 			if snap.Credits != nil && !snap.Credits.Unlimited {
 				c := snap.Credits
-				balance := c.Balance
-				if balance == "" {
-					balance = "unknown"
-				}
+				balance := formatCreditsBalance(c.Balance)
 				util := 0.0
 				if !c.HasCredits {
 					util = 100.0
@@ -291,10 +316,7 @@ func (p *CodexProvider) FetchUsage(ctx context.Context) (UsageSnapshot, error) {
 
 		if rateLimits.RateLimits.Credits != nil && !rateLimits.RateLimits.Credits.Unlimited {
 			c := rateLimits.RateLimits.Credits
-			balance := c.Balance
-			if balance == "" {
-				balance = "unknown"
-			}
+			balance := formatCreditsBalance(c.Balance)
 			util := 0.0
 			if !c.HasCredits {
 				util = 100.0
@@ -329,6 +351,17 @@ func codexTimestampToTime(ts int64) *time.Time {
 	}
 	t := time.Unix(ts, 0)
 	return &t
+}
+
+func formatCreditsBalance(balance string) string {
+	if balance == "" {
+		return "?"
+	}
+	var f float64
+	if _, err := fmt.Sscanf(balance, "%f", &f); err != nil {
+		return balance
+	}
+	return fmt.Sprintf("%.2f", f)
 }
 
 func killCodexProcess(cmd *exec.Cmd) {

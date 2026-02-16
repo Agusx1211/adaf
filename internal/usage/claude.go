@@ -88,9 +88,10 @@ func getClaudeTokenFromDotfile() (string, error) {
 }
 
 type claudeUsageResponse struct {
-	FiveHour     *claudeUsageWindow `json:"five_hour"`
-	SevenDay     *claudeUsageWindow `json:"seven_day"`
-	SevenDayOpus *claudeUsageWindow `json:"seven_day_opus"`
+	FiveHour       *claudeUsageWindow `json:"five_hour"`
+	SevenDay       *claudeUsageWindow `json:"seven_day"`
+	SevenDaySonnet *claudeUsageWindow `json:"seven_day_sonnet"`
+	SevenDayOpus   *claudeUsageWindow `json:"seven_day_opus"`
 }
 
 type claudeUsageWindow struct {
@@ -109,7 +110,8 @@ func (p *ClaudeProvider) FetchUsage(ctx context.Context) (UsageSnapshot, error) 
 		return UsageSnapshot{}, &ProviderError{Provider: ProviderClaude, Err: err}
 	}
 
-	req.SetBasicAuth(token, "")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -155,6 +157,14 @@ func (p *ClaudeProvider) FetchUsage(ctx context.Context) (UsageSnapshot, error) 
 			Name:           "7-day window",
 			UtilizationPct: usageResp.SevenDay.Utilization,
 			ResetsAt:       parseClaudeTimestamp(usageResp.SevenDay.ResetsAt),
+		})
+	}
+
+	if usageResp.SevenDaySonnet != nil {
+		limits = append(limits, UsageLimit{
+			Name:           "7-day Sonnet",
+			UtilizationPct: usageResp.SevenDaySonnet.Utilization,
+			ResetsAt:       parseClaudeTimestamp(usageResp.SevenDaySonnet.ResetsAt),
 		})
 	}
 
