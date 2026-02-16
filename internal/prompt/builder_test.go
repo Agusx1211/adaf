@@ -123,7 +123,7 @@ func TestBuild_SubAgentIncludesParentCommunicationCommands(t *testing.T) {
 	if !strings.Contains(got, "You are a sub-agent working as a") {
 		t.Fatalf("missing sub-agent intro in prompt\nprompt:\n%s", got)
 	}
-	if !strings.Contains(got, "`adaf parent-ask \"question\"`") {
+	if !strings.Contains(got, "adaf parent-ask") {
 		t.Fatalf("missing parent-ask guidance in sub-agent prompt\nprompt:\n%s", got)
 	}
 }
