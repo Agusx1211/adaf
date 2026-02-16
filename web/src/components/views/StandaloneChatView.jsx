@@ -4,6 +4,7 @@ import { apiCall, apiBase, buildWSURL } from '../../api/client.js';
 import { useToast } from '../common/Toast.jsx';
 import { injectEventBlockStyles, cleanResponse } from '../common/EventBlocks.jsx';
 import ChatMessageList from '../common/ChatMessageList.jsx';
+import { agentInfo } from '../../utils/colors.js';
 
 export default function StandaloneChatView() {
   var state = useAppState();
@@ -414,38 +415,76 @@ export default function StandaloneChatView() {
   var headerTitle = chatMeta ? chatMeta.title : 'Chat';
   if (headerTitle.length > 60) headerTitle = headerTitle.slice(0, 60) + '\u2026';
   var headerProfile = chatMeta ? chatMeta.profile : '';
+  var headerTeam = chatMeta ? chatMeta.team : '';
+  var headerAgent = chatMeta ? chatMeta.agent : '';
+  var agentColor = headerAgent ? agentInfo(headerAgent) : (headerProfile ? agentInfo(headerProfile) : null);
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg-0)' }}>
       {/* Header */}
       <div style={{
-        padding: '4px 12px', borderBottom: '1px solid var(--border)',
+        padding: '10px 16px', borderBottom: '1px solid var(--border)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        background: 'var(--bg-1)', flexShrink: 0,
+        background: 'var(--bg-1)', flexShrink: 0, gap: 10,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
           {sending && (
             <span style={{
-              width: 6, height: 6, borderRadius: '50%',
+              width: 7, height: 7, borderRadius: '50%',
               background: streamEvents.length > 0 ? 'var(--green)' : 'var(--accent)',
               animation: 'pulse 1.5s ease-in-out infinite',
               flexShrink: 0,
             }} />
           )}
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: 'var(--text-1)' }}>
+          <span style={{
+            fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600,
+            color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
             {headerTitle}
           </span>
           {headerProfile && (
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)' }}>
+            <span style={{
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+              padding: '1px 7px', borderRadius: 8, flexShrink: 0,
+              background: agentColor ? agentColor.color + '18' : 'var(--bg-3)',
+              color: agentColor ? agentColor.color : 'var(--text-2)',
+              border: '1px solid ' + (agentColor ? agentColor.color + '30' : 'var(--border)'),
+            }}>
               {headerProfile}
             </span>
           )}
+          {headerTeam && (
+            <span style={{
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+              padding: '1px 7px', borderRadius: 8, flexShrink: 0,
+              background: 'var(--green)18', color: 'var(--green)',
+              border: '1px solid var(--green)30',
+            }}>
+              {headerTeam}
+            </span>
+          )}
         </div>
-        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)' }}>
-          {sending
-            ? (streamEvents.length > 0 ? 'responding\u2026' : 'thinking\u2026')
-            : messages.length + ' msgs'}
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {sending ? (
+            <span style={{
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+              padding: '2px 8px', borderRadius: 8,
+              background: streamEvents.length > 0 ? 'var(--green)18' : 'var(--accent)18',
+              color: streamEvents.length > 0 ? 'var(--green)' : 'var(--accent)',
+              animation: 'pulse 1.5s ease-in-out infinite',
+            }}>
+              {streamEvents.length > 0 ? 'responding\u2026' : 'thinking\u2026'}
+            </span>
+          ) : (
+            <span style={{
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+              padding: '2px 8px', borderRadius: 8,
+              background: 'var(--bg-3)', color: 'var(--text-3)',
+            }}>
+              {messages.length} msg{messages.length !== 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Messages area */}

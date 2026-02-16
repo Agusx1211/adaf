@@ -17,7 +17,7 @@ var inputStyle = {
 var selectStyle = { ...inputStyle };
 
 var labelStyle = {
-  fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+  fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
   color: 'var(--text-3)', display: 'block', marginBottom: 4,
   textTransform: 'uppercase', letterSpacing: '0.05em',
 };
@@ -54,8 +54,10 @@ export default function ConfigDetailPanel() {
   var [profiles, setProfiles] = useState([]);
   var [teams, setTeams] = useState([]);
   var [skills, setSkills] = useState([]);
+  var [roleDefs, setRoleDefs] = useState([]);
   var [agentsMeta, setAgentsMeta] = useState(null);
   var [saving, setSaving] = useState(false);
+  var [previewItem, setPreviewItem] = useState(null);
 
   // Fetch agents metadata once on mount.
   var fetchAgentsMeta = useCallback(function () {
@@ -78,6 +80,10 @@ export default function ConfigDetailPanel() {
     var skillsList = [];
     try { skillsList = (await apiCall('/api/config/skills', 'GET', null, { allow404: true })) || []; } catch (_) {}
     setSkills(skillsList);
+
+    var rolesList = [];
+    try { rolesList = (await apiCall('/api/config/roles', 'GET', null, { allow404: true })) || []; } catch (_) {}
+    setRoleDefs(rolesList);
 
     if (!sel) { setData(null); return; }
 
@@ -237,11 +243,14 @@ export default function ConfigDetailPanel() {
       </div>
 
       {/* Body */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px' }}>
-        {sel.type === 'profile' && <ProfileEditor data={data} set={set} setData={setData} isNew={sel.isNew} agentsMeta={agentsMeta} onRefreshAgents={fetchAgentsMeta} showToast={showToast} />}
-        {sel.type === 'loop' && <LoopEditor data={data} setData={setData} profiles={profiles} teams={teams} skills={skills} isNew={sel.isNew} />}
-        {sel.type === 'team' && <TeamEditor data={data} set={set} setData={setData} profiles={profiles} skills={skills} isNew={sel.isNew} />}
-        {sel.type === 'skill' && <SkillEditor data={data} set={set} isNew={sel.isNew} />}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px' }}>
+          {sel.type === 'profile' && <ProfileEditor data={data} set={set} setData={setData} isNew={sel.isNew} agentsMeta={agentsMeta} onRefreshAgents={fetchAgentsMeta} showToast={showToast} />}
+          {sel.type === 'loop' && <LoopEditor data={data} setData={setData} profiles={profiles} teams={teams} skills={skills} isNew={sel.isNew} onPreview={setPreviewItem} />}
+          {sel.type === 'team' && <TeamEditor data={data} set={set} setData={setData} profiles={profiles} skills={skills} roleDefs={roleDefs} isNew={sel.isNew} onPreview={setPreviewItem} />}
+          {sel.type === 'skill' && <SkillEditor data={data} set={set} isNew={sel.isNew} />}
+        </div>
+        {previewItem && <PreviewPanel item={previewItem} onClose={function () { setPreviewItem(null); }} />}
       </div>
     </div>
   );
@@ -275,6 +284,8 @@ function ProfileEditor({ data, set, setData, isNew, agentsMeta, onRefreshAgents,
       .finally(function () { setDetecting(false); });
   }
 
+  var sectionDivider = { borderTop: '1px solid var(--border)', paddingTop: 16 };
+
   return (
     <div style={{ maxWidth: 600, display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Field label="Name" value={data.name} onChange={function (v) { set('name', v); }} disabled={!isNew} placeholder="my-profile" />
@@ -284,7 +295,7 @@ function ProfileEditor({ data, set, setData, isNew, agentsMeta, onRefreshAgents,
           {agentNames.map(function (a) { return <option key={a} value={a}>{a}</option>; })}
         </select>
       </div>
-      <div>
+      <div style={sectionDivider}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
           <label style={{ ...labelStyle, marginBottom: 0 }}>Model (optional)</label>
           <button onClick={handleRedetect} disabled={detecting} style={{ ...btnStyle, fontSize: 9, padding: '2px 8px', opacity: detecting ? 0.6 : 1 }}>
@@ -315,7 +326,7 @@ function ProfileEditor({ data, set, setData, isNew, agentsMeta, onRefreshAgents,
           </select>
         </div>
       )}
-      <div>
+      <div style={sectionDivider}>
         <label style={labelStyle}>Speed</label>
         <select value={data.speed || ''} onChange={function (e) { set('speed', e.target.value); }} style={selectStyle}>
           <option value="">Not set</option>
@@ -324,9 +335,9 @@ function ProfileEditor({ data, set, setData, isNew, agentsMeta, onRefreshAgents,
       </div>
       <Field label="Intelligence (1-10, 0=unset)" value={data.intelligence || 0} type="number" onChange={function (v) { set('intelligence', Number(v)); }} />
       <Field label="Max Instances (0=unlimited)" value={data.max_instances || 0} type="number" onChange={function (v) { set('max_instances', Number(v)); }} />
-      <div>
+      <div style={sectionDivider}>
         <label style={labelStyle}>Description</label>
-        <textarea value={data.description || ''} onChange={function (e) { set('description', e.target.value); }} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} placeholder="Strengths, weaknesses, best use cases..." />
+        <textarea value={data.description || ''} onChange={function (e) { set('description', e.target.value); }} style={{ ...inputStyle, minHeight: 100, resize: 'vertical' }} placeholder="Strengths, weaknesses, best use cases..." />
       </div>
     </div>
   );
@@ -352,7 +363,7 @@ function SkillEditor({ data, set, isNew }) {
 
 // ── Loop Editor ──
 
-function LoopEditor({ data, setData, profiles, teams, skills, isNew }) {
+function LoopEditor({ data, setData, profiles, teams, skills, isNew, onPreview }) {
   function setName(val) {
     setData(function (prev) { return { ...prev, name: val }; });
   }
@@ -433,11 +444,12 @@ function LoopEditor({ data, setData, profiles, teams, skills, isNew }) {
                 selected={step.skills || []}
                 available={skills}
                 onChange={function (v) { setStep(idx, 'skills', v); }}
+                onPreview={onPreview}
               />
 
               <div>
                 <label style={labelStyle}>Instructions (optional)</label>
-                <textarea value={step.instructions || ''} onChange={function (e) { setStep(idx, 'instructions', e.target.value); }} style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} placeholder="Step-specific instructions" />
+                <textarea value={step.instructions || ''} onChange={function (e) { setStep(idx, 'instructions', e.target.value); }} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} placeholder="Step-specific instructions" />
               </div>
               <div style={{ display: 'flex', gap: 16 }}>
                 <Checkbox label="can_stop" checked={!!step.can_stop} onChange={function (v) { setStep(idx, 'can_stop', v); }} />
@@ -456,7 +468,7 @@ function LoopEditor({ data, setData, profiles, teams, skills, isNew }) {
 
 // ── Team Editor ──
 
-function TeamEditor({ data, set, setData, profiles, skills, isNew }) {
+function TeamEditor({ data, set, setData, profiles, skills, roleDefs, isNew, onPreview }) {
   function setDelegation(deleg) {
     setData(function (prev) { return { ...prev, delegation: deleg }; });
   }
@@ -466,7 +478,7 @@ function TeamEditor({ data, set, setData, profiles, skills, isNew }) {
       <Field label="Name" value={data.name} onChange={function (v) { set('name', v); }} disabled={!isNew} placeholder="my-team" />
       <div>
         <label style={labelStyle}>Description</label>
-        <textarea value={data.description || ''} onChange={function (e) { set('description', e.target.value); }} style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} placeholder="What this team is good at..." />
+        <textarea value={data.description || ''} onChange={function (e) { set('description', e.target.value); }} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} placeholder="What this team is good at..." />
       </div>
 
       {/* Delegation */}
@@ -475,15 +487,146 @@ function TeamEditor({ data, set, setData, profiles, skills, isNew }) {
         onChange={setDelegation}
         profiles={profiles}
         skills={skills}
+        roleDefs={roleDefs}
         label="Team Sub-Agent Delegation"
+        onPreview={onPreview}
       />
+    </div>
+  );
+}
+
+// ── Role Picker (checkbox multi-select with descriptions) ──
+
+var ROLE_DESCRIPTIONS = {
+  'developer': 'Writes code, fixes bugs, implements features',
+  'lead-developer': 'Senior developer who reviews code and makes architectural decisions',
+  'manager': 'Coordinates work across agents, decides task priorities',
+  'supervisor': 'Monitors agent work, provides feedback and course corrections',
+  'ui-designer': 'Focuses on UI/UX, frontend components, and visual design',
+  'qa': 'Tests code, finds bugs, validates requirements',
+  'backend-designer': 'Designs APIs, data models, and backend architecture',
+};
+
+var ROLE_CHIP_COLORS = {
+  'developer': 'var(--accent)',
+  'lead-developer': 'var(--orange)',
+  'manager': 'var(--pink)',
+  'supervisor': 'var(--pink)',
+  'ui-designer': '#7B8CFF',
+  'qa': 'var(--green)',
+  'backend-designer': '#5BCEFC',
+};
+
+function RolePicker({ selected, onChange, roleDefs, onPreview }) {
+  var selectedSet = {};
+  (selected || []).forEach(function (v) { selectedSet[v] = true; });
+
+  // Build a lookup from API role definitions
+  var roleDefMap = {};
+  (roleDefs || []).forEach(function (rd) { roleDefMap[rd.name] = rd; });
+
+  function toggle(role) {
+    if (selectedSet[role]) {
+      onChange((selected || []).filter(function (v) { return v !== role; }));
+    } else {
+      onChange((selected || []).concat([role]));
+    }
+  }
+
+  function handleRemove(val) {
+    onChange((selected || []).filter(function (v) { return v !== val; }));
+  }
+
+  function handleHover(role) {
+    if (!onPreview) return;
+    var rd = roleDefMap[role];
+    onPreview({
+      type: 'role',
+      id: role,
+      title: rd ? rd.title : role,
+      description: rd ? rd.description : (ROLE_DESCRIPTIONS[role] || ''),
+      identity: rd ? rd.identity : '',
+      can_write_code: rd ? rd.can_write_code : true,
+      rule_ids: rd ? (rd.rule_ids || []) : [],
+    });
+  }
+
+  return (
+    <div>
+      {/* Selected role chips */}
+      {(selected || []).length > 0 ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
+          {(selected || []).map(function (val) {
+            var chipColor = ROLE_CHIP_COLORS[val] || 'var(--text-2)';
+            return (
+              <span key={val} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '2px 8px', borderRadius: 10,
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+                background: chipColor + '18', color: chipColor,
+                border: '1px solid ' + chipColor + '35',
+              }}>
+                {val}
+                <span
+                  onClick={function () { handleRemove(val); }}
+                  style={{ cursor: 'pointer', fontSize: 12, lineHeight: 1, opacity: 0.7 }}
+                  onMouseEnter={function (e) { e.currentTarget.style.opacity = '1'; }}
+                  onMouseLeave={function (e) { e.currentTarget.style.opacity = '0.7'; }}
+                >{'\u00D7'}</span>
+              </span>
+            );
+          })}
+        </div>
+      ) : (
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', marginBottom: 8 }}>
+          Default (developer)
+        </div>
+      )}
+
+      {/* Checkbox list of all roles */}
+      <div style={{
+        border: '1px solid var(--border)', borderRadius: 4, background: 'var(--bg-2)',
+        padding: 4, overflow: 'auto',
+      }}>
+        {ROLES.map(function (role) {
+          var isChecked = !!selectedSet[role];
+          var chipColor = ROLE_CHIP_COLORS[role] || 'var(--text-2)';
+          var rd = roleDefMap[role];
+          var desc = rd ? rd.description : (ROLE_DESCRIPTIONS[role] || '');
+          return (
+            <div key={role} style={{
+              display: 'flex', alignItems: 'flex-start', gap: 6, padding: '5px 4px',
+              borderRadius: 3,
+            }}
+              onMouseEnter={function (e) { e.currentTarget.style.background = 'var(--bg-3)'; handleHover(role); }}
+              onMouseLeave={function (e) { e.currentTarget.style.background = 'transparent'; }}
+            >
+              <label style={{
+                display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer',
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+                color: isChecked ? 'var(--text-0)' : 'var(--text-2)',
+                flex: 1, minWidth: 0,
+              }}>
+                <input type="checkbox" checked={isChecked} onChange={function () { toggle(role); }}
+                  style={{ marginTop: 2, flexShrink: 0 }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: isChecked ? 600 : 400, color: isChecked ? chipColor : undefined }}>{role}</div>
+                  <div style={{ fontSize: 9, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {desc}
+                  </div>
+                </div>
+              </label>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
 // ── Delegation Editor (reusable) ──
 
-function DelegationEditor({ delegation, onChange, profiles, skills, label }) {
+function DelegationEditor({ delegation, onChange, profiles, skills, roleDefs, label, isNested, onPreview }) {
   var hasDeleg = delegation && delegation.profiles && delegation.profiles.length > 0;
   var [expanded, setExpanded] = useState(hasDeleg);
 
@@ -509,6 +652,16 @@ function DelegationEditor({ delegation, onChange, profiles, skills, label }) {
     onChange({ ...delegation, profiles: profs });
   }
 
+  function setProfileMulti(idx, updates) {
+    var profs = (delegation.profiles || []).map(function (p, i) {
+      if (i !== idx) return p;
+      var next = { ...p };
+      Object.keys(updates).forEach(function (k) { next[k] = updates[k]; });
+      return next;
+    });
+    onChange({ ...delegation, profiles: profs });
+  }
+
   function addProfile() {
     onChange({ ...delegation, profiles: (delegation.profiles || []).concat([emptyDelegationProfile()]) });
   }
@@ -523,28 +676,55 @@ function DelegationEditor({ delegation, onChange, profiles, skills, label }) {
     setProfile(idx, 'delegation', childDeleg);
   }
 
+  // Find profile metadata for display
+  function profileMeta(name) {
+    if (!name) return null;
+    return profiles.find(function (p) { return p.name === name; });
+  }
+
+  var borderStyle = isNested ? '1px dashed var(--border)' : '1px solid var(--border)';
+
   return (
-    <div style={{ border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
+    <div style={{ border: borderStyle, borderRadius: 6, overflow: 'hidden' }}>
       <div
         onClick={function () { if (delegation) setExpanded(!expanded); }}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '8px 12px', background: 'var(--bg-2)', cursor: 'pointer',
+          padding: '10px 14px', background: 'var(--bg-2)', cursor: delegation ? 'pointer' : 'default',
         }}
       >
-        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: delegation ? 'var(--orange)' : 'var(--text-3)' }}>
-          {delegation ? (expanded ? '\u25BE' : '\u25B8') : '\u25CB'} {label || 'Delegation'}
-          {delegation && delegation.profiles ? ' (' + delegation.profiles.length + ' sub-agents)' : ''}
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{
+            fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600,
+            color: delegation ? 'var(--orange)' : 'var(--text-3)',
+          }}>
+            {label || 'Delegation'}
+          </span>
+          {delegation && delegation.profiles && (
+            <span style={{
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+              padding: '1px 6px', borderRadius: 8,
+              background: 'var(--orange)15', color: 'var(--orange)',
+            }}>
+              {delegation.profiles.length} sub-agent{delegation.profiles.length !== 1 ? 's' : ''}
+            </span>
+          )}
+          {delegation && expanded && (
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)' }}>{'\u25BE'}</span>
+          )}
+          {delegation && !expanded && (
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)' }}>{'\u25B8'}</span>
+          )}
+        </div>
         {!delegation ? (
-          <button onClick={function (e) { e.stopPropagation(); enable(); }} style={{ ...btnStyle, fontSize: 10, padding: '2px 8px' }}>Enable</button>
+          <button onClick={function (e) { e.stopPropagation(); enable(); }} style={{ ...btnStyle, fontSize: 10, padding: '3px 10px' }}>Enable</button>
         ) : (
-          <button onClick={function (e) { e.stopPropagation(); disable(); }} style={{ ...btnDangerStyle, fontSize: 10, padding: '2px 8px' }}>Remove</button>
+          <button onClick={function (e) { e.stopPropagation(); disable(); }} style={{ ...btnDangerStyle, fontSize: 10, padding: '3px 10px' }}>Disable</button>
         )}
       </div>
 
       {delegation && expanded && (
-        <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ display: 'flex', gap: 12 }}>
             <div style={{ flex: 1 }}>
               <label style={labelStyle}>Max Parallel</label>
@@ -571,72 +751,27 @@ function DelegationEditor({ delegation, onChange, profiles, skills, label }) {
           </div>
 
           {(delegation.profiles || []).map(function (dp, idx) {
+            var meta = profileMeta(dp.name);
+            var agentName = meta ? meta.agent : '';
+            var displayName = dp.name ? dp.name : 'Sub-Agent ' + (idx + 1);
+            var advancedKey = 'adv_' + idx;
+
             return (
-              <div key={idx} style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 4, background: 'var(--bg-1)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--orange)' }}>Sub-Agent {idx + 1}</span>
-                  <button onClick={function () { removeProfile(idx); }} style={{ ...btnDangerStyle, fontSize: 9, padding: '1px 6px' }}>Remove</button>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div>
-                    <label style={labelStyle}>Profile</label>
-                    <select value={dp.name || ''} onChange={function (e) { setProfile(idx, 'name', e.target.value); }} style={selectStyle}>
-                      <option value="">Select profile</option>
-                      {profiles.map(function (p) { return <option key={p.name} value={p.name}>{p.name} ({p.agent})</option>; })}
-                    </select>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <div style={{ flex: 1 }}>
-                      <label style={labelStyle}>Roles</label>
-                      <select
-                        multiple
-                        value={Array.isArray(dp.roles) && dp.roles.length ? dp.roles : (dp.role ? [dp.role] : [])}
-                        onChange={function (e) {
-                          var roles = Array.prototype.slice.call(e.target.selectedOptions).map(function (o) { return o.value; }).filter(function (v) { return v !== ''; });
-                          setProfile(idx, 'roles', roles);
-                          setProfile(idx, 'role', '');
-                        }}
-                        style={selectStyle}
-                      >
-                        <option value="">Default (developer)</option>
-                        {ROLES.map(function (r) { return <option key={r} value={r}>{r}</option>; })}
-                      </select>
-                    </div>
-                    <div style={{ width: 100 }}>
-                      <label style={labelStyle}>Max Instances</label>
-                      <input type="number" min="0" value={dp.max_instances || 0} onChange={function (e) { setProfile(idx, 'max_instances', parseInt(e.target.value, 10) || 0); }} style={inputStyle} />
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <div style={{ flex: 1 }}>
-                      <label style={labelStyle}>Speed</label>
-                      <select value={dp.speed || ''} onChange={function (e) { setProfile(idx, 'speed', e.target.value); }} style={selectStyle}>
-                        <option value="">Not set</option>
-                        {SPEED_OPTIONS.filter(Boolean).map(function (s) { return <option key={s} value={s}>{s}</option>; })}
-                      </select>
-                    </div>
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', gap: 12, paddingBottom: 6 }}>
-                      <Checkbox label="handoff" checked={!!dp.handoff} onChange={function (v) { setProfile(idx, 'handoff', v); }} />
-                    </div>
-                  </div>
-
-                  {/* Skills picker for sub-agent */}
-                  <SkillsPicker
-                    selected={dp.skills || []}
-                    available={skills || []}
-                    onChange={function (v) { setProfile(idx, 'skills', v); }}
-                  />
-
-                  {/* Nested delegation for this sub-agent */}
-                  <DelegationEditor
-                    delegation={dp.delegation}
-                    onChange={function (d) { setProfileDelegation(idx, d); }}
-                    profiles={profiles}
-                    skills={skills}
-                    label={'Sub-Agent ' + (idx + 1) + ' Child Delegation'}
-                  />
-                </div>
-              </div>
+              <SubAgentCard
+                key={idx}
+                dp={dp}
+                idx={idx}
+                displayName={displayName}
+                agentName={agentName}
+                profiles={profiles}
+                skills={skills}
+                roleDefs={roleDefs}
+                setProfile={setProfile}
+                setProfileMulti={setProfileMulti}
+                removeProfile={removeProfile}
+                setProfileDelegation={setProfileDelegation}
+                onPreview={onPreview}
+              />
             );
           })}
 
@@ -647,10 +782,116 @@ function DelegationEditor({ delegation, onChange, profiles, skills, label }) {
   );
 }
 
+// ── Sub-Agent Card (used inside DelegationEditor) ──
+
+function SubAgentCard({ dp, idx, displayName, agentName, profiles, skills, roleDefs, setProfile, setProfileMulti, removeProfile, setProfileDelegation, onPreview }) {
+  var [showAdvanced, setShowAdvanced] = useState(false);
+
+  return (
+    <div style={{ padding: 16, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-1)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: 'var(--orange)' }}>
+            {displayName}
+          </span>
+          {agentName && (
+            <span style={{
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+              padding: '1px 6px', borderRadius: 8,
+              background: 'var(--accent)15', color: 'var(--accent)',
+            }}>{agentName}</span>
+          )}
+        </div>
+        <button onClick={function () { removeProfile(idx); }} style={{ ...btnDangerStyle, fontSize: 9, padding: '2px 8px' }}>Remove</button>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* Essential: Profile + Roles always visible */}
+        <div>
+          <label style={labelStyle}>Profile</label>
+          <select value={dp.name || ''} onChange={function (e) { setProfile(idx, 'name', e.target.value); }} style={selectStyle}>
+            <option value="">Select profile</option>
+            {profiles.map(function (p) { return <option key={p.name} value={p.name}>{p.name} ({p.agent})</option>; })}
+          </select>
+        </div>
+        <div>
+          <label style={labelStyle}>Roles</label>
+          <RolePicker
+            selected={Array.isArray(dp.roles) && dp.roles.length ? dp.roles : (dp.role ? [dp.role] : [])}
+            onChange={function (roles) {
+              setProfileMulti(idx, { roles: roles, role: '' });
+            }}
+            roleDefs={roleDefs}
+            onPreview={onPreview}
+          />
+        </div>
+
+        {/* Collapsible Advanced section */}
+        <div
+          onClick={function () { setShowAdvanced(!showAdvanced); }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            cursor: 'pointer', padding: '4px 0',
+            borderTop: '1px solid var(--border)', marginTop: 2,
+          }}
+        >
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)' }}>
+            {showAdvanced ? '\u25BE' : '\u25B8'}
+          </span>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', fontWeight: 500 }}>
+            Advanced
+          </span>
+        </div>
+
+        {showAdvanced && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 4 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Speed</label>
+                <select value={dp.speed || ''} onChange={function (e) { setProfile(idx, 'speed', e.target.value); }} style={selectStyle}>
+                  <option value="">Not set</option>
+                  {SPEED_OPTIONS.filter(Boolean).map(function (s) { return <option key={s} value={s}>{s}</option>; })}
+                </select>
+              </div>
+              <div style={{ width: 100 }}>
+                <label style={labelStyle}>Max Instances</label>
+                <input type="number" min="0" value={dp.max_instances || 0} onChange={function (e) { setProfile(idx, 'max_instances', parseInt(e.target.value, 10) || 0); }} style={inputStyle} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 4 }}>
+              <Checkbox label="handoff" checked={!!dp.handoff} onChange={function (v) { setProfile(idx, 'handoff', v); }} />
+            </div>
+          </div>
+        )}
+
+        {/* Skills picker — always show pill summary */}
+        <SkillsPicker
+          selected={dp.skills || []}
+          available={skills || []}
+          onChange={function (v) { setProfile(idx, 'skills', v); }}
+          onPreview={onPreview}
+        />
+
+        {/* Nested delegation for this sub-agent */}
+        <DelegationEditor
+          delegation={dp.delegation}
+          onChange={function (d) { setProfileDelegation(idx, d); }}
+          profiles={profiles}
+          skills={skills}
+          roleDefs={roleDefs}
+          label={'Child Delegation'}
+          isNested={true}
+          onPreview={onPreview}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ── Skills Picker (reusable multi-select) ──
 
-function SkillsPicker({ selected, available, onChange }) {
+function SkillsPicker({ selected, available, onChange, onPreview }) {
   var [isOpen, setIsOpen] = useState(false);
+  var [filter, setFilter] = useState('');
   var selectedSet = {};
   (selected || []).forEach(function (id) { selectedSet[id] = true; });
 
@@ -671,6 +912,11 @@ function SkillsPicker({ selected, available, onChange }) {
   }
 
   var count = (selected || []).length;
+  var filtered = (available || []).filter(function (sk) {
+    if (!filter) return true;
+    var q = filter.toLowerCase();
+    return sk.id.toLowerCase().indexOf(q) >= 0 || (sk.short || '').toLowerCase().indexOf(q) >= 0;
+  });
 
   return (
     <div>
@@ -680,47 +926,83 @@ function SkillsPicker({ selected, available, onChange }) {
           {count > 0 && (
             <button type="button" onClick={clearAll} style={{ ...btnStyle, fontSize: 9, padding: '1px 6px', color: 'var(--text-3)' }}>Clear</button>
           )}
-          <button type="button" onClick={function () { setIsOpen(!isOpen); }} style={{ ...btnStyle, fontSize: 9, padding: '1px 6px' }}>
-            {isOpen ? 'Close' : 'Edit'}
-          </button>
         </div>
       </div>
 
-      {/* Compact display of selected skills */}
-      {count > 0 && !isOpen && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+      {/* Always show selected skill pills */}
+      {count > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
           {(selected || []).map(function (id) {
             return (
               <span key={id} style={{
-                padding: '2px 6px', borderRadius: 3, fontSize: 9,
+                display: 'inline-flex', alignItems: 'center', gap: 3,
+                padding: '2px 8px', borderRadius: 10, fontSize: 10,
                 fontFamily: "'JetBrains Mono', monospace",
                 background: 'var(--pink)15', color: 'var(--pink)',
                 border: '1px solid var(--pink)30',
-              }}>{id}</span>
+              }}>
+                {id}
+                <span
+                  onClick={function () { toggle(id); }}
+                  style={{ cursor: 'pointer', fontSize: 11, lineHeight: 1, opacity: 0.7 }}
+                  onMouseEnter={function (e) { e.currentTarget.style.opacity = '1'; }}
+                  onMouseLeave={function (e) { e.currentTarget.style.opacity = '0.7'; }}
+                >{'\u00D7'}</span>
+              </span>
             );
           })}
         </div>
       )}
 
+      {/* Toggle link */}
+      <span
+        onClick={function () { setIsOpen(!isOpen); setFilter(''); }}
+        style={{
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+          color: 'var(--accent)', cursor: 'pointer',
+          textDecoration: 'none', opacity: 0.8,
+        }}
+        onMouseEnter={function (e) { e.currentTarget.style.opacity = '1'; }}
+        onMouseLeave={function (e) { e.currentTarget.style.opacity = '0.8'; }}
+      >
+        {isOpen ? 'Close skills' : 'Edit skills\u2026'}
+      </span>
+
       {/* Expanded picker */}
       {isOpen && (
         <div style={{
           border: '1px solid var(--border)', borderRadius: 4, background: 'var(--bg-2)',
-          padding: 8, maxHeight: 200, overflow: 'auto',
+          padding: 8, maxHeight: 280, overflow: 'auto', marginTop: 6,
         }}>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
-            <button type="button" onClick={selectAll} style={{ ...btnStyle, fontSize: 9, padding: '1px 6px', color: 'var(--text-3)' }}>Select All</button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, gap: 6 }}>
+            {(available || []).length > 6 && (
+              <input
+                type="text"
+                value={filter}
+                onChange={function (e) { setFilter(e.target.value); }}
+                placeholder="Filter skills\u2026"
+                style={{ ...inputStyle, fontSize: 10, padding: '3px 8px', flex: 1 }}
+              />
+            )}
+            <button type="button" onClick={selectAll} style={{ ...btnStyle, fontSize: 9, padding: '2px 8px', color: 'var(--text-3)', flexShrink: 0 }}>Select All</button>
           </div>
-          {(available || []).map(function (sk) {
+          {filtered.map(function (sk) {
             var isChecked = !!selectedSet[sk.id];
             var shortText = sk.short || '';
             if (shortText.length > 80) shortText = shortText.slice(0, 80) + '\u2026';
             return (
               <label key={sk.id} style={{
-                display: 'flex', alignItems: 'flex-start', gap: 6, padding: '3px 0',
+                display: 'flex', alignItems: 'flex-start', gap: 6, padding: '6px 4px',
                 cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
                 color: isChecked ? 'var(--text-0)' : 'var(--text-2)',
-              }}>
+                borderRadius: 3,
+              }}
+                onMouseEnter={function (e) {
+                  e.currentTarget.style.background = 'var(--bg-3)';
+                  if (onPreview) onPreview({ type: 'skill', id: sk.id, short: sk.short, long: sk.long });
+                }}
+                onMouseLeave={function (e) { e.currentTarget.style.background = 'transparent'; }}
+              >
                 <input type="checkbox" checked={isChecked} onChange={function () { toggle(sk.id); }}
                   style={{ marginTop: 2, flexShrink: 0 }} />
                 <div style={{ minWidth: 0 }}>
@@ -732,6 +1014,11 @@ function SkillsPicker({ selected, available, onChange }) {
               </label>
             );
           })}
+          {filtered.length === 0 && (available || []).length > 0 && (
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', textAlign: 'center', padding: 8 }}>
+              No matching skills
+            </div>
+          )}
           {(available || []).length === 0 && (
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', textAlign: 'center', padding: 8 }}>
               No skills available
@@ -743,9 +1030,148 @@ function SkillsPicker({ selected, available, onChange }) {
   );
 }
 
+// ── Preview Panel ──
+
+function PreviewPanel({ item, onClose }) {
+  if (!item) return null;
+
+  var isRole = item.type === 'role';
+  var badgeColor = isRole ? (ROLE_CHIP_COLORS[item.id] || 'var(--orange)') : 'var(--pink)';
+  var badgeLabel = isRole ? 'ROLE' : 'SKILL';
+
+  return (
+    <div style={{
+      width: 300, flexShrink: 0, borderLeft: '1px solid var(--border)',
+      background: 'var(--bg-1)', display: 'flex', flexDirection: 'column',
+      overflow: 'hidden',
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: '12px 16px', borderBottom: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        flexShrink: 0,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <span style={{
+            fontFamily: "'JetBrains Mono', monospace", fontSize: 9, padding: '2px 6px',
+            borderRadius: 3, background: badgeColor + '15', color: badgeColor,
+            textTransform: 'uppercase', fontWeight: 600, flexShrink: 0,
+          }}>{badgeLabel}</span>
+          <span style={{
+            fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 600,
+            color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{item.title || item.id}</span>
+        </div>
+        <span
+          onClick={onClose}
+          style={{
+            cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 16, lineHeight: 1, color: 'var(--text-3)',
+            flexShrink: 0, marginLeft: 8,
+          }}
+          onMouseEnter={function (e) { e.currentTarget.style.color = 'var(--text-0)'; }}
+          onMouseLeave={function (e) { e.currentTarget.style.color = 'var(--text-3)'; }}
+        >{'\u00D7'}</span>
+      </div>
+
+      {/* Body */}
+      <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
+        {isRole && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Description */}
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--text-1)', lineHeight: 1.6 }}>
+              {item.description}
+            </div>
+
+            {/* Capabilities badge */}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 9, padding: '2px 8px',
+                borderRadius: 10, fontWeight: 500,
+                background: item.can_write_code ? 'var(--green)15' : 'var(--red)15',
+                color: item.can_write_code ? 'var(--green)' : 'var(--red)',
+                border: '1px solid ' + (item.can_write_code ? 'var(--green)30' : 'var(--red)30'),
+              }}>
+                {item.can_write_code ? 'Can write code' : 'Read-only (no code writes)'}
+              </span>
+            </div>
+
+            {/* Identity / system prompt */}
+            {item.identity && (
+              <div>
+                <div style={{ ...labelStyle, marginBottom: 6 }}>Identity Prompt</div>
+                <pre style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-2)',
+                  lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0,
+                  padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 4,
+                  border: '1px solid var(--border)',
+                }}>
+                  {item.identity}
+                </pre>
+              </div>
+            )}
+
+            {/* Rule IDs */}
+            {item.rule_ids && item.rule_ids.length > 0 && (
+              <div>
+                <div style={{ ...labelStyle, marginBottom: 6 }}>Attached Rules</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {item.rule_ids.map(function (rid) {
+                    return (
+                      <span key={rid} style={{
+                        fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+                        padding: '2px 8px', borderRadius: 10,
+                        background: 'var(--accent)12', color: 'var(--accent)',
+                        border: '1px solid var(--accent)25',
+                      }}>{rid}</span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {!isRole && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {item.short && (
+              <div>
+                <div style={{ ...labelStyle, marginBottom: 6 }}>Summary</div>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--text-1)', lineHeight: 1.6 }}>
+                  {item.short}
+                </div>
+              </div>
+            )}
+            {item.long && (
+              <div>
+                <div style={{ ...labelStyle, marginBottom: 6 }}>Documentation</div>
+                <pre style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-2)',
+                  lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0,
+                  padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 4,
+                  border: '1px solid var(--border)',
+                }}>
+                  {item.long}
+                </pre>
+              </div>
+            )}
+            {!item.short && !item.long && (
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--text-3)' }}>
+                No description available.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Shared components ──
 
 function Field({ label, value, onChange, disabled, placeholder, type }) {
+  var disabledStyle = disabled ? {
+    opacity: 0.5, borderStyle: 'dashed', background: 'var(--bg-1)',
+  } : {};
   return (
     <div>
       <label style={labelStyle}>{label}</label>
@@ -755,7 +1181,7 @@ function Field({ label, value, onChange, disabled, placeholder, type }) {
         onChange={function (e) { onChange(e.target.value); }}
         disabled={disabled}
         placeholder={placeholder}
-        style={{ ...inputStyle, opacity: disabled ? 0.5 : 1 }}
+        style={{ ...inputStyle, ...disabledStyle }}
       />
     </div>
   );

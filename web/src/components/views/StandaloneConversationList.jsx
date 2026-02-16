@@ -4,6 +4,7 @@ import { apiCall, apiBase } from '../../api/client.js';
 import { timeAgo, cropText } from '../../utils/format.js';
 import { useToast } from '../common/Toast.jsx';
 import Modal from '../common/Modal.jsx';
+import { agentInfo } from '../../utils/colors.js';
 
 export default function StandaloneConversationList() {
   var state = useAppState();
@@ -102,6 +103,8 @@ export default function StandaloneConversationList() {
         if (title.length > 60) title = title.slice(0, 60) + '\u2026';
         var chatStatus = chatStatuses[inst.id]; // 'thinking' | 'responding' | undefined
         var statusColor = chatStatus === 'thinking' ? 'var(--accent)' : chatStatus === 'responding' ? 'var(--green)' : null;
+        var profileAgent = agentInfo(inst.profile);
+        var msgCount = inst.message_count || 0;
         return (
           <div
             key={inst.id}
@@ -110,8 +113,12 @@ export default function StandaloneConversationList() {
               padding: '8px 14px', margin: '0 6px 2px 6px',
               borderRadius: 5, cursor: 'pointer',
               background: isSelected ? 'var(--bg-3)' : 'transparent',
-              border: isSelected ? '1px solid var(--accent)40' : '1px solid transparent',
-              transition: 'background 0.1s',
+              borderLeft: isSelected ? '3px solid var(--accent)' : chatStatus ? '3px solid ' + statusColor : '3px solid transparent',
+              borderRight: '1px solid transparent',
+              borderTop: '1px solid transparent',
+              borderBottom: '1px solid transparent',
+              transition: 'background 0.1s, border-color 0.2s',
+              animation: chatStatus ? 'none' : 'none',
             }}
             onMouseEnter={function (e) { if (!isSelected) e.currentTarget.style.background = 'var(--bg-2)'; }}
             onMouseLeave={function (e) { if (!isSelected) e.currentTarget.style.background = isSelected ? 'var(--bg-3)' : 'transparent'; }}
@@ -124,14 +131,6 @@ export default function StandaloneConversationList() {
                 display: 'flex', alignItems: 'center', gap: 6,
                 overflow: 'hidden', flex: 1, minWidth: 0,
               }}>
-                {chatStatus && (
-                  <span style={{
-                    width: 6, height: 6, borderRadius: '50%',
-                    background: statusColor,
-                    animation: 'pulse 1.5s ease-in-out infinite',
-                    flexShrink: 0,
-                  }} />
-                )}
                 <span style={{
                   fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
                   color: isSelected ? 'var(--text-0)' : 'var(--text-1)',
@@ -152,26 +151,44 @@ export default function StandaloneConversationList() {
               >{'\u00D7'}</button>
             </div>
             <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
+              display: 'flex', alignItems: 'center', gap: 5,
               fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)',
-              marginTop: 2,
-              marginLeft: chatStatus ? 12 : 0,
+              marginTop: 3,
             }}>
               {chatStatus ? (
                 <span style={{
-                  color: statusColor,
+                  padding: '0px 5px', borderRadius: 6,
+                  background: statusColor + '18', color: statusColor,
                   animation: 'pulse 1.5s ease-in-out infinite',
-                  fontWeight: 500,
+                  fontWeight: 500, fontSize: 9,
                 }}>
                   {chatStatus === 'thinking' ? 'thinking\u2026' : 'responding\u2026'}
                 </span>
               ) : (
                 <>
-                  <span style={{ opacity: 0.7 }}>{inst.profile}</span>
+                  {inst.profile && (
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 3,
+                      color: profileAgent.color, opacity: 0.85,
+                    }}>
+                      <span style={{
+                        width: 5, height: 5, borderRadius: '50%',
+                        background: profileAgent.color, display: 'inline-block', flexShrink: 0,
+                      }} />
+                      {inst.profile}
+                    </span>
+                  )}
                   {inst.team && (
+                    <span style={{
+                      padding: '0px 4px', borderRadius: 4,
+                      background: 'var(--green)12', color: 'var(--green)',
+                      opacity: 0.85,
+                    }}>{inst.team}</span>
+                  )}
+                  {msgCount > 0 && (
                     <>
                       <span style={{ opacity: 0.4 }}>{'\u00B7'}</span>
-                      <span style={{ opacity: 0.7, color: 'var(--green)' }}>{inst.team}</span>
+                      <span style={{ opacity: 0.5 }}>{msgCount} msg{msgCount !== 1 ? 's' : ''}</span>
                     </>
                   )}
                   <span style={{ opacity: 0.4 }}>{'\u00B7'}</span>
@@ -206,7 +223,6 @@ export function NewChatModal({ base, onCreated, onClose }) {
   var [selectedProfile, setSelectedProfile] = useState('');
   var [selectedTeam, setSelectedTeam] = useState('');
   var [selectedSkills, setSelectedSkills] = useState([]);
-  var [showSkills, setShowSkills] = useState(false);
   var [creating, setCreating] = useState(false);
   var showToast = useToast();
 
@@ -270,10 +286,12 @@ export function NewChatModal({ base, onCreated, onClose }) {
   };
 
   var labelStyle = {
-    fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+    fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
     color: 'var(--text-3)', display: 'block', marginBottom: 6,
     textTransform: 'uppercase', letterSpacing: '0.05em',
   };
+
+  var sectionDivider = { borderTop: '1px solid var(--border)', paddingTop: 14 };
 
   var canCreate = !!selectedProfile;
 
@@ -287,21 +305,24 @@ export function NewChatModal({ base, onCreated, onClose }) {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {recentCombos.slice(0, 6).map(function (combo, idx) {
                 var isActive = selectedProfile === combo.profile && selectedTeam === (combo.team || '');
+                var comboAgent = agentInfo(combo.profile);
                 return (
                   <button
                     key={idx}
                     type="button"
                     onClick={function () { handleQuickPick(combo); }}
                     style={{
-                      padding: '4px 10px', borderRadius: 12,
+                      padding: '5px 12px', borderRadius: 14,
                       border: isActive ? '1px solid var(--accent)' : '1px solid var(--border)',
                       background: isActive ? 'var(--accent)15' : 'var(--bg-2)',
                       color: isActive ? 'var(--accent)' : 'var(--text-1)',
                       cursor: 'pointer',
-                      fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+                      fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
                     }}
                   >
-                    {combo.profile}{combo.team ? ' + ' + combo.team : ''}
+                    <span style={{ fontWeight: 600 }}>{combo.profile}</span>
+                    {combo.team && <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>+ {combo.team}</span>}
                   </button>
                 );
               })}
@@ -310,7 +331,7 @@ export function NewChatModal({ base, onCreated, onClose }) {
         )}
 
         {/* Profile dropdown */}
-        <div style={{ marginBottom: 12 }}>
+        <div style={{ marginBottom: 14, ...( recentCombos.length > 0 ? sectionDivider : {}) }}>
           <label style={labelStyle}>Profile</label>
           {profiles.length === 0 ? (
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--text-3)', padding: 8 }}>
@@ -328,7 +349,7 @@ export function NewChatModal({ base, onCreated, onClose }) {
 
         {/* Team dropdown (optional) */}
         {selectedProfile && (
-          <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 14, ...sectionDivider }}>
             <label style={labelStyle}>Team (optional)</label>
             <select value={selectedTeam} onChange={function (e) { setSelectedTeam(e.target.value); }} style={selectStyle}>
               <option value="">No team</option>
@@ -340,66 +361,69 @@ export function NewChatModal({ base, onCreated, onClose }) {
           </div>
         )}
 
-        {/* Skills (optional, collapsible) */}
+        {/* Skills — always visible when skills exist */}
         {selectedProfile && skills.length > 0 && (
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-              <label style={{ ...labelStyle, marginBottom: 0 }}>
-                Skills ({selectedSkills.length} selected)
-              </label>
-              <button type="button" onClick={function () { setShowSkills(!showSkills); }} style={{
-                padding: '2px 8px', border: '1px solid var(--border)', background: 'var(--bg-2)',
-                color: 'var(--text-2)', borderRadius: 3, cursor: 'pointer',
-                fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-              }}>
-                {showSkills ? 'Hide' : 'Show'}
-              </button>
-            </div>
-            {selectedSkills.length > 0 && !showSkills && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          <div style={{ marginBottom: 14, ...sectionDivider }}>
+            <label style={labelStyle}>
+              Skills ({selectedSkills.length} selected)
+            </label>
+            {/* Selected skills as dismissible pills */}
+            {selectedSkills.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
                 {selectedSkills.map(function (id) {
                   return (
                     <span key={id} style={{
-                      padding: '2px 6px', borderRadius: 3, fontSize: 9,
+                      display: 'inline-flex', alignItems: 'center', gap: 3,
+                      padding: '2px 8px', borderRadius: 10, fontSize: 10,
                       fontFamily: "'JetBrains Mono', monospace",
                       background: 'var(--pink)15', color: 'var(--pink)',
                       border: '1px solid var(--pink)30',
-                    }}>{id}</span>
-                  );
-                })}
-              </div>
-            )}
-            {showSkills && (
-              <div style={{
-                border: '1px solid var(--border)', borderRadius: 4, background: 'var(--bg-2)',
-                padding: 8, maxHeight: 160, overflow: 'auto',
-              }}>
-                {skills.map(function (sk) {
-                  var isChecked = selectedSkills.indexOf(sk.id) >= 0;
-                  return (
-                    <label key={sk.id} style={{
-                      display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0',
-                      cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
-                      color: isChecked ? 'var(--text-0)' : 'var(--text-2)',
                     }}>
-                      <input type="checkbox" checked={isChecked} onChange={function () { toggleSkill(sk.id); }} />
-                      <span style={{ fontWeight: isChecked ? 600 : 400 }}>{sk.id}</span>
-                    </label>
+                      {id}
+                      <span
+                        onClick={function () { toggleSkill(id); }}
+                        style={{ cursor: 'pointer', fontSize: 11, lineHeight: 1, opacity: 0.7 }}
+                        onMouseEnter={function (e) { e.currentTarget.style.opacity = '1'; }}
+                        onMouseLeave={function (e) { e.currentTarget.style.opacity = '0.7'; }}
+                      >{'\u00D7'}</span>
+                    </span>
                   );
                 })}
               </div>
             )}
+            <div style={{
+              border: '1px solid var(--border)', borderRadius: 4, background: 'var(--bg-2)',
+              padding: 8, maxHeight: 180, overflow: 'auto',
+            }}>
+              {skills.map(function (sk) {
+                var isChecked = selectedSkills.indexOf(sk.id) >= 0;
+                return (
+                  <label key={sk.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '5px 4px',
+                    cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+                    color: isChecked ? 'var(--text-0)' : 'var(--text-2)',
+                    borderRadius: 3,
+                  }}
+                    onMouseEnter={function (e) { e.currentTarget.style.background = 'var(--bg-3)'; }}
+                    onMouseLeave={function (e) { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <input type="checkbox" checked={isChecked} onChange={function () { toggleSkill(sk.id); }} />
+                    <span style={{ fontWeight: isChecked ? 600 : 400 }}>{sk.id}</span>
+                  </label>
+                );
+              })}
+            </div>
           </div>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 4 }}>
           <button type="button" onClick={onClose} style={{
-            padding: '6px 12px', border: '1px solid var(--border)', background: 'var(--bg-2)',
+            padding: '8px 16px', border: '1px solid var(--border)', background: 'var(--bg-2)',
             color: 'var(--text-1)', borderRadius: 4, cursor: 'pointer',
             fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
           }}>Cancel</button>
           <button type="submit" disabled={!canCreate || creating} style={{
-            padding: '6px 12px', border: '1px solid var(--accent)',
+            padding: '8px 16px', border: '1px solid var(--accent)',
             background: 'var(--accent)', color: '#000',
             borderRadius: 4, cursor: !canCreate || creating ? 'not-allowed' : 'pointer',
             fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600,
