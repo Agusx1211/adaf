@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/session"
 	"github.com/agusx1211/adaf/internal/store"
 )
@@ -491,6 +492,79 @@ func TestConfigLoopDefEndpoints(t *testing.T) {
 	deleteRec := performRequest(t, srv, http.MethodDelete, "/api/config/loops/test-loop")
 	if deleteRec.Code != http.StatusOK {
 		t.Fatalf("delete status = %d, want %d", deleteRec.Code, http.StatusOK)
+	}
+}
+
+func TestConfigLoopDefUpdateClearsOptionalStepFields(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	performJSONRequest(t, srv, http.MethodPost, "/api/config/profiles", `{"name":"loop-prof","agent":"claude"}`)
+
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/config/loops", `{
+		"name":"test-loop",
+		"steps":[{"profile":"loop-prof","turns":1,"team":"my-team","instructions":"hello"}]
+	}`)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
+	}
+
+	updateRec := performJSONRequest(t, srv, http.MethodPut, "/api/config/loops/test-loop", `{
+		"name":"test-loop",
+		"steps":[{"profile":"loop-prof","turns":2}]
+	}`)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, want %d", updateRec.Code, http.StatusOK)
+	}
+
+	listRec := performRequest(t, srv, http.MethodGet, "/api/config/loops")
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d", listRec.Code, http.StatusOK)
+	}
+
+	loops := decodeResponse[[]config.LoopDef](t, listRec)
+	if len(loops) != 1 {
+		t.Fatalf("loops length = %d, want 1", len(loops))
+	}
+	if len(loops[0].Steps) != 1 {
+		t.Fatalf("steps length = %d, want 1", len(loops[0].Steps))
+	}
+	if loops[0].Steps[0].Team != "" {
+		t.Fatalf("step team = %q, want empty", loops[0].Steps[0].Team)
+	}
+	if loops[0].Steps[0].Instructions != "" {
+		t.Fatalf("step instructions = %q, want empty", loops[0].Steps[0].Instructions)
+	}
+}
+
+func TestConfigTeamUpdateClearsDelegation(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	performJSONRequest(t, srv, http.MethodPost, "/api/config/profiles", `{"name":"sub-prof","agent":"claude"}`)
+
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/config/teams", `{
+		"name":"test-team",
+		"delegation":{"profiles":[{"name":"sub-prof"}]}
+	}`)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
+	}
+
+	updateRec := performJSONRequest(t, srv, http.MethodPut, "/api/config/teams/test-team", `{"name":"test-team"}`)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, want %d", updateRec.Code, http.StatusOK)
+	}
+
+	listRec := performRequest(t, srv, http.MethodGet, "/api/config/teams")
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d", listRec.Code, http.StatusOK)
+	}
+
+	teams := decodeResponse[[]config.Team](t, listRec)
+	if len(teams) != 1 {
+		t.Fatalf("teams length = %d, want 1", len(teams))
+	}
+	if teams[0].Delegation != nil {
+		t.Fatalf("team delegation = %#v, want nil", teams[0].Delegation)
 	}
 }
 

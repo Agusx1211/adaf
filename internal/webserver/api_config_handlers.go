@@ -149,12 +149,14 @@ func updateMatchingEntry[T any](
 		if !matches(items[i]) {
 			continue
 		}
-		if err := decode(&items[i]); err != nil {
+		var updated T
+		if err := decode(&updated); err != nil {
 			return false, errInvalidRequestBody
 		}
 		if finalize != nil {
-			finalize(&items[i])
+			finalize(&updated)
 		}
+		items[i] = updated
 		return true, nil
 	}
 	return false, nil
