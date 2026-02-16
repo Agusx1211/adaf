@@ -1,4 +1,4 @@
-.PHONY: build install test race clean lint fmt web web-install web-watch e2e-install e2e e2e-clean
+.PHONY: build install test race clean lint fmt web web-install web-watch e2e-install e2e e2e-clean record-vibe-fixture
 
 BINARY=adaf
 BUILD_DIR=bin
@@ -51,3 +51,6 @@ tidy:
 	go mod tidy
 
 all: tidy fmt build test race
+
+record-vibe-fixture:
+	ADAF_RECORD_VIBE_FIXTURE=1 go test -tags=integration ./internal/agent -run TestRecordVibeFixture -v

@@ -442,6 +442,9 @@ make build
 # Run tests
 make test
 
+# Record Vibe replay fixture (requires vibe + credentials)
+make record-vibe-fixture
+
 # Format code
 make fmt
 

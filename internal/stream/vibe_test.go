@@ -114,6 +114,29 @@ func TestParseVibeDetailed(t *testing.T) {
 	}
 }
 
+func TestParseVibeRawRecordedOncePerLine(t *testing.T) {
+	ndjson := `{"role":"assistant","content":"hello","reasoning_content":"thinking"}`
+	ch := ParseVibe(context.Background(), strings.NewReader(ndjson))
+
+	var events []RawEvent
+	for ev := range ch {
+		if ev.Err != nil {
+			t.Fatalf("unexpected error: %v", ev.Err)
+		}
+		events = append(events, ev)
+	}
+
+	if len(events) != 2 {
+		t.Fatalf("expected 2 parsed events, got %d", len(events))
+	}
+	if len(events[0].Raw) == 0 {
+		t.Fatal("first parsed event should carry raw line")
+	}
+	if len(events[1].Raw) != 0 {
+		t.Fatal("second parsed event should not duplicate raw line")
+	}
+}
+
 func TestVibeToClaudeEvent_Reasoning(t *testing.T) {
 	vm := VibeMessage{
 		Role:             "assistant",

@@ -154,8 +154,15 @@ func ParseVibe(ctx context.Context, r io.Reader) <-chan RawEvent {
 				continue
 			}
 
-			for _, ce := range events {
-				offerRawEvent(ctx, ch, RawEvent{Raw: raw, Parsed: ce}, "vibe")
+			// One raw line can map to multiple parsed events (for example
+			// reasoning + assistant text). Emit Raw only on the first mapped
+			// event so downstream recording captures each NDJSON line once.
+			for i, ce := range events {
+				if i == 0 {
+					offerRawEvent(ctx, ch, RawEvent{Raw: raw, Parsed: ce}, "vibe")
+					continue
+				}
+				offerRawEvent(ctx, ch, RawEvent{Parsed: ce}, "vibe")
 			}
 		}
 
