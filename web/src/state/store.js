@@ -43,7 +43,7 @@ var initialState = {
   activeLoopIDForMessages: 0,
   viewLoaded: { issues: false, docs: false, plan: false, logs: false },
 
-  configSelection: null, // { type: 'profile'|'loop'|'team', name: string } or null
+  configSelection: null, // { type: 'profile'|'loop'|'team'|'skill'|'role', name: string } or null
   standaloneChatID: '', // active chat instance ID
   standaloneChatStatuses: {}, // { [chatID]: 'thinking' | 'responding' }
   loopRuns: [], // all loop runs (not just active)
