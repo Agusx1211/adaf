@@ -57,7 +57,16 @@ export default function App() {
     return sessions.length ? sessions[0].id : 0;
   }, [selectedScope, sessions, state.spawns]);
 
-  useSessionSocket(targetSessionID);
+  // Only open WebSocket for running sessions. Non-running sessions load
+  // historical recordings via the REST API (see AgentOutput.jsx).
+  var wsSessionID = useMemo(function () {
+    if (!targetSessionID) return 0;
+    var sess = sessions.find(function (s) { return s.id === targetSessionID; });
+    if (!sess) return targetSessionID; // unknown status — try connecting
+    return STATUS_RUNNING[normalizeStatus(sess.status)] ? targetSessionID : 0;
+  }, [targetSessionID, sessions]);
+
+  useSessionSocket(wsSessionID);
 
   // Ensure tree defaults — expand running sessions
   useEffect(function () {

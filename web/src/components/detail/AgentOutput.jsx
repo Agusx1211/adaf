@@ -61,13 +61,46 @@ export default function AgentOutput({ scope }) {
       .catch(function () { setLoadingHistory(false); });
   }, [turnID, isCompleted, blockEvents.length, historicalEvents, currentProjectID, dispatch]);
 
-  // Convert historical recording events to display blocks
+  // Convert historical recording events to display blocks.
+  // Handles two formats:
+  //   1. Store RecordingEvent: {type: "meta"|"claude_stream"|"stdout", data: "..."}
+  //   2. Wire protocol (session events): {type: "prompt"|"event"|"raw", data: {...}}
   var historicalBlocks = useMemo(function () {
     if (!turnID || !historicalEvents[turnID]) return [];
     var events = historicalEvents[turnID];
     var blocks = [];
 
+    function parseAgentEvent(parsed) {
+      if (parsed && parsed.type === 'assistant' && parsed.message && Array.isArray(parsed.message.content)) {
+        parsed.message.content.forEach(function (block) {
+          if (block.type === 'text' && block.text) {
+            blocks.push({ type: 'text', content: block.text });
+          } else if (block.type === 'thinking' && block.text) {
+            blocks.push({ type: 'thinking', content: block.text });
+          } else if (block.type === 'tool_use') {
+            blocks.push({ type: 'tool_use', tool: block.name || 'tool', input: block.input || '' });
+          } else if (block.type === 'tool_result') {
+            blocks.push({ type: 'tool_result', tool: block.name || '', result: block.content || block.output || block.text || '' });
+          }
+        });
+        return true;
+      }
+      if (parsed && parsed.type === 'user' && parsed.message && Array.isArray(parsed.message.content)) {
+        parsed.message.content.forEach(function (block) {
+          if (block.type === 'tool_result') {
+            blocks.push({ type: 'tool_result', tool: block.name || '', result: block.content || block.output || block.text || '', isError: !!block.is_error });
+          }
+        });
+        return true;
+      }
+      if (parsed && parsed.type === 'result') {
+        return true;
+      }
+      return false;
+    }
+
     events.forEach(function (ev) {
+      // --- Store RecordingEvent format ---
       if (ev.type === 'meta') {
         try {
           var metaData = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
@@ -83,37 +116,49 @@ export default function AgentOutput({ scope }) {
       if (ev.type === 'claude_stream' || ev.type === 'stdout') {
         try {
           var parsed = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
-          if (parsed && parsed.type === 'assistant' && parsed.message && Array.isArray(parsed.message.content)) {
-            parsed.message.content.forEach(function (block) {
-              if (block.type === 'text' && block.text) {
-                blocks.push({ type: 'text', content: block.text });
-              } else if (block.type === 'thinking' && block.text) {
-                blocks.push({ type: 'thinking', content: block.text });
-              } else if (block.type === 'tool_use') {
-                blocks.push({ type: 'tool_use', tool: block.name || 'tool', input: block.input || '' });
-              } else if (block.type === 'tool_result') {
-                blocks.push({ type: 'tool_result', tool: block.name || '', result: block.content || block.output || block.text || '' });
-              }
-            });
-            return;
-          }
-          if (parsed && parsed.type === 'user' && parsed.message && Array.isArray(parsed.message.content)) {
-            parsed.message.content.forEach(function (block) {
-              if (block.type === 'tool_result') {
-                blocks.push({ type: 'tool_result', tool: block.name || '', result: block.content || block.output || block.text || '', isError: !!block.is_error });
-              }
-            });
-            return;
-          }
-          if (parsed && parsed.type === 'result') {
-            return;
-          }
+          if (parseAgentEvent(parsed)) return;
         } catch (_) {}
         if (ev.data && typeof ev.data === 'string' && ev.data.trim()) {
           blocks.push({ type: 'text', content: ev.data });
         }
         return;
       }
+
+      // --- Wire protocol format (from session events file) ---
+      if (ev.type === 'prompt') {
+        var promptData = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
+        if (promptData && promptData.prompt) {
+          blocks.push({ type: 'initial_prompt', content: promptData.prompt });
+        }
+        return;
+      }
+
+      if (ev.type === 'event') {
+        try {
+          var wireData = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
+          var agentEvent = wireData && wireData.event ? wireData.event : wireData;
+          if (typeof agentEvent === 'string') agentEvent = JSON.parse(agentEvent);
+          if (parseAgentEvent(agentEvent)) return;
+        } catch (_) {}
+        return;
+      }
+
+      if (ev.type === 'raw') {
+        try {
+          var rawData = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
+          var rawText = typeof rawData === 'string' ? rawData : (rawData && rawData.data ? String(rawData.data) : '');
+          if (rawText.trim()) {
+            blocks.push({ type: 'text', content: rawText });
+          }
+        } catch (_) {
+          if (ev.data && typeof ev.data === 'string' && ev.data.trim()) {
+            blocks.push({ type: 'text', content: ev.data });
+          }
+        }
+        return;
+      }
+
+      // Ignore wire lifecycle messages (started, finished, done, etc.)
     });
 
     return blocks;

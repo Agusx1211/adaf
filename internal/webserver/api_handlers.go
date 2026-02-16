@@ -253,14 +253,22 @@ func handleTurnByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 }
 
 func handleTurnRecordingEventsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
-	turnID, err := parsePathID(r.PathValue("id"))
+	id, err := parsePathID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "turn not found")
 		return
 	}
 
-	eventsPath := filepath.Join(s.RecordsDirs()[0], fmt.Sprintf("%d", turnID), "events.jsonl")
+	// Try store recording first (keyed by store turn ID).
+	eventsPath := filepath.Join(s.RecordsDirs()[0], fmt.Sprintf("%d", id), "events.jsonl")
 	data, err := os.ReadFile(eventsPath)
+	if err != nil && os.IsNotExist(err) {
+		// Fall back to the session daemon events file (keyed by session ID).
+		// Session IDs and store turn IDs use independent counters, so the
+		// frontend may pass a session ID that has no matching store recording.
+		sessionEventsPath := session.EventsPath(id)
+		data, err = os.ReadFile(sessionEventsPath)
+	}
 	if err != nil {
 		if os.IsNotExist(err) {
 			writeError(w, http.StatusNotFound, "no recording found for this turn")

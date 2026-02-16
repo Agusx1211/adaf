@@ -46,7 +46,7 @@ export default function CenterPanel() {
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
           <AgentInfoBar scope={selectedScope} />
           {tabs.length > 1 && <TabBar tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />}
-          <div style={{ flex: 1, overflow: 'hidden' }}>
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             {activeTab === 'output' ? (
               <AgentOutput scope={selectedScope} />
             ) : activeTab === 'loop' ? (
