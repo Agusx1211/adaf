@@ -4,13 +4,13 @@ import "testing"
 
 func TestDefaultSkills(t *testing.T) {
 	skills := DefaultSkills()
-	if len(skills) != 12 {
-		t.Fatalf("DefaultSkills() returned %d skills, want 12", len(skills))
+	if len(skills) != 13 {
+		t.Fatalf("DefaultSkills() returned %d skills, want 13", len(skills))
 	}
 
 	// Verify all built-in skill IDs are present.
 	wantIDs := []string{
-		SkillAutonomy, SkillCodeWriting, SkillCommit, SkillFocus,
+		SkillAutonomy, SkillCodeWriting, SkillCodeReview, SkillCommit, SkillFocus,
 		SkillAdafTools, SkillDelegation, SkillIssues, SkillPlan,
 		SkillSessionContext, SkillLoopControl, SkillReadOnly, SkillPushover,
 	}
@@ -45,8 +45,8 @@ func TestEnsureDefaultSkillCatalog_Seeds(t *testing.T) {
 	if !changed {
 		t.Fatal("EnsureDefaultSkillCatalog should return true when seeding defaults")
 	}
-	if len(cfg.Skills) != 12 {
-		t.Fatalf("seeded %d skills, want 12", len(cfg.Skills))
+	if len(cfg.Skills) != 13 {
+		t.Fatalf("seeded %d skills, want 13", len(cfg.Skills))
 	}
 }
 
@@ -163,5 +163,113 @@ func TestRemoveSkill(t *testing.T) {
 	}
 	if cfg.FindSkill("c") == nil {
 		t.Fatal("skill c should still exist")
+	}
+}
+
+func TestResolveSkillsForRole(t *testing.T) {
+	cfg := &GlobalConfig{}
+	EnsureDefaultRoleCatalog(cfg)
+	EnsureDefaultSkillCatalog(cfg)
+
+	allSkills := []string{
+		SkillAutonomy, SkillCodeWriting, SkillCommit, SkillFocus,
+		SkillAdafTools, SkillDelegation,
+	}
+
+	tests := []struct {
+		name     string
+		skills   []string
+		role     string
+		readOnly bool
+		wantHas  []string // skills that should be present
+		wantNot  []string // skills that should be absent
+	}{
+		{
+			name:    "writing role keeps code_writing and commit",
+			skills:  allSkills,
+			role:    RoleDeveloper,
+			wantHas: []string{SkillCodeWriting, SkillCommit, SkillAutonomy},
+			wantNot: []string{SkillCodeReview, SkillReadOnly},
+		},
+		{
+			name:    "non-writing role replaces code_writing with code_review",
+			skills:  allSkills,
+			role:    RoleManager,
+			wantHas: []string{SkillCodeReview, SkillAutonomy},
+			wantNot: []string{SkillCodeWriting, SkillCommit},
+		},
+		{
+			name:     "read-only mode removes commit and adds read_only",
+			skills:   allSkills,
+			role:     RoleDeveloper,
+			readOnly: true,
+			wantHas:  []string{SkillCodeWriting, SkillReadOnly, SkillAutonomy},
+			wantNot:  []string{SkillCommit},
+		},
+		{
+			name:     "non-writing role + read-only",
+			skills:   allSkills,
+			role:     RoleManager,
+			readOnly: true,
+			wantHas:  []string{SkillCodeReview, SkillReadOnly},
+			wantNot:  []string{SkillCodeWriting, SkillCommit},
+		},
+		{
+			name:     "read-only does not duplicate read_only if already present",
+			skills:   []string{SkillReadOnly, SkillAutonomy},
+			role:     RoleDeveloper,
+			readOnly: true,
+			wantHas:  []string{SkillReadOnly, SkillAutonomy},
+		},
+		{
+			name:    "empty skills returns empty",
+			skills:  []string{},
+			role:    RoleDeveloper,
+			wantHas: []string{},
+			wantNot: []string{SkillCodeWriting, SkillCommit},
+		},
+		{
+			name:     "empty skills + read-only adds read_only",
+			skills:   []string{},
+			role:     RoleDeveloper,
+			readOnly: true,
+			wantHas:  []string{SkillReadOnly},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ResolveSkillsForRole(tt.skills, tt.role, tt.readOnly, cfg)
+
+			has := func(id string) bool {
+				for _, s := range result {
+					if s == id {
+						return true
+					}
+				}
+				return false
+			}
+
+			for _, id := range tt.wantHas {
+				if !has(id) {
+					t.Errorf("expected skill %q in result %v", id, result)
+				}
+			}
+			for _, id := range tt.wantNot {
+				if has(id) {
+					t.Errorf("unexpected skill %q in result %v", id, result)
+				}
+			}
+
+			// Verify input was not mutated.
+			originalCopy := make([]string, len(tt.skills))
+			copy(originalCopy, tt.skills)
+			ResolveSkillsForRole(tt.skills, tt.role, tt.readOnly, cfg)
+			for i := range tt.skills {
+				if tt.skills[i] != originalCopy[i] {
+					t.Errorf("input slice was mutated at index %d: got %q, want %q", i, tt.skills[i], originalCopy[i])
+				}
+			}
+		})
 	}
 }

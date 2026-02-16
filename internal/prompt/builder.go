@@ -180,38 +180,27 @@ func buildSkillsPrompt(opts BuildOpts) (string, error) {
 		}
 	}
 
-	// Compute effective role for role-conditional sections.
+	// Resolve skills for role and read-only mode.
 	effectiveRole := ""
 	if opts.Profile != nil {
 		effectiveRole = config.EffectiveStepRole(opts.Role, opts.GlobalCfg)
 	}
-	roleCanWrite := config.CanWriteCode(effectiveRole, opts.GlobalCfg)
+	resolvedSkills := config.ResolveSkillsForRole(opts.Skills, effectiveRole, opts.ReadOnly, opts.GlobalCfg)
 
 	// Skills section.
-	if len(opts.Skills) > 0 && opts.GlobalCfg != nil {
+	if len(resolvedSkills) > 0 && opts.GlobalCfg != nil {
 		b.WriteString("# Skills\n\n")
-		for _, skillID := range opts.Skills {
+		for _, skillID := range resolvedSkills {
 			sk := opts.GlobalCfg.FindSkill(skillID)
 			if sk == nil {
 				continue
 			}
-			// Role-aware skill rendering.
-			short := sk.Short
-			if sk.ID == config.SkillCodeWriting && !roleCanWrite {
-				short = "Review work, check progress, and provide guidance to running agents. Do NOT write or modify code."
-			}
-			if sk.ID == config.SkillCommit && !roleCanWrite {
-				continue // skip commit skill for non-writing roles
-			}
-			if sk.ID == config.SkillCommit && opts.ReadOnly {
-				continue // skip commit skill in read-only mode
-			}
-			fmt.Fprintf(&b, "## %s\n%s\n\n", sk.ID, short)
+			fmt.Fprintf(&b, "## %s\n%s\n\n", sk.ID, sk.Short)
 		}
 	}
 
 	// Read-only mode.
-	if opts.ReadOnly && hasSkill(opts.Skills, config.SkillReadOnly) {
+	if opts.ReadOnly && hasSkill(resolvedSkills, config.SkillReadOnly) {
 		b.WriteString(ReadOnlyPrompt())
 		b.WriteString("\n")
 	}
@@ -219,7 +208,7 @@ func buildSkillsPrompt(opts BuildOpts) (string, error) {
 	// Dynamic context sections gated by active skills.
 
 	// Session context.
-	if hasSkill(opts.Skills, config.SkillSessionContext) {
+	if hasSkill(resolvedSkills, config.SkillSessionContext) {
 		allTurns, _ := s.ListTurns()
 		if len(allTurns) > 0 {
 			b.WriteString(renderSessionLogs(allTurns))
@@ -227,17 +216,17 @@ func buildSkillsPrompt(opts BuildOpts) (string, error) {
 	}
 
 	// Issues.
-	if hasSkill(opts.Skills, config.SkillIssues) {
+	if hasSkill(resolvedSkills, config.SkillIssues) {
 		b.WriteString(renderIssues(s, effectivePlanID))
 	}
 
 	// Loop control.
-	if hasSkill(opts.Skills, config.SkillLoopControl) && opts.LoopContext != nil {
+	if hasSkill(resolvedSkills, config.SkillLoopControl) && opts.LoopContext != nil {
 		b.WriteString(renderLoopContext(opts))
 	}
 
 	// Pushover.
-	if hasSkill(opts.Skills, config.SkillPushover) && opts.LoopContext != nil && opts.LoopContext.CanPushover {
+	if hasSkill(resolvedSkills, config.SkillPushover) && opts.LoopContext != nil && opts.LoopContext.CanPushover {
 		b.WriteString(renderPushover())
 	}
 
@@ -247,7 +236,7 @@ func buildSkillsPrompt(opts BuildOpts) (string, error) {
 	}
 
 	// Delegation section.
-	if hasSkill(opts.Skills, config.SkillDelegation) {
+	if hasSkill(resolvedSkills, config.SkillDelegation) {
 		var runningSpawns []store.SpawnRecord
 		if opts.Store != nil && opts.CurrentTurnID > 0 {
 			if records, err := opts.Store.SpawnsByParent(opts.CurrentTurnID); err == nil {
@@ -266,7 +255,7 @@ func buildSkillsPrompt(opts BuildOpts) (string, error) {
 	b.WriteString(renderHandoffs(opts.Handoffs))
 
 	// Objective.
-	b.WriteString(renderObjective(opts, project, plan, roleCanWrite))
+	b.WriteString(renderObjective(opts, project, plan, resolvedSkills))
 
 	return b.String(), nil
 }
@@ -374,7 +363,11 @@ func buildLegacyPrompt(opts BuildOpts) (string, error) {
 	b.WriteString(renderHandoffs(opts.Handoffs))
 
 	// Objective.
-	b.WriteString(renderObjective(opts, project, plan, roleCanWrite))
+	var legacySkills []string
+	if roleCanWrite {
+		legacySkills = []string{config.SkillCodeWriting}
+	}
+	b.WriteString(renderObjective(opts, project, plan, legacySkills))
 
 	return b.String(), nil
 }
@@ -609,7 +602,8 @@ func renderHandoffs(handoffs []store.HandoffInfo) string {
 }
 
 // renderObjective formats the objective section.
-func renderObjective(opts BuildOpts, project *store.ProjectConfig, plan *store.Plan, roleCanWrite bool) string {
+func renderObjective(opts BuildOpts, project *store.ProjectConfig, plan *store.Plan, skills []string) string {
+	roleCanWrite := hasSkill(skills, config.SkillCodeWriting)
 	var b strings.Builder
 	b.WriteString("# Objective\n\n")
 	b.WriteString("Project: " + project.Name + "\n\n")

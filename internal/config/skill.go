@@ -23,13 +23,14 @@ const (
 	SkillLoopControl    = "loop_control"
 	SkillReadOnly       = "read_only"
 	SkillPushover       = "pushover"
+	SkillCodeReview     = "code_review"
 )
 
 func normalizeSkillID(id string) string {
 	return strings.ToLower(strings.TrimSpace(id))
 }
 
-// DefaultSkills returns the 12 built-in skills.
+// DefaultSkills returns the 13 built-in skills.
 func DefaultSkills() []Skill {
 	return []Skill{
 		{
@@ -55,6 +56,18 @@ func DefaultSkills() []Skill {
 				"- Run the test suite after making changes\n" +
 				"- Fix any compilation errors or test failures you introduce\n" +
 				"- Keep changes focused and minimal\n",
+		},
+		{
+			ID:    SkillCodeReview,
+			Short: "Review work, check progress, and provide guidance to running agents. Do NOT write or modify code.",
+			Long: "# Code Review\n\n" +
+				"Review work, check progress, and provide guidance to running agents. Do NOT write or modify code.\n\n" +
+				"Guidelines:\n" +
+				"- Review diffs and changes made by other agents\n" +
+				"- Verify that code follows project conventions and patterns\n" +
+				"- Check that tests pass and builds succeed\n" +
+				"- Provide constructive feedback and flag issues\n" +
+				"- Guide agents toward the correct approach without writing code yourself\n",
 		},
 		{
 			ID:    SkillCommit,
@@ -256,4 +269,40 @@ func EnsureDefaultSkillCatalog(cfg *GlobalConfig) bool {
 
 	cfg.Skills = DefaultSkills()
 	return true
+}
+
+// ResolveSkillsForRole returns a copy of skills adjusted for the given role and read-only mode.
+// For non-writing roles: code_writing is replaced with code_review, commit is removed.
+// For read-only mode: commit is removed, read_only is ensured present.
+// The input slice is never mutated.
+func ResolveSkillsForRole(skills []string, role string, readOnly bool, cfg *GlobalConfig) []string {
+	canWrite := CanWriteCode(role, cfg)
+
+	out := make([]string, 0, len(skills))
+	for _, s := range skills {
+		sid := normalizeSkillID(s)
+		if sid == SkillCodeWriting && !canWrite {
+			out = append(out, SkillCodeReview)
+			continue
+		}
+		if sid == SkillCommit && (!canWrite || readOnly) {
+			continue
+		}
+		out = append(out, s)
+	}
+
+	if readOnly {
+		hasRO := false
+		for _, s := range out {
+			if normalizeSkillID(s) == SkillReadOnly {
+				hasRO = true
+				break
+			}
+		}
+		if !hasRO {
+			out = append(out, SkillReadOnly)
+		}
+	}
+
+	return out
 }
