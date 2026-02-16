@@ -9,7 +9,6 @@ import { stateToHash, hashToActions } from './utils/deeplink.js';
 import TopBar from './components/layout/TopBar.jsx';
 import LeftPanel from './components/layout/LeftPanel.jsx';
 import CenterPanel from './components/layout/CenterPanel.jsx';
-import RightSidebar from './components/layout/RightSidebar.jsx';
 import Modal from './components/common/Modal.jsx';
 
 export default function App() {
@@ -191,7 +190,6 @@ export default function App() {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
             <CenterPanel />
-            {leftView !== 'loops' && leftView !== 'standalone' && <RightSidebar />}
           </div>
         </div>
       </div>
