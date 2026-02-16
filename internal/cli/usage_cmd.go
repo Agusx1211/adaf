@@ -42,19 +42,14 @@ func runUsage(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 	defer cancel()
 
-	providers := []usage.Provider{
-		usage.NewClaudeProvider(),
-		usage.NewCodexProvider(),
-		usage.NewMistralProvider(),
-		usage.NewOpenAIProvider(),
-	}
+	providers := usage.DefaultProviders()
 
 	if providerFlag != "" {
 		providers = filterProviders(providers, providerFlag)
 	}
 
 	var snapshots []usage.UsageSnapshot
-	var errors []error
+	var errs []error
 
 	for _, p := range providers {
 		if !p.HasCredentials() {
@@ -63,17 +58,17 @@ func runUsage(cmd *cobra.Command, args []string) error {
 
 		snapshot, err := p.FetchUsage(ctx)
 		if err != nil {
-			errors = append(errors, err)
+			errs = append(errs, err)
 			continue
 		}
 		snapshots = append(snapshots, snapshot)
 	}
 
 	if asJSON {
-		return printUsageJSON(snapshots, errors)
+		return printUsageJSON(snapshots, errs)
 	}
 
-	return printUsageHuman(snapshots, errors)
+	return printUsageHuman(snapshots, errs)
 }
 
 func filterProviders(providers []usage.Provider, name string) []usage.Provider {
@@ -127,7 +122,7 @@ func printUsageSnapshot(snap usage.UsageSnapshot) {
 		}
 		empty := barWidth - filled
 
-		bar := colorGreen + strings.Repeat("█", filled) + colorDim + strings.Repeat("░", empty) + colorReset
+		bar := limitColor + strings.Repeat("█", filled) + colorDim + strings.Repeat("░", empty) + colorReset
 
 		resetText := ""
 		if limit.ResetsAt != nil {
@@ -227,11 +222,11 @@ func printUsageJSON(snapshots []usage.UsageSnapshot, errors []error) error {
 		out.Errors = append(out.Errors, err.Error())
 	}
 
-	fmt.Println(mustMarshalJSON(out))
+	fmt.Println(marshalJSON(out))
 	return nil
 }
 
-func mustMarshalJSON(v interface{}) string {
+func marshalJSON(v interface{}) string {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return "{}"

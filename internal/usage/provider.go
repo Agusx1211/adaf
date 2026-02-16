@@ -7,3 +7,11 @@ type Provider interface {
 	FetchUsage(ctx context.Context) (UsageSnapshot, error)
 	HasCredentials() bool
 }
+
+// DefaultProviders returns the standard set of usage providers.
+func DefaultProviders() []Provider {
+	return []Provider{
+		NewClaudeProvider(),
+		NewCodexProvider(),
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -112,6 +113,7 @@ func (p *CodexProvider) FetchUsage(ctx context.Context) (UsageSnapshot, error) {
 	}
 
 	cmd := exec.CommandContext(ctx, binary, "app-server")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdin = nil
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -141,8 +143,7 @@ func (p *CodexProvider) FetchUsage(ctx context.Context) (UsageSnapshot, error) {
 	rlMsg := `{"jsonrpc":"2.0","method":"account/rateLimits/read","id":2,"params":{}}` + "\n"
 
 	if _, err := stdin.Write([]byte(initMsg)); err != nil {
-		cmd.Process.Kill()
-		cmd.Wait()
+		killCodexProcess(cmd)
 		return UsageSnapshot{}, &ProviderError{
 			Provider: ProviderCodex,
 			Err:      fmt.Errorf("failed to write initialize: %w", err),
@@ -150,8 +151,7 @@ func (p *CodexProvider) FetchUsage(ctx context.Context) (UsageSnapshot, error) {
 	}
 
 	if _, err := stdin.Write([]byte(rlMsg)); err != nil {
-		cmd.Process.Kill()
-		cmd.Wait()
+		killCodexProcess(cmd)
 		return UsageSnapshot{}, &ProviderError{
 			Provider: ProviderCodex,
 			Err:      fmt.Errorf("failed to write rateLimits request: %w", err),
@@ -203,8 +203,7 @@ func (p *CodexProvider) FetchUsage(ctx context.Context) (UsageSnapshot, error) {
 		}
 	}
 
-	cmd.Process.Kill()
-	cmd.Wait()
+	killCodexProcess(cmd)
 
 	if rateLimits == nil {
 		return UsageSnapshot{}, &ProviderError{
@@ -330,6 +329,13 @@ func codexTimestampToTime(ts int64) *time.Time {
 	}
 	t := time.Unix(ts, 0)
 	return &t
+}
+
+func killCodexProcess(cmd *exec.Cmd) {
+	if cmd.Process != nil {
+		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.Wait()
 }
 
 func IsCodexNotConfigured(err error) bool {

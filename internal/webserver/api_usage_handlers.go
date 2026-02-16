@@ -32,12 +32,7 @@ func (srv *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	providers := []usage.Provider{
-		usage.NewClaudeProvider(),
-		usage.NewCodexProvider(),
-		usage.NewMistralProvider(),
-		usage.NewOpenAIProvider(),
-	}
+	providers := usage.DefaultProviders()
 
 	var resp usageResponse
 	for _, p := range providers {

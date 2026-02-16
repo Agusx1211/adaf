@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -13,8 +14,6 @@ func TestProviderKindDisplayName(t *testing.T) {
 		{ProviderClaude, "Claude Code"},
 		{ProviderCodex, "Codex"},
 		{ProviderGemini, "Gemini"},
-		{ProviderMistral, "Mistral (Vibe)"},
-		{ProviderOpenAI, "OpenAI"},
 		{ProviderKind("unknown"), "unknown"},
 	}
 
@@ -165,7 +164,7 @@ func TestNewSnapshotMaxLevel(t *testing.T) {
 }
 
 func TestProviderError(t *testing.T) {
-	t.Run("with error", func(t *testing.T) {
+	t.Run("nil error", func(t *testing.T) {
 		err := &ProviderError{
 			Provider: ProviderClaude,
 			Err:      nil,
@@ -173,15 +172,22 @@ func TestProviderError(t *testing.T) {
 		if got := err.Error(); got != "Claude Code: unknown error" {
 			t.Errorf("Error() = %q, want %q", got, "Claude Code: unknown error")
 		}
+		if err.Unwrap() != nil {
+			t.Errorf("Unwrap() = %v, want nil", err.Unwrap())
+		}
 	})
 
 	t.Run("with inner error", func(t *testing.T) {
+		inner := fmt.Errorf("connection refused")
 		err := &ProviderError{
 			Provider: ProviderCodex,
-			Err:      nil,
+			Err:      inner,
 		}
-		if got := err.Error(); got != "Codex: unknown error" {
-			t.Errorf("Error() = %q, want %q", got, "Codex: unknown error")
+		if got := err.Error(); got != "Codex: connection refused" {
+			t.Errorf("Error() = %q, want %q", got, "Codex: connection refused")
+		}
+		if err.Unwrap() != inner {
+			t.Errorf("Unwrap() = %v, want %v", err.Unwrap(), inner)
 		}
 	})
 }
