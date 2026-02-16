@@ -453,6 +453,10 @@ func (l *Loop) Run(ctx context.Context) error {
 		l.LastResult = result
 		if result != nil && result.AgentSessionID != "" {
 			l.lastAgentSessionID = result.AgentSessionID
+		} else if cfg.ResumeSessionID != "" {
+			// Preserve the resume target across canceled/error turns when the
+			// agent did not emit a fresh session ID.
+			l.lastAgentSessionID = cfg.ResumeSessionID
 		}
 
 		// Record completion metadata.
@@ -489,10 +493,19 @@ func (l *Loop) Run(ctx context.Context) error {
 			} else {
 				turnLog.DurationSecs = durationSecs
 			}
-			if waitingForSpawns {
-				turnLog.BuildState = "waiting_for_spawns"
-				turnLog.CurrentState = fmt.Sprintf("Turn %d waiting for spawns", turn+1)
-			} else if result.ExitCode == 0 {
+		}
+		if waitingForSpawns {
+			turnLog.BuildState = "waiting_for_spawns"
+			turnLog.CurrentState = fmt.Sprintf("Turn %d waiting for spawns", turn+1)
+		} else if runErr != nil {
+			if errors.Is(runErr, context.Canceled) {
+				turnLog.BuildState = "cancelled"
+			} else {
+				turnLog.BuildState = "error"
+			}
+			turnLog.KnownIssues = runErr.Error()
+		} else if result != nil {
+			if result.ExitCode == 0 {
 				turnLog.BuildState = "success"
 				turnLog.CurrentState = fmt.Sprintf("Turn %d completed", turn+1)
 			} else {
@@ -500,14 +513,8 @@ func (l *Loop) Run(ctx context.Context) error {
 				turnLog.CurrentState = fmt.Sprintf("Turn %d completed", turn+1)
 			}
 		} else {
-			if errors.Is(runErr, context.Canceled) {
-				turnLog.BuildState = "cancelled"
-			} else {
-				turnLog.BuildState = "error"
-			}
-			if runErr != nil {
-				turnLog.KnownIssues = runErr.Error()
-			}
+			turnLog.BuildState = "error"
+			turnLog.KnownIssues = "agent returned no result"
 		}
 
 		// Best-effort update of the turn. We re-read the ID since

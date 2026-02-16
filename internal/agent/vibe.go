@@ -123,10 +123,12 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 
 	start := time.Now()
 	result, err := runStreamAgent(ctx, cmd, cfg, recorder, "vibe", cmdName, args, stream.ParseVibe)
-	if err != nil {
-		return nil, err
+	if result != nil && result.AgentSessionID == "" {
+		result.AgentSessionID = extractVibeSessionID(start, vibeHome)
 	}
-	result.AgentSessionID = extractVibeSessionID(start, vibeHome)
+	if err != nil {
+		return result, err
+	}
 	return result, nil
 }
 

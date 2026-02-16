@@ -43,6 +43,11 @@ type waitSeenTrackingStubAgent struct {
 	turnRuns  map[int]int
 }
 
+type waitResumeSessionCarryStubAgent struct {
+	store *store.Store
+	runs  []agent.Config
+}
+
 func (a *stubAgent) Name() string { return "stub" }
 
 func (a *stubAgent) Run(ctx context.Context, cfg agent.Config, recorder *recording.Recorder) (*agent.Result, error) {
@@ -152,6 +157,41 @@ func (a *waitSeenTrackingStubAgent) Run(ctx context.Context, cfg agent.Config, r
 		Duration:       time.Millisecond,
 		AgentSessionID: fmt.Sprintf("sess-%d-%d", cfg.TurnID, runInTurn),
 	}, nil
+}
+
+func (a *waitResumeSessionCarryStubAgent) Name() string { return "stub" }
+
+func (a *waitResumeSessionCarryStubAgent) Run(ctx context.Context, cfg agent.Config, recorder *recording.Recorder) (*agent.Result, error) {
+	cloned := cfg
+	cloned.Env = make(map[string]string, len(cfg.Env))
+	for k, v := range cfg.Env {
+		cloned.Env[k] = v
+	}
+	a.runs = append(a.runs, cloned)
+
+	switch len(a.runs) {
+	case 1:
+		if err := a.store.SignalWait(cfg.TurnID); err != nil {
+			return nil, err
+		}
+		return &agent.Result{
+			ExitCode:       0,
+			Duration:       time.Millisecond,
+			AgentSessionID: "sess-keep",
+		}, nil
+	case 2:
+		if err := a.store.SignalWait(cfg.TurnID); err != nil {
+			return nil, err
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	default:
+		return &agent.Result{
+			ExitCode:       0,
+			Duration:       time.Millisecond,
+			AgentSessionID: "sess-final",
+		}, nil
+	}
 }
 
 func TestLoopPromptFuncReceivesTurnID(t *testing.T) {
@@ -523,6 +563,59 @@ func TestLoopOnWaitSeenSpawnIDsAccumulateAndResetByTurn(t *testing.T) {
 	}
 	if len(seenCounts) != 3 || seenCounts[0] != 0 || seenCounts[1] != 1 || seenCounts[2] != 0 {
 		t.Fatalf("seen counts = %v, want [0 1 0]", seenCounts)
+	}
+}
+
+func TestLoopWaitResumePreservesSessionIDWhenCanceledRunHasNoResult(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "test", RepoPath: dir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
+	}
+
+	a := &waitResumeSessionCarryStubAgent{store: s}
+	waitCalls := 0
+	l := &Loop{
+		Store: s,
+		Agent: a,
+		Config: agent.Config{
+			Prompt:   "base",
+			MaxTurns: 1,
+		},
+		OnWait: func(_ context.Context, turnID int, alreadySeen map[int]struct{}) ([]WaitResult, bool) {
+			waitCalls++
+			switch waitCalls {
+			case 1:
+				return []WaitResult{{SpawnID: 1, Profile: "scout", Status: "completed", Summary: "first"}}, true
+			case 2:
+				return []WaitResult{{SpawnID: 2, Profile: "scout", Status: "completed", Summary: "second"}}, false
+			default:
+				t.Fatalf("unexpected OnWait call #%d", waitCalls)
+				return nil, false
+			}
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := l.Run(ctx); err != nil {
+		t.Fatalf("Loop.Run() error = %v", err)
+	}
+
+	if len(a.runs) != 3 {
+		t.Fatalf("agent runs = %d, want 3", len(a.runs))
+	}
+	if got := a.runs[1].ResumeSessionID; got != "sess-keep" {
+		t.Fatalf("second run resume session id = %q, want %q", got, "sess-keep")
+	}
+	if got := a.runs[2].ResumeSessionID; got != "sess-keep" {
+		t.Fatalf("third run resume session id = %q, want %q", got, "sess-keep")
+	}
+	if got := a.runs[2].Prompt; !containsAll(got, "Continue from where you left off.", "Spawn #2") {
+		t.Fatalf("third run prompt missing continuation markers: %q", got)
 	}
 }
 

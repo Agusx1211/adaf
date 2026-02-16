@@ -286,8 +286,20 @@ func runStreamAgent(
 
 	exitCode, err := extractExitCode(waitErr)
 	if err != nil {
+		wrappedErr := fmt.Errorf("%s agent: failed to run command: %w", agentName, err)
 		debug.LogKV("agent."+agentName, "cmd.Wait() error (not ExitError)", "error", err)
-		return nil, fmt.Errorf("%s agent: failed to run command: %w", agentName, err)
+		// Preserve partial stream output/session metadata on context cancellation
+		// so callers can still resume sessions (e.g. wait-for-spawns flow).
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return &Result{
+				ExitCode:       0,
+				Duration:       duration,
+				Output:         text,
+				Error:          ss.Buf.String(),
+				AgentSessionID: agentSessionID,
+			}, wrappedErr
+		}
+		return nil, wrappedErr
 	}
 
 	debug.LogKV("agent."+agentName, "process finished",

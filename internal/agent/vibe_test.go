@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -270,4 +271,55 @@ func TestExtractVibeSessionID(t *testing.T) {
 			t.Errorf("extractVibeSessionID() = %q, want valid session from earlier", got)
 		}
 	})
+}
+
+func TestVibeRunCancellationPreservesSessionID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script helper not supported on windows")
+	}
+
+	tmp := t.TempDir()
+	cmdPath := filepath.Join(tmp, "fake-vibe-cancel")
+	script := `#!/usr/bin/env sh
+trap 'exit 0' TERM
+session_dir="$VIBE_HOME/logs/session/session_20260216_000000_test"
+mkdir -p "$session_dir"
+cat >"$session_dir/meta.json" <<'EOF'
+{"session_id":"vibe-cancel-session"}
+EOF
+cat >/dev/null
+printf '{"role":"assistant","content":"running"}\n'
+while true; do sleep 1; done
+`
+	if err := os.WriteFile(cmdPath, []byte(script), 0755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	s, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	rec := recording.New(1, s)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	result, err := NewVibeAgent().Run(ctx, Config{
+		Command: cmdPath,
+		WorkDir: tmp,
+		Prompt:  "PING",
+	}, rec)
+
+	if err == nil {
+		t.Fatal("Run() error = nil, want cancellation error")
+	}
+	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Run() error = %v, want context canceled/deadline exceeded", err)
+	}
+	if result == nil {
+		t.Fatal("Run() result is nil, want partial result with session ID")
+	}
+	if got, want := result.AgentSessionID, "vibe-cancel-session"; got != want {
+		t.Fatalf("Run() AgentSessionID = %q, want %q", got, want)
+	}
 }

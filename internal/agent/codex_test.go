@@ -2,11 +2,13 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/agusx1211/adaf/internal/recording"
 	"github.com/agusx1211/adaf/internal/store"
@@ -195,4 +197,50 @@ printf '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens"
 			t.Fatalf("stderr should not contain default RUST_LOG when overridden: %q", result.Error)
 		}
 	})
+}
+
+func TestCodexRunCancellationPreservesSessionID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script helper not supported on windows")
+	}
+
+	tmp := t.TempDir()
+	cmdPath := filepath.Join(tmp, "fake-codex-cancel")
+	script := `#!/usr/bin/env sh
+trap 'exit 0' TERM
+cat >/dev/null
+printf '{"type":"thread.started","thread_id":"cancel-thread"}\n'
+while true; do sleep 1; done
+`
+	if err := os.WriteFile(cmdPath, []byte(script), 0755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	s, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	rec := recording.New(1, s)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	result, err := NewCodexAgent().Run(ctx, Config{
+		Command: cmdPath,
+		WorkDir: tmp,
+		Prompt:  "PING",
+	}, rec)
+
+	if err == nil {
+		t.Fatal("Run() error = nil, want cancellation error")
+	}
+	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Run() error = %v, want context canceled/deadline exceeded", err)
+	}
+	if result == nil {
+		t.Fatal("Run() result is nil, want partial result with session ID")
+	}
+	if got, want := result.AgentSessionID, "cancel-thread"; got != want {
+		t.Fatalf("Run() AgentSessionID = %q, want %q", got, want)
+	}
 }
