@@ -50,11 +50,6 @@ func StylePresetText(preset string) string {
 	return stylePresetTexts[preset]
 }
 
-// AllStylePresets returns all valid style preset names.
-func AllStylePresets() []string {
-	return []string{StylePresetManager, StylePresetParallel, StylePresetScout, StylePresetSequential}
-}
-
 // DelegationStyleText returns the effective style text for a delegation config.
 // If StylePreset is set, it takes precedence over Style.
 func (d *DelegationConfig) DelegationStyleText() string {

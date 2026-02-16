@@ -45,35 +45,12 @@ func (s *Store) GetProfileStats(name string) (*ProfileStats, error) {
 // SaveProfileStats writes profile stats to disk with file locking.
 func (s *Store) SaveProfileStats(stats *ProfileStats) error {
 	dir := s.profileStatsDir()
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating profile stats dir: %w", err)
-	}
-	return s.writeJSONLocked(s.profileStatsPath(stats.ProfileName), stats)
+	return s.saveStatsFile(dir, s.profileStatsPath(stats.ProfileName), "profile", stats)
 }
 
 // ListProfileStats returns stats for all profiles that have stats files.
 func (s *Store) ListProfileStats() ([]ProfileStats, error) {
-	dir := s.profileStatsDir()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var result []ProfileStats
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		var stats ProfileStats
-		if err := s.readJSONLocked(filepath.Join(dir, e.Name()), &stats); err != nil {
-			continue
-		}
-		result = append(result, stats)
-	}
-	return result, nil
+	return listStatsFiles[ProfileStats](s, s.profileStatsDir())
 }
 
 // --- Loop Stats ---
@@ -110,15 +87,22 @@ func (s *Store) GetLoopStats(name string) (*LoopStats, error) {
 // SaveLoopStats writes loop stats to disk with file locking.
 func (s *Store) SaveLoopStats(stats *LoopStats) error {
 	dir := s.loopStatsDir()
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating loop stats dir: %w", err)
-	}
-	return s.writeJSONLocked(s.loopStatsPath(stats.LoopName), stats)
+	return s.saveStatsFile(dir, s.loopStatsPath(stats.LoopName), "loop", stats)
 }
 
 // ListLoopStats returns stats for all loops that have stats files.
 func (s *Store) ListLoopStats() ([]LoopStats, error) {
-	dir := s.loopStatsDir()
+	return listStatsFiles[LoopStats](s, s.loopStatsDir())
+}
+
+func (s *Store) saveStatsFile(dir, path, label string, stats any) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("creating %s stats dir: %w", label, err)
+	}
+	return s.writeJSONLocked(path, stats)
+}
+
+func listStatsFiles[T any](s *Store, dir string) ([]T, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -127,16 +111,16 @@ func (s *Store) ListLoopStats() ([]LoopStats, error) {
 		return nil, err
 	}
 
-	var result []LoopStats
+	var result []T
 	for _, e := range entries {
 		if !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		var stats LoopStats
-		if err := s.readJSONLocked(filepath.Join(dir, e.Name()), &stats); err != nil {
+		var item T
+		if err := s.readJSONLocked(filepath.Join(dir, e.Name()), &item); err != nil {
 			continue
 		}
-		result = append(result, stats)
+		result = append(result, item)
 	}
 	return result, nil
 }

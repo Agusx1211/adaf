@@ -472,18 +472,6 @@ func (b *broadcaster) removeClient(cc *clientConn) {
 	cc.close(websocket.StatusNormalClosure, "")
 }
 
-// broadcast sends a pre-encoded message to all connected clients and records a
-// compact reconnect snapshot (state + bounded recent output). This path is kept
-// for tests and compatibility.
-func (b *broadcaster) broadcast(line []byte) {
-	lineCopy := append([]byte(nil), line...)
-	msg, err := DecodeMsg(lineCopy)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "session %d: broadcast decode failed: %v\n", b.meta.SessionID, err)
-	}
-	b.broadcastPrepared(lineCopy, msg, nil, snapshotUpdate{})
-}
-
 // broadcastTyped sends a typed message to clients while updating snapshot state
 // without re-decoding the encoded line on the hot path.
 func (b *broadcaster) broadcastTyped(msgType string, payload any) {

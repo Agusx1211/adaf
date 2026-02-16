@@ -368,11 +368,7 @@ func TestHandleClientSendsSnapshotRecentOutput(t *testing.T) {
 	}
 
 	for i := 0; i < 5; i++ {
-		line, err := EncodeMsg(MsgRaw, WireRaw{Data: fmt.Sprintf("line-%d", i+1)})
-		if err != nil {
-			t.Fatalf("EncodeMsg raw: %v", err)
-		}
-		b.broadcast(line)
+		b.broadcastTyped(MsgRaw, WireRaw{Data: fmt.Sprintf("line-%d", i+1)})
 	}
 
 	ws := wsTestServer(t, b)
@@ -425,7 +421,7 @@ func TestHandleClientSnapshotCarriesCurrentState(t *testing.T) {
 		},
 	}
 
-	stepLine, _ := EncodeMsg(MsgLoopStepStart, WireLoopStepStart{
+	b.broadcastTyped(MsgLoopStepStart, WireLoopStepStart{
 		RunID:      3,
 		RunHexID:   "runhex",
 		StepHexID:  "stephex",
@@ -434,12 +430,10 @@ func TestHandleClientSnapshotCarriesCurrentState(t *testing.T) {
 		Profile:    "reviewer",
 		TotalSteps: 4,
 	})
-	b.broadcast(stepLine)
-	startLine, _ := EncodeMsg(MsgStarted, WireStarted{
+	b.broadcastTyped(MsgStarted, WireStarted{
 		SessionID: 42,
 		TurnHexID: "turnhex",
 	})
-	b.broadcast(startLine)
 
 	ws := wsTestServer(t, b)
 
@@ -1242,11 +1236,7 @@ func TestHandleClientDoesNotDuplicateDoneAfterDoneBroadcast(t *testing.T) {
 		meta:       WireMeta{SessionID: 8},
 	}
 
-	doneLine, err := EncodeMsg(MsgDone, WireDone{})
-	if err != nil {
-		t.Fatalf("EncodeMsg done: %v", err)
-	}
-	b.broadcast(doneLine)
+	b.broadcastTyped(MsgDone, WireDone{})
 
 	ws := wsTestServer(t, b)
 
@@ -1340,11 +1330,7 @@ func TestBroadcasterConcurrentAttachAndBroadcast(t *testing.T) {
 	}
 
 	for i := 0; i < 64; i++ {
-		line, err := EncodeMsg(MsgRaw, WireRaw{Data: fmt.Sprintf("burst-%d", i)})
-		if err != nil {
-			t.Fatalf("EncodeMsg: %v", err)
-		}
-		b.broadcast(line)
+		b.broadcastTyped(MsgRaw, WireRaw{Data: fmt.Sprintf("burst-%d", i)})
 	}
 
 	for i := 0; i < clients; i++ {

@@ -28,18 +28,6 @@ func RequestWait(sessionID int, turnID int) (*WireControlResult, error) {
 	}, "wait", false)
 }
 
-// RequestInterruptSpawn asks a running session daemon to interrupt a spawn's
-// current turn with a message.
-func RequestInterruptSpawn(sessionID int, spawnID int, message string) (*WireControlResult, error) {
-	return requestControl(sessionID, WireControl{
-		Action: "interrupt_spawn",
-		Interrupt: &WireControlInterrupt{
-			SpawnID: spawnID,
-			Message: message,
-		},
-	}, "interrupt_spawn", false)
-}
-
 func requestControl(sessionID int, req WireControl, expectAction string, waitForCompletion bool) (*WireControlResult, error) {
 	client, err := Connect(SocketPath(sessionID))
 	if err != nil {

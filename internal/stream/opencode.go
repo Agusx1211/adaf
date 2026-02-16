@@ -106,9 +106,9 @@ func parseOpencodeLine(raw []byte) (ClaudeEvent, bool, error) {
 
 	switch ev.Type {
 	case "text":
-		return parseOpencodeText(ev)
+		return parseOpencodeTextPart(ev, "text")
 	case "reasoning":
-		return parseOpencodeReasoning(ev)
+		return parseOpencodeTextPart(ev, "thinking")
 	case "tool_use":
 		return parseOpencodeToolUse(ev)
 	case "step_start":
@@ -127,7 +127,7 @@ func parseOpencodeLine(raw []byte) (ClaudeEvent, bool, error) {
 	}
 }
 
-func parseOpencodeText(ev opencodeEvent) (ClaudeEvent, bool, error) {
+func parseOpencodeTextPart(ev opencodeEvent, blockType string) (ClaudeEvent, bool, error) {
 	var part opencodePart
 	if err := json.Unmarshal(ev.Part, &part); err != nil {
 		return ClaudeEvent{}, false, err
@@ -141,27 +141,7 @@ func parseOpencodeText(ev opencodeEvent) (ClaudeEvent, bool, error) {
 		AssistantMessage: &AssistantMessage{
 			Role: "assistant",
 			Content: []ContentBlock{
-				{Type: "text", Text: part.Text},
-			},
-		},
-	}, true, nil
-}
-
-func parseOpencodeReasoning(ev opencodeEvent) (ClaudeEvent, bool, error) {
-	var part opencodePart
-	if err := json.Unmarshal(ev.Part, &part); err != nil {
-		return ClaudeEvent{}, false, err
-	}
-	if strings.TrimSpace(part.Text) == "" {
-		return ClaudeEvent{}, false, nil
-	}
-	return ClaudeEvent{
-		Type:   "assistant",
-		TurnID: ev.SessionID,
-		AssistantMessage: &AssistantMessage{
-			Role: "assistant",
-			Content: []ContentBlock{
-				{Type: "thinking", Text: part.Text},
+				{Type: blockType, Text: part.Text},
 			},
 		},
 	}, true, nil

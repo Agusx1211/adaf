@@ -11,34 +11,14 @@ import (
 )
 
 type ClaudeProvider struct {
-	oauthToken        string
 	warnThreshold     float64
 	criticalThreshold float64
 }
 
-func NewClaudeProvider(opts ...ClaudeOption) *ClaudeProvider {
-	p := &ClaudeProvider{
+func NewClaudeProvider() *ClaudeProvider {
+	return &ClaudeProvider{
 		warnThreshold:     70.0,
 		criticalThreshold: 90.0,
-	}
-	for _, opt := range opts {
-		opt(p)
-	}
-	return p
-}
-
-type ClaudeOption func(*ClaudeProvider)
-
-func WithClaudeToken(token string) ClaudeOption {
-	return func(p *ClaudeProvider) {
-		p.oauthToken = token
-	}
-}
-
-func WithClaudeThresholds(warn, critical float64) ClaudeOption {
-	return func(p *ClaudeProvider) {
-		p.warnThreshold = warn
-		p.criticalThreshold = critical
 	}
 }
 
@@ -52,9 +32,6 @@ func (p *ClaudeProvider) HasCredentials() bool {
 }
 
 func (p *ClaudeProvider) getToken() (string, error) {
-	if p.oauthToken != "" {
-		return p.oauthToken, nil
-	}
 	return getClaudeTokenFromDotfile()
 }
 

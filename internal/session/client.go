@@ -451,22 +451,6 @@ func (c *Client) Cancel() error {
 	return c.ws.Write(ctx, websocket.MessageText, []byte(CtrlCancel))
 }
 
-// SendControl sends a structured control message to the daemon and returns
-// the next control_result response.
-func (c *Client) SendControl(ctrl WireControl) (*WireControlResult, error) {
-	line, err := EncodeMsg(MsgControl, ctrl)
-	if err != nil {
-		return nil, fmt.Errorf("encoding control message: %w", err)
-	}
-	// Strip trailing newline for WebSocket frame.
-	if len(line) > 0 && line[len(line)-1] == '\n' {
-		line = line[:len(line)-1]
-	}
-	ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
-	defer cancel()
-	return nil, c.ws.Write(ctx, websocket.MessageText, line)
-}
-
 // Close disconnects from the daemon without cancelling the agent.
 func (c *Client) Close() error {
 	c.cancel()

@@ -131,14 +131,6 @@ func Close() {
 	l.file.Close()
 }
 
-// Enabled returns true if the debug logger is active.
-func Enabled() bool {
-	loggerMu.RLock()
-	e := logger != nil
-	loggerMu.RUnlock()
-	return e
-}
-
 // Path returns the log file path, or "" if not enabled.
 func Path() string {
 	loggerMu.RLock()

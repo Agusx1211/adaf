@@ -2,7 +2,6 @@ package webserver
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -79,25 +78,6 @@ func (r *ProjectRegistry) Register(id, projectDir string) error {
 	return nil
 }
 
-// SetDefault changes the default project ID.
-func (r *ProjectRegistry) SetDefault(id string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if _, ok := r.projects[id]; !ok {
-		return fmt.Errorf("project %q not found", id)
-	}
-
-	// Clear old default
-	if old, ok := r.projects[r.defaultID]; ok {
-		old.IsDefault = false
-	}
-
-	r.defaultID = id
-	r.projects[id].IsDefault = true
-	return nil
-}
-
 // Get returns the store for a given project ID.
 func (r *ProjectRegistry) Get(id string) (*store.Store, bool) {
 	r.mu.RLock()
@@ -137,13 +117,6 @@ func (r *ProjectRegistry) List() []ProjectEntry {
 	return entries
 }
 
-// Count returns the number of registered projects.
-func (r *ProjectRegistry) Count() int {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return len(r.projects)
-}
-
 // RegisterByPath registers a project by its absolute path, computing the ID
 // as the relative path from rootDir.
 func (r *ProjectRegistry) RegisterByPath(rootDir, absPath string) (string, error) {
@@ -171,36 +144,4 @@ func (r *ProjectRegistry) GetByPath(absPath string) (*ProjectEntry, bool) {
 		}
 	}
 	return nil, false
-}
-
-// ScanDirectory scans a parent directory for subdirectories containing
-// .adaf/project.json and registers each one. The directory name is used
-// as the project ID.
-func (r *ProjectRegistry) ScanDirectory(parentDir string) (int, error) {
-	entries, err := os.ReadDir(parentDir)
-	if err != nil {
-		return 0, fmt.Errorf("reading directory %s: %w", parentDir, err)
-	}
-
-	count := 0
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		projectDir := filepath.Join(parentDir, entry.Name())
-		projectFile := filepath.Join(projectDir, store.AdafDir, "project.json")
-		if _, err := os.Stat(projectFile); err != nil {
-			continue // not an adaf project
-		}
-
-		id := entry.Name()
-		if err := r.Register(id, projectDir); err != nil {
-			// Skip projects that fail to register (already registered, corrupt, etc.)
-			continue
-		}
-		count++
-	}
-
-	return count, nil
 }

@@ -67,20 +67,6 @@ func (c *DaemonClient) CreateIssue(projectID string, req map[string]interface{})
 	return c.doJSON(http.MethodPost, path, req, http.StatusCreated)
 }
 
-func (c *DaemonClient) UpdateIssue(projectID, issueID string, req map[string]interface{}) error {
-	path := fmt.Sprintf(
-		"/api/projects/%s/issues/%s",
-		url.PathEscape(strings.TrimSpace(projectID)),
-		url.PathEscape(strings.TrimSpace(issueID)),
-	)
-	return c.doJSON(http.MethodPut, path, req, http.StatusOK)
-}
-
-func (c *DaemonClient) CreatePlan(projectID string, req map[string]interface{}) error {
-	path := fmt.Sprintf("/api/projects/%s/plans", url.PathEscape(strings.TrimSpace(projectID)))
-	return c.doJSON(http.MethodPost, path, req, http.StatusCreated)
-}
-
 func (c *DaemonClient) doJSON(method, path string, req map[string]interface{}, okStatuses ...int) error {
 	if c == nil {
 		return fmt.Errorf("daemon client is nil")

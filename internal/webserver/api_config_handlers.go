@@ -2,6 +2,7 @@ package webserver
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/agusx1211/adaf/internal/agentmeta"
 	"github.com/agusx1211/adaf/internal/config"
 )
+
+var errInvalidRequestBody = errors.New("invalid request body")
 
 func (srv *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	cfg, err := config.Load()
@@ -19,10 +22,261 @@ func (srv *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, cfg)
 }
 
-func (srv *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return false
+	}
+	return true
+}
+
+func loadConfigOrError(w http.ResponseWriter) (*config.GlobalConfig, bool) {
 	cfg, err := config.Load()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load config")
+		return nil, false
+	}
+	return cfg, true
+}
+
+func saveConfigOrError(w http.ResponseWriter, cfg *config.GlobalConfig) bool {
+	if err := config.Save(cfg); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save config")
+		return false
+	}
+	return true
+}
+
+func pathValueRequired(w http.ResponseWriter, r *http.Request, key string) (string, bool) {
+	value := strings.TrimSpace(r.PathValue(key))
+	if value == "" {
+		writeError(w, http.StatusBadRequest, key+" is required")
+		return "", false
+	}
+	return value, true
+}
+
+func writeOK(w http.ResponseWriter) {
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (srv *Server) createConfigEntry(
+	w http.ResponseWriter,
+	r *http.Request,
+	payload any,
+	validate func() string,
+	add func(cfg *config.GlobalConfig) error,
+) {
+	if !decodeJSONBody(w, r, payload) {
+		return
+	}
+	if msg := strings.TrimSpace(validate()); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	cfg, ok := loadConfigOrError(w)
+	if !ok {
+		return
+	}
+	if err := add(cfg); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !saveConfigOrError(w, cfg) {
+		return
+	}
+	writeJSON(w, http.StatusCreated, payload)
+}
+
+func (srv *Server) updateConfigEntry(
+	w http.ResponseWriter,
+	r *http.Request,
+	pathKey string,
+	notFoundMsg string,
+	update func(cfg *config.GlobalConfig, key string) (bool, error),
+) {
+	key, ok := pathValueRequired(w, r, pathKey)
+	if !ok {
+		return
+	}
+	cfg, ok := loadConfigOrError(w)
+	if !ok {
+		return
+	}
+	found, err := update(cfg, key)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, notFoundMsg)
+		return
+	}
+	if !saveConfigOrError(w, cfg) {
+		return
+	}
+	writeOK(w)
+}
+
+func (srv *Server) deleteConfigEntry(
+	w http.ResponseWriter,
+	r *http.Request,
+	pathKey string,
+	remove func(cfg *config.GlobalConfig, key string),
+) {
+	key, ok := pathValueRequired(w, r, pathKey)
+	if !ok {
+		return
+	}
+	cfg, ok := loadConfigOrError(w)
+	if !ok {
+		return
+	}
+	remove(cfg, key)
+	if !saveConfigOrError(w, cfg) {
+		return
+	}
+	writeOK(w)
+}
+
+func updateMatchingEntry[T any](
+	items []T,
+	matches func(item T) bool,
+	decode func(item *T) error,
+	finalize func(item *T),
+) (bool, error) {
+	for i := range items {
+		if !matches(items[i]) {
+			continue
+		}
+		if err := decode(&items[i]); err != nil {
+			return false, errInvalidRequestBody
+		}
+		if finalize != nil {
+			finalize(&items[i])
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func updateConfigSliceEntry[T any](
+	srv *Server,
+	w http.ResponseWriter,
+	r *http.Request,
+	pathKey string,
+	notFoundMsg string,
+	beforeUpdate func(cfg *config.GlobalConfig),
+	selectItems func(cfg *config.GlobalConfig) []T,
+	matches func(item T, key string) bool,
+	stabilize func(item *T, key string),
+) {
+	srv.updateConfigEntry(w, r, pathKey, notFoundMsg, func(cfg *config.GlobalConfig, key string) (bool, error) {
+		if beforeUpdate != nil {
+			beforeUpdate(cfg)
+		}
+		return updateMatchingEntry(
+			selectItems(cfg),
+			func(item T) bool { return matches(item, key) },
+			func(item *T) error { return json.NewDecoder(r.Body).Decode(item) },
+			func(item *T) {
+				if stabilize != nil {
+					stabilize(item, key)
+				}
+			},
+		)
+	})
+}
+
+func createTypedConfigEntry[T any](
+	srv *Server,
+	w http.ResponseWriter,
+	r *http.Request,
+	payload *T,
+	validate func(item T) string,
+	add func(cfg *config.GlobalConfig, item T) error,
+) {
+	srv.createConfigEntry(
+		w,
+		r,
+		payload,
+		func() string { return validate(*payload) },
+		func(cfg *config.GlobalConfig) error { return add(cfg, *payload) },
+	)
+}
+
+func validateRequiredName(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return "name is required"
+	}
+	return ""
+}
+
+func validateCreateProfile(prof config.Profile) string {
+	if strings.TrimSpace(prof.Name) == "" || strings.TrimSpace(prof.Agent) == "" {
+		return "name and agent are required"
+	}
+	return ""
+}
+
+func validateCreateLoop(loop config.LoopDef) string {
+	if strings.TrimSpace(loop.Name) == "" {
+		return "name is required"
+	}
+	if len(loop.Steps) == 0 {
+		return "at least one step is required"
+	}
+	for _, step := range loop.Steps {
+		if strings.TrimSpace(step.Profile) == "" {
+			return "each step must have a profile"
+		}
+	}
+	return ""
+}
+
+func validateCreateRule(rule config.PromptRule) string {
+	if strings.TrimSpace(rule.ID) == "" || strings.TrimSpace(rule.Body) == "" {
+		return "id and body are required"
+	}
+	return ""
+}
+
+func validateCreateRole(role config.RoleDefinition) string {
+	return validateRequiredName(role.Name)
+}
+
+func validateCreateTeam(team config.Team) string {
+	return validateRequiredName(team.Name)
+}
+
+func validateCreateSkill(skill config.Skill) string {
+	if strings.TrimSpace(skill.ID) == "" {
+		return "id is required"
+	}
+	return ""
+}
+
+func selectProfiles(cfg *config.GlobalConfig) []config.Profile { return cfg.Profiles }
+
+func profileMatchesName(p config.Profile, name string) bool { return p.Name == name }
+
+func setProfileName(p *config.Profile, name string) { p.Name = name }
+
+func selectLoops(cfg *config.GlobalConfig) []config.LoopDef { return cfg.Loops }
+
+func loopMatchesName(loop config.LoopDef, name string) bool { return loop.Name == name }
+
+func setLoopName(loop *config.LoopDef, name string) { loop.Name = name }
+
+func selectTeams(cfg *config.GlobalConfig) []config.Team { return cfg.Teams }
+
+func teamMatchesName(team config.Team, name string) bool { return team.Name == name }
+
+func setTeamName(team *config.Team, name string) { team.Name = name }
+
+func (srv *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
+	cfg, ok := loadConfigOrError(w)
+	if !ok {
 		return
 	}
 	profiles := cfg.Profiles
@@ -34,101 +288,23 @@ func (srv *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 	var prof config.Profile
-	if err := json.NewDecoder(r.Body).Decode(&prof); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if prof.Name == "" || prof.Agent == "" {
-		writeError(w, http.StatusBadRequest, "name and agent are required")
-		return
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
-		return
-	}
-
-	if err := cfg.AddProfile(prof); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, prof)
+	createTypedConfigEntry(srv, w, r, &prof, validateCreateProfile, (*config.GlobalConfig).AddProfile)
 }
 
 func (srv *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
-		return
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
-		return
-	}
-
-	found := false
-	for i := range cfg.Profiles {
-		if cfg.Profiles[i].Name == name {
-			if err := json.NewDecoder(r.Body).Decode(&cfg.Profiles[i]); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid request body")
-				return
-			}
-			// Ensure name doesn't change via body if we want to keep it consistent with URL
-			cfg.Profiles[i].Name = name
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		writeError(w, http.StatusNotFound, "profile not found")
-		return
-	}
-
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	// Keep URL name authoritative.
+	updateConfigSliceEntry(srv, w, r, "name", "profile not found", nil, selectProfiles, profileMatchesName, setProfileName)
 }
 
 func (srv *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
-		return
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
-		return
-	}
-
-	cfg.RemoveProfile(name)
-
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	srv.deleteConfigEntry(w, r, "name", func(cfg *config.GlobalConfig, name string) {
+		cfg.RemoveProfile(name)
+	})
 }
 
 func (srv *Server) handleListLoopDefs(w http.ResponseWriter, r *http.Request) {
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
+	cfg, ok := loadConfigOrError(w)
+	if !ok {
 		return
 	}
 	loops := cfg.Loops
@@ -140,110 +316,22 @@ func (srv *Server) handleListLoopDefs(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleCreateLoopDef(w http.ResponseWriter, r *http.Request) {
 	var loop config.LoopDef
-	if err := json.NewDecoder(r.Body).Decode(&loop); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if loop.Name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
-		return
-	}
-	if len(loop.Steps) == 0 {
-		writeError(w, http.StatusBadRequest, "at least one step is required")
-		return
-	}
-	for _, step := range loop.Steps {
-		if step.Profile == "" {
-			writeError(w, http.StatusBadRequest, "each step must have a profile")
-			return
-		}
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
-		return
-	}
-
-	if err := cfg.AddLoop(loop); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, loop)
+	createTypedConfigEntry(srv, w, r, &loop, validateCreateLoop, (*config.GlobalConfig).AddLoop)
 }
 
 func (srv *Server) handleUpdateLoopDef(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
-		return
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
-		return
-	}
-
-	found := false
-	for i := range cfg.Loops {
-		if cfg.Loops[i].Name == name {
-			if err := json.NewDecoder(r.Body).Decode(&cfg.Loops[i]); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid request body")
-				return
-			}
-			cfg.Loops[i].Name = name
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		writeError(w, http.StatusNotFound, "loop not found")
-		return
-	}
-
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	updateConfigSliceEntry(srv, w, r, "name", "loop not found", nil, selectLoops, loopMatchesName, setLoopName)
 }
 
 func (srv *Server) handleDeleteLoopDef(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
-		return
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
-		return
-	}
-
-	cfg.RemoveLoop(name)
-
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	srv.deleteConfigEntry(w, r, "name", func(cfg *config.GlobalConfig, name string) {
+		cfg.RemoveLoop(name)
+	})
 }
 
 func (srv *Server) handleListRoles(w http.ResponseWriter, r *http.Request) {
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
+	cfg, ok := loadConfigOrError(w)
+	if !ok {
 		return
 	}
 	config.EnsureDefaultRoleCatalog(cfg)
@@ -256,102 +344,32 @@ func (srv *Server) handleListRoles(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleCreateRole(w http.ResponseWriter, r *http.Request) {
 	var role config.RoleDefinition
-	if err := json.NewDecoder(r.Body).Decode(&role); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if role.Name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
-		return
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
-		return
-	}
-
-	if err := cfg.AddRoleDefinition(role); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, role)
+	createTypedConfigEntry(srv, w, r, &role, validateCreateRole, (*config.GlobalConfig).AddRoleDefinition)
 }
 
 func (srv *Server) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
-		return
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
-		return
-	}
-
-	config.EnsureDefaultRoleCatalog(cfg)
-
-	found := false
-	for i := range cfg.Roles {
-		if strings.EqualFold(cfg.Roles[i].Name, name) {
-			if err := json.NewDecoder(r.Body).Decode(&cfg.Roles[i]); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid request body")
-				return
-			}
-			cfg.Roles[i].Name = name
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		writeError(w, http.StatusNotFound, "role not found: "+name)
-		return
-	}
-
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	updateConfigSliceEntry(
+		srv,
+		w,
+		r,
+		"name",
+		"role not found: "+r.PathValue("name"),
+		func(cfg *config.GlobalConfig) { config.EnsureDefaultRoleCatalog(cfg) },
+		func(cfg *config.GlobalConfig) []config.RoleDefinition { return cfg.Roles },
+		func(role config.RoleDefinition, name string) bool { return strings.EqualFold(role.Name, name) },
+		func(role *config.RoleDefinition, name string) { role.Name = name },
+	)
 }
 
 func (srv *Server) handleDeleteRole(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
-		return
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
-		return
-	}
-
-	cfg.RemoveRoleDefinition(name)
-
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	srv.deleteConfigEntry(w, r, "name", func(cfg *config.GlobalConfig, name string) {
+		cfg.RemoveRoleDefinition(name)
+	})
 }
 
 func (srv *Server) handleListRules(w http.ResponseWriter, r *http.Request) {
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
+	cfg, ok := loadConfigOrError(w)
+	if !ok {
 		return
 	}
 	rules := cfg.PromptRules
@@ -363,63 +381,20 @@ func (srv *Server) handleListRules(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 	var rule config.PromptRule
-	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if rule.ID == "" || rule.Body == "" {
-		writeError(w, http.StatusBadRequest, "id and body are required")
-		return
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
-		return
-	}
-
-	if err := cfg.AddPromptRule(rule); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, rule)
+	createTypedConfigEntry(srv, w, r, &rule, validateCreateRule, (*config.GlobalConfig).AddPromptRule)
 }
 
 func (srv *Server) handleDeleteRule(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "id is required")
-		return
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
-		return
-	}
-
-	cfg.RemovePromptRule(id)
-
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	srv.deleteConfigEntry(w, r, "id", func(cfg *config.GlobalConfig, id string) {
+		cfg.RemovePromptRule(id)
+	})
 }
 
 // ── Team handlers ──
 
 func (srv *Server) handleListTeams(w http.ResponseWriter, r *http.Request) {
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
+	cfg, ok := loadConfigOrError(w)
+	if !ok {
 		return
 	}
 	teams := cfg.Teams
@@ -431,100 +406,22 @@ func (srv *Server) handleListTeams(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 	var t config.Team
-	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if t.Name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
-		return
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
-		return
-	}
-
-	if err := cfg.AddTeam(t); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, t)
+	createTypedConfigEntry(srv, w, r, &t, validateCreateTeam, (*config.GlobalConfig).AddTeam)
 }
 
 func (srv *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
-		return
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
-		return
-	}
-
-	found := false
-	for i := range cfg.Teams {
-		if cfg.Teams[i].Name == name {
-			if err := json.NewDecoder(r.Body).Decode(&cfg.Teams[i]); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid request body")
-				return
-			}
-			cfg.Teams[i].Name = name
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		writeError(w, http.StatusNotFound, "team not found")
-		return
-	}
-
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	updateConfigSliceEntry(srv, w, r, "name", "team not found", nil, selectTeams, teamMatchesName, setTeamName)
 }
 
 func (srv *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
-		return
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
-		return
-	}
-
-	cfg.RemoveTeam(name)
-
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	srv.deleteConfigEntry(w, r, "name", func(cfg *config.GlobalConfig, name string) {
+		cfg.RemoveTeam(name)
+	})
 }
 
 func (srv *Server) handleListRecentCombinations(w http.ResponseWriter, r *http.Request) {
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
+	cfg, ok := loadConfigOrError(w)
+	if !ok {
 		return
 	}
 	combos := cfg.RecentCombinations
@@ -535,9 +432,8 @@ func (srv *Server) handleListRecentCombinations(w http.ResponseWriter, r *http.R
 }
 
 func (srv *Server) handleGetPushover(w http.ResponseWriter, r *http.Request) {
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
+	cfg, ok := loadConfigOrError(w)
+	if !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, cfg.Pushover)
@@ -615,33 +511,29 @@ func (srv *Server) handleDetectAgents(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleUpdatePushover(w http.ResponseWriter, r *http.Request) {
 	var req config.PushoverConfig
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
+	cfg, ok := loadConfigOrError(w)
+	if !ok {
 		return
 	}
 
 	cfg.Pushover = req
 
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
+	if !saveConfigOrError(w, cfg) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeOK(w)
 }
 
 // ── Skill handlers ──
 
 func (srv *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
+	cfg, ok := loadConfigOrError(w)
+	if !ok {
 		return
 	}
 	config.EnsureDefaultSkillCatalog(cfg)
@@ -654,92 +546,25 @@ func (srv *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleCreateSkill(w http.ResponseWriter, r *http.Request) {
 	var sk config.Skill
-	if err := json.NewDecoder(r.Body).Decode(&sk); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if sk.ID == "" {
-		writeError(w, http.StatusBadRequest, "id is required")
-		return
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
-		return
-	}
-
-	if err := cfg.AddSkill(sk); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, sk)
+	createTypedConfigEntry(srv, w, r, &sk, validateCreateSkill, (*config.GlobalConfig).AddSkill)
 }
 
 func (srv *Server) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "id is required")
-		return
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
-		return
-	}
-
-	found := false
-	for i := range cfg.Skills {
-		if strings.EqualFold(cfg.Skills[i].ID, id) {
-			if err := json.NewDecoder(r.Body).Decode(&cfg.Skills[i]); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid request body")
-				return
-			}
-			cfg.Skills[i].ID = id
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		writeError(w, http.StatusNotFound, "skill not found")
-		return
-	}
-
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	updateConfigSliceEntry(
+		srv,
+		w,
+		r,
+		"id",
+		"skill not found",
+		nil,
+		func(cfg *config.GlobalConfig) []config.Skill { return cfg.Skills },
+		func(skill config.Skill, id string) bool { return strings.EqualFold(skill.ID, id) },
+		func(skill *config.Skill, id string) { skill.ID = id },
+	)
 }
 
 func (srv *Server) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "id is required")
-		return
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load config")
-		return
-	}
-
-	cfg.RemoveSkill(id)
-
-	if err := config.Save(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save config")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	srv.deleteConfigEntry(w, r, "id", func(cfg *config.GlobalConfig, id string) {
+		cfg.RemoveSkill(id)
+	})
 }

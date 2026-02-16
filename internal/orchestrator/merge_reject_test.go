@@ -250,7 +250,7 @@ func TestReject_SpawnNotFound(t *testing.T) {
 	}
 }
 
-func TestCancel_RunningSpawn(t *testing.T) {
+func TestInterruptSpawn_RunningSpawn(t *testing.T) {
 	cancelCalled := false
 	o := &Orchestrator{
 		spawns: map[int]*activeSpawn{
@@ -264,27 +264,27 @@ func TestCancel_RunningSpawn(t *testing.T) {
 		},
 	}
 
-	if err := o.Cancel(17); err != nil {
-		t.Fatalf("Cancel: %v", err)
+	if err := o.InterruptSpawn(17, "stop"); err != nil {
+		t.Fatalf("InterruptSpawn: %v", err)
 	}
 	if !cancelCalled {
 		t.Fatalf("cancel not called")
 	}
 }
 
-func TestCancel_NotFound(t *testing.T) {
+func TestInterruptSpawn_NotFound(t *testing.T) {
 	o := &Orchestrator{spawns: map[int]*activeSpawn{}}
 
-	err := o.Cancel(99999)
+	err := o.InterruptSpawn(99999, "stop")
 	if err == nil {
-		t.Fatalf("Cancel error = nil, want not found")
+		t.Fatalf("InterruptSpawn error = nil, want not found")
 	}
 	if !strings.Contains(err.Error(), "not found or already completed") {
-		t.Fatalf("Cancel error = %q, want not found/already completed hint", err)
+		t.Fatalf("InterruptSpawn error = %q, want not found/already completed hint", err)
 	}
 }
 
-func TestCancel_AlreadyCompleted(t *testing.T) {
+func TestInterruptSpawn_AlreadyCompleted(t *testing.T) {
 	repo := initGitRepo(t)
 	s := newTestStore(t, repo)
 	rec := &store.SpawnRecord{
@@ -299,12 +299,12 @@ func TestCancel_AlreadyCompleted(t *testing.T) {
 	}
 
 	o := New(s, &config.GlobalConfig{}, repo)
-	err := o.Cancel(rec.ID)
+	err := o.InterruptSpawn(rec.ID, "stop")
 	if err == nil {
-		t.Fatalf("Cancel error = nil, want already completed error")
+		t.Fatalf("InterruptSpawn error = nil, want already completed error")
 	}
 	if !strings.Contains(err.Error(), "not found or already completed") {
-		t.Fatalf("Cancel error = %q, want not found/already completed hint", err)
+		t.Fatalf("InterruptSpawn error = %q, want not found/already completed hint", err)
 	}
 }
 

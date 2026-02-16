@@ -1378,19 +1378,6 @@ func (o *Orchestrator) WaitForRunningSpawns(parentTurnIDs []int, timeout time.Du
 	return true
 }
 
-// Cancel cancels a running spawn.
-func (o *Orchestrator) Cancel(spawnID int) error {
-	o.mu.Lock()
-	as, ok := o.spawns[spawnID]
-	o.mu.Unlock()
-
-	if !ok {
-		return fmt.Errorf("spawn %d not found or already completed", spawnID)
-	}
-	as.cancel()
-	return nil
-}
-
 // InterruptSpawn sends an interrupt message to a running spawn's loop.
 func (o *Orchestrator) InterruptSpawn(spawnID int, message string) error {
 	o.mu.Lock()
@@ -1505,17 +1492,6 @@ func (o *Orchestrator) Diff(ctx context.Context, spawnID int) (string, error) {
 		return "", fmt.Errorf("spawn %d has no branch", spawnID)
 	}
 	return o.worktrees.Diff(ctx, rec.Branch)
-}
-
-// Status returns spawn records for a parent turn.
-func (o *Orchestrator) Status(parentTurnID int) []store.SpawnRecord {
-	records, _ := o.store.SpawnsByParent(parentTurnID)
-	return records
-}
-
-// CleanupAll cleans up all active worktrees.
-func (o *Orchestrator) CleanupAll(ctx context.Context) error {
-	return o.worktrees.CleanupAll(ctx)
 }
 
 // staleWorktreeMaxAge is the TTL after which an untracked worktree is considered stale.

@@ -4,12 +4,10 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -19,23 +17,10 @@ type CodexProvider struct {
 	criticalThreshold float64
 }
 
-func NewCodexProvider(opts ...CodexOption) *CodexProvider {
-	p := &CodexProvider{
+func NewCodexProvider() *CodexProvider {
+	return &CodexProvider{
 		warnThreshold:     70.0,
 		criticalThreshold: 90.0,
-	}
-	for _, opt := range opts {
-		opt(p)
-	}
-	return p
-}
-
-type CodexOption func(*CodexProvider)
-
-func WithCodexThresholds(warn, critical float64) CodexOption {
-	return func(p *CodexProvider) {
-		p.warnThreshold = warn
-		p.criticalThreshold = critical
 	}
 }
 
@@ -369,18 +354,4 @@ func killCodexProcess(cmd *exec.Cmd) {
 		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 	cmd.Wait()
-}
-
-func IsCodexNotConfigured(err error) bool {
-	if err == nil {
-		return false
-	}
-	var pe *ProviderError
-	if !strings.Contains(err.Error(), "codex binary not found") {
-		return false
-	}
-	if errors.As(err, &pe) {
-		return pe.Provider == ProviderCodex
-	}
-	return false
 }
