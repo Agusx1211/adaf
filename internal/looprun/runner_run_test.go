@@ -119,6 +119,17 @@ func TestRun_ContextCancellationReturnsError(t *testing.T) {
 	if err != context.Canceled {
 		t.Fatalf("error = %v, want context.Canceled", err)
 	}
+
+	runs, listErr := s.ListLoopRuns()
+	if listErr != nil {
+		t.Fatalf("ListLoopRuns() error = %v", listErr)
+	}
+	if len(runs) == 0 {
+		t.Fatal("expected loop run record to exist after cancellation")
+	}
+	if runs[0].Status != "cancelled" {
+		t.Fatalf("run status = %q, want %q", runs[0].Status, "cancelled")
+	}
 }
 
 func TestRun_MaxCyclesLimitsExecution(t *testing.T) {

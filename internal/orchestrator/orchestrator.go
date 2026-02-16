@@ -1134,7 +1134,7 @@ func (o *Orchestrator) Wait(parentTurnID int) []SpawnResult {
 	records, _ := o.store.SpawnsByParent(parentTurnID)
 	pending := make(map[int]struct{})
 	for _, r := range records {
-		if !isTerminalSpawnStatus(r.Status) {
+		if !store.IsTerminalSpawnStatus(r.Status) {
 			pending[r.ID] = struct{}{}
 		}
 	}
@@ -1145,7 +1145,7 @@ func (o *Orchestrator) Wait(parentTurnID int) []SpawnResult {
 			<-ticker.C
 			for id := range pending {
 				rec, err := o.store.GetSpawn(id)
-				if err != nil || isTerminalSpawnStatus(rec.Status) {
+				if err != nil || store.IsTerminalSpawnStatus(rec.Status) {
 					delete(pending, id)
 				}
 			}
@@ -1185,7 +1185,7 @@ func (o *Orchestrator) WaitAny(ctx context.Context, parentTurnID int, alreadySee
 	var completed []int
 	seenCompleted := 0
 	for _, r := range records {
-		if isTerminalSpawnStatus(r.Status) {
+		if store.IsTerminalSpawnStatus(r.Status) {
 			if _, seen := alreadySeen[r.ID]; seen {
 				seenCompleted++
 				continue
@@ -1234,7 +1234,7 @@ func (o *Orchestrator) WaitAny(ctx context.Context, parentTurnID int, alreadySee
 					delete(pending, id)
 					continue
 				}
-				if isTerminalSpawnStatus(rec.Status) {
+				if store.IsTerminalSpawnStatus(rec.Status) {
 					delete(pending, id)
 					if _, seen := alreadySeen[id]; seen {
 						continue
@@ -1295,7 +1295,7 @@ func (o *Orchestrator) WaitOne(spawnID int) SpawnResult {
 		if err != nil {
 			return SpawnResult{SpawnID: spawnID, Status: "unknown"}
 		}
-		if isTerminalSpawnStatus(rec.Status) {
+		if store.IsTerminalSpawnStatus(rec.Status) {
 			return SpawnResult{
 				SpawnID:  rec.ID,
 				Status:   rec.Status,
@@ -1644,14 +1644,6 @@ func (o *Orchestrator) ActiveSpawnsForParent(parentTurnID int) []int {
 		}
 	}
 	return ids
-}
-func isTerminalSpawnStatus(status string) bool {
-	switch status {
-	case "completed", "failed", "canceled", "cancelled", "merged", "rejected":
-		return true
-	default:
-		return false
-	}
 }
 
 // --- Singleton ---

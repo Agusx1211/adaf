@@ -2,6 +2,7 @@
 package looprun
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -108,7 +109,9 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 	debug.LogKV("looprun", "loop run created", "run_id", run.ID, "hex_id", run.HexID)
 
 	defer func() {
-		run.Status = "stopped"
+		if run.Status == "" || run.Status == "running" {
+			run.Status = "stopped"
+		}
 		run.StoppedAt = time.Now().UTC()
 		cfg.Store.UpdateLoopRun(run)
 		_ = stats.UpdateLoopStats(cfg.Store, loopDef.Name, run)
@@ -576,6 +579,16 @@ func emitSpawnOutput(records []store.SpawnRecord, s *store.Store, offsets map[in
 			offsets[rec.ID] = prevOffset
 			continue
 		}
+
+		// Only process complete newline-delimited JSON records. If the file is
+		// read while the writer is in the middle of a line, keep the partial
+		// bytes for the next poll by not advancing offset past the last newline.
+		lastNewline := bytes.LastIndexByte(chunk, '\n')
+		if lastNewline < 0 {
+			offsets[rec.ID] = prevOffset
+			continue
+		}
+		chunk = chunk[:lastNewline+1]
 		offsets[rec.ID] = prevOffset + int64(len(chunk))
 
 		for _, line := range strings.Split(string(chunk), "\n") {
@@ -823,7 +836,7 @@ func waitForAnySessionSpawns(ctx context.Context, s *store.Store, parentTurnID i
 	var completed []int
 	seenCompleted := 0
 	for _, rec := range records {
-		if isTerminalSpawnStatus(rec.Status) {
+		if store.IsTerminalSpawnStatus(rec.Status) {
 			if _, seen := alreadySeen[rec.ID]; seen {
 				seenCompleted++
 				continue
@@ -886,7 +899,7 @@ func waitForAnySessionSpawns(ctx context.Context, s *store.Store, parentTurnID i
 					delete(pending, id)
 					continue
 				}
-				if isTerminalSpawnStatus(rec.Status) {
+				if store.IsTerminalSpawnStatus(rec.Status) {
 					delete(pending, id)
 					if _, seen := alreadySeen[id]; seen {
 						continue
@@ -929,15 +942,6 @@ func waitForAnySessionSpawns(ctx context.Context, s *store.Store, parentTurnID i
 		"more_pending", len(pending) > 0,
 	)
 	return results, len(pending) > 0
-}
-
-func isTerminalSpawnStatus(status string) bool {
-	switch status {
-	case "completed", "failed", "canceled", "cancelled", "merged", "rejected":
-		return true
-	default:
-		return false
-	}
 }
 
 // gatherUnseenMessages returns messages that this step hasn't seen yet,

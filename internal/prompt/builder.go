@@ -812,10 +812,5 @@ func buildStandaloneChatContext(opts BuildOpts) (string, error) {
 }
 
 func isDelegationActiveSpawnStatus(status string) bool {
-	switch status {
-	case "completed", "failed", "canceled", "cancelled", "merged", "rejected":
-		return false
-	default:
-		return true
-	}
+	return !store.IsTerminalSpawnStatus(status)
 }

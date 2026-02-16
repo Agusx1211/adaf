@@ -63,7 +63,7 @@ func TestWaitForAnySessionSpawnsReturnsOnlyUnseenCompletions(t *testing.T) {
 	}
 }
 
-func TestIsTerminalSpawnStatusIncludesCanceled(t *testing.T) {
+func TestStoreTerminalSpawnStatusIncludesCanceled(t *testing.T) {
 	tests := []struct {
 		name   string
 		status string
@@ -80,8 +80,8 @@ func TestIsTerminalSpawnStatusIncludesCanceled(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isTerminalSpawnStatus(tt.status); got != tt.want {
-				t.Fatalf("isTerminalSpawnStatus(%q) = %v, want %v", tt.status, got, tt.want)
+			if got := store.IsTerminalSpawnStatus(tt.status); got != tt.want {
+				t.Fatalf("store.IsTerminalSpawnStatus(%q) = %v, want %v", tt.status, got, tt.want)
 			}
 		})
 	}

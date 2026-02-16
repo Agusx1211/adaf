@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 
+	"github.com/agusx1211/adaf/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -94,10 +95,5 @@ func runSpawnWait(cmd *cobra.Command, args []string) error {
 }
 
 func isTerminalSpawnStatus(status string) bool {
-	switch status {
-	case "completed", "failed", "canceled", "cancelled", "merged", "rejected":
-		return true
-	default:
-		return false
-	}
+	return store.IsTerminalSpawnStatus(status)
 }

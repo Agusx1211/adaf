@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/agusx1211/adaf/internal/agent"
+	"github.com/agusx1211/adaf/internal/store"
 )
 
 func TestClassifySpawnCompletion(t *testing.T) {
@@ -117,10 +118,10 @@ func TestAppendSpawnSummary(t *testing.T) {
 }
 
 func TestIsTerminalSpawnStatusIncludesCanceled(t *testing.T) {
-	if !isTerminalSpawnStatus("canceled") {
-		t.Fatalf("isTerminalSpawnStatus(canceled) = false, want true")
+	if !store.IsTerminalSpawnStatus("canceled") {
+		t.Fatalf("store.IsTerminalSpawnStatus(canceled) = false, want true")
 	}
-	if !isTerminalSpawnStatus("cancelled") {
-		t.Fatalf("isTerminalSpawnStatus(cancelled) = false, want true")
+	if !store.IsTerminalSpawnStatus("cancelled") {
+		t.Fatalf("store.IsTerminalSpawnStatus(cancelled) = false, want true")
 	}
 }
