@@ -134,10 +134,15 @@ func DefaultSkills() []Skill {
 				"**Monitoring (use sparingly — prefer wait-for-spawns):**\n" +
 				"- `adaf spawn-status [--spawn-id N]` — Check spawn status\n" +
 				"- `adaf spawn-watch --spawn-id N` — Watch spawn output in real-time\n\n" +
-				"**Review & merge:**\n" +
+				"**Review & merge (MANDATORY for writable spawns):**\n" +
 				"- `adaf spawn-diff --spawn-id N` — View diff of spawn's changes\n" +
-				"- `adaf spawn-merge --spawn-id N [--squash]` — Merge spawn's changes\n" +
+				"- `adaf spawn-merge --spawn-id N [--squash]` — Merge spawn's changes into YOUR branch\n" +
 				"- `adaf spawn-reject --spawn-id N` — Reject spawn's changes (destroys branch — see below)\n\n" +
+				"**CRITICAL: Writable sub-agents work in isolated worktree branches. Their commits are INVISIBLE to your branch until you explicitly merge them.** A spawn completing with status=completed does NOT mean the work is on your branch. You MUST:\n" +
+				"1. Review the diff: `adaf spawn-diff --spawn-id N`\n" +
+				"2. Merge: `adaf spawn-merge --spawn-id N`\n" +
+				"3. Verify the merge succeeded (spawn a scout if needed)\n" +
+				"Skipping the merge means the sub-agent's work is lost — it only exists on an orphaned worktree branch.\n\n" +
 				"**Replying to child questions:**\n" +
 				"- `adaf spawn-reply --spawn-id N \"answer\"` — Reply to child's question\n\n" +
 				"## On Rejecting Work\n\n" +

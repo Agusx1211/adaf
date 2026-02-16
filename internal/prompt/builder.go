@@ -573,6 +573,18 @@ func renderWaitResults(results []WaitResultInfo) string {
 	var b strings.Builder
 	b.WriteString("## Spawn Wait Results\n\n")
 	b.WriteString("The spawns you waited for have completed:\n\n")
+
+	// Count writable spawns that need merging.
+	writableCount := 0
+	for _, wr := range results {
+		if !wr.ReadOnly && wr.Branch != "" && (wr.Status == "completed" || wr.Status == "canceled") {
+			writableCount++
+		}
+	}
+	if writableCount > 0 {
+		b.WriteString("**IMPORTANT: Writable spawns completed. Their work is on isolated branches — NOT on your branch yet. You MUST `adaf spawn-diff` and `adaf spawn-merge` each writable spawn to land the changes on your branch. Skipping merge means the work is lost.**\n\n")
+	}
+
 	for _, wr := range results {
 		b.WriteString(formatWaitResultInfo(wr))
 	}
@@ -707,6 +719,11 @@ func formatWaitResultInfo(wr WaitResultInfo) string {
 		fmt.Fprintf(&b, " (exit_code=%d)", wr.ExitCode)
 	}
 	b.WriteString("\n\n")
+
+	// Remind parent to merge writable spawns.
+	if !wr.ReadOnly && wr.Branch != "" && (wr.Status == "completed" || wr.Status == "canceled") {
+		fmt.Fprintf(&b, "**Action required:** Review and merge this spawn's work: `adaf spawn-diff --spawn-id %d` then `adaf spawn-merge --spawn-id %d`\n\n", wr.SpawnID, wr.SpawnID)
+	}
 
 	body := wr.Summary
 	if body == "" {

@@ -112,6 +112,13 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 		run.StoppedAt = time.Now().UTC()
 		cfg.Store.UpdateLoopRun(run)
 		_ = stats.UpdateLoopStats(cfg.Store, loopDef.Name, run)
+
+		// Clean up orphaned worktrees from spawns that were never
+		// merged or rejected. Without this, completed-but-unmerged
+		// spawn worktrees leak on disk indefinitely.
+		if o := orchestrator.Get(); o != nil && len(run.TurnIDs) > 0 {
+			o.CleanupSpawnWorktrees(run.TurnIDs)
+		}
 	}()
 
 	// Run cycles until stopped/cancelled (or MaxCycles if configured).

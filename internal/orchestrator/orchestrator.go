@@ -1555,6 +1555,62 @@ func (o *Orchestrator) cleanupStaleWorktrees() {
 	}
 }
 
+// CleanupSpawnWorktrees removes worktrees for terminal (completed/failed/canceled)
+// spawns belonging to any of the given parent turn IDs. This is called at the end
+// of a loop run to prevent worktree leaks from spawns that were never explicitly
+// merged or rejected by the parent agent.
+func (o *Orchestrator) CleanupSpawnWorktrees(turnIDs []int) {
+	if len(turnIDs) == 0 {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	removed := 0
+	for _, turnID := range turnIDs {
+		records, err := o.store.SpawnsByParent(turnID)
+		if err != nil {
+			continue
+		}
+		for _, rec := range records {
+			if rec.WorktreePath == "" || rec.ReadOnly {
+				continue
+			}
+			// Only clean up terminal spawns that were NOT already merged/rejected
+			// (those are already cleaned up by Merge/Reject).
+			switch rec.Status {
+			case "completed", "failed", "canceled", "cancelled":
+				// These are orphaned worktrees — the parent never merged them.
+			default:
+				continue
+			}
+
+			debug.LogKV("orch", "cleaning up orphaned spawn worktree",
+				"spawn_id", rec.ID,
+				"status", rec.Status,
+				"branch", rec.Branch,
+				"worktree", rec.WorktreePath,
+			)
+			if rmErr := o.worktrees.RemoveWithBranch(ctx, rec.WorktreePath, rec.Branch); rmErr != nil {
+				debug.LogKV("orch", "orphaned worktree cleanup failed",
+					"spawn_id", rec.ID,
+					"worktree", rec.WorktreePath,
+					"error", rmErr,
+				)
+				continue
+			}
+			removed++
+		}
+	}
+	if removed > 0 {
+		debug.LogKV("orch", "cleaned up orphaned spawn worktrees",
+			"turn_ids", fmt.Sprintf("%v", turnIDs),
+			"removed", removed,
+		)
+	}
+}
+
 // ReparentSpawn updates a spawn's parent turn ID, used for handoff across loop steps.
 func (o *Orchestrator) ReparentSpawn(spawnID, newParentTurnID int) error {
 	if err := o.withSpawnRecordLock(spawnID, func(rec *store.SpawnRecord) error {

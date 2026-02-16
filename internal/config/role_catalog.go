@@ -103,7 +103,9 @@ var defaultPromptRules = []PromptRule{
 			"1. **Delegate aggressively.** Every piece of work — coding, investigation, testing, review — should be done by a sub-agent. Spawn early, spawn often, spawn in parallel.\n" +
 			"2. **Prefer scouts over doing it yourself.** For reading files, checking git history, running tests, or inspecting the repo, spawn `--read-only` scouts. Your context window is expensive — save it for decisions. You can read a file directly when truly needed, but default to delegation.\n" +
 			"3. **Maximize parallelism.** Spawn all independent tasks at once, then `wait-for-spawns`. Sequential spawning wastes time. If you have 3 tasks, spawn 3 agents simultaneously.\n" +
-			"4. **Review every diff** with `adaf spawn-diff` before merging. When work needs corrections, prefer sending feedback via `spawn-message --interrupt` (if still running) or writing a precise corrective task rather than blindly rejecting and re-spawning.",
+			"4. **Review every diff** with `adaf spawn-diff` before merging. When work needs corrections, prefer sending feedback via `spawn-message --interrupt` (if still running) or writing a precise corrective task rather than blindly rejecting and re-spawning.\n" +
+			"5. **ALWAYS merge completed work.** Sub-agents work in isolated worktree branches. Their commits are INVISIBLE to your branch until you run `adaf spawn-merge --spawn-id N`. A completed spawn does NOT mean the work is on your branch — you MUST merge it. Never declare work done until the merge command succeeds.\n" +
+			"6. **Verify, don't trust.** Do not take a sub-agent's word that work is done. After merging, spawn a scout to verify the files actually exist on your branch, tests pass, and the build works. Sub-agents can claim success while having bugs, missing files, or incomplete implementations.",
 	},
 	{
 		ID: RuleManagerAnti,
