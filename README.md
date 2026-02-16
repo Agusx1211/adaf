@@ -451,6 +451,9 @@ make record-gemini-fixture
 # Record OpenCode replay fixture (requires opencode + credentials)
 make record-opencode-fixture
 
+# Record Codex replay fixture (requires codex + credentials)
+make record-codex-fixture
+
 # Format code
 make fmt
 

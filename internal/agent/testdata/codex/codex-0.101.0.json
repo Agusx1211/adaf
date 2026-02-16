@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "provider": "codex",
+  "version": "0.101.0",
+  "version_raw": "codex-cli 0.101.0",
+  "binary": "codex",
+  "captured_at": "2026-02-16T15:49:31Z",
+  "prompt": "In the current directory, create a file named fixture_note.txt with exactly this content: CODEX_FIXTURE_FILE_CONTENT. Then answer with exactly: CODEX_FIXTURE_OK.",
+  "args": [],
+  "result": {
+    "exit_code": 0,
+    "output": "CODEX_FIXTURE_OK",
+    "error": "Reading prompt from stdin...\n",
+    "agent_session_id": "019c6724-6158-7133-aad9-614deb22ebdf"
+  },
+  "summary": {
+    "raw_events": 9,
+    "parsed_events": 8,
+    "system_events": 1,
+    "assistant_events": 5,
+    "user_events": 1,
+    "result_events": 1,
+    "error_events": 0,
+    "text_blocks": 2,
+    "thinking_blocks": 2,
+    "tool_use_blocks": 1,
+    "tool_result_blocks": 1
+  },
+  "stream": [
+    "{\"type\":\"thread.started\",\"thread_id\":\"019c6724-6158-7133-aad9-614deb22ebdf\"}",
+    "{\"type\":\"turn.started\"}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"reasoning\",\"text\":\"**Creating file with exact content**\"}}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"agent_message\",\"text\":\"Creating `fixture_note.txt` in `/tmp/adaf-codex-demo-repo` with the exact required content, then I’ll confirm completion.\"}}",
+    "{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/bash -lc \\\"printf 'CODEX_FIXTURE_FILE_CONTENT' \u003e fixture_note.txt \u0026\u0026 wc -c fixture_note.txt \u0026\u0026 cat fixture_note.txt\\\"\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/bash -lc \\\"printf 'CODEX_FIXTURE_FILE_CONTENT' \u003e fixture_note.txt \u0026\u0026 wc -c fixture_note.txt \u0026\u0026 cat fixture_note.txt\\\"\",\"aggregated_output\":\"26 fixture_note.txt\\nCODEX_FIXTURE_FILE_CONTENT\",\"exit_code\":0,\"status\":\"completed\"}}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"reasoning\",\"text\":\"CODEX_FIXTURE_OK\"}}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_4\",\"type\":\"agent_message\",\"text\":\"CODEX_FIXTURE_OK\"}}",
+    "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":15959,\"cached_input_tokens\":14848,\"output_tokens\":269}}"
+  ],
+  "events": [
+    {
+      "type": "stdin",
+      "data": "In the current directory, create a file named fixture_note.txt with exactly this content: CODEX_FIXTURE_FILE_CONTENT. Then answer with exactly: CODEX_FIXTURE_OK."
+    },
+    {
+      "type": "meta",
+      "data": "agent=codex"
+    },
+    {
+      "type": "meta",
+      "data": "command=/home/agusx1211/.bun/bin/codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --json"
+    },
+    {
+      "type": "meta",
+      "data": "workdir=/tmp/adaf-codex-demo-repo"
+    },
+    {
+      "type": "stderr",
+      "data": "Reading prompt from stdin...\n"
+    }
+  ],
+  "workspace": {
+    "fixture_note.txt": "CODEX_FIXTURE_FILE_CONTENT"
+  },
+  "metadata": {
+    "demo_repo": "/tmp/adaf-codex-demo-repo",
+    "record_env": "ADAF_RECORD_CODEX_FIXTURE"
+  }
+}
