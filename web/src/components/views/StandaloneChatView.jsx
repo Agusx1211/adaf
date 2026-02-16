@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAppState, useDispatch } from '../../state/store.js';
 import { apiCall, apiBase, buildWSURL } from '../../api/client.js';
+import { reportMissingUISample } from '../../api/missingUISamples.js';
 import { useToast } from '../common/Toast.jsx';
 import { injectEventBlockStyles, cleanResponse } from '../common/EventBlocks.jsx';
 import ChatMessageList from '../common/ChatMessageList.jsx';
@@ -214,6 +215,21 @@ export default function StandaloneChatView() {
     var assistantTurnsSeen = 0;
     var turnsToSkip = entry.assistantTurnsToSkip || 0;
 
+    function reportMissing(sample) {
+      if (!sample || typeof sample !== 'object') return;
+      reportMissingUISample(state.currentProjectID, {
+        source: sample.source || 'standalone_ws_event',
+        reason: sample.reason || 'unknown_parse_gap',
+        scope: sample.scope || ('chat-' + forChatID),
+        session_id: sample.session_id || sessionID || 0,
+        event_type: sample.event_type || '',
+        agent: sample.agent || (chatMeta && chatMeta.agent) || '',
+        model: sample.model || (chatMeta && chatMeta.model) || '',
+        fallback_text: sample.fallback_text || '',
+        payload: sample.payload,
+      });
+    }
+
     ws.addEventListener('message', function (wsEvent) {
       try {
         var envelope = JSON.parse(wsEvent.data);
@@ -264,6 +280,12 @@ export default function StandaloneChatView() {
                   result: block.content || block.tool_content || block.output || block.text || '',
                   isError: !!block.is_error,
                 });
+              } else if (block && typeof block === 'object') {
+                reportMissing({
+                  reason: 'unknown_assistant_block',
+                  event_type: block.type || 'unknown',
+                  payload: block,
+                });
               }
             });
             return;
@@ -281,10 +303,21 @@ export default function StandaloneChatView() {
                   result: block.content || block.tool_content || block.output || block.text || '',
                   isError: !!block.is_error,
                 });
+              } else if (block && typeof block === 'object') {
+                reportMissing({
+                  reason: 'unknown_user_block',
+                  event_type: block.type || 'unknown',
+                  payload: block,
+                });
               }
             });
             return;
           }
+          reportMissing({
+            reason: 'unknown_agent_event_type',
+            event_type: ev.type || 'event',
+            payload: ev,
+          });
           return;
         }
 
@@ -299,8 +332,23 @@ export default function StandaloneChatView() {
 
         if (type === 'done' || type === 'loop_done') {
           finalizeChat(forChatID);
+          return;
         }
+
+        reportMissing({
+          source: 'standalone_ws_envelope',
+          reason: 'unknown_envelope_type',
+          event_type: type || 'event',
+          payload: data,
+        });
       } catch (e) {
+        reportMissing({
+          source: 'standalone_ws_message',
+          reason: 'invalid_ws_payload_json',
+          event_type: 'message',
+          fallback_text: String(wsEvent && wsEvent.data ? wsEvent.data : ''),
+          payload: String(wsEvent && wsEvent.data ? wsEvent.data : ''),
+        });
         console.error('Standalone Chat WebSocket parse error:', e);
       }
     });

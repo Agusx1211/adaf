@@ -1,12 +1,22 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { buildWSURL } from './client.js';
 import { useDispatch, useAppState, normalizeSpawns } from '../state/store.js';
-import { normalizeStatus, safeJSONString, stringifyToolPayload, cropText, arrayOrEmpty } from '../utils/format.js';
+import { safeJSONString, stringifyToolPayload, cropText } from '../utils/format.js';
+import { reportMissingUISample } from './missingUISamples.js';
 
 export function useSessionSocket(sessionID) {
+  var state = useAppState();
   var dispatch = useDispatch();
   var wsRef = useRef(null);
   var reconnectRef = useRef(null);
+  var contextRef = useRef({ projectID: '', sessions: [] });
+
+  useEffect(function () {
+    contextRef.current = {
+      projectID: state.currentProjectID || '',
+      sessions: Array.isArray(state.sessions) ? state.sessions : [],
+    };
+  }, [state.currentProjectID, state.sessions]);
 
   var addStreamEvent = useCallback(function (entry) {
     dispatch({
@@ -24,10 +34,45 @@ export function useSessionSocket(sessionID) {
     });
   }, [dispatch]);
 
+  var reportMissing = useCallback(function (sample) {
+    if (!sample || typeof sample !== 'object') return;
+
+    var context = contextRef.current || {};
+    var sid = Number(sample.session_id || 0);
+    if (!sid && sessionID) sid = sessionID;
+
+    var sessionMeta = findSessionByID(context.sessions, sid);
+
+    reportMissingUISample(context.projectID, {
+      source: sample.source || 'session_ws_event',
+      reason: sample.reason || 'unknown_parse_gap',
+      scope: sample.scope || (sid ? 'session-' + sid : ''),
+      session_id: sid || 0,
+      turn_id: Number(sample.turn_id || 0) || 0,
+      spawn_id: Number(sample.spawn_id || 0) || 0,
+      event_type: sample.event_type || '',
+      agent: sample.agent || (sessionMeta && sessionMeta.agent) || '',
+      model: sample.model || (sessionMeta && sessionMeta.model) || '',
+      provider: sample.provider || '',
+      fallback_text: sample.fallback_text || '',
+      payload: sample.payload,
+    });
+  }, [sessionID]);
+
   var handleAgentStreamEvent = useCallback(function (scope, rawEvent) {
     var event = asObject(rawEvent);
     if (!event || typeof event !== 'object') {
-      addStreamEvent({ scope: scope, type: 'text', text: safeJSONString(rawEvent) });
+      var fallbackRaw = safeJSONString(rawEvent);
+      addStreamEvent({ scope: scope, type: 'text', text: fallbackRaw });
+      reportMissing({
+        source: 'session_ws_event',
+        reason: 'event_not_object',
+        scope: scope,
+        session_id: sessionID,
+        event_type: typeof rawEvent,
+        fallback_text: cropText(fallbackRaw, 400),
+        payload: rawEvent,
+      });
       return;
     }
 
@@ -35,6 +80,15 @@ export function useSessionSocket(sessionID) {
       var blocks = extractContentBlocks(event);
       if (!blocks.length) {
         addStreamEvent({ scope: scope, type: 'text', text: '[assistant event]' });
+        reportMissing({
+          source: 'session_ws_event',
+          reason: 'assistant_without_content_blocks',
+          scope: scope,
+          session_id: sessionID,
+          event_type: event.type || 'assistant',
+          fallback_text: '[assistant event]',
+          payload: event,
+        });
         return;
       }
       blocks.forEach(function (block) {
@@ -48,7 +102,17 @@ export function useSessionSocket(sessionID) {
         } else if (block.type === 'tool_result') {
           addStreamEvent({ scope: scope, type: 'tool_result', tool: block.name || 'tool_result', result: stringifyToolPayload(block.content || block.output || block.text || '') });
         } else {
-          addStreamEvent({ scope: scope, type: 'text', text: safeJSONString(block) });
+          var blockFallback = safeJSONString(block);
+          addStreamEvent({ scope: scope, type: 'text', text: blockFallback });
+          reportMissing({
+            source: 'session_ws_event',
+            reason: 'unknown_assistant_block',
+            scope: scope,
+            session_id: sessionID,
+            event_type: block.type || 'unknown',
+            fallback_text: cropText(blockFallback, 400),
+            payload: block,
+          });
         }
       });
       return;
@@ -59,14 +123,35 @@ export function useSessionSocket(sessionID) {
       userBlocks.forEach(function (block) {
         if (block && block.type === 'tool_result') {
           addStreamEvent({ scope: scope, type: 'tool_result', tool: block.name || 'tool_result', result: stringifyToolPayload(block.content || block.output || block.text || safeJSONString(block)) });
+          return;
         }
+        if (!block || typeof block !== 'object') return;
+        reportMissing({
+          source: 'session_ws_event',
+          reason: 'unknown_user_block',
+          scope: scope,
+          session_id: sessionID,
+          event_type: block.type || 'unknown',
+          payload: block,
+        });
       });
       return;
     }
 
     if (event.type === 'content_block_delta') {
       var delta = event.delta && (event.delta.text || event.delta.partial_json);
-      if (delta) addStreamEvent({ scope: scope, type: 'text', text: String(delta) });
+      if (delta) {
+        addStreamEvent({ scope: scope, type: 'text', text: String(delta) });
+      } else {
+        reportMissing({
+          source: 'session_ws_event',
+          reason: 'content_block_delta_without_renderable_text',
+          scope: scope,
+          session_id: sessionID,
+          event_type: event.type,
+          payload: event,
+        });
+      }
       return;
     }
 
@@ -75,8 +160,18 @@ export function useSessionSocket(sessionID) {
       return;
     }
 
-    addStreamEvent({ scope: scope, type: 'text', text: '[' + (event.type || 'event') + '] ' + safeJSONString(event) });
-  }, [addStreamEvent]);
+    var fallback = '[' + (event.type || 'event') + '] ' + safeJSONString(event);
+    addStreamEvent({ scope: scope, type: 'text', text: fallback });
+    reportMissing({
+      source: 'session_ws_event',
+      reason: 'unknown_agent_event_type',
+      scope: scope,
+      session_id: sessionID,
+      event_type: event.type || 'event',
+      fallback_text: cropText(fallback, 400),
+      payload: event,
+    });
+  }, [addStreamEvent, reportMissing, sessionID]);
 
   var ingestEnvelope = useCallback(function (sid, envelope) {
     if (!envelope || typeof envelope !== 'object') return;
@@ -149,8 +244,15 @@ export function useSessionSocket(sessionID) {
       return;
     }
 
-    // Unknown types - silently ignore
-  }, [dispatch, addStreamEvent, handleAgentStreamEvent]);
+    reportMissing({
+      source: 'session_ws_envelope',
+      reason: 'unknown_envelope_type',
+      scope: 'session-' + sid,
+      session_id: sid,
+      event_type: type,
+      payload: data,
+    });
+  }, [dispatch, addStreamEvent, handleAgentStreamEvent, reportMissing]);
 
   useEffect(function () {
     if (!sessionID) return;
@@ -177,7 +279,17 @@ export function useSessionSocket(sessionID) {
         var payload = JSON.parse(event.data);
         ingestEnvelope(sessionID, payload);
       } catch (_) {
-        addStreamEvent({ scope: 'session-' + sessionID, type: 'text', text: String(event.data || '') });
+        var rawText = String(event.data || '');
+        addStreamEvent({ scope: 'session-' + sessionID, type: 'text', text: rawText });
+        reportMissing({
+          source: 'session_ws_message',
+          reason: 'invalid_ws_payload_json',
+          scope: 'session-' + sessionID,
+          session_id: sessionID,
+          event_type: 'message',
+          fallback_text: cropText(rawText, 400),
+          payload: rawText,
+        });
       }
     });
 
@@ -201,7 +313,7 @@ export function useSessionSocket(sessionID) {
         wsRef.current = null;
       }
     };
-  }, [sessionID, dispatch, addStreamEvent, ingestEnvelope]);
+  }, [sessionID, dispatch, addStreamEvent, ingestEnvelope, reportMissing]);
 }
 
 export function useTerminalSocket(terminalRef) {
@@ -271,4 +383,14 @@ function extractContentBlocks(event) {
   if (event.message && Array.isArray(event.message.content)) return event.message.content.slice();
   if (event.content_block && typeof event.content_block === 'object') return [event.content_block];
   return [];
+}
+
+function findSessionByID(sessions, id) {
+  if (!Array.isArray(sessions)) return null;
+  var targetID = Number(id || 0);
+  if (!targetID) return null;
+  for (var i = 0; i < sessions.length; i++) {
+    if (Number(sessions[i] && sessions[i].id) === targetID) return sessions[i];
+  }
+  return null;
 }

@@ -345,6 +345,7 @@ func (srv *Server) registerProjectRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("POST "+prefix+"/chat-instances/{id}/response", srv.projectHandler(handleSaveChatInstanceResponse))
 	mux.HandleFunc("PATCH "+prefix+"/chat-instances/{id}", srv.projectHandler(handleUpdateChatInstance))
 	mux.HandleFunc("DELETE "+prefix+"/chat-instances/{id}", srv.projectHandler(handleDeleteChatInstance))
+	mux.HandleFunc("POST "+prefix+"/ui/missing-samples", srv.projectHandler(handleReportMissingUISampleP))
 
 	// Stats
 	mux.HandleFunc("GET "+prefix+"/stats/loops", srv.projectHandler(handleLoopStatsP))
