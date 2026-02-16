@@ -24,6 +24,7 @@ export function usePolling() {
         apiCall(base + '/spawns', 'GET', null, { allow404: true }),
         apiCall(base + '/loops', 'GET', null, { allow404: true }),
         apiCall(base + '/stats/profiles', 'GET', null, { allow404: true }),
+        apiCall(base + '/turns?limit=1000', 'GET', null, { allow404: true }),
       ]);
 
       if (!mountedRef.current) return;
@@ -33,12 +34,13 @@ export function usePolling() {
       var spawns = normalizeSpawns(results[2]);
       var loopRun = pickActiveLoopRun(results[3]);
       var loopRuns = normalizeAllLoopRuns(results[3]);
+      var turns = normalizeTurns(results[5]);
 
       var usageFromStats = aggregateUsageFromProfileStats(results[4]);
 
       dispatch({
         type: 'SET_CORE_DATA',
-        payload: { projectMeta, sessions, spawns, loopRun, loopRuns, usage: usageFromStats },
+        payload: { projectMeta, sessions, spawns, turns, loopRun, loopRuns, usage: usageFromStats },
       });
 
       return { loopRun, sessions, spawns };

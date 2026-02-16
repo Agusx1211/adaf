@@ -118,6 +118,7 @@ export default function ChatMessageList({
             var msgEvents = Array.isArray(msg._events) ? msg._events : (Array.isArray(msg.events) ? msg.events : []);
             var hasPromptEvent = msgEvents.some(function (e) { return e && e.type === 'initial_prompt'; });
             var renderEvents = msgEvents;
+            var ageLabel = timeAgo(msg.created_at);
             if (!isUser && msg._prompt && msg._prompt.text && !hasPromptEvent) {
               renderEvents = [{ type: 'initial_prompt', content: msg._prompt.text }].concat(msgEvents);
             }
@@ -137,9 +138,11 @@ export default function ChatMessageList({
                     fontFamily: "'JetBrains Mono', monospace",
                   }}>
                     <span>{isUser ? 'You' : 'Agent'}</span>
-                    <span style={{ fontWeight: 400, color: 'var(--text-3)', textTransform: 'none', letterSpacing: 'normal', fontSize: 9 }}>
-                      {timeAgo(msg.created_at)}
-                    </span>
+                    {ageLabel && (
+                      <span style={{ fontWeight: 400, color: 'var(--text-3)', textTransform: 'none', letterSpacing: 'normal', fontSize: 9 }}>
+                        {ageLabel}
+                      </span>
+                    )}
                     {hasInspectData && (
                       <button
                         onClick={function (e) { e.stopPropagation(); setInspectedMessage(msg); }}

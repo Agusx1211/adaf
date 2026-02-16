@@ -316,6 +316,7 @@ export function stateEventsToBlocks(stateEvents) {
       _sourceColor: evt._sourceColor || '',
       _spawnID: evt._spawnID || 0,
       _scope: evt.scope || evt._scope || '',
+      _ts: Number(evt && evt.ts) || 0,
     };
     if (evt.type === 'initial_prompt') {
       return { type: 'initial_prompt', content: evt.text || evt.content || '', _scope: meta._scope };

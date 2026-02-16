@@ -76,6 +76,11 @@ export function useSessionSocket(sessionID) {
       return;
     }
 
+    if (event.type === 'system') {
+      // Ignore transport/system frames such as "subtype:init" so they do not pollute chat output.
+      return;
+    }
+
     if (event.type === 'assistant') {
       var blocks = extractContentBlocks(event);
       if (!blocks.length) {
@@ -217,6 +222,17 @@ export function useSessionSocket(sessionID) {
       var wireEvent = data && data.event ? data.event : data;
       var eventScope = (data && data.spawn_id > 0) ? 'spawn-' + data.spawn_id : 'session-' + sid;
       handleAgentStreamEvent(eventScope, wireEvent);
+      return;
+    }
+
+    if (type === 'finished') {
+      if (data && data.wait_for_spawns) {
+        addStreamEvent({
+          scope: 'session-' + sid,
+          type: 'text',
+          text: '[system] waiting for spawns (parent turn suspended)',
+        });
+      }
       return;
     }
 

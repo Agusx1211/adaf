@@ -29,7 +29,9 @@ export function formatTime(ts) {
 }
 
 export function timeAgo(ts) {
-  var diff = Math.max(0, Date.now() - parseTimestamp(ts));
+  var parsed = parseTimestamp(ts);
+  if (!parsed) return '';
+  var diff = Math.max(0, Date.now() - parsed);
   var sec = Math.floor(diff / 1000);
   if (sec < 60) return 'just now';
   var min = Math.floor(sec / 60);

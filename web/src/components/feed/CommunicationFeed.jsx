@@ -53,6 +53,17 @@ export default function CommunicationFeed() {
       if (targetSpawn > 0) {
         list = list.filter(function (m) { return Number(m.spawn_id) === targetSpawn; });
       }
+    } else if (parsedScope.kind === 'turn' || parsedScope.kind === 'turn_main') {
+      var targetTurn = parsedScope.id;
+      if (targetTurn > 0) {
+        var turnSession = spawnScopeMaps.turnToSession[targetTurn] || 0;
+        var allowedSpawns = {};
+        (spawnScopeMaps.turnToSpawnIDs[targetTurn] || []).forEach(function (id) { allowedSpawns[id] = true; });
+        list = list.filter(function (m) {
+          if (!m.spawn_id) return turnSession > 0;
+          return !!allowedSpawns[Number(m.spawn_id)];
+        });
+      }
     } else if (parsedScope.kind === 'session' || parsedScope.kind === 'session_main') {
       var targetSession = parsedScope.id;
       if (targetSession > 0) {

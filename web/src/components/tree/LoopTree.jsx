@@ -7,7 +7,7 @@ import { StopSessionButton } from '../session/SessionControls.jsx';
 export default function LoopTree() {
   var state = useAppState();
   var dispatch = useDispatch();
-  var { sessions, loopRuns, selectedScope, expandedNodes } = state;
+  var { sessions, spawns, turns, loopRuns, selectedScope, expandedNodes } = state;
 
   var tree = useMemo(function () {
     var filteredRuns = loopRuns.filter(function (lr) {
@@ -112,6 +112,125 @@ export default function LoopTree() {
     return { sortedRuns: sortedRuns, standaloneSessions: standaloneSessions };
   }, [sessions, loopRuns]);
 
+  var spawnTree = useMemo(function () {
+    var storeTurnToDaemonSession = {};
+    (loopRuns || []).forEach(function (lr) {
+      if (lr.daemon_session_id > 0 && lr.turn_ids) {
+        lr.turn_ids.forEach(function (tid) {
+          if (tid > 0) storeTurnToDaemonSession[tid] = lr.daemon_session_id;
+        });
+      }
+    });
+
+    var childrenByParent = {};
+    var rootsBySession = {};
+    var rootsByTurn = {};
+
+    spawns.forEach(function (spawn) {
+      if (spawn.parent_spawn_id > 0) {
+        if (!childrenByParent[spawn.parent_spawn_id]) childrenByParent[spawn.parent_spawn_id] = [];
+        childrenByParent[spawn.parent_spawn_id].push(spawn);
+      } else {
+        var storeTurnID = spawn.parent_turn_id || 0;
+        var sessionKey = spawn.parent_daemon_session_id || storeTurnToDaemonSession[storeTurnID] || storeTurnID;
+        if (sessionKey <= 0) return;
+        if (!rootsBySession[sessionKey]) rootsBySession[sessionKey] = [];
+        rootsBySession[sessionKey].push(spawn);
+        if (storeTurnID > 0) {
+          if (!rootsByTurn[storeTurnID]) rootsByTurn[storeTurnID] = [];
+          rootsByTurn[storeTurnID].push(spawn);
+        }
+      }
+    });
+
+    return { childrenByParent: childrenByParent, rootsBySession: rootsBySession, rootsByTurn: rootsByTurn };
+  }, [spawns, loopRuns]);
+
+  var sessionMetaByID = useMemo(function () {
+    var metaByID = {};
+    var turnToDaemonSession = {};
+    var modelTurnBySession = {};
+
+    (loopRuns || []).forEach(function (lr) {
+      var daemonSessionID = Number(lr && lr.daemon_session_id) || 0;
+      if (daemonSessionID <= 0) return;
+
+      if (!metaByID[daemonSessionID]) metaByID[daemonSessionID] = {};
+
+      var steps = Array.isArray(lr && lr.steps) ? lr.steps : [];
+      if (steps.length > 0) {
+        var stepIndex = Number(lr && lr.step_index);
+        if (!Number.isFinite(stepIndex) || stepIndex < 0) stepIndex = 0;
+        if (stepIndex >= steps.length) stepIndex = stepIndex % steps.length;
+        var step = steps[stepIndex] || steps[0] || {};
+        if (step.role) metaByID[daemonSessionID].role = String(step.role);
+      }
+
+      var turnIDs = Array.isArray(lr && lr.turn_ids) ? lr.turn_ids : [];
+      turnIDs.forEach(function (turnIDRaw) {
+        var turnID = Number(turnIDRaw) || 0;
+        if (turnID > 0) turnToDaemonSession[turnID] = daemonSessionID;
+      });
+    });
+
+    (turns || []).forEach(function (turn) {
+      if (!turn || turn.id <= 0 || !turn.agent_model) return;
+      var daemonSessionID = turnToDaemonSession[turn.id] || 0;
+      if (daemonSessionID <= 0) return;
+      if (!metaByID[daemonSessionID]) metaByID[daemonSessionID] = {};
+
+      var prevTurnID = modelTurnBySession[daemonSessionID] || 0;
+      if (turn.id >= prevTurnID) {
+        metaByID[daemonSessionID].model = String(turn.agent_model);
+        modelTurnBySession[daemonSessionID] = turn.id;
+      }
+    });
+
+    return metaByID;
+  }, [loopRuns, turns]);
+
+  var turnsByID = useMemo(function () {
+    var map = {};
+    (turns || []).forEach(function (turn) {
+      if (!turn || turn.id <= 0) return;
+      map[turn.id] = turn;
+    });
+    return map;
+  }, [turns]);
+
+  var turnStepByRun = useMemo(function () {
+    var out = {};
+    (loopRuns || []).forEach(function (lr) {
+      var runKey = (lr && (lr.id || lr.loop_name)) || '';
+      if (!runKey) return;
+      var turnIDs = uniquePositiveIDs(Array.isArray(lr && lr.turn_ids) ? lr.turn_ids : []);
+      if (!turnIDs.length) return;
+      var steps = Array.isArray(lr && lr.steps) ? lr.steps : [];
+      if (!steps.length) return;
+
+      var byTurn = {};
+      var stepIndex = 0;
+      var stepTurnsRemaining = stepTurns(steps[0]);
+
+      turnIDs.forEach(function (turnID) {
+        var step = steps[stepIndex] || {};
+        byTurn[turnID] = {
+          profile: step.profile ? String(step.profile) : '',
+          role: step.role ? String(step.role) : '',
+          step_index: stepIndex,
+        };
+        stepTurnsRemaining -= 1;
+        if (stepTurnsRemaining <= 0) {
+          stepIndex = (stepIndex + 1) % steps.length;
+          stepTurnsRemaining = stepTurns(steps[stepIndex]);
+        }
+      });
+
+      out[runKey] = byTurn;
+    });
+    return out;
+  }, [loopRuns]);
+
   function toggleNode(nodeID) {
     dispatch({ type: 'TOGGLE_NODE', payload: nodeID });
   }
@@ -138,26 +257,112 @@ export default function LoopTree() {
         var expanded = loopNodeID in expandedNodes ? !!expandedNodes[loopNodeID] : isRunning;
         var loopColor = isRunning ? 'var(--purple)' : 'var(--text-2)';
         var sColor = statusColor(lr.status);
+        var daemonSessionID = Number(lr && lr.daemon_session_id) || 0;
+        var hasDaemonSession = daemonSessionID > 0;
+        var loopScopeID = hasDaemonSession ? 'session-' + daemonSessionID : null;
+        var runTurnIDs = uniquePositiveIDs(Array.isArray(lr && lr.turn_ids) ? lr.turn_ids : []);
+        runTurnIDs.sort(function (a, b) { return b - a; });
+
+        var daemonSession = group.sessions.find(function (s) { return s.id === daemonSessionID; }) || group.sessions[0] || null;
+        var hasTurnRows = hasDaemonSession && runTurnIDs.length > 0;
+        var latestTurnID = hasTurnRows ? runTurnIDs[0] : 0;
+        var stepByTurn = turnStepByRun[runKey] || {};
+        var turnCount = hasTurnRows ? runTurnIDs.length : group.sessions.length;
+
+        var loopSelected = !!(loopScopeID && (selectedScope === loopScopeID || selectedScope === ('session-main-' + daemonSessionID)));
+        if (!loopSelected && hasTurnRows) {
+          loopSelected = runTurnIDs.some(function (turnID) {
+            return selectedScope === ('turn-' + turnID) || selectedScope === ('turn-main-' + turnID);
+          });
+        }
+
+        var rows = [];
+        if (hasTurnRows) {
+          runTurnIDs.forEach(function (turnID) {
+            var turn = turnsByID[turnID] || null;
+            var step = stepByTurn[turnID] || {};
+            var startedAt = (turn && turn.date) || (daemonSession && daemonSession.started_at) || lr.started_at || '';
+            var endedAt = '';
+            if (turn && turn.duration_secs > 0) {
+              endedAt = addSecondsISO(startedAt, turn.duration_secs);
+            }
+            if (!endedAt && turnID !== latestTurnID && daemonSession && !STATUS_RUNNING[normalizeStatus(daemonSession.status)]) {
+              endedAt = daemonSession.ended_at || '';
+            }
+
+            var rootSpawns = spawnTree.rootsByTurn[turnID] || [];
+            if (!rootSpawns.length && runTurnIDs.length === 1) {
+              rootSpawns = spawnTree.rootsBySession[daemonSessionID] || [];
+            }
+
+            rows.push({
+              key: 'turn-' + turnID,
+              displayID: turnID,
+              scopeMode: 'turn',
+              scopeID: turnID,
+              stopSessionID: daemonSessionID,
+              sessionRole: step.role || '',
+              sessionModel: (turn && turn.agent_model) || (daemonSession && daemonSession.model) || '',
+              rootSpawns: rootSpawns,
+              session: {
+                id: daemonSessionID || turnID,
+                profile: (turn && turn.profile_name) || step.profile || (daemonSession && daemonSession.profile) || 'unknown',
+                agent: (turn && turn.agent) || (daemonSession && daemonSession.agent) || '',
+                model: (turn && turn.agent_model) || (daemonSession && daemonSession.model) || '',
+                status: turnID === latestTurnID && daemonSession ? daemonSession.status : 'done',
+                action: step.role || '',
+                started_at: startedAt,
+                ended_at: endedAt,
+              },
+            });
+          });
+        } else {
+          group.sessions.forEach(function (session) {
+            var sessionMeta = sessionMetaByID[session.id] || {};
+            rows.push({
+              key: 'session-' + session.id,
+              displayID: session.id,
+              scopeMode: 'session',
+              scopeID: session.id,
+              stopSessionID: session.id,
+              sessionRole: sessionMeta.role || '',
+              sessionModel: sessionMeta.model || session.model || '',
+              rootSpawns: spawnTree.rootsBySession[session.id] || [],
+              session: session,
+            });
+          });
+        }
 
         return (
           <div key={runKey}>
             <div
-              onClick={function () { toggleNode(loopNodeID); }}
+              onClick={function () {
+                if (loopScopeID) {
+                  selectScope(loopScopeID);
+                  if (!expanded) toggleNode(loopNodeID);
+                } else {
+                  toggleNode(loopNodeID);
+                }
+              }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8,
                 padding: '8px 12px', cursor: 'pointer',
-                background: 'transparent',
+                background: loopSelected ? 'rgba(123,140,255,0.07)' : 'transparent',
+                borderLeft: loopSelected ? '2px solid var(--purple)' : '2px solid transparent',
                 borderBottom: '1px solid var(--bg-3)',
-                transition: 'background 0.12s ease',
+                transition: 'all 0.12s ease',
               }}
-              onMouseEnter={function (e) { e.currentTarget.style.background = 'var(--bg-2)'; }}
-              onMouseLeave={function (e) { e.currentTarget.style.background = 'transparent'; }}
+              onMouseEnter={function (e) { if (!loopSelected) e.currentTarget.style.background = 'var(--bg-2)'; }}
+              onMouseLeave={function (e) { if (!loopSelected) e.currentTarget.style.background = loopSelected ? 'rgba(123,140,255,0.07)' : 'transparent'; }}
             >
-              <span style={{
-                width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 10, color: loopColor,
-                transform: expanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 0.2s ease',
-              }}>{'\u25BE'}</span>
+              <span
+                onClick={function (e) { e.stopPropagation(); toggleNode(loopNodeID); }}
+                style={{
+                  width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 10, color: loopColor,
+                  transform: expanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 0.2s ease',
+                }}
+              >{'\u25BE'}</span>
 
               <span style={{
                 width: 7, height: 7, borderRadius: '50%', background: sColor, flexShrink: 0,
@@ -189,7 +394,7 @@ export default function LoopTree() {
                   )}
                 </div>
                 <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)', marginTop: 1 }}>
-                  {group.sessions.length} turns
+                  {turnCount} turns
                   {lr.cycle > 0 ? ' \u00B7 cycle ' + (lr.cycle + 1) : ''}
                   {' \u00B7 '}
                   {formatElapsed(lr.started_at, lr.stopped_at)}
@@ -197,13 +402,23 @@ export default function LoopTree() {
               </div>
             </div>
 
-            {expanded && group.sessions.map(function (session) {
+            {expanded && rows.map(function (row) {
               return (
                 <TurnNode
-                  key={session.id}
-                  session={session}
+                  key={row.key}
+                  session={row.session}
+                  displayID={row.displayID}
+                  scopeMode={row.scopeMode}
+                  scopeID={row.scopeID}
+                  stopSessionID={row.stopSessionID}
+                  sessionRole={row.sessionRole}
+                  sessionModel={row.sessionModel}
                   selectedScope={selectedScope}
+                  expandedNodes={expandedNodes}
+                  rootSpawns={row.rootSpawns}
+                  childrenByParent={spawnTree.childrenByParent}
                   onSelect={selectScope}
+                  onToggle={toggleNode}
                 />
               );
             })}
@@ -221,12 +436,19 @@ export default function LoopTree() {
             }}>Standalone</div>
           )}
           {tree.standaloneSessions.map(function (session) {
+            var sessionMeta = sessionMetaByID[session.id] || {};
             return (
               <TurnNode
                 key={session.id}
                 session={session}
+                sessionRole={sessionMeta.role || ''}
+                sessionModel={sessionMeta.model || session.model || ''}
                 selectedScope={selectedScope}
+                expandedNodes={expandedNodes}
+                rootSpawns={spawnTree.rootsBySession[session.id] || []}
+                childrenByParent={spawnTree.childrenByParent}
                 onSelect={selectScope}
+                onToggle={toggleNode}
               />
             );
           })}
@@ -236,55 +458,275 @@ export default function LoopTree() {
   );
 }
 
-function TurnNode({ session, selectedScope, onSelect }) {
-  var sessionNodeID = 'session-' + session.id;
-  var mainScopeID = 'session-main-' + session.id;
-  var selected = selectedScope === sessionNodeID || selectedScope === mainScopeID;
+function TurnNode({ session, displayID, scopeMode, scopeID, stopSessionID, sessionRole, sessionModel, selectedScope, expandedNodes, rootSpawns, childrenByParent, onSelect, onToggle }) {
+  var effectiveMode = scopeMode === 'turn' ? 'turn' : 'session';
+  var effectiveScopeID = Number(scopeID || session.id) || Number(session.id) || 0;
+  var effectiveDisplayID = Number(displayID || session.id) || Number(session.id) || 0;
+  var sessionNodeID = effectiveMode === 'turn' ? ('turn-' + effectiveScopeID) : ('session-' + effectiveScopeID);
+  var mainScopeID = effectiveMode === 'turn' ? ('turn-main-' + effectiveScopeID) : ('session-main-' + effectiveScopeID);
+  var selectedAll = selectedScope === sessionNodeID;
+  var selectedMain = selectedScope === mainScopeID;
+  var selected = selectedAll || selectedMain;
   var status = normalizeStatus(session.status);
   var isRunning = !!STATUS_RUNNING[status];
   var sColor = statusColor(session.status);
   var info = agentInfo(session.agent);
+  var hasSpawns = rootSpawns.length > 0;
+  var turnExpandKey = 'turn-' + effectiveMode + '-' + effectiveDisplayID;
+  var expanded = turnExpandKey in expandedNodes ? !!expandedNodes[turnExpandKey] : isRunning;
+  var detailParts = [];
+  if (sessionRole) detailParts.push(sessionRole);
+  else if (session.action) detailParts.push(session.action);
+  if (session.agent) detailParts.push(session.agent);
+  if (sessionModel) detailParts.push(sessionModel);
+  var detailText = detailParts.join(' \u00B7 ');
 
   return (
-    <div
-      onClick={function () { onSelect(sessionNodeID); }}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 6,
-        padding: '5px 12px 5px 28px', cursor: 'pointer',
-        background: selected ? (info.color + '10') : 'transparent',
-        borderLeft: selected ? ('2px solid ' + info.color) : '2px solid transparent',
-        transition: 'all 0.12s ease',
-      }}
-      onMouseEnter={function (e) { if (!selected) e.currentTarget.style.background = 'var(--bg-3)'; }}
-      onMouseLeave={function (e) { if (!selected) e.currentTarget.style.background = 'transparent'; }}
-    >
-      <span style={{
-        width: 6, height: 6, borderRadius: '50%', background: sColor, flexShrink: 0,
-        boxShadow: isRunning ? '0 0 6px ' + sColor : 'none',
-        animation: isRunning ? 'pulse 2s ease-in-out infinite' : 'none',
-      }} />
+    <div>
+      <div
+        onClick={function () { onSelect(hasSpawns ? mainScopeID : sessionNodeID); }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '5px 12px 5px 28px', cursor: 'pointer',
+          background: selected ? (info.color + '10') : 'transparent',
+          borderLeft: selected ? ('2px solid ' + info.color) : '2px solid transparent',
+          transition: 'all 0.12s ease',
+        }}
+        onMouseEnter={function (e) { if (!selected) e.currentTarget.style.background = 'var(--bg-3)'; }}
+        onMouseLeave={function (e) { if (!selected) e.currentTarget.style.background = 'transparent'; }}
+      >
+        {hasSpawns ? (
+          <span
+            onClick={function (e) { e.stopPropagation(); onToggle(turnExpandKey); }}
+            style={{
+              width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 9, color: info.color, border: '1px solid ' + info.color + '40',
+              borderRadius: 3, cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace",
+              transform: expanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 0.2s ease',
+            }}
+          >{'\u25BE'}</span>
+        ) : (
+          <span style={{ width: 14 }} />
+        )}
 
-      <span style={{ color: info.color, fontSize: 10, flexShrink: 0 }}>{info.icon}</span>
+        <span style={{
+          width: 6, height: 6, borderRadius: '50%', background: sColor, flexShrink: 0,
+          boxShadow: isRunning ? '0 0 6px ' + sColor : 'none',
+          animation: isRunning ? 'pulse 2s ease-in-out infinite' : 'none',
+        }} />
 
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-0)' }}>{session.profile || 'unknown'}</span>
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)' }}>#{session.id}</span>
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)' }}>
-            {formatElapsed(session.started_at, session.ended_at)}
-          </span>
+        <span style={{ color: info.color, fontSize: 10, flexShrink: 0 }}>{info.icon}</span>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-0)' }}>{session.profile || 'unknown'}</span>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)' }}>#{effectiveDisplayID || session.id}</span>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)' }}>
+              {formatElapsed(session.started_at, session.ended_at)}
+            </span>
+          </div>
+          {detailText && (
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)', marginTop: 1 }}>
+              {detailText}
+            </div>
+          )}
         </div>
+
+        {hasSpawns && (
+          <span
+            onClick={function (e) { e.stopPropagation(); }}
+            title="Output scope"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 2,
+              border: '1px solid var(--border)', borderRadius: 4,
+              background: 'var(--bg-2)', padding: 1,
+            }}
+          >
+            <button
+              type="button"
+              onClick={function (e) { e.stopPropagation(); onSelect(mainScopeID); }}
+              style={{
+                border: 'none', cursor: 'pointer',
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 8, fontWeight: 700,
+                color: selectedMain ? 'var(--accent)' : 'var(--text-3)',
+                background: selectedMain ? 'var(--accent)16' : 'transparent',
+                borderRadius: 3, padding: '1px 4px', letterSpacing: '0.04em',
+              }}
+            >MAIN</button>
+            <button
+              type="button"
+              onClick={function (e) { e.stopPropagation(); onSelect(sessionNodeID); }}
+              style={{
+                border: 'none', cursor: 'pointer',
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 8, fontWeight: 700,
+                color: selectedAll ? 'var(--accent)' : 'var(--text-3)',
+                background: selectedAll ? 'var(--accent)16' : 'transparent',
+                borderRadius: 3, padding: '1px 4px', letterSpacing: '0.04em',
+              }}
+            >ALL</button>
+          </span>
+        )}
+
+        {hasSpawns && (
+          <span style={{
+            fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)',
+            padding: '1px 5px', background: 'var(--bg-3)', borderRadius: 3,
+          }}>{rootSpawns.length} spawn{rootSpawns.length !== 1 ? 's' : ''}</span>
+        )}
+
+        {isRunning && (
+          <>
+            <StopSessionButton sessionID={stopSessionID || session.id} />
+            <span style={{
+              width: 8, height: 8, border: '1.5px solid ' + info.color, borderTopColor: 'transparent',
+              borderRadius: '50%', animation: 'spin 1s linear infinite', flexShrink: 0,
+            }} />
+          </>
+        )}
       </div>
 
-      {isRunning && (
-        <>
-          <StopSessionButton sessionID={session.id} />
+      {hasSpawns && expanded && rootSpawns.map(function (spawn) {
+        return (
+          <SpawnNode
+            key={spawn.id}
+            spawn={spawn}
+            depth={0}
+            childrenByParent={childrenByParent}
+            selectedScope={selectedScope}
+            expandedNodes={expandedNodes}
+            onSelect={onSelect}
+            onToggle={onToggle}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function stepTurns(step) {
+  var count = Number(step && step.turns) || 1;
+  return count > 0 ? count : 1;
+}
+
+function addSecondsISO(ts, seconds) {
+  var base = parseTimestamp(ts);
+  var delta = Number(seconds) || 0;
+  if (!(base > 0) || delta <= 0) return '';
+  return new Date(base + delta * 1000).toISOString();
+}
+
+function uniquePositiveIDs(ids) {
+  var seen = {};
+  var out = [];
+  (Array.isArray(ids) ? ids : []).forEach(function (id) {
+    var n = Number(id) || 0;
+    if (n <= 0 || seen[n]) return;
+    seen[n] = true;
+    out.push(n);
+  });
+  return out;
+}
+
+function SpawnNode({ spawn, depth, childrenByParent, selectedScope, expandedNodes, onSelect, onToggle }) {
+  var nodeID = 'spawn-' + spawn.id;
+  var selected = selectedScope === nodeID;
+  var children = childrenByParent[spawn.id] || [];
+  var expanded = !!expandedNodes[nodeID];
+  var status = normalizeStatus(spawn.status);
+  var isRunning = !!STATUS_RUNNING[status];
+  var sColor = statusColor(spawn.status);
+  var hasPendingQuestion = status === 'awaiting_input' && !!spawn.question;
+  var leftPad = 46 + depth * 18;
+
+  return (
+    <div>
+      <div
+        onClick={function () { onSelect(nodeID); }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '4px 12px 4px ' + leftPad + 'px', cursor: 'pointer',
+          background: selected ? (sColor + '12') : 'transparent',
+          borderLeft: selected ? ('2px solid ' + sColor) : '2px solid transparent',
+          transition: 'all 0.15s ease',
+        }}
+        onMouseEnter={function (e) { if (!selected) e.currentTarget.style.background = 'var(--bg-3)'; }}
+        onMouseLeave={function (e) { if (!selected) e.currentTarget.style.background = 'transparent'; }}
+      >
+        {children.length > 0 ? (
+          <span
+            onClick={function (e) { e.stopPropagation(); onToggle(nodeID); }}
+            style={{
+              width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 9, color: sColor, border: '1px solid ' + sColor + '40',
+              borderRadius: 3, cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace",
+              transform: expanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 0.2s ease',
+            }}
+          >{'\u25BE'}</span>
+        ) : (
+          <span style={{ width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ width: 4, height: 4, borderRadius: '50%', background: sColor + '60' }} />
+          </span>
+        )}
+
+        <span style={{
+          width: 6, height: 6, borderRadius: '50%', background: sColor, flexShrink: 0,
+          boxShadow: isRunning ? '0 0 6px ' + sColor : 'none',
+          animation: isRunning ? 'pulse 2s ease-in-out infinite' : 'none',
+        }} />
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>#{spawn.id}</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-0)' }}>{spawn.profile || 'spawn'}</span>
+            {spawn.role && <span style={{ fontSize: 10, color: 'var(--text-3)' }}>as {spawn.role}</span>}
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)' }}>
+              {formatElapsed(spawn.started_at, spawn.completed_at)}
+            </span>
+          </div>
+          {spawn.task && (
+            <div style={{ fontSize: 10, color: 'var(--text-2)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {spawn.task}
+            </div>
+          )}
+          {spawn.branch && (
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--purple)', marginTop: 1 }}>
+              {spawn.branch}
+            </div>
+          )}
+          {hasPendingQuestion && (
+            <div style={{
+              marginTop: 4, padding: '4px 8px', background: 'rgba(232,168,56,0.08)',
+              border: '1px solid rgba(232,168,56,0.2)', borderRadius: 4,
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--orange)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--orange)' }}>AWAITING RESPONSE</span>
+            </div>
+          )}
+        </div>
+
+        {isRunning && (
           <span style={{
-            width: 8, height: 8, border: '1.5px solid ' + info.color, borderTopColor: 'transparent',
+            width: 10, height: 10, border: '2px solid ' + sColor, borderTopColor: 'transparent',
             borderRadius: '50%', animation: 'spin 1s linear infinite', flexShrink: 0,
           }} />
-        </>
-      )}
+        )}
+      </div>
+
+      {expanded && children.map(function (child) {
+        return (
+          <SpawnNode
+            key={child.id}
+            spawn={child}
+            depth={depth + 1}
+            childrenByParent={childrenByParent}
+            selectedScope={selectedScope}
+            expandedNodes={expandedNodes}
+            onSelect={onSelect}
+            onToggle={onToggle}
+          />
+        );
+      })}
     </div>
   );
 }

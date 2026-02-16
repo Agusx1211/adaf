@@ -18,6 +18,10 @@ export default function LeftPanel() {
   var { leftView, sessions, loopRuns } = state;
   var [showNewChat, setShowNewChat] = useState(false);
   var base = apiBase(state.currentProjectID);
+  var loopTurnCount = (loopRuns || []).reduce(function (sum, run) {
+    var ids = Array.isArray(run && run.turn_ids) ? run.turn_ids : [];
+    return sum + ids.filter(function (id) { return Number(id) > 0; }).length;
+  }, 0);
 
   function renderContent() {
     if (leftView === 'loops') return <LoopTree />;
@@ -64,10 +68,10 @@ export default function LeftPanel() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: 'var(--text-1)' }}>Loops</span>
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>
-              {loopRuns.length} runs {'\u00B7'} {sessions.length} turns
-            </span>
-          </div>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>
+                  {loopRuns.length} runs {'\u00B7'} {loopTurnCount || sessions.length} turns
+                </span>
+              </div>
           <NewSessionButton />
         </div>
       )}

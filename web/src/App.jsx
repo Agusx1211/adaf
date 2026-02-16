@@ -114,6 +114,10 @@ export default function App() {
     }
     var parsedScope = parseScope(selectedScope);
     if (parsedScope.kind === 'session' || parsedScope.kind === 'session_main') return parsedScope.id;
+    if (parsedScope.kind === 'turn' || parsedScope.kind === 'turn_main') {
+      var mappedTurnSession = spawnScopeMaps.turnToSession[parsedScope.id] || 0;
+      if (mappedTurnSession > 0) return mappedTurnSession;
+    }
     if (parsedScope.kind === 'spawn') {
       var mapped = spawnScopeMaps.spawnToSession[parsedScope.id] || 0;
       if (mapped > 0) return mapped;

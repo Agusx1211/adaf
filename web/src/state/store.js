@@ -245,7 +245,7 @@ export function normalizeSessions(rawSessions) {
       id: Number(session && session.id) || 0,
       profile: session && (session.profile_name || session.profile) ? String(session.profile_name || session.profile) : '',
       agent: session && (session.agent_name || session.agent) ? String(session.agent_name || session.agent) : '',
-      model: session && session.model ? String(session.model) : '',
+      model: session && (session.model || session.agent_model) ? String(session.model || session.agent_model) : '',
       status: session && session.status ? String(session.status) : 'unknown',
       action: session && session.action ? String(session.action) : '',
       started_at: session && session.started_at ? session.started_at : '',
@@ -349,6 +349,7 @@ export function normalizeTurns(rawTurns) {
       plan_id: turn && turn.plan_id ? String(turn.plan_id) : '',
       commit_hash: turn && turn.commit_hash ? String(turn.commit_hash) : '',
       build_state: turn && turn.build_state ? String(turn.build_state) : 'unknown',
+      date: turn && turn.date ? turn.date : '',
       objective: turn && turn.objective ? String(turn.objective) : '',
       what_was_built: turn && turn.what_was_built ? String(turn.what_was_built) : '',
       key_decisions: turn && turn.key_decisions ? String(turn.key_decisions) : '',
@@ -374,7 +375,11 @@ export function normalizeLoopRun(run) {
     daemon_session_id: Number(run && run.daemon_session_id) || 0,
     turn_ids: arrayOrEmpty(run && (run.turn_ids || run.session_ids)).map(function (id) { return Number(id) || 0; }),
     steps: arrayOrEmpty(run && run.steps).map(function (step) {
-      return { profile: step && step.profile ? String(step.profile) : '', role: step && step.role ? String(step.role) : '' };
+      return {
+        profile: step && step.profile ? String(step.profile) : '',
+        role: step && step.role ? String(step.role) : '',
+        turns: Number(step && step.turns) || 1,
+      };
     }),
   };
 }
