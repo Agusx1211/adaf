@@ -1,0 +1,188 @@
+const { expect, test } = require('@playwright/test');
+const {
+  fixtureProject,
+  loadState,
+  projectAppURL,
+  uniqueName,
+} = require('./helpers.js');
+
+async function gotoConfig(page, request) {
+  const state = loadState();
+  const fixture = await fixtureProject(request, state);
+  await page.goto(projectAppURL(state, fixture.id));
+  await page.getByRole('button', { name: 'Config' }).click();
+  await expect(page.getByText(/Profiles \(\d+\)/)).toBeVisible();
+  return { state, fixture };
+}
+
+async function clickSectionNew(page, sectionRegex) {
+  const sectionLabel = page.getByText(sectionRegex).first();
+  await expect(sectionLabel).toBeVisible();
+  const header = sectionLabel.locator('xpath=..');
+  await header.getByRole('button', { name: '+ New' }).click();
+}
+
+async function readConfigList(request, state, endpoint) {
+  let lastStatus = 0;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const response = await request.get(`${state.baseURL}${endpoint}`);
+    lastStatus = response.status();
+    if (lastStatus === 200) {
+      const payload = await response.json();
+      return Array.isArray(payload) ? payload : [];
+    }
+    await pageWait(150);
+  }
+  expect(lastStatus).toBe(200);
+  return [];
+}
+
+function pageWait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+test('config profile CRUD persists through API', async ({ page, request }) => {
+  const { state } = await gotoConfig(page, request);
+  const profileName = uniqueName('profile');
+
+  await clickSectionNew(page, /Profiles \(\d+\)/);
+  await page.getByPlaceholder('my-profile').fill(profileName);
+  await page.getByPlaceholder('Strengths, weaknesses, best use cases...').fill('Profile created by e2e test.');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved').first()).toBeVisible();
+
+  const createdProfiles = await readConfigList(request, state, '/api/config/profiles');
+  const createdProfile = createdProfiles.find((profile) => String(profile.name || '') === profileName);
+  expect(createdProfile).toBeTruthy();
+
+  await page.getByPlaceholder('Strengths, weaknesses, best use cases...').fill('Updated by e2e profile CRUD.');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved').first()).toBeVisible();
+
+  const updatedProfiles = await readConfigList(request, state, '/api/config/profiles');
+  const updatedProfile = updatedProfiles.find((profile) => String(profile.name || '') === profileName);
+  expect(updatedProfile).toBeTruthy();
+  expect(String(updatedProfile.description || '')).toContain('Updated by e2e profile CRUD');
+
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Delete' }).click();
+  await expect(page.getByText('Deleted').first()).toBeVisible();
+
+  const remainingProfiles = await readConfigList(request, state, '/api/config/profiles');
+  expect(remainingProfiles.find((profile) => String(profile.name || '') === profileName)).toBeFalsy();
+});
+
+test('config skill appears in standalone new chat modal and supports delete', async ({ page, request }) => {
+  const { state } = await gotoConfig(page, request);
+  const skillID = uniqueName('skill').replace(/-/g, '_');
+  const profileName = uniqueName('chat-profile');
+
+  const profileCreate = await request.post(`${state.baseURL}/api/config/profiles`, {
+    data: { name: profileName, agent: 'generic' },
+  });
+  expect(profileCreate.status()).toBe(201);
+
+  await clickSectionNew(page, /Skills \(\d+\)/);
+  await page.getByPlaceholder('my_skill').fill(skillID);
+  await page.getByPlaceholder('Concise instruction (1-4 sentences) for prompt embedding...').fill('Skill seeded by e2e.');
+  await page.getByPlaceholder('Full documentation in Markdown...').fill('# Skill\n\nUsed in standalone modal.');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved').first()).toBeVisible();
+
+  const createdSkills = await readConfigList(request, state, '/api/config/skills');
+  expect(createdSkills.find((skill) => String(skill.id || '') === skillID)).toBeTruthy();
+
+  await page.getByRole('button', { name: 'Standalone' }).click();
+  const newChatButton = page.getByRole('button', { name: '+ New Chat' }).first();
+  await expect(newChatButton).toBeVisible();
+  await newChatButton.click();
+
+  const newChatModal = page.getByRole('dialog', { name: 'New Chat' });
+  await expect(newChatModal).toBeVisible();
+  await newChatModal.locator('select').first().selectOption(profileName);
+  await expect(newChatModal.getByText(skillID, { exact: true })).toBeVisible();
+  await newChatModal.getByRole('button', { name: 'Cancel' }).click();
+
+  await page.getByRole('button', { name: 'Config' }).click();
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Delete' }).click();
+  await expect(page.getByText('Deleted').first()).toBeVisible();
+
+  const remainingSkills = await readConfigList(request, state, '/api/config/skills');
+  expect(remainingSkills.find((skill) => String(skill.id || '') === skillID)).toBeFalsy();
+
+  await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(profileName)}`);
+});
+
+test('config loop CRUD works with real profile step', async ({ page, request }) => {
+  const { state } = await gotoConfig(page, request);
+  const profileName = uniqueName('loop-profile');
+  const loopName = uniqueName('loop');
+
+  const profileCreate = await request.post(`${state.baseURL}/api/config/profiles`, {
+    data: { name: profileName, agent: 'generic' },
+  });
+  expect(profileCreate.status()).toBe(201);
+
+  await clickSectionNew(page, /Loops \(\d+\)/);
+  await page.getByPlaceholder('my-loop').fill(loopName);
+
+  const profileSelect = page.locator('label', { hasText: 'Profile' }).first().locator('xpath=following-sibling::select[1]');
+  await profileSelect.selectOption(profileName);
+
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved').first()).toBeVisible();
+
+  const loops = await readConfigList(request, state, '/api/config/loops');
+  const createdLoop = loops.find((loop) => String(loop.name || '') === loopName);
+  expect(createdLoop).toBeTruthy();
+  expect(createdLoop.steps && createdLoop.steps[0] && createdLoop.steps[0].profile).toBe(profileName);
+
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Delete' }).click();
+  await expect(page.getByText('Deleted').first()).toBeVisible();
+
+  const remainingLoops = await readConfigList(request, state, '/api/config/loops');
+  expect(remainingLoops.find((loop) => String(loop.name || '') === loopName)).toBeFalsy();
+
+  await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(profileName)}`);
+});
+
+test('config team and role CRUD persists', async ({ page, request }) => {
+  const { state } = await gotoConfig(page, request);
+  const teamName = uniqueName('team');
+  const roleName = uniqueName('role');
+
+  await clickSectionNew(page, /Teams \(\d+\)/);
+  await page.getByPlaceholder('my-team').fill(teamName);
+  await page.getByPlaceholder('What this team is good at...').fill('Team created in e2e tests.');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved').first()).toBeVisible();
+
+  const teams = await readConfigList(request, state, '/api/config/teams');
+  expect(teams.find((team) => String(team.name || '') === teamName)).toBeTruthy();
+
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Delete' }).click();
+  await expect(page.getByText('Deleted').first()).toBeVisible();
+
+  await clickSectionNew(page, /Roles \(\d+\)/);
+  await page.getByPlaceholder('my-role').fill(roleName);
+  await page.getByPlaceholder('ROLE TITLE (uppercase)').fill('E2E ROLE');
+  await page.getByPlaceholder('What this role does...').fill('Role created by e2e.');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved').first()).toBeVisible();
+
+  const roles = await readConfigList(request, state, '/api/config/roles');
+  expect(roles.find((role) => String(role.name || '') === roleName)).toBeTruthy();
+
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Delete' }).click();
+  await expect(page.getByText('Deleted').first()).toBeVisible();
+
+  const finalTeams = await readConfigList(request, state, '/api/config/teams');
+  expect(finalTeams.find((team) => String(team.name || '') === teamName)).toBeFalsy();
+
+  const finalRoles = await readConfigList(request, state, '/api/config/roles');
+  expect(finalRoles.find((role) => String(role.name || '') === roleName)).toBeFalsy();
+});

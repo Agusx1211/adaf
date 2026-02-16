@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
+const { prepareFixtureReplayData } = require('./fixture-replay.js');
 
 const STATE_FILE = path.join(__dirname, '.state', 'web-server.json');
 const WAIT_MS = 30_000;
@@ -57,16 +58,16 @@ async function waitForReady(url) {
   throw new Error(`Server did not become ready at ${url}`);
 }
 
-function writeAdafConfig(homeDir, repositoryRoot) {
+function writeAdafConfig(homeDir, repositoryRoot, fixtureProjectDir) {
   const adafConfigDir = path.join(homeDir, '.adaf');
   fs.mkdirSync(adafConfigDir, { recursive: true });
 
   const config = {
     recent_projects: [
       {
-        id: 'workspace',
-        path: repositoryRoot,
-        name: path.basename(repositoryRoot),
+        id: 'fixture-replay-project',
+        path: fixtureProjectDir,
+        name: path.basename(fixtureProjectDir),
         root_dir: repositoryRoot,
       },
     ],
@@ -83,15 +84,22 @@ module.exports = async function globalSetup() {
   fs.mkdirSync(path.join(__dirname, '.state'), { recursive: true });
 
   const repositoryRoot = path.resolve(__dirname, '..');
+  const workspaceRoot = path.join(__dirname, '.state', 'workspace');
+  const fixtureProjectDir = path.join(workspaceRoot, 'fixture-replay-project');
+  const fixtureProjectID = path.relative(repositoryRoot, fixtureProjectDir).split(path.sep).join('/');
   const port = await getFreePort();
   const baseURL = `http://127.0.0.1:${port}`;
+
+  fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  fs.mkdirSync(workspaceRoot, { recursive: true });
 
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'adaf-e2e-'));
   const goModCache = path.join(homeDir, 'go', 'pkg', 'mod');
   const goBuildCache = path.join(homeDir, 'go', 'cache');
   fs.mkdirSync(goModCache, { recursive: true });
   fs.mkdirSync(goBuildCache, { recursive: true });
-  writeAdafConfig(homeDir, repositoryRoot);
+  const fixtures = prepareFixtureReplayData(repositoryRoot, homeDir, fixtureProjectDir);
+  writeAdafConfig(homeDir, repositoryRoot, fixtureProjectDir);
 
   const env = {
     ...process.env,
@@ -113,7 +121,7 @@ module.exports = async function globalSetup() {
       '--port',
       String(port),
       '--allowed-root',
-      repositoryRoot,
+      workspaceRoot,
       '--rate-limit',
       '0',
     ],
@@ -155,7 +163,16 @@ module.exports = async function globalSetup() {
     } catch {
       // best effort only
     }
-    fs.rmSync(homeDir, { recursive: true, force: true });
+    try {
+      fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    } catch {
+      // best effort only
+    }
+    try {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    } catch {
+      // best effort only
+    }
     throw err;
   }
 
@@ -167,6 +184,11 @@ module.exports = async function globalSetup() {
         pid: child.pid,
         port,
         homeDir,
+        repositoryRoot,
+        workspaceRoot,
+        fixtureProjectDir,
+        fixtureProjectID,
+        fixtures,
         command: 'go run ./cmd/adaf web --daemon=false',
       },
       null,

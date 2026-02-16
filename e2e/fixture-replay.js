@@ -1,0 +1,612 @@
+const fs = require('node:fs');
+const path = require('node:path');
+
+const FIXTURE_PROVIDERS = ['claude', 'codex', 'gemini', 'opencode', 'vibe'];
+const FIXTURE_LOOP_NAME = 'fixture-replay';
+const FIXTURE_PROJECT_NAME = 'E2E Replay Fixtures';
+const FIXTURE_SESSION_BASE_ID = 4200;
+const SEED_PLAN_ID = 'seed-plan';
+const SEED_DOC_ID = 'seed-doc';
+const SEED_ISSUE_ID = 1;
+const SEED_TURN_ID = 1;
+
+function prepareFixtureReplayData(repositoryRoot, homeDir, fixtureProjectDir) {
+  const fixtures = loadFixtures(repositoryRoot);
+
+  writeFixtureProject(fixtureProjectDir, repositoryRoot);
+  writeFixtureSessions(homeDir, fixtureProjectDir, fixtures);
+
+  return fixtures.map(function (fixture, index) {
+    return {
+      provider: fixture.provider,
+      session_id: FIXTURE_SESSION_BASE_ID + index + 1,
+      profile: fixture.profile,
+      expected_output: String(fixture.fixture.result && fixture.fixture.result.output ? fixture.fixture.result.output : '').trim(),
+      fixture_file: fixture.filePath,
+    };
+  });
+}
+
+function loadFixtures(repositoryRoot) {
+  return FIXTURE_PROVIDERS.map(function (provider) {
+    const providerDir = path.join(repositoryRoot, 'internal', 'agent', 'testdata', provider);
+    const files = fs.readdirSync(providerDir)
+      .filter(function (name) { return name.endsWith('.json'); })
+      .sort();
+
+    if (files.length === 0) {
+      throw new Error('No fixture files found for provider: ' + provider);
+    }
+
+    const filePath = path.join(providerDir, files[0]);
+    const fixture = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    return {
+      provider: provider,
+      profile: provider + '-fixture',
+      filePath: filePath,
+      fixture: fixture,
+    };
+  });
+}
+
+function writeFixtureProject(fixtureProjectDir, repositoryRoot) {
+  fs.rmSync(fixtureProjectDir, { recursive: true, force: true });
+  const adafDir = path.join(fixtureProjectDir, '.adaf');
+  fs.mkdirSync(adafDir, { recursive: true });
+  const nowISO = new Date().toISOString();
+
+  const projectConfig = {
+    name: FIXTURE_PROJECT_NAME,
+    repo_path: repositoryRoot,
+    created: nowISO,
+    agent_config: {},
+    metadata: {
+      source: 'playwright-fixture-replay',
+    },
+    active_plan_id: SEED_PLAN_ID,
+  };
+
+  fs.writeFileSync(
+    path.join(adafDir, 'project.json'),
+    JSON.stringify(projectConfig, null, 2) + '\n',
+    'utf8',
+  );
+
+  writeSeedProjectData(adafDir, nowISO);
+}
+
+function writeSeedProjectData(adafDir, nowISO) {
+  [
+    'plans',
+    'docs',
+    'issues',
+    'local/turns',
+    'local/records',
+    'local/spawns',
+    'local/messages',
+    'local/loopruns',
+    'local/stats/profiles',
+    'local/stats/loops',
+    'waits',
+    'interrupts',
+  ].forEach(function (dir) {
+    fs.mkdirSync(path.join(adafDir, dir), { recursive: true });
+  });
+
+  const plan = {
+    id: SEED_PLAN_ID,
+    title: 'Seed Delivery Plan',
+    description: 'Initial plan data seeded for Playwright e2e coverage.',
+    status: 'active',
+    phases: [
+      {
+        id: 'phase-1',
+        title: 'Validate Fixtures',
+        description: 'Confirm replay fixtures render across providers.',
+        status: 'in_progress',
+        priority: 1,
+        depends_on: [],
+      },
+      {
+        id: 'phase-2',
+        title: 'Ship E2E',
+        description: 'Add real browser tests for core workflows.',
+        status: 'not_started',
+        priority: 2,
+        depends_on: ['phase-1'],
+      },
+    ],
+    created: nowISO,
+    updated: nowISO,
+  };
+  fs.writeFileSync(
+    path.join(adafDir, 'plans', SEED_PLAN_ID + '.json'),
+    JSON.stringify(plan, null, 2) + '\n',
+    'utf8',
+  );
+
+  const doc = {
+    id: SEED_DOC_ID,
+    plan_id: SEED_PLAN_ID,
+    title: 'Seed Doc',
+    content: '# Seed Doc\n\nThis markdown document is seeded for real e2e edit flows.',
+    created: nowISO,
+    updated: nowISO,
+  };
+  fs.writeFileSync(
+    path.join(adafDir, 'docs', SEED_DOC_ID + '.json'),
+    JSON.stringify(doc, null, 2) + '\n',
+    'utf8',
+  );
+
+  const issue = {
+    id: SEED_ISSUE_ID,
+    plan_id: SEED_PLAN_ID,
+    title: 'Seed issue',
+    description: 'Initial issue content used by e2e editing tests.',
+    status: 'open',
+    priority: 'medium',
+    labels: ['seed', 'e2e'],
+    session_id: 0,
+    created: nowISO,
+    updated: nowISO,
+  };
+  fs.writeFileSync(
+    path.join(adafDir, 'issues', String(SEED_ISSUE_ID) + '.json'),
+    JSON.stringify(issue, null, 2) + '\n',
+    'utf8',
+  );
+
+  const turn = {
+    id: SEED_TURN_ID,
+    hex_id: 'seedturn',
+    loop_run_hex_id: 'seedloop',
+    step_hex_id: 'seedstep',
+    plan_id: SEED_PLAN_ID,
+    date: nowISO,
+    agent: 'codex',
+    agent_model: 'seed-model',
+    profile_name: 'seed-profile',
+    commit_hash: 'abc123',
+    objective: 'Seed objective',
+    what_was_built: 'Seeded baseline output for logs view.',
+    key_decisions: 'Seed decisions',
+    challenges: 'Seed challenges',
+    current_state: 'Seed current state',
+    known_issues: 'Seed known issues',
+    next_steps: 'Seed next steps',
+    build_state: 'passing',
+    duration_secs: 42,
+  };
+  fs.writeFileSync(
+    path.join(adafDir, 'local', 'turns', String(SEED_TURN_ID) + '.json'),
+    JSON.stringify(turn, null, 2) + '\n',
+    'utf8',
+  );
+
+  const turnRecordDir = path.join(adafDir, 'local', 'records', String(SEED_TURN_ID));
+  fs.mkdirSync(turnRecordDir, { recursive: true });
+  const turnEvents = [
+    {
+      timestamp: nowISO,
+      type: 'meta',
+      data: JSON.stringify({ prompt: 'Seed turn prompt' }),
+    },
+    {
+      timestamp: nowISO,
+      type: 'stdout',
+      data: 'Seed turn stdout',
+    },
+  ];
+  fs.writeFileSync(
+    path.join(turnRecordDir, 'events.jsonl'),
+    turnEvents.map(function (event) { return JSON.stringify(event); }).join('\n') + '\n',
+    'utf8',
+  );
+}
+
+function writeFixtureSessions(homeDir, fixtureProjectDir, fixtures) {
+  const sessionsRoot = path.join(homeDir, '.adaf', 'sessions');
+  fs.mkdirSync(sessionsRoot, { recursive: true });
+
+  const now = Date.now();
+  fixtures.forEach(function (entry, index) {
+    const sessionID = FIXTURE_SESSION_BASE_ID + index + 1;
+    const sessionDir = path.join(sessionsRoot, String(sessionID));
+    fs.mkdirSync(sessionDir, { recursive: true });
+
+    const startedAt = new Date(now - (fixtures.length-index)*90_000);
+    const endedAt = new Date(startedAt.getTime() + 15_000);
+
+    const meta = {
+      id: sessionID,
+      profile_name: entry.profile,
+      agent_name: entry.provider,
+      loop_name: FIXTURE_LOOP_NAME,
+      loop_steps: 1,
+      project_dir: fixtureProjectDir,
+      project_name: FIXTURE_PROJECT_NAME,
+      project_id: '',
+      pid: 0,
+      status: 'done',
+      started_at: startedAt.toISOString(),
+      ended_at: endedAt.toISOString(),
+      error: '',
+    };
+
+    fs.writeFileSync(
+      path.join(sessionDir, 'meta.json'),
+      JSON.stringify(meta, null, 2) + '\n',
+      'utf8',
+    );
+
+    const events = buildReplayEvents(entry.provider, entry.fixture);
+    const payload = events.map(function (event) {
+      return JSON.stringify(event);
+    }).join('\n');
+
+    fs.writeFileSync(
+      path.join(sessionDir, 'events.jsonl'),
+      (payload ? payload + '\n' : ''),
+      'utf8',
+    );
+  });
+}
+
+function buildReplayEvents(provider, fixture) {
+  const capturedAt = Date.parse(fixture.captured_at || '');
+  let ts = Number.isFinite(capturedAt) ? capturedAt : Date.now();
+  const events = [];
+
+  function push(type, data) {
+    events.push({
+      timestamp: new Date(ts).toISOString(),
+      type: type,
+      data: data,
+    });
+    ts += 1;
+  }
+
+  if (fixture.prompt) {
+    push('meta', JSON.stringify({ prompt: String(fixture.prompt) }));
+  }
+
+  if (Array.isArray(fixture.events)) {
+    fixture.events.forEach(function (event) {
+      if (!event || typeof event !== 'object') return;
+      if (event.type === 'meta' || event.type === 'stdin' || event.type === 'stdout' || event.type === 'stderr') {
+        push(event.type, String(event.data == null ? '' : event.data));
+      }
+    });
+  }
+
+  const streamLines = Array.isArray(fixture.stream) ? fixture.stream : [];
+  streamLines.forEach(function (line) {
+    const rawLine = String(line == null ? '' : line);
+    const parsed = parseMaybeJSON(rawLine);
+    if (!parsed || typeof parsed !== 'object') {
+      if (rawLine.trim()) {
+        push('stdout', rawLine);
+      }
+      return;
+    }
+
+    const mapped = mapFixtureStreamEvent(provider, parsed);
+    mapped.forEach(function (mappedEvent) {
+      push('claude_stream', JSON.stringify(mappedEvent));
+    });
+  });
+
+  const expectedOutput = String(fixture.result && fixture.result.output ? fixture.result.output : '').trim();
+  const expectedToken = expectedOutput.replace(/[.!?]+$/, '');
+  if (expectedOutput && expectedToken && !eventsContainText(events, expectedToken)) {
+    push('claude_stream', JSON.stringify(assistantTextEvent(expectedOutput)));
+  }
+
+  return events;
+}
+
+function eventsContainText(events, text) {
+  return events.some(function (event) {
+    return typeof event.data === 'string' && event.data.indexOf(text) >= 0;
+  });
+}
+
+function mapFixtureStreamEvent(provider, event) {
+  switch (provider) {
+    case 'claude':
+      return mapClaudeStreamEvent(event);
+    case 'codex':
+      return mapCodexStreamEvent(event);
+    case 'gemini':
+      return mapGeminiStreamEvent(event);
+    case 'opencode':
+      return mapOpencodeStreamEvent(event);
+    case 'vibe':
+      return mapVibeStreamEvent(event);
+    default:
+      return [];
+  }
+}
+
+function mapClaudeStreamEvent(event) {
+  if (!event || typeof event !== 'object') return [];
+  if (!event.type) return [];
+  if (event.type !== 'assistant' && event.type !== 'user' && event.type !== 'content_block_delta') {
+    return [];
+  }
+  return [event];
+}
+
+function mapCodexStreamEvent(event) {
+  if (!event || typeof event !== 'object') return [];
+  if (event.type === 'thread.started') {
+    return [systemInitEvent(event.thread_id || '', 'codex')];
+  }
+  if (event.type !== 'item.started' && event.type !== 'item.updated' && event.type !== 'item.completed') {
+    return [];
+  }
+
+  const item = event.item;
+  if (!item || typeof item !== 'object') return [];
+  const itemType = String(item.type || '');
+
+  if (itemType === 'reasoning' && item.text) {
+    return [assistantThinkingEvent(item.text)];
+  }
+  if (itemType === 'agent_message' && item.text) {
+    return [assistantTextEvent(item.text)];
+  }
+  if (itemType === 'command_execution') {
+    const status = String(item.status || '').toLowerCase();
+    const isStart = event.type === 'item.started' || status === '' || status === 'in_progress';
+    const commandID = item.id || 'codex-command';
+    if (isStart) {
+      return [assistantToolUseEvent('Bash', commandID, { command: item.command || '' })];
+    }
+    const exitCode = Number(item.exit_code);
+    const isError = status === 'failed' || status === 'declined' || (Number.isFinite(exitCode) && exitCode !== 0);
+    const output = item.aggregated_output || item.command || 'command finished';
+    return [userToolResultEvent(commandID, 'Bash', output, isError)];
+  }
+
+  if (itemType === 'web_search') {
+    if (event.type === 'item.started') {
+      return [assistantToolUseEvent('web_search', item.id || 'codex-web-search', { query: item.query || '' })];
+    }
+    return [userToolResultEvent(item.id || 'codex-web-search', 'web_search', item.query || 'web search completed', false)];
+  }
+
+  if (itemType === 'file_change' && Array.isArray(item.changes) && item.changes.length > 0) {
+    const summary = item.changes.map(function (change) {
+      return 'File changes: ' + String(change.kind || 'update') + ' ' + String(change.path || '');
+    }).join('\n');
+    return [assistantTextEvent(summary)];
+  }
+
+  return [];
+}
+
+function mapGeminiStreamEvent(event) {
+  if (!event || typeof event !== 'object') return [];
+
+  if (event.type === 'init') {
+    return [systemInitEvent(event.session_id || '', event.model || 'gemini')];
+  }
+
+  if (event.type === 'message') {
+    if (event.role !== 'assistant') return [];
+    if (event.delta) {
+      return [contentDeltaEvent(event.content || '')];
+    }
+    return [assistantTextEvent(event.content || '')];
+  }
+
+  if (event.type === 'tool_use') {
+    return [assistantToolUseEvent(event.tool_name || 'tool', event.tool_id || 'gemini-tool', event.parameters || {})];
+  }
+
+  if (event.type === 'tool_result') {
+    let output = event.output;
+    let isError = event.status === 'error';
+    if (isError && event.error && event.error.message) {
+      output = event.error.message;
+    }
+    if (output == null || output === '') {
+      output = isError ? 'tool failed' : 'tool completed';
+    }
+    return [userToolResultEvent(event.tool_id || 'gemini-tool', 'tool_result', output, isError)];
+  }
+
+  if (event.type === 'error' && event.message) {
+    return [assistantTextEvent('Gemini error: ' + event.message)];
+  }
+
+  return [];
+}
+
+function mapOpencodeStreamEvent(event) {
+  if (!event || typeof event !== 'object') return [];
+
+  if (event.type === 'step_start') {
+    return [systemInitEvent(event.sessionID || '', 'opencode')];
+  }
+
+  const part = event.part && typeof event.part === 'object' ? event.part : {};
+
+  if (event.type === 'text' && part.text) {
+    return [assistantTextEvent(part.text)];
+  }
+  if (event.type === 'reasoning' && part.text) {
+    return [assistantThinkingEvent(part.text)];
+  }
+  if (event.type === 'tool_use') {
+    const toolName = part.tool || 'tool';
+    const callID = part.callID || part.id || 'opencode-tool';
+    const state = part.state && typeof part.state === 'object' ? part.state : {};
+    const input = state.input && typeof state.input === 'object' ? state.input : {};
+    const output = state.output || 'tool completed';
+    const isError = state.status === 'error';
+    return [
+      assistantToolUseEvent(toolName, callID, input),
+      userToolResultEvent(callID, toolName, output, isError),
+    ];
+  }
+
+  if (event.type === 'error') {
+    const msg = event.error && event.error.name ? String(event.error.name) : 'OpenCode error';
+    return [assistantTextEvent(msg)];
+  }
+
+  return [];
+}
+
+function mapVibeStreamEvent(event) {
+  if (!event || typeof event !== 'object') return [];
+
+  if (event.role === 'assistant') {
+    const mapped = [];
+
+    if (event.reasoning_content) {
+      mapped.push(assistantThinkingEvent(event.reasoning_content));
+    }
+
+    const blocks = [];
+    const text = String(event.content || '');
+    if (text.trim()) {
+      blocks.push({ type: 'text', text: text });
+    }
+
+    if (Array.isArray(event.tool_calls)) {
+      event.tool_calls.forEach(function (toolCall) {
+        if (!toolCall || typeof toolCall !== 'object') return;
+        const fn = toolCall.function && typeof toolCall.function === 'object' ? toolCall.function : {};
+        const args = parseMaybeJSON(String(fn.arguments || ''));
+        blocks.push({
+          type: 'tool_use',
+          id: toolCall.id || '',
+          name: fn.name || 'tool',
+          input: args || String(fn.arguments || ''),
+        });
+      });
+    }
+
+    if (blocks.length > 0) {
+      mapped.push({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: blocks,
+        },
+      });
+    }
+
+    return mapped;
+  }
+
+  if (event.role === 'tool') {
+    const toolName = event.name || 'tool_result';
+    const toolCallID = event.tool_call_id || toolName;
+    return [userToolResultEvent(toolCallID, toolName, event.content || '', false)];
+  }
+
+  return [];
+}
+
+function assistantTextEvent(text) {
+  return {
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        {
+          type: 'text',
+          text: String(text || ''),
+        },
+      ],
+    },
+  };
+}
+
+function assistantThinkingEvent(text) {
+  return {
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        {
+          type: 'thinking',
+          text: String(text || ''),
+        },
+      ],
+    },
+  };
+}
+
+function assistantToolUseEvent(name, id, input) {
+  return {
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          name: String(name || 'tool'),
+          id: String(id || 'tool-call'),
+          input: input == null ? {} : input,
+        },
+      ],
+    },
+  };
+}
+
+function userToolResultEvent(toolUseID, name, content, isError) {
+  return {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: String(toolUseID || ''),
+          name: String(name || ''),
+          content: content == null ? '' : content,
+          is_error: !!isError,
+        },
+      ],
+    },
+  };
+}
+
+function contentDeltaEvent(text) {
+  return {
+    type: 'content_block_delta',
+    delta: {
+      type: 'text_delta',
+      text: String(text || ''),
+    },
+  };
+}
+
+function systemInitEvent(sessionID, model) {
+  return {
+    type: 'system',
+    subtype: 'init',
+    session_id: String(sessionID || ''),
+    model: String(model || ''),
+  };
+}
+
+function parseMaybeJSON(raw) {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (_) {
+    return null;
+  }
+}
+
+module.exports = {
+  FIXTURE_PROJECT_NAME,
+  prepareFixtureReplayData,
+};

@@ -51,5 +51,21 @@ module.exports = async function globalTeardown() {
     }
   }
 
+  if (state?.fixtureProjectDir) {
+    try {
+      fs.rmSync(state.fixtureProjectDir, { recursive: true, force: true });
+    } catch {
+      // Best-effort cleanup only.
+    }
+  }
+
+  if (state?.workspaceRoot) {
+    try {
+      fs.rmSync(state.workspaceRoot, { recursive: true, force: true });
+    } catch {
+      // Best-effort cleanup only.
+    }
+  }
+
   fs.rmSync(STATE_FILE, { force: true });
 };
