@@ -223,6 +223,7 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/config/loops/{name}", srv.handleDeleteLoopDef)
 	mux.HandleFunc("GET /api/config/roles", srv.handleListRoles)
 	mux.HandleFunc("POST /api/config/roles", srv.handleCreateRole)
+	mux.HandleFunc("PUT /api/config/roles/{name}", srv.handleUpdateRole)
 	mux.HandleFunc("DELETE /api/config/roles/{name}", srv.handleDeleteRole)
 	mux.HandleFunc("GET /api/config/rules", srv.handleListRules)
 	mux.HandleFunc("POST /api/config/rules", srv.handleCreateRule)

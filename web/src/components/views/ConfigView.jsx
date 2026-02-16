@@ -35,7 +35,8 @@ export default function ConfigView() {
   var [loops, setLoops] = useState([]);
   var [teams, setTeams] = useState([]);
   var [skills, setSkills] = useState([]);
-  var [expanded, setExpanded] = useState({ profiles: true, loops: true, teams: true, skills: false });
+  var [roles, setRoles] = useState([]);
+  var [expanded, setExpanded] = useState({ profiles: true, loops: true, teams: true, skills: false, roles: false });
 
   var configSelection = state.configSelection;
 
@@ -46,11 +47,13 @@ export default function ConfigView() {
         apiCall('/api/config/loops', 'GET', null, { allow404: true }),
         apiCall('/api/config/teams', 'GET', null, { allow404: true }),
         apiCall('/api/config/skills', 'GET', null, { allow404: true }),
+        apiCall('/api/config/roles', 'GET', null, { allow404: true }),
       ]);
       setProfiles(results[0] || []);
       setLoops(results[1] || []);
       setTeams(results[2] || []);
       setSkills(results[3] || []);
+      setRoles(results[4] || []);
     } catch (err) {
       if (!err.authRequired) console.error('Config load error:', err);
     }
@@ -165,6 +168,41 @@ export default function ConfigView() {
         })}
         {expanded.teams && teams.length === 0 && (
           <div style={{ padding: 12, color: 'var(--text-3)', fontSize: 11, textAlign: 'center' }}>No teams configured.</div>
+        )}
+      </div>
+
+      {/* Roles */}
+      <div>
+        <div style={sectionHeaderStyle} onClick={function () { toggle('roles'); }}>
+          <span style={titleStyle}>{expanded.roles ? '\u25BE' : '\u25B8'} Roles ({roles.length})</span>
+          <button onClick={function (e) { e.stopPropagation(); handleNew('role'); }} style={{ ...btnNewStyle, border: '1px solid var(--orange)40', background: 'var(--orange)15', color: 'var(--orange)' }}>+ New</button>
+        </div>
+        {expanded.roles && roles.map(function (rl) {
+          var sel = isSelected('role', rl.name);
+          var desc = rl.description || '';
+          if (desc.length > 60) desc = desc.slice(0, 60) + '\u2026';
+          return (
+            <div key={rl.name} onClick={function () { select('role', rl.name); }}
+              style={{ ...rowStyle, background: sel ? 'var(--bg-3)' : 'transparent', borderLeft: sel ? '2px solid var(--orange)' : '2px solid transparent' }}
+              onMouseEnter={function (e) { if (!sel) e.currentTarget.style.background = 'var(--bg-2)'; }}
+              onMouseLeave={function (e) { if (!sel) e.currentTarget.style.background = 'transparent'; }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: 'var(--text-0)' }}>{rl.name}</span>
+                  {!rl.can_write_code && (
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 8, padding: '1px 4px', borderRadius: 3, background: 'var(--red)15', color: 'var(--red)' }}>read-only</span>
+                  )}
+                </div>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {desc}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {expanded.roles && roles.length === 0 && (
+          <div style={{ padding: 12, color: 'var(--text-3)', fontSize: 11, textAlign: 'center' }}>No roles configured.</div>
         )}
       </div>
 

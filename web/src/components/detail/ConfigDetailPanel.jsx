@@ -92,6 +92,7 @@ export default function ConfigDetailPanel() {
       else if (sel.type === 'loop') setData({ name: '', steps: [emptyStep()] });
       else if (sel.type === 'team') setData({ name: '', description: '', delegation: null });
       else if (sel.type === 'skill') setData({ id: '', short: '', long: '' });
+      else if (sel.type === 'role') setData({ name: '', title: '', description: '', identity: '', can_write_code: true, rule_ids: [] });
       return;
     }
 
@@ -110,6 +111,9 @@ export default function ConfigDetailPanel() {
       } else if (sel.type === 'skill') {
         var sk = skillsList.find(function (s) { return s.id === sel.name; });
         setData(sk ? deepCopy(sk) : null);
+      } else if (sel.type === 'role') {
+        var rl = rolesList.find(function (r) { return r.name === sel.name; });
+        setData(rl ? deepCopy(rl) : null);
       }
     } catch (err) {
       if (!err.authRequired) console.error('Config load error:', err);
@@ -117,6 +121,9 @@ export default function ConfigDetailPanel() {
   }, [sel && sel.type, sel && sel.name, sel && sel.isNew]);
 
   useEffect(function () { loadItem(); }, [loadItem]);
+
+  // Clear preview panel when selection changes
+  useEffect(function () { setPreviewItem(null); }, [sel && sel.type, sel && sel.name, sel && sel.isNew]);
 
   if (!sel) {
     return (
@@ -175,10 +182,22 @@ export default function ConfigDetailPanel() {
         } else {
           await apiCall('/api/config/skills/' + encodeURIComponent(data.id), 'PUT', skOut);
         }
+      } else if (sel.type === 'role') {
+        var rlOut = { name: data.name, can_write_code: !!data.can_write_code };
+        if (data.title) rlOut.title = data.title;
+        if (data.description) rlOut.description = data.description;
+        if (data.identity) rlOut.identity = data.identity;
+        if (data.rule_ids && data.rule_ids.length > 0) rlOut.rule_ids = data.rule_ids;
+        if (sel.isNew) {
+          await apiCall('/api/config/roles', 'POST', rlOut);
+        } else {
+          await apiCall('/api/config/roles/' + encodeURIComponent(data.name), 'PUT', rlOut);
+        }
       }
       showToast('Saved', 'success');
       if (sel.isNew) {
-        dispatch({ type: 'SET_CONFIG_SELECTION', payload: { type: sel.type, name: sel.type === 'skill' ? data.id : data.name } });
+        var savedName = sel.type === 'skill' ? data.id : data.name;
+        dispatch({ type: 'SET_CONFIG_SELECTION', payload: { type: sel.type, name: savedName } });
       }
       if (window.__configReload) window.__configReload();
     } catch (err) {
@@ -196,6 +215,7 @@ export default function ConfigDetailPanel() {
       var endpoint = sel.type === 'profile' ? '/api/config/profiles/' :
         sel.type === 'loop' ? '/api/config/loops/' :
         sel.type === 'skill' ? '/api/config/skills/' :
+        sel.type === 'role' ? '/api/config/roles/' :
         '/api/config/teams/';
       await apiCall(endpoint + encodeURIComponent(itemName), 'DELETE');
       showToast('Deleted', 'success');
@@ -211,8 +231,8 @@ export default function ConfigDetailPanel() {
     setData(function (prev) { return { ...prev, [key]: val }; });
   }
 
-  var typeLabel = sel.type === 'profile' ? 'Profile' : sel.type === 'loop' ? 'Loop' : sel.type === 'skill' ? 'Skill' : 'Team';
-  var typeColor = sel.type === 'team' ? 'var(--green)' : sel.type === 'skill' ? 'var(--pink)' : 'var(--accent)';
+  var typeLabel = sel.type === 'profile' ? 'Profile' : sel.type === 'loop' ? 'Loop' : sel.type === 'skill' ? 'Skill' : sel.type === 'role' ? 'Role' : 'Team';
+  var typeColor = sel.type === 'team' ? 'var(--green)' : sel.type === 'skill' ? 'var(--pink)' : sel.type === 'role' ? 'var(--orange)' : 'var(--accent)';
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -244,11 +264,12 @@ export default function ConfigDetailPanel() {
 
       {/* Body */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px' }}>
+        <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column' }}>
           {sel.type === 'profile' && <ProfileEditor data={data} set={set} setData={setData} isNew={sel.isNew} agentsMeta={agentsMeta} onRefreshAgents={fetchAgentsMeta} showToast={showToast} />}
           {sel.type === 'loop' && <LoopEditor data={data} setData={setData} profiles={profiles} teams={teams} skills={skills} isNew={sel.isNew} onPreview={setPreviewItem} />}
           {sel.type === 'team' && <TeamEditor data={data} set={set} setData={setData} profiles={profiles} skills={skills} roleDefs={roleDefs} isNew={sel.isNew} onPreview={setPreviewItem} />}
           {sel.type === 'skill' && <SkillEditor data={data} set={set} isNew={sel.isNew} />}
+          {sel.type === 'role' && <RoleEditor data={data} set={set} isNew={sel.isNew} />}
         </div>
         {previewItem && <PreviewPanel item={previewItem} onClose={function () { setPreviewItem(null); }} />}
       </div>
@@ -347,15 +368,35 @@ function ProfileEditor({ data, set, setData, isNew, agentsMeta, onRefreshAgents,
 
 function SkillEditor({ data, set, isNew }) {
   return (
-    <div style={{ maxWidth: 700, display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, height: '100%' }}>
       <Field label="Skill ID" value={data.id} onChange={function (v) { set('id', v); }} disabled={!isNew} placeholder="my_skill" />
       <div>
         <label style={labelStyle}>Short (embedded in prompt)</label>
         <textarea value={data.short || ''} onChange={function (e) { set('short', e.target.value); }} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} placeholder="Concise instruction (1-4 sentences) for prompt embedding..." />
       </div>
-      <div>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 200 }}>
         <label style={labelStyle}>Long (full documentation, shown via `adaf skill`)</label>
-        <textarea value={data.long || ''} onChange={function (e) { set('long', e.target.value); }} style={{ ...inputStyle, minHeight: 200, resize: 'vertical' }} placeholder="Full documentation in Markdown..." />
+        <textarea value={data.long || ''} onChange={function (e) { set('long', e.target.value); }} style={{ ...inputStyle, flex: 1, resize: 'vertical' }} placeholder="Full documentation in Markdown..." />
+      </div>
+    </div>
+  );
+}
+
+// ── Role Editor ──
+
+function RoleEditor({ data, set, isNew }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, height: '100%' }}>
+      <Field label="Role Name" value={data.name} onChange={function (v) { set('name', v); }} disabled={!isNew} placeholder="my-role" />
+      <Field label="Title" value={data.title || ''} onChange={function (v) { set('title', v); }} placeholder="ROLE TITLE (uppercase)" />
+      <div>
+        <label style={labelStyle}>Description</label>
+        <textarea value={data.description || ''} onChange={function (e) { set('description', e.target.value); }} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} placeholder="What this role does..." />
+      </div>
+      <Checkbox label="can_write_code" checked={data.can_write_code !== false} onChange={function (v) { set('can_write_code', v); }} />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 200 }}>
+        <label style={labelStyle}>Identity Prompt</label>
+        <textarea value={data.identity || ''} onChange={function (e) { set('identity', e.target.value); }} style={{ ...inputStyle, flex: 1, resize: 'vertical' }} placeholder="System prompt / identity for this role..." />
       </div>
     </div>
   );
