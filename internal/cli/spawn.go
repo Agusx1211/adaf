@@ -56,6 +56,10 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	readOnly, _ := cmd.Flags().GetBool("read-only")
 	childRole = strings.ToLower(strings.TrimSpace(childRole))
 
+	// Bare invocation: no profile, no task → show contextual guide.
+	if profileName == "" && task == "" && taskFile == "" {
+		return printSpawnGuide()
+	}
 	if profileName == "" {
 		return fmt.Errorf("--profile is required")
 	}
@@ -308,4 +312,82 @@ func printSpawnRecord(r *store.SpawnRecord) {
 		}
 	}
 	fmt.Println()
+}
+
+// printSpawnGuide outputs a compact, LLM-friendly guide for sub-agent delegation.
+// It is shown when `adaf spawn` is called with no arguments.
+func printSpawnGuide() error {
+	fmt.Println("# Sub-Agent Delegation")
+	fmt.Println()
+	fmt.Println("## Recommended Flow")
+	fmt.Println("1. Spawn all independent tasks in parallel:")
+	fmt.Println("   adaf spawn --profile <name> --task \"task description\"")
+	fmt.Println("   adaf spawn --profile <name> --task \"task description\"")
+	fmt.Println("2. Signal that you're waiting:")
+	fmt.Println("   adaf wait-for-spawns")
+	fmt.Println("   Your turn will be suspended and automatically resumed with results")
+	fmt.Println("   when all sub-agents finish. No need to poll or wait manually.")
+	fmt.Println()
+
+	// Available Profiles (best-effort).
+	parentProfile := os.Getenv("ADAF_PROFILE")
+	if deleg, err := resolveCurrentDelegation(parentProfile); err == nil && deleg != nil && len(deleg.Profiles) > 0 {
+		globalCfg, cfgErr := config.Load()
+		fmt.Printf("## Available Profiles (max %d concurrent)\n", deleg.EffectiveMaxParallel())
+		fmt.Println()
+		for _, dp := range deleg.Profiles {
+			agent := dp.Name
+			model := ""
+			if cfgErr == nil {
+				if p := globalCfg.FindProfile(dp.Name); p != nil {
+					agent = p.Agent
+					model = p.Model
+				}
+			}
+			label := fmt.Sprintf("  %s (agent: %s", dp.Name, agent)
+			if model != "" {
+				label += ", model: " + model
+			}
+			label += ")"
+			fmt.Println(label)
+
+			roles, rolesErr := dp.EffectiveRoles()
+			if rolesErr == nil && len(roles) > 0 {
+				fmt.Printf("    Roles: %s\n", strings.Join(roles, ", "))
+			}
+		}
+		fmt.Println()
+	}
+
+	// Running Spawns (best-effort).
+	if parentTurnID, _, err := getTurnContext(); err == nil && parentTurnID > 0 {
+		if s, err := openStore(); err == nil && s.Exists() {
+			if records, err := s.SpawnsByParent(parentTurnID); err == nil && len(records) > 0 {
+				fmt.Println("## Running Spawns")
+				fmt.Println()
+				for _, r := range records {
+					elapsed := time.Since(r.StartedAt).Round(time.Second).String()
+					if !r.CompletedAt.IsZero() {
+						elapsed = r.CompletedAt.Sub(r.StartedAt).Round(time.Second).String()
+					}
+					fmt.Printf("  #%d %s [%s] %s — %q\n", r.ID, r.ChildProfile, r.Status, elapsed, truncate(r.Task, 60))
+				}
+				fmt.Println()
+			} else {
+				fmt.Println("## Running Spawns")
+				fmt.Println()
+				fmt.Println("  No spawns running.")
+				fmt.Println()
+			}
+		}
+	}
+
+	fmt.Println("## Other Commands")
+	fmt.Println("  adaf spawn-status              # Check all spawn statuses")
+	fmt.Println("  adaf spawn-diff --spawn-id N   # View a spawn's code changes")
+	fmt.Println("  adaf spawn-merge --spawn-id N  # Merge a completed spawn")
+	fmt.Println("  adaf spawn-reject --spawn-id N # Cancel/reject a spawn")
+	fmt.Println("  adaf spawn-inspect --spawn-id N # See a spawn's recent activity")
+
+	return nil
 }
