@@ -1,4 +1,4 @@
-.PHONY: build install test race clean lint fmt web web-install web-watch e2e-install e2e e2e-clean record-vibe-fixture record-gemini-fixture
+.PHONY: build install test race clean lint fmt web web-install web-watch e2e-install e2e e2e-clean record-vibe-fixture record-gemini-fixture record-opencode-fixture
 
 BINARY=adaf
 BUILD_DIR=bin
@@ -57,3 +57,6 @@ record-vibe-fixture:
 
 record-gemini-fixture:
 	ADAF_RECORD_GEMINI_FIXTURE=1 go test -tags=integration ./internal/agent -run TestRecordGeminiFixture -v
+
+record-opencode-fixture:
+	ADAF_RECORD_OPENCODE_FIXTURE=1 go test -tags=integration ./internal/agent -run TestRecordOpencodeFixture -v

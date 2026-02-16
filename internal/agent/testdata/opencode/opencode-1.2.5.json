@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "provider": "opencode",
+  "version": "1.2.5",
+  "version_raw": "1.2.5",
+  "binary": "opencode",
+  "captured_at": "2026-02-16T15:41:17Z",
+  "prompt": "In the current directory, create a file named fixture_note.txt with exactly this content: OPENCODE_FIXTURE_FILE_CONTENT. Then answer with exactly: OPENCODE_FIXTURE_OK.",
+  "args": [],
+  "result": {
+    "exit_code": 0,
+    "output": "OPENCODE_FIXTURE_OK",
+    "error": "",
+    "agent_session_id": "ses_398e34277ffeWbqKfwwEFe19FU"
+  },
+  "summary": {
+    "raw_events": 6,
+    "parsed_events": 6,
+    "assistant_events": 2,
+    "thinking_blocks": 0,
+    "text_blocks": 1,
+    "tool_use_blocks": 1,
+    "tool_result_blocks": 1,
+    "result_events": 2,
+    "error_events": 0
+  },
+  "stream": [
+    "{\"type\":\"step_start\",\"timestamp\":1771256471647,\"sessionID\":\"ses_398e34277ffeWbqKfwwEFe19FU\",\"part\":{\"id\":\"prt_c671ce05a001s2VtAC3uUkTCKZ\",\"sessionID\":\"ses_398e34277ffeWbqKfwwEFe19FU\",\"messageID\":\"msg_c671cbf12001GUYVxrHPm6H5Es\",\"type\":\"step-start\",\"snapshot\":\"15f907d5ed8144099385b86b1c8e810863dcc3ea\"}}",
+    "{\"type\":\"tool_use\",\"timestamp\":1771256471662,\"sessionID\":\"ses_398e34277ffeWbqKfwwEFe19FU\",\"part\":{\"id\":\"prt_c671ce064001jKF4FMNsW3B3pU\",\"sessionID\":\"ses_398e34277ffeWbqKfwwEFe19FU\",\"messageID\":\"msg_c671cbf12001GUYVxrHPm6H5Es\",\"type\":\"tool\",\"callID\":\"call_3554b27ba38b4b47babd32d7\",\"tool\":\"write\",\"state\":{\"status\":\"completed\",\"input\":{\"content\":\"OPENCODE_FIXTURE_FILE_CONTENT\",\"filePath\":\"/tmp/adaf-opencode-demo-repo/fixture_note.txt\"},\"output\":\"Wrote file successfully.\",\"title\":\"fixture_note.txt\",\"metadata\":{\"diagnostics\":{},\"filepath\":\"/tmp/adaf-opencode-demo-repo/fixture_note.txt\",\"exists\":false,\"truncated\":false},\"time\":{\"start\":1771256471656,\"end\":1771256471658}}}}",
+    "{\"type\":\"step_finish\",\"timestamp\":1771256471688,\"sessionID\":\"ses_398e34277ffeWbqKfwwEFe19FU\",\"part\":{\"id\":\"prt_c671ce06e001z1ZfasjJkx3ytu\",\"sessionID\":\"ses_398e34277ffeWbqKfwwEFe19FU\",\"messageID\":\"msg_c671cbf12001GUYVxrHPm6H5Es\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"snapshot\":\"15f907d5ed8144099385b86b1c8e810863dcc3ea\",\"cost\":0,\"tokens\":{\"total\":10654,\"input\":10128,\"output\":78,\"reasoning\":0,\"cache\":{\"read\":448,\"write\":0}}}}",
+    "{\"type\":\"step_start\",\"timestamp\":1771256477063,\"sessionID\":\"ses_398e34277ffeWbqKfwwEFe19FU\",\"part\":{\"id\":\"prt_c671cf585001BgTMttrnAaPI74\",\"sessionID\":\"ses_398e34277ffeWbqKfwwEFe19FU\",\"messageID\":\"msg_c671ce08f0018tcYrdG081neow\",\"type\":\"step-start\",\"snapshot\":\"15f907d5ed8144099385b86b1c8e810863dcc3ea\"}}",
+    "{\"type\":\"text\",\"timestamp\":1771256477067,\"sessionID\":\"ses_398e34277ffeWbqKfwwEFe19FU\",\"part\":{\"id\":\"prt_c671cf588001cFjAIJ7efgOaLg\",\"sessionID\":\"ses_398e34277ffeWbqKfwwEFe19FU\",\"messageID\":\"msg_c671ce08f0018tcYrdG081neow\",\"type\":\"text\",\"text\":\"OPENCODE_FIXTURE_OK\",\"time\":{\"start\":1771256477066,\"end\":1771256477066}}}",
+    "{\"type\":\"step_finish\",\"timestamp\":1771256477072,\"sessionID\":\"ses_398e34277ffeWbqKfwwEFe19FU\",\"part\":{\"id\":\"prt_c671cf58b001fOwnJW8S0RWKsJ\",\"sessionID\":\"ses_398e34277ffeWbqKfwwEFe19FU\",\"messageID\":\"msg_c671ce08f0018tcYrdG081neow\",\"type\":\"step-finish\",\"reason\":\"stop\",\"snapshot\":\"15f907d5ed8144099385b86b1c8e810863dcc3ea\",\"cost\":0,\"tokens\":{\"total\":10686,\"input\":103,\"output\":23,\"reasoning\":0,\"cache\":{\"read\":10560,\"write\":0}}}}"
+  ],
+  "events": [
+    {
+      "type": "stdin",
+      "data": "In the current directory, create a file named fixture_note.txt with exactly this content: OPENCODE_FIXTURE_FILE_CONTENT. Then answer with exactly: OPENCODE_FIXTURE_OK."
+    },
+    {
+      "type": "meta",
+      "data": "agent=opencode"
+    },
+    {
+      "type": "meta",
+      "data": "command=/home/agusx1211/.opencode/bin/opencode run --format json"
+    },
+    {
+      "type": "meta",
+      "data": "workdir=/tmp/adaf-opencode-demo-repo"
+    }
+  ],
+  "workspace": {
+    "fixture_note.txt": "OPENCODE_FIXTURE_FILE_CONTENT"
+  },
+  "metadata": {
+    "demo_repo": "/tmp/adaf-opencode-demo-repo",
+    "record_env": "ADAF_RECORD_OPENCODE_FIXTURE"
+  }
+}
