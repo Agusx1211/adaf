@@ -195,9 +195,6 @@ func setupBufferOutput(cmd *exec.Cmd, cfg Config, recorder *recording.Recorder) 
 		&bo.StderrBuf,
 		recorder.WrapWriter(stderrW, "stderr"),
 	}
-	if w := newEventSinkWriter(cfg.EventSink, cfg.TurnID, "[stderr] "); w != nil {
-		stderrWriters = append(stderrWriters, w)
-	}
 
 	cmd.Stdout = io.MultiWriter(stdoutWriters...)
 	cmd.Stderr = io.MultiWriter(stderrWriters...)
@@ -319,8 +316,10 @@ type streamStderr struct {
 }
 
 // setupStreamStderr configures stderr capture for stream-mode agents,
-// writing to an in-memory buffer, the recorder, and optionally the
-// EventSink.
+// writing to an in-memory buffer and the recorder. Stderr is intentionally
+// not forwarded to the EventSink — agent CLIs emit noisy diagnostics
+// (auth retries, debug logs) that clutter the live UI. The data is still
+// available in recordings and Result.Error for post-mortem debugging.
 func setupStreamStderr(cmd *exec.Cmd, cfg Config, recorder *recording.Recorder) *streamStderr {
 	ss := &streamStderr{}
 	ss.W = writerOrDefault(cfg.Stderr, os.Stderr)
@@ -328,9 +327,6 @@ func setupStreamStderr(cmd *exec.Cmd, cfg Config, recorder *recording.Recorder) 
 	writers := []io.Writer{
 		&ss.Buf,
 		recorder.WrapWriter(ss.W, "stderr"),
-	}
-	if w := newEventSinkWriter(cfg.EventSink, cfg.TurnID, "[stderr] "); w != nil {
-		writers = append(writers, w)
 	}
 	cmd.Stderr = io.MultiWriter(writers...)
 	return ss
