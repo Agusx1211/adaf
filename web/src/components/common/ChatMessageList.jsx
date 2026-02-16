@@ -86,10 +86,7 @@ export default function ChatMessageList({
                   )}
                 </div>
                 {isUser ? (
-                  <div style={{
-                    fontSize: 13, color: 'var(--text-0)', lineHeight: 1.5,
-                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                  }}>{msg.content}</div>
+                  <MarkdownContent text={msg.content} style={{ fontSize: 13, color: 'var(--text-0)', lineHeight: 1.5 }} />
                 ) : msgEvents && msgEvents.length > 0 ? (
                   <EventBlockList events={msgEvents} />
                 ) : (
