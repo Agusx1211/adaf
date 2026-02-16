@@ -50,6 +50,7 @@ func init() {
 	runCmd.Flags().String("command", "", "Custom command path for the selected agent")
 	runCmd.Flags().String("reasoning-level", "", "Reasoning level (e.g. low, medium, high, xhigh)")
 	runCmd.Flags().BoolP("session", "s", false, "Start and leave detached (use 'adaf attach' to connect)")
+	runCmd.Flags().StringSlice("skills", nil, "Skill IDs to activate (e.g. autonomy,code_writing,commit)")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -75,6 +76,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	customCmd, _ := cmd.Flags().GetString("command")
 	reasoningLevel, _ := cmd.Flags().GetString("reasoning-level")
 	sessionMode, _ := cmd.Flags().GetBool("session")
+	skills, _ := cmd.Flags().GetStringSlice("skills")
 
 	modelFlag = strings.TrimSpace(modelFlag)
 	reasoningLevel = strings.TrimSpace(reasoningLevel)
@@ -136,7 +138,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		ReasoningLevel: reasoningLevel,
 	}
 
-	loopDef, maxCycles := buildRunLoopDefinition(agentName, profileName, prompt, maxTurns, globalCfg)
+	loopDef, maxCycles := buildRunLoopDefinition(agentName, profileName, prompt, maxTurns, globalCfg, skills)
 
 	var commandOverrides map[string]string
 	if customCmd != "" {
@@ -187,7 +189,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	return streamRunSession(cmd.Context(), sessionID, projCfg.Name, agentName, effectivePlanID)
 }
 
-func buildRunLoopDefinition(agentName, profileName, prompt string, maxTurns int, globalCfg *config.GlobalConfig) (config.LoopDef, int) {
+func buildRunLoopDefinition(agentName, profileName, prompt string, maxTurns int, globalCfg *config.GlobalConfig, skills []string) (config.LoopDef, int) {
 	stepTurns, maxCycles := runTurnConfig(maxTurns)
 	return config.LoopDef{
 		Name: "run:" + agentName,
@@ -197,6 +199,7 @@ func buildRunLoopDefinition(agentName, profileName, prompt string, maxTurns int,
 				Role:         config.DefaultRole(globalCfg),
 				Turns:        stepTurns,
 				Instructions: prompt,
+				Skills:       skills,
 			},
 		},
 	}, maxCycles

@@ -3,6 +3,7 @@ package webserver
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/agentmeta"
@@ -585,6 +586,114 @@ func (srv *Server) handleUpdatePushover(w http.ResponseWriter, r *http.Request) 
 	}
 
 	cfg.Pushover = req
+
+	if err := config.Save(cfg); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save config")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// ── Skill handlers ──
+
+func (srv *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load config")
+		return
+	}
+	config.EnsureDefaultSkillCatalog(cfg)
+	skills := cfg.Skills
+	if skills == nil {
+		skills = []config.Skill{}
+	}
+	writeJSON(w, http.StatusOK, skills)
+}
+
+func (srv *Server) handleCreateSkill(w http.ResponseWriter, r *http.Request) {
+	var sk config.Skill
+	if err := json.NewDecoder(r.Body).Decode(&sk); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if sk.ID == "" {
+		writeError(w, http.StatusBadRequest, "id is required")
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load config")
+		return
+	}
+
+	if err := cfg.AddSkill(sk); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := config.Save(cfg); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save config")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, sk)
+}
+
+func (srv *Server) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "id is required")
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load config")
+		return
+	}
+
+	found := false
+	for i := range cfg.Skills {
+		if strings.EqualFold(cfg.Skills[i].ID, id) {
+			if err := json.NewDecoder(r.Body).Decode(&cfg.Skills[i]); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid request body")
+				return
+			}
+			cfg.Skills[i].ID = id
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		writeError(w, http.StatusNotFound, "skill not found")
+		return
+	}
+
+	if err := config.Save(cfg); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save config")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (srv *Server) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "id is required")
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load config")
+		return
+	}
+
+	cfg.RemoveSkill(id)
 
 	if err := config.Save(cfg); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save config")

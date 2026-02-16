@@ -455,6 +455,221 @@ func TestBuild_DelegationIncludesRunningSpawnStateAndCapacity(t *testing.T) {
 	}
 }
 
+func TestBuild_SkillsRenderedInOrder(t *testing.T) {
+	s, project := initPromptTestStore(t)
+	globalCfg := &config.GlobalConfig{}
+	config.EnsureDefaultSkillCatalog(globalCfg)
+
+	profile := &config.Profile{Name: "dev", Agent: "codex"}
+
+	got, err := Build(BuildOpts{
+		Store:     s,
+		Project:   project,
+		Profile:   profile,
+		GlobalCfg: globalCfg,
+		Skills:    []string{"autonomy", "code_writing", "focus"},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	// All three skills should appear.
+	if !strings.Contains(got, "## autonomy") {
+		t.Fatalf("missing autonomy skill\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "## code_writing") {
+		t.Fatalf("missing code_writing skill\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "## focus") {
+		t.Fatalf("missing focus skill\nprompt:\n%s", got)
+	}
+
+	// Skills should appear in order.
+	autonomyIdx := strings.Index(got, "## autonomy")
+	codeIdx := strings.Index(got, "## code_writing")
+	focusIdx := strings.Index(got, "## focus")
+	if autonomyIdx > codeIdx || codeIdx > focusIdx {
+		t.Fatalf("skills not in order: autonomy=%d, code_writing=%d, focus=%d", autonomyIdx, codeIdx, focusIdx)
+	}
+
+	// Should NOT have the legacy "# Rules" section.
+	if strings.Contains(got, "# Rules\n") {
+		t.Fatalf("skills-driven prompt should not have legacy Rules section\nprompt:\n%s", got)
+	}
+}
+
+func TestBuild_NoSkillsMinimalPrompt(t *testing.T) {
+	s, project := initPromptTestStore(t)
+	globalCfg := &config.GlobalConfig{}
+	config.EnsureDefaultSkillCatalog(globalCfg)
+
+	profile := &config.Profile{Name: "dev", Agent: "codex"}
+
+	got, err := Build(BuildOpts{
+		Store:     s,
+		Project:   project,
+		Profile:   profile,
+		GlobalCfg: globalCfg,
+		Skills:    []string{},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	// Should have role header and objective but no skills section content.
+	if !strings.Contains(got, "# Objective") {
+		t.Fatalf("missing Objective section\nprompt:\n%s", got)
+	}
+	// Should NOT have the legacy rules section.
+	if strings.Contains(got, "# Rules\n") {
+		t.Fatalf("empty-skills prompt should not have legacy Rules section\nprompt:\n%s", got)
+	}
+}
+
+func TestBuild_DelegationSkillGatesDelegationSection(t *testing.T) {
+	s, project := initPromptTestStore(t)
+	globalCfg := &config.GlobalConfig{
+		Profiles: []config.Profile{
+			{Name: "manager", Agent: "claude"},
+			{Name: "worker", Agent: "codex"},
+		},
+	}
+	config.EnsureDefaultSkillCatalog(globalCfg)
+
+	deleg := &config.DelegationConfig{
+		Profiles: []config.DelegationProfile{
+			{Name: "worker", Role: config.RoleDeveloper},
+		},
+	}
+	profile := &config.Profile{Name: "manager", Agent: "claude"}
+
+	// Without delegation skill: no delegation section.
+	got, err := Build(BuildOpts{
+		Store:      s,
+		Project:    project,
+		Profile:    profile,
+		GlobalCfg:  globalCfg,
+		Delegation: deleg,
+		Skills:     []string{"autonomy"},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if strings.Contains(got, "# Delegation") {
+		t.Fatalf("delegation section should be gated by delegation skill\nprompt:\n%s", got)
+	}
+
+	// With delegation skill: delegation section present.
+	got, err = Build(BuildOpts{
+		Store:      s,
+		Project:    project,
+		Profile:    profile,
+		GlobalCfg:  globalCfg,
+		Delegation: deleg,
+		Skills:     []string{"autonomy", "delegation"},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if !strings.Contains(got, "# Delegation") {
+		t.Fatalf("delegation section should be present with delegation skill\nprompt:\n%s", got)
+	}
+}
+
+func TestBuild_SessionContextSkillGatesLogs(t *testing.T) {
+	s, project := initPromptTestStore(t)
+	globalCfg := &config.GlobalConfig{}
+	config.EnsureDefaultSkillCatalog(globalCfg)
+
+	// Create a turn so there's session data to show.
+	if err := s.CreateTurn(&store.Turn{
+		Agent:     "claude",
+		Objective: "Test objective",
+	}); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+
+	profile := &config.Profile{Name: "dev", Agent: "claude"}
+
+	// Without session_context skill: no logs.
+	got, err := Build(BuildOpts{
+		Store:     s,
+		Project:   project,
+		Profile:   profile,
+		GlobalCfg: globalCfg,
+		Skills:    []string{"autonomy"},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if strings.Contains(got, "Recent Session Logs") {
+		t.Fatalf("session logs should be gated by session_context skill\nprompt:\n%s", got)
+	}
+
+	// With session_context skill: logs present.
+	got, err = Build(BuildOpts{
+		Store:     s,
+		Project:   project,
+		Profile:   profile,
+		GlobalCfg: globalCfg,
+		Skills:    []string{"session_context"},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if !strings.Contains(got, "Recent Session Logs") {
+		t.Fatalf("session logs should be present with session_context skill\nprompt:\n%s", got)
+	}
+}
+
+func TestBuild_UnknownSkillIgnored(t *testing.T) {
+	s, project := initPromptTestStore(t)
+	globalCfg := &config.GlobalConfig{}
+	config.EnsureDefaultSkillCatalog(globalCfg)
+
+	profile := &config.Profile{Name: "dev", Agent: "claude"}
+
+	// Including an unknown skill should not crash.
+	got, err := Build(BuildOpts{
+		Store:     s,
+		Project:   project,
+		Profile:   profile,
+		GlobalCfg: globalCfg,
+		Skills:    []string{"nonexistent_skill", "autonomy"},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if !strings.Contains(got, "## autonomy") {
+		t.Fatalf("known skill should still render\nprompt:\n%s", got)
+	}
+	if strings.Contains(got, "nonexistent_skill") {
+		t.Fatalf("unknown skill should be silently ignored\nprompt:\n%s", got)
+	}
+}
+
+func TestBuild_NilSkillsFallsBackToLegacy(t *testing.T) {
+	s, project := initPromptTestStore(t)
+
+	profile := &config.Profile{Name: "dev", Agent: "codex"}
+
+	// nil Skills = legacy path.
+	got, err := Build(BuildOpts{
+		Store:   s,
+		Project: project,
+		Profile: profile,
+		Skills:  nil,
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	// Legacy path has "# Rules" section.
+	if !strings.Contains(got, "# Rules\n") {
+		t.Fatalf("nil Skills should use legacy path with Rules section\nprompt:\n%s", got)
+	}
+}
+
 func initPromptTestStore(t *testing.T) (*store.Store, *store.ProjectConfig) {
 	t.Helper()
 	dir := t.TempDir()

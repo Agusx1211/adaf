@@ -80,6 +80,48 @@ func RolePrompt(profile *config.Profile, stepRole string, globalCfg *config.Glob
 	return b.String()
 }
 
+// RolePromptSlim returns a simplified role section with only title, identity, and description.
+// Used by the skills-driven prompt path where rule composition is replaced by skill blocks.
+func RolePromptSlim(profile *config.Profile, stepRole string, globalCfg *config.GlobalConfig) string {
+	role := config.EffectiveStepRole(stepRole, globalCfg)
+
+	roles := config.DefaultRoleDefinitions()
+	if globalCfg != nil {
+		config.EnsureDefaultRoleCatalog(globalCfg)
+		roles = globalCfg.Roles
+	}
+
+	roleTitle := strings.ToUpper(role)
+	roleIdentity := ""
+	roleDesc := ""
+	for _, def := range roles {
+		if strings.EqualFold(def.Name, role) {
+			if strings.TrimSpace(def.Title) != "" {
+				roleTitle = strings.TrimSpace(def.Title)
+			}
+			roleIdentity = strings.TrimSpace(def.Identity)
+			roleDesc = strings.TrimSpace(def.Description)
+			break
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("# Your Role: " + roleTitle + "\n\n")
+	if roleIdentity != "" {
+		b.WriteString(roleIdentity + "\n\n")
+	}
+	if roleDesc != "" {
+		b.WriteString(roleDesc + "\n\n")
+	}
+
+	if profile.Description != "" {
+		b.WriteString("## Your Description\n\n")
+		b.WriteString(profile.Description + "\n\n")
+	}
+
+	return b.String()
+}
+
 // ReadOnlyPrompt returns the read-only mode prompt section.
 func ReadOnlyPrompt() string {
 	return "# READ-ONLY MODE\n\nYou are in READ-ONLY mode. Do NOT create, modify, or delete any files. Only read and analyze.\n\nDo NOT write reports into repository files (for example `*.md`, `*.txt`, or TODO files). Return your report in your final assistant message.\n"

@@ -34,7 +34,8 @@ export default function ConfigView() {
   var [profiles, setProfiles] = useState([]);
   var [loops, setLoops] = useState([]);
   var [teams, setTeams] = useState([]);
-  var [expanded, setExpanded] = useState({ profiles: true, loops: true, teams: true });
+  var [skills, setSkills] = useState([]);
+  var [expanded, setExpanded] = useState({ profiles: true, loops: true, teams: true, skills: false });
 
   var configSelection = state.configSelection;
 
@@ -44,10 +45,12 @@ export default function ConfigView() {
         apiCall('/api/config/profiles', 'GET', null, { allow404: true }),
         apiCall('/api/config/loops', 'GET', null, { allow404: true }),
         apiCall('/api/config/teams', 'GET', null, { allow404: true }),
+        apiCall('/api/config/skills', 'GET', null, { allow404: true }),
       ]);
       setProfiles(results[0] || []);
       setLoops(results[1] || []);
       setTeams(results[2] || []);
+      setSkills(results[3] || []);
     } catch (err) {
       if (!err.authRequired) console.error('Config load error:', err);
     }
@@ -60,8 +63,9 @@ export default function ConfigView() {
     window.__configReload = loadAll;
     window.__configProfiles = profiles;
     window.__configTeams = teams;
-    return function () { delete window.__configReload; delete window.__configProfiles; delete window.__configTeams; };
-  }, [loadAll, profiles, teams]);
+    window.__configSkills = skills;
+    return function () { delete window.__configReload; delete window.__configProfiles; delete window.__configTeams; delete window.__configSkills; };
+  }, [loadAll, profiles, teams, skills]);
 
   function toggle(section) {
     setExpanded(function (prev) { return { ...prev, [section]: !prev[section] }; });
@@ -161,6 +165,36 @@ export default function ConfigView() {
         })}
         {expanded.teams && teams.length === 0 && (
           <div style={{ padding: 12, color: 'var(--text-3)', fontSize: 11, textAlign: 'center' }}>No teams configured.</div>
+        )}
+      </div>
+
+      {/* Skills */}
+      <div>
+        <div style={sectionHeaderStyle} onClick={function () { toggle('skills'); }}>
+          <span style={titleStyle}>{expanded.skills ? '\u25BE' : '\u25B8'} Skills ({skills.length})</span>
+          <button onClick={function (e) { e.stopPropagation(); handleNew('skill'); }} style={{ ...btnNewStyle, border: '1px solid var(--pink)40', background: 'var(--pink)15', color: 'var(--pink)' }}>+ New</button>
+        </div>
+        {expanded.skills && skills.map(function (sk) {
+          var sel = isSelected('skill', sk.id);
+          var summary = sk.short || '';
+          if (summary.length > 60) summary = summary.slice(0, 60) + '\u2026';
+          return (
+            <div key={sk.id} onClick={function () { select('skill', sk.id); }}
+              style={{ ...rowStyle, background: sel ? 'var(--bg-3)' : 'transparent', borderLeft: sel ? '2px solid var(--pink)' : '2px solid transparent' }}
+              onMouseEnter={function (e) { if (!sel) e.currentTarget.style.background = 'var(--bg-2)'; }}
+              onMouseLeave={function (e) { if (!sel) e.currentTarget.style.background = 'transparent'; }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: 'var(--text-0)' }}>{sk.id}</div>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {summary}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {expanded.skills && skills.length === 0 && (
+          <div style={{ padding: 12, color: 'var(--text-3)', fontSize: 11, textAlign: 'center' }}>No skills configured.</div>
         )}
       </div>
 

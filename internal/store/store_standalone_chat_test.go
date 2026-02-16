@@ -14,7 +14,7 @@ func TestUpdateChatInstanceLastSession(t *testing.T) {
 		t.Fatalf("EnsureDirs: %v", err)
 	}
 
-	inst, err := s.CreateChatInstance("test-profile", "")
+	inst, err := s.CreateChatInstance("test-profile", "", nil)
 	if err != nil {
 		t.Fatalf("CreateChatInstance: %v", err)
 	}

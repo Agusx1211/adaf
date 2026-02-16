@@ -201,9 +201,12 @@ export default function StandaloneConversationList() {
 export function NewChatModal({ base, onCreated, onClose }) {
   var [profiles, setProfiles] = useState([]);
   var [teams, setTeams] = useState([]);
+  var [skills, setSkills] = useState([]);
   var [recentCombos, setRecentCombos] = useState([]);
   var [selectedProfile, setSelectedProfile] = useState('');
   var [selectedTeam, setSelectedTeam] = useState('');
+  var [selectedSkills, setSelectedSkills] = useState([]);
+  var [showSkills, setShowSkills] = useState(false);
   var [creating, setCreating] = useState(false);
   var showToast = useToast();
 
@@ -212,13 +215,16 @@ export function NewChatModal({ base, onCreated, onClose }) {
       apiCall('/api/config/profiles', 'GET', null, { allow404: true }),
       apiCall('/api/config/teams', 'GET', null, { allow404: true }),
       apiCall('/api/config/recent-combinations', 'GET', null, { allow404: true }),
+      apiCall('/api/config/skills', 'GET', null, { allow404: true }),
     ]).then(function (results) {
       var profs = (results[0] || []).filter(function (p) { return p && p.name; });
       var ts = (results[1] || []).filter(function (t) { return t && t.name; });
       var combos = (results[2] || []).filter(function (c) { return c && c.profile; });
+      var sks = (results[3] || []).filter(function (s) { return s && s.id; });
       setProfiles(profs);
       setTeams(ts);
       setRecentCombos(combos);
+      setSkills(sks);
       if (profs.length > 0) setSelectedProfile(profs[0].name);
     }).catch(function () {});
   }, []);
@@ -229,6 +235,7 @@ export function NewChatModal({ base, onCreated, onClose }) {
 
     var body = { profile: selectedProfile };
     if (selectedTeam) body.team = selectedTeam;
+    if (selectedSkills.length > 0) body.skills = selectedSkills;
 
     setCreating(true);
     apiCall(base + '/chat-instances', 'POST', body)
@@ -245,6 +252,15 @@ export function NewChatModal({ base, onCreated, onClose }) {
   function handleQuickPick(combo) {
     setSelectedProfile(combo.profile);
     setSelectedTeam(combo.team || '');
+  }
+
+  function toggleSkill(id) {
+    setSelectedSkills(function (prev) {
+      if (prev.indexOf(id) >= 0) {
+        return prev.filter(function (s) { return s !== id; });
+      }
+      return prev.concat([id]);
+    });
   }
 
   var selectStyle = {
@@ -321,6 +337,58 @@ export function NewChatModal({ base, onCreated, onClose }) {
                 return <option key={t.name} value={t.name}>{t.name} ({subCount} sub-agents)</option>;
               })}
             </select>
+          </div>
+        )}
+
+        {/* Skills (optional, collapsible) */}
+        {selectedProfile && skills.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <label style={{ ...labelStyle, marginBottom: 0 }}>
+                Skills ({selectedSkills.length} selected)
+              </label>
+              <button type="button" onClick={function () { setShowSkills(!showSkills); }} style={{
+                padding: '2px 8px', border: '1px solid var(--border)', background: 'var(--bg-2)',
+                color: 'var(--text-2)', borderRadius: 3, cursor: 'pointer',
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+              }}>
+                {showSkills ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            {selectedSkills.length > 0 && !showSkills && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {selectedSkills.map(function (id) {
+                  return (
+                    <span key={id} style={{
+                      padding: '2px 6px', borderRadius: 3, fontSize: 9,
+                      fontFamily: "'JetBrains Mono', monospace",
+                      background: 'var(--pink)15', color: 'var(--pink)',
+                      border: '1px solid var(--pink)30',
+                    }}>{id}</span>
+                  );
+                })}
+              </div>
+            )}
+            {showSkills && (
+              <div style={{
+                border: '1px solid var(--border)', borderRadius: 4, background: 'var(--bg-2)',
+                padding: 8, maxHeight: 160, overflow: 'auto',
+              }}>
+                {skills.map(function (sk) {
+                  var isChecked = selectedSkills.indexOf(sk.id) >= 0;
+                  return (
+                    <label key={sk.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0',
+                      cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+                      color: isChecked ? 'var(--text-0)' : 'var(--text-2)',
+                    }}>
+                      <input type="checkbox" checked={isChecked} onChange={function () { toggleSkill(sk.id); }} />
+                      <span style={{ fontWeight: isChecked ? 600 : 400 }}>{sk.id}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 

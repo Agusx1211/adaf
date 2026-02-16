@@ -25,8 +25,9 @@ func handleListChatInstances(s *store.Store, w http.ResponseWriter, r *http.Requ
 // handleCreateChatInstance creates a new chat instance with a profile+team combination.
 func handleCreateChatInstance(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Profile string `json:"profile"`
-		Team    string `json:"team"`
+		Profile string   `json:"profile"`
+		Team    string   `json:"team"`
+		Skills  []string `json:"skills"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -56,7 +57,7 @@ func handleCreateChatInstance(s *store.Store, w http.ResponseWriter, r *http.Req
 		_ = config.Save(cfg)
 	}
 
-	inst, err := s.CreateChatInstance(req.Profile, req.Team)
+	inst, err := s.CreateChatInstance(req.Profile, req.Team, req.Skills)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create chat instance")
 		return
@@ -159,6 +160,7 @@ func handleSendChatInstanceMessage(s *store.Store, w http.ResponseWriter, r *htt
 		Instructions:   req.Message,
 		StandaloneChat: true,
 		Team:           inst.Team,
+		Skills:         inst.Skills,
 	}
 
 	loopDef := config.LoopDef{

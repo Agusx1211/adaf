@@ -8,7 +8,7 @@ import (
 )
 
 func TestBuildAskLoopDefinition(t *testing.T) {
-	loopDef, maxCycles := buildAskLoopDefinition("ask:claude", "fix the tests")
+	loopDef, maxCycles := buildAskLoopDefinition("ask:claude", "fix the tests", nil)
 
 	if maxCycles != 1 {
 		t.Fatalf("maxCycles = %d, want 1", maxCycles)

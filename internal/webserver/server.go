@@ -234,6 +234,10 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/config/recent-combinations", srv.handleListRecentCombinations)
 	mux.HandleFunc("GET /api/config/pushover", srv.handleGetPushover)
 	mux.HandleFunc("PUT /api/config/pushover", srv.handleUpdatePushover)
+	mux.HandleFunc("GET /api/config/skills", srv.handleListSkills)
+	mux.HandleFunc("POST /api/config/skills", srv.handleCreateSkill)
+	mux.HandleFunc("PUT /api/config/skills/{id}", srv.handleUpdateSkill)
+	mux.HandleFunc("DELETE /api/config/skills/{id}", srv.handleDeleteSkill)
 	mux.HandleFunc("GET /api/config/agents", srv.handleListAgents)
 	mux.HandleFunc("POST /api/config/agents/detect", srv.handleDetectAgents)
 

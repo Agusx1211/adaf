@@ -222,6 +222,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				Delegation:     effectiveDelegation,
 				Handoffs:       handoffs,
 				StandaloneChat: stepDef.StandaloneChat,
+				Skills:         stepDef.Skills,
 			}
 
 			// When resuming a standalone chat, the agent already has full context.

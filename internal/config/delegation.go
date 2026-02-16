@@ -15,6 +15,7 @@ type DelegationProfile struct {
 	Speed        string            `json:"speed,omitempty"`         // "fast", "medium", "slow" — informational
 	Handoff      bool              `json:"handoff,omitempty"`       // can be transferred to next loop step
 	Delegation   *DelegationConfig `json:"delegation,omitempty"`    // child spawn rules for this option
+	Skills       []string          `json:"skills,omitempty"`        // skill IDs for spawned agents
 }
 
 // DelegationConfig describes spawn capabilities for a loop step or session.
@@ -84,6 +85,9 @@ func (d *DelegationConfig) Clone() *DelegationConfig {
 			p := d.Profiles[i]
 			if len(p.Roles) > 0 {
 				p.Roles = append([]string(nil), p.Roles...)
+			}
+			if len(p.Skills) > 0 {
+				p.Skills = append([]string(nil), p.Skills...)
 			}
 			p.Delegation = p.Delegation.Clone()
 			out.Profiles[i] = p

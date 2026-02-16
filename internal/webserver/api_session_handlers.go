@@ -19,9 +19,10 @@ func (srv *Server) handleStartAskSession(w http.ResponseWriter, r *http.Request)
 
 func handleStartAskSessionP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Profile string `json:"profile"`
-		Prompt  string `json:"prompt"`
-		PlanID  string `json:"plan_id"`
+		Profile string   `json:"profile"`
+		Prompt  string   `json:"prompt"`
+		PlanID  string   `json:"plan_id"`
+		Skills  []string `json:"skills"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -88,6 +89,7 @@ func handleStartAskSessionP(s *store.Store, w http.ResponseWriter, r *http.Reque
 			Profile:      prof.Name,
 			Turns:        1,
 			Instructions: instructions,
+			Skills:       req.Skills,
 		}},
 	}
 

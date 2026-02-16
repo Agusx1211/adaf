@@ -110,6 +110,11 @@ type BuildOpts struct {
 	// When true, Build() short-circuits to a focused prompt without
 	// autonomous rules, session logs, or loop context.
 	StandaloneChat bool
+
+	// Skills lists which skill IDs are active for this prompt.
+	// When nil (not empty slice), Build() falls back to the legacy prompt path.
+	// When non-nil (including empty), Build() uses the skills-driven path.
+	Skills []string
 }
 
 // WaitResultInfo describes the result of a spawn that was waited on.
@@ -125,6 +130,8 @@ type WaitResultInfo struct {
 }
 
 // Build constructs a prompt from project context and role configuration.
+// When opts.Skills is non-nil, the skills-driven prompt path is used.
+// When opts.Skills is nil, the legacy prompt path is used for backward compatibility.
 func Build(opts BuildOpts) (string, error) {
 	if opts.ParentTurnID > 0 {
 		return buildSubAgentPrompt(opts)
@@ -134,6 +141,25 @@ func Build(opts BuildOpts) (string, error) {
 		return buildStandaloneChatContext(opts)
 	}
 
+	if opts.Skills != nil {
+		return buildSkillsPrompt(opts)
+	}
+
+	return buildLegacyPrompt(opts)
+}
+
+// hasSkill reports whether the given skill ID is active in the skills list.
+func hasSkill(skills []string, id string) bool {
+	for _, s := range skills {
+		if strings.EqualFold(s, id) {
+			return true
+		}
+	}
+	return false
+}
+
+// buildSkillsPrompt constructs a prompt driven by explicit skill IDs.
+func buildSkillsPrompt(opts BuildOpts) (string, error) {
 	var b strings.Builder
 
 	s := opts.Store
@@ -143,39 +169,120 @@ func Build(opts BuildOpts) (string, error) {
 		return "Explore the codebase and address any open issues.", nil
 	}
 
-	effectivePlanID := strings.TrimSpace(opts.PlanID)
-	if effectivePlanID == "" && opts.Task == "" {
-		effectivePlanID = strings.TrimSpace(project.ActivePlanID)
+	effectivePlanID, plan := resolvePlan(opts)
+
+	// Role header (slim: title + identity + description only).
+	if opts.Profile != nil {
+		roleSection := RolePromptSlim(opts.Profile, opts.Role, opts.GlobalCfg)
+		if roleSection != "" {
+			b.WriteString(roleSection)
+			b.WriteString("\n")
+		}
 	}
 
-	var plan *store.Plan
-	if effectivePlanID == "" && opts.Task == "" {
-		// Fallback path: use currently active plan if available.
-		loaded, _ := s.LoadPlan()
-		if loaded != nil && loaded.ID != "" {
-			if loaded.Status == "" {
-				loaded.Status = "active"
+	// Compute effective role for role-conditional sections.
+	effectiveRole := ""
+	if opts.Profile != nil {
+		effectiveRole = config.EffectiveStepRole(opts.Role, opts.GlobalCfg)
+	}
+	roleCanWrite := config.CanWriteCode(effectiveRole, opts.GlobalCfg)
+
+	// Skills section.
+	if len(opts.Skills) > 0 && opts.GlobalCfg != nil {
+		b.WriteString("# Skills\n\n")
+		for _, skillID := range opts.Skills {
+			sk := opts.GlobalCfg.FindSkill(skillID)
+			if sk == nil {
+				continue
 			}
-			if loaded.Status == "active" {
-				plan = loaded
-				effectivePlanID = loaded.ID
+			// Role-aware skill rendering.
+			short := sk.Short
+			if sk.ID == config.SkillCodeWriting && !roleCanWrite {
+				short = "Review work, check progress, and provide guidance to running agents. Do NOT write or modify code."
 			}
+			if sk.ID == config.SkillCommit && !roleCanWrite {
+				continue // skip commit skill for non-writing roles
+			}
+			if sk.ID == config.SkillCommit && opts.ReadOnly {
+				continue // skip commit skill in read-only mode
+			}
+			fmt.Fprintf(&b, "## %s\n%s\n\n", sk.ID, short)
 		}
 	}
-	if effectivePlanID != "" && (plan == nil || plan.ID != effectivePlanID) {
-		plan, _ = s.GetPlan(effectivePlanID)
-		if plan != nil {
-			if plan.Status == "" {
-				plan.Status = "active"
-			}
-			if plan.Status != "active" {
-				plan = nil
-				effectivePlanID = ""
-			}
-		} else {
-			effectivePlanID = ""
+
+	// Read-only mode.
+	if opts.ReadOnly && hasSkill(opts.Skills, config.SkillReadOnly) {
+		b.WriteString(ReadOnlyPrompt())
+		b.WriteString("\n")
+	}
+
+	// Dynamic context sections gated by active skills.
+
+	// Session context.
+	if hasSkill(opts.Skills, config.SkillSessionContext) {
+		allTurns, _ := s.ListTurns()
+		if len(allTurns) > 0 {
+			b.WriteString(renderSessionLogs(allTurns))
 		}
 	}
+
+	// Issues.
+	if hasSkill(opts.Skills, config.SkillIssues) {
+		b.WriteString(renderIssues(s, effectivePlanID))
+	}
+
+	// Loop control.
+	if hasSkill(opts.Skills, config.SkillLoopControl) && opts.LoopContext != nil {
+		b.WriteString(renderLoopContext(opts))
+	}
+
+	// Pushover.
+	if hasSkill(opts.Skills, config.SkillPushover) && opts.LoopContext != nil && opts.LoopContext.CanPushover {
+		b.WriteString(renderPushover())
+	}
+
+	// Loop messages (always render if loop context has messages, regardless of skills).
+	if opts.LoopContext != nil && len(opts.LoopContext.Messages) > 0 {
+		b.WriteString(renderLoopMessages(opts.LoopContext.Messages))
+	}
+
+	// Delegation section.
+	if hasSkill(opts.Skills, config.SkillDelegation) {
+		var runningSpawns []store.SpawnRecord
+		if opts.Store != nil && opts.CurrentTurnID > 0 {
+			if records, err := opts.Store.SpawnsByParent(opts.CurrentTurnID); err == nil {
+				for _, rec := range records {
+					if isDelegationActiveSpawnStatus(rec.Status) {
+						runningSpawns = append(runningSpawns, rec)
+					}
+				}
+			}
+		}
+		b.WriteString(delegationSection(opts.Delegation, opts.GlobalCfg, runningSpawns))
+	}
+
+	// Runtime data (always, when present): wait results, handoffs.
+	b.WriteString(renderWaitResults(opts.WaitResults))
+	b.WriteString(renderHandoffs(opts.Handoffs))
+
+	// Objective.
+	b.WriteString(renderObjective(opts, project, plan, roleCanWrite))
+
+	return b.String(), nil
+}
+
+// buildLegacyPrompt is the original Build() logic, used when opts.Skills is nil.
+func buildLegacyPrompt(opts BuildOpts) (string, error) {
+	var b strings.Builder
+
+	s := opts.Store
+	project := opts.Project
+
+	if project == nil {
+		return "Explore the codebase and address any open issues.", nil
+	}
+
+	effectivePlanID, plan := resolvePlan(opts)
 
 	allTurns, _ := s.ListTurns()
 
@@ -228,143 +335,24 @@ func Build(opts BuildOpts) (string, error) {
 	// Context.
 	b.WriteString("# Context\n\n")
 
-	// Recent session logs — only for top-level agents, not sub-agents.
+	// Recent session logs.
 	if len(allTurns) > 0 {
-		totalTurns := len(allTurns)
-		start := totalTurns - maxRecentTurns
-		if start < 0 {
-			start = 0
-		}
-		recentTurns := allTurns[start:]
-
-		b.WriteString("## Recent Session Logs\n\n")
-		if totalTurns > len(recentTurns) {
-			fmt.Fprintf(&b, "There are %d session logs total. Showing the %d most recent:\n\n", totalTurns, len(recentTurns))
-		}
-
-		for i, turn := range recentTurns {
-			isLatest := i == len(recentTurns)-1
-
-			fmt.Fprintf(&b, "### Turn #%d", turn.ID)
-			if !turn.Date.IsZero() {
-				fmt.Fprintf(&b, " (%s", turn.Date.Format("2006-01-02"))
-				if turn.Agent != "" {
-					fmt.Fprintf(&b, ", %s", turn.Agent)
-				}
-				b.WriteString(")")
-			}
-			b.WriteString("\n")
-
-			if isLatest {
-				// Most recent turn: full detail.
-				if turn.Objective != "" {
-					fmt.Fprintf(&b, "- Objective: %s\n", turn.Objective)
-				}
-				if turn.WhatWasBuilt != "" {
-					fmt.Fprintf(&b, "- Built: %s\n", turn.WhatWasBuilt)
-				}
-				if turn.KeyDecisions != "" {
-					fmt.Fprintf(&b, "- Key decisions: %s\n", turn.KeyDecisions)
-				}
-				if turn.Challenges != "" {
-					fmt.Fprintf(&b, "- Challenges: %s\n", turn.Challenges)
-				}
-				if turn.CurrentState != "" {
-					fmt.Fprintf(&b, "- Current state: %s\n", turn.CurrentState)
-				}
-				if turn.KnownIssues != "" {
-					fmt.Fprintf(&b, "- Known issues: %s\n", turn.KnownIssues)
-				}
-				if turn.NextSteps != "" {
-					fmt.Fprintf(&b, "- Next steps: %s\n", turn.NextSteps)
-				}
-				if turn.BuildState != "" {
-					fmt.Fprintf(&b, "- Build state: %s\n", turn.BuildState)
-				}
-			} else {
-				// Older turns: condensed view.
-				if turn.Objective != "" {
-					fmt.Fprintf(&b, "- Objective: %s\n", turn.Objective)
-				}
-				if turn.WhatWasBuilt != "" {
-					fmt.Fprintf(&b, "- Built: %s\n", turn.WhatWasBuilt)
-				}
-			}
-			b.WriteString("\n")
-		}
+		b.WriteString(renderSessionLogs(allTurns))
 	}
 
 	// Issues section.
-	{
-		// Top-level agent: show all open issues.
-		var issues []store.Issue
-		if effectivePlanID != "" {
-			issues, _ = s.ListIssuesForPlan(effectivePlanID)
-		} else {
-			issues, _ = s.ListSharedIssues()
-		}
-		var relevant []store.Issue
-		for _, iss := range issues {
-			if iss.Status == "open" || iss.Status == "in_progress" {
-				relevant = append(relevant, iss)
-			}
-		}
-		if len(relevant) > 0 {
-			b.WriteString("## Open Issues\n")
-			for _, iss := range relevant {
-				fmt.Fprintf(&b, "- #%d [%s] %s: %s\n", iss.ID, iss.Priority, iss.Title, iss.Description)
-			}
-			b.WriteString("\n")
-		}
-	}
+	b.WriteString(renderIssues(s, effectivePlanID))
 
-	// Messages from parent.
-	// Parent communication commands are available whenever this session is a spawned sub-agent.
 	// Loop context.
-	if lc := opts.LoopContext; lc != nil {
-		b.WriteString("# Loop Context\n\n")
-		fmt.Fprintf(&b, "You are running in loop %q, cycle %d, step %d of %d",
-			lc.LoopName, lc.Cycle+1, lc.StepIndex+1, lc.TotalSteps)
-		if opts.Profile != nil {
-			fmt.Fprintf(&b, " (profile %q)", opts.Profile.Name)
-		}
-		b.WriteString(".\n")
+	if opts.LoopContext != nil {
+		b.WriteString(renderLoopContext(opts))
 
-		if lc.InitialPrompt != "" {
-			b.WriteString("\n## General Objective\n\n")
-			b.WriteString(lc.InitialPrompt + "\n")
+		if opts.LoopContext.CanPushover {
+			b.WriteString(renderPushover())
 		}
 
-		if lc.Instructions != "" {
-			b.WriteString("\n" + lc.Instructions + "\n")
-		}
-
-		b.WriteString("\n")
-
-		if lc.CanStop {
-			b.WriteString("You can stop this loop when objectives are met by running: `adaf loop stop`\n\n")
-		}
-		if lc.CanMessage {
-			b.WriteString("You can send a message to subsequent steps by running: `adaf loop message \"your message\"`\n\n")
-		}
-		if lc.CanPushover {
-			b.WriteString("## Pushover Notifications\n\n")
-			b.WriteString("You can send push notifications to the user's device by running:\n")
-			b.WriteString("`adaf loop notify \"<title>\" \"<message>\"` — Send a notification (default priority: normal)\n")
-			b.WriteString("`adaf loop notify --priority 1 \"<title>\" \"<message>\"` — Send a high-priority notification\n\n")
-			b.WriteString("**Character limits:**\n")
-			b.WriteString("- Title: max 250 characters (keep it short and descriptive)\n")
-			b.WriteString("- Message: max 1024 characters (concise summary of what happened)\n\n")
-			b.WriteString("**Priority levels:** -2 (lowest), -1 (low), 0 (normal), 1 (high)\n\n")
-			b.WriteString("**When to use:** Send notifications for significant events like task completion, errors requiring attention, or milestones reached. Do NOT spam — only send when genuinely useful.\n\n")
-		}
-
-		if len(lc.Messages) > 0 {
-			b.WriteString("## Messages from Previous Steps\n\n")
-			for _, msg := range lc.Messages {
-				fmt.Fprintf(&b, "- [step %d, %s]: %s\n", msg.StepIndex, msg.CreatedAt.Format("15:04:05"), msg.Content)
-			}
-			b.WriteString("\n")
+		if len(opts.LoopContext.Messages) > 0 {
+			b.WriteString(renderLoopMessages(opts.LoopContext.Messages))
 		}
 	}
 
@@ -381,36 +369,248 @@ func Build(opts BuildOpts) (string, error) {
 	}
 	b.WriteString(delegationSection(opts.Delegation, opts.GlobalCfg, runningSpawns))
 
-	// Wait results from a previous wait-for-spawns cycle.
-	if len(opts.WaitResults) > 0 {
-		b.WriteString("## Spawn Wait Results\n\n")
-		b.WriteString("The spawns you waited for have completed:\n\n")
-		for _, wr := range opts.WaitResults {
-			b.WriteString(formatWaitResultInfo(wr))
-		}
+	// Wait results and handoffs.
+	b.WriteString(renderWaitResults(opts.WaitResults))
+	b.WriteString(renderHandoffs(opts.Handoffs))
+
+	// Objective.
+	b.WriteString(renderObjective(opts, project, plan, roleCanWrite))
+
+	return b.String(), nil
+}
+
+// resolvePlan resolves the effective plan ID and loads the plan.
+func resolvePlan(opts BuildOpts) (string, *store.Plan) {
+	effectivePlanID := strings.TrimSpace(opts.PlanID)
+	if effectivePlanID == "" && opts.Task == "" && opts.Project != nil {
+		effectivePlanID = strings.TrimSpace(opts.Project.ActivePlanID)
 	}
 
-	// Handoff section.
-	if len(opts.Handoffs) > 0 {
-		b.WriteString("## Inherited Running Agents (Handoff)\n\n")
-		b.WriteString("The previous step handed off these running sub-agents to you:\n\n")
-		for _, h := range opts.Handoffs {
-			fmt.Fprintf(&b, "- Spawn #%d (profile: %s", h.SpawnID, h.Profile)
-			if h.Speed != "" {
-				fmt.Fprintf(&b, ", speed: %s", h.Speed)
+	var plan *store.Plan
+	if effectivePlanID == "" && opts.Task == "" && opts.Store != nil {
+		loaded, _ := opts.Store.LoadPlan()
+		if loaded != nil && loaded.ID != "" {
+			if loaded.Status == "" {
+				loaded.Status = "active"
 			}
-			fmt.Fprintf(&b, ") — Task: %q\n", h.Task)
-			fmt.Fprintf(&b, "  Status: %s", h.Status)
-			if h.Branch != "" {
-				fmt.Fprintf(&b, ", Branch: %s", h.Branch)
+			if loaded.Status == "active" {
+				plan = loaded
+				effectivePlanID = loaded.ID
 			}
-			b.WriteString("\n")
-			fmt.Fprintf(&b, "  Use `adaf spawn-status --spawn-id %d` to check progress.\n\n", h.SpawnID)
 		}
-		b.WriteString("You can manage these exactly like your own spawns (wait, diff, merge, reject).\n\n")
+	}
+	if effectivePlanID != "" && (plan == nil || plan.ID != effectivePlanID) && opts.Store != nil {
+		plan, _ = opts.Store.GetPlan(effectivePlanID)
+		if plan != nil {
+			if plan.Status == "" {
+				plan.Status = "active"
+			}
+			if plan.Status != "active" {
+				plan = nil
+				effectivePlanID = ""
+			}
+		} else {
+			effectivePlanID = ""
+		}
+	}
+	return effectivePlanID, plan
+}
+
+// renderSessionLogs formats recent session logs for the prompt.
+func renderSessionLogs(allTurns []store.Turn) string {
+	var b strings.Builder
+	totalTurns := len(allTurns)
+	start := totalTurns - maxRecentTurns
+	if start < 0 {
+		start = 0
+	}
+	recentTurns := allTurns[start:]
+
+	b.WriteString("## Recent Session Logs\n\n")
+	if totalTurns > len(recentTurns) {
+		fmt.Fprintf(&b, "There are %d session logs total. Showing the %d most recent:\n\n", totalTurns, len(recentTurns))
 	}
 
-	// Objective — placed last so the agent's immediate focus lands here.
+	for i, turn := range recentTurns {
+		isLatest := i == len(recentTurns)-1
+
+		fmt.Fprintf(&b, "### Turn #%d", turn.ID)
+		if !turn.Date.IsZero() {
+			fmt.Fprintf(&b, " (%s", turn.Date.Format("2006-01-02"))
+			if turn.Agent != "" {
+				fmt.Fprintf(&b, ", %s", turn.Agent)
+			}
+			b.WriteString(")")
+		}
+		b.WriteString("\n")
+
+		if isLatest {
+			if turn.Objective != "" {
+				fmt.Fprintf(&b, "- Objective: %s\n", turn.Objective)
+			}
+			if turn.WhatWasBuilt != "" {
+				fmt.Fprintf(&b, "- Built: %s\n", turn.WhatWasBuilt)
+			}
+			if turn.KeyDecisions != "" {
+				fmt.Fprintf(&b, "- Key decisions: %s\n", turn.KeyDecisions)
+			}
+			if turn.Challenges != "" {
+				fmt.Fprintf(&b, "- Challenges: %s\n", turn.Challenges)
+			}
+			if turn.CurrentState != "" {
+				fmt.Fprintf(&b, "- Current state: %s\n", turn.CurrentState)
+			}
+			if turn.KnownIssues != "" {
+				fmt.Fprintf(&b, "- Known issues: %s\n", turn.KnownIssues)
+			}
+			if turn.NextSteps != "" {
+				fmt.Fprintf(&b, "- Next steps: %s\n", turn.NextSteps)
+			}
+			if turn.BuildState != "" {
+				fmt.Fprintf(&b, "- Build state: %s\n", turn.BuildState)
+			}
+		} else {
+			if turn.Objective != "" {
+				fmt.Fprintf(&b, "- Objective: %s\n", turn.Objective)
+			}
+			if turn.WhatWasBuilt != "" {
+				fmt.Fprintf(&b, "- Built: %s\n", turn.WhatWasBuilt)
+			}
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// renderIssues formats the issues section.
+func renderIssues(s *store.Store, effectivePlanID string) string {
+	var issues []store.Issue
+	if effectivePlanID != "" {
+		issues, _ = s.ListIssuesForPlan(effectivePlanID)
+	} else {
+		issues, _ = s.ListSharedIssues()
+	}
+	var relevant []store.Issue
+	for _, iss := range issues {
+		if iss.Status == "open" || iss.Status == "in_progress" {
+			relevant = append(relevant, iss)
+		}
+	}
+	if len(relevant) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Open Issues\n")
+	for _, iss := range relevant {
+		fmt.Fprintf(&b, "- #%d [%s] %s: %s\n", iss.ID, iss.Priority, iss.Title, iss.Description)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// renderLoopContext formats the loop context section.
+func renderLoopContext(opts BuildOpts) string {
+	lc := opts.LoopContext
+	if lc == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("# Loop Context\n\n")
+	fmt.Fprintf(&b, "You are running in loop %q, cycle %d, step %d of %d",
+		lc.LoopName, lc.Cycle+1, lc.StepIndex+1, lc.TotalSteps)
+	if opts.Profile != nil {
+		fmt.Fprintf(&b, " (profile %q)", opts.Profile.Name)
+	}
+	b.WriteString(".\n")
+
+	if lc.InitialPrompt != "" {
+		b.WriteString("\n## General Objective\n\n")
+		b.WriteString(lc.InitialPrompt + "\n")
+	}
+
+	if lc.Instructions != "" {
+		b.WriteString("\n" + lc.Instructions + "\n")
+	}
+
+	b.WriteString("\n")
+
+	if lc.CanStop {
+		b.WriteString("You can stop this loop when objectives are met by running: `adaf loop stop`\n\n")
+	}
+	if lc.CanMessage {
+		b.WriteString("You can send a message to subsequent steps by running: `adaf loop message \"your message\"`\n\n")
+	}
+	return b.String()
+}
+
+// renderPushover formats the pushover notifications section.
+func renderPushover() string {
+	var b strings.Builder
+	b.WriteString("## Pushover Notifications\n\n")
+	b.WriteString("You can send push notifications to the user's device by running:\n")
+	b.WriteString("`adaf loop notify \"<title>\" \"<message>\"` — Send a notification (default priority: normal)\n")
+	b.WriteString("`adaf loop notify --priority 1 \"<title>\" \"<message>\"` — Send a high-priority notification\n\n")
+	b.WriteString("**Character limits:**\n")
+	b.WriteString("- Title: max 250 characters (keep it short and descriptive)\n")
+	b.WriteString("- Message: max 1024 characters (concise summary of what happened)\n\n")
+	b.WriteString("**Priority levels:** -2 (lowest), -1 (low), 0 (normal), 1 (high)\n\n")
+	b.WriteString("**When to use:** Send notifications for significant events like task completion, errors requiring attention, or milestones reached. Do NOT spam — only send when genuinely useful.\n\n")
+	return b.String()
+}
+
+// renderLoopMessages formats loop messages from previous steps.
+func renderLoopMessages(messages []store.LoopMessage) string {
+	var b strings.Builder
+	b.WriteString("## Messages from Previous Steps\n\n")
+	for _, msg := range messages {
+		fmt.Fprintf(&b, "- [step %d, %s]: %s\n", msg.StepIndex, msg.CreatedAt.Format("15:04:05"), msg.Content)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// renderWaitResults formats wait-for-spawns results.
+func renderWaitResults(results []WaitResultInfo) string {
+	if len(results) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Spawn Wait Results\n\n")
+	b.WriteString("The spawns you waited for have completed:\n\n")
+	for _, wr := range results {
+		b.WriteString(formatWaitResultInfo(wr))
+	}
+	return b.String()
+}
+
+// renderHandoffs formats the handoff section.
+func renderHandoffs(handoffs []store.HandoffInfo) string {
+	if len(handoffs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Inherited Running Agents (Handoff)\n\n")
+	b.WriteString("The previous step handed off these running sub-agents to you:\n\n")
+	for _, h := range handoffs {
+		fmt.Fprintf(&b, "- Spawn #%d (profile: %s", h.SpawnID, h.Profile)
+		if h.Speed != "" {
+			fmt.Fprintf(&b, ", speed: %s", h.Speed)
+		}
+		fmt.Fprintf(&b, ") — Task: %q\n", h.Task)
+		fmt.Fprintf(&b, "  Status: %s", h.Status)
+		if h.Branch != "" {
+			fmt.Fprintf(&b, ", Branch: %s", h.Branch)
+		}
+		b.WriteString("\n")
+		fmt.Fprintf(&b, "  Use `adaf spawn-status --spawn-id %d` to check progress.\n\n", h.SpawnID)
+	}
+	b.WriteString("You can manage these exactly like your own spawns (wait, diff, merge, reject).\n\n")
+	return b.String()
+}
+
+// renderObjective formats the objective section.
+func renderObjective(opts BuildOpts, project *store.ProjectConfig, plan *store.Plan, roleCanWrite bool) string {
+	var b strings.Builder
 	b.WriteString("# Objective\n\n")
 	b.WriteString("Project: " + project.Name + "\n\n")
 	if plan != nil {
@@ -450,7 +650,6 @@ func Build(opts BuildOpts) (string, error) {
 			b.WriteString("No plan is set. Explore the codebase and address any open issues.\n\n")
 		}
 
-		// Neighboring phases.
 		if currentPhase != nil && plan != nil && len(plan.Phases) > 1 {
 			b.WriteString("## Neighboring Phases\n")
 			for i, p := range plan.Phases {
@@ -470,8 +669,7 @@ func Build(opts BuildOpts) (string, error) {
 			b.WriteString("\n")
 		}
 	}
-
-	return b.String(), nil
+	return b.String()
 }
 
 // formatWaitResultInfo formats a single WaitResultInfo for the prompt.

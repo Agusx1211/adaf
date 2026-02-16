@@ -64,6 +64,7 @@ func init() {
 	askCmd.Flags().Int("count", 1, "Number of sequential runs (default 1)")
 	askCmd.Flags().Bool("chain", false, "When --count > 1, include previous run's output as context")
 	askCmd.Flags().BoolP("session", "s", false, "Start detached (use 'adaf attach' to connect)")
+	askCmd.Flags().StringSlice("skills", nil, "Skill IDs to activate (e.g. autonomy,code_writing,commit)")
 	rootCmd.AddCommand(askCmd)
 }
 
@@ -85,6 +86,7 @@ func runAsk(cmd *cobra.Command, args []string) error {
 	}
 	chain, _ := cmd.Flags().GetBool("chain")
 	sessionMode, _ := cmd.Flags().GetBool("session")
+	skills, _ := cmd.Flags().GetStringSlice("skills")
 
 	s, err := openStoreRequired()
 	if err != nil {
@@ -151,7 +153,7 @@ func runAsk(cmd *cobra.Command, args []string) error {
 			iterPrompt += "\n\n## Previous Run Output\n\n" + lastOutput + "\n"
 		}
 
-		loopDef, maxCycles := buildAskLoopDefinition(prof.Name, iterPrompt)
+		loopDef, maxCycles := buildAskLoopDefinition(prof.Name, iterPrompt, skills)
 
 		// Attach team to the loop step so the runner can resolve delegation.
 		if teamName != "" && len(loopDef.Steps) > 0 {
@@ -300,7 +302,7 @@ func buildAskPrompt(s *store.Store, projCfg *store.ProjectConfig, planID, userPr
 }
 
 // buildAskLoopDefinition creates a minimal 1-step loop for standalone execution.
-func buildAskLoopDefinition(profileName, prompt string) (config.LoopDef, int) {
+func buildAskLoopDefinition(profileName, prompt string, skills []string) (config.LoopDef, int) {
 	return config.LoopDef{
 		Name: "ask",
 		Steps: []config.LoopStep{
@@ -308,6 +310,7 @@ func buildAskLoopDefinition(profileName, prompt string) (config.LoopDef, int) {
 				Profile:      profileName,
 				Turns:        1,
 				Instructions: prompt,
+				Skills:       skills,
 			},
 		},
 	}, 1 // maxCycles = 1 (single run)

@@ -41,6 +41,7 @@ type SpawnRequest struct {
 	ChildMaxInstances int
 	ChildSpeed        string
 	ChildHandoff      bool
+	ChildSkills       []string
 }
 
 // SpawnResult is the outcome of a completed spawn.
@@ -340,6 +341,9 @@ func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error)
 	if resolved.MaxInstances > 0 {
 		req.ChildMaxInstances = resolved.MaxInstances
 	}
+	if len(resolved.Skills) > 0 {
+		req.ChildSkills = append([]string(nil), resolved.Skills...)
+	}
 	if resolved.Delegation != nil {
 		req.ChildDelegation = resolved.Delegation.Clone()
 	} else {
@@ -501,6 +505,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 		ReadOnly:     req.ReadOnly,
 		ParentTurnID: req.ParentTurnID,
 		Delegation:   req.ChildDelegation,
+		Skills:       req.ChildSkills,
 	})
 
 	workDir := o.repoRoot
@@ -697,6 +702,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 					ReadOnly:     req.ReadOnly,
 					ParentTurnID: req.ParentTurnID,
 					Delegation:   req.ChildDelegation,
+					Skills:       req.ChildSkills,
 				})
 				return newPrompt
 			},

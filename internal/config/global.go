@@ -26,15 +26,16 @@ type Profile struct {
 
 // LoopStep defines one step in a loop cycle.
 type LoopStep struct {
-	Profile        string `json:"profile"`                   // profile name reference
-	Role           string `json:"role,omitempty"`            // role name from global roles catalog
-	Turns          int    `json:"turns,omitempty"`           // turns per step (0 = 1 turn)
-	Instructions   string `json:"instructions,omitempty"`    // custom instructions appended to prompt
-	CanStop        bool   `json:"can_stop,omitempty"`        // can this step signal loop stop?
-	CanMessage     bool   `json:"can_message,omitempty"`     // can this step send messages to subsequent steps?
-	CanPushover    bool   `json:"can_pushover,omitempty"`    // can this step send Pushover notifications?
-	Team           string `json:"team,omitempty"`            // team name reference (resolved to delegation at runtime)
-	StandaloneChat bool   `json:"standalone_chat,omitempty"` // interactive chat mode (minimal prompt)
+	Profile        string   `json:"profile"`                   // profile name reference
+	Role           string   `json:"role,omitempty"`            // role name from global roles catalog
+	Turns          int      `json:"turns,omitempty"`           // turns per step (0 = 1 turn)
+	Instructions   string   `json:"instructions,omitempty"`    // custom instructions appended to prompt
+	CanStop        bool     `json:"can_stop,omitempty"`        // can this step signal loop stop?
+	CanMessage     bool     `json:"can_message,omitempty"`     // can this step send messages to subsequent steps?
+	CanPushover    bool     `json:"can_pushover,omitempty"`    // can this step send Pushover notifications?
+	Team           string   `json:"team,omitempty"`            // team name reference (resolved to delegation at runtime)
+	StandaloneChat bool     `json:"standalone_chat,omitempty"` // interactive chat mode (minimal prompt)
+	Skills         []string `json:"skills,omitempty"`          // skill IDs to activate for this step
 }
 
 // LoopDef defines a loop as a cyclic template of profile steps.
@@ -74,6 +75,7 @@ type GlobalConfig struct {
 	PromptRules        []PromptRule                 `json:"prompt_rules,omitempty"`
 	Roles              []RoleDefinition             `json:"roles,omitempty"`
 	DefaultRole        string                       `json:"default_role,omitempty"`
+	Skills             []Skill                      `json:"skills,omitempty"`
 }
 
 // GlobalAgentConfig holds per-agent overrides at the global (user) level.
@@ -105,6 +107,7 @@ func Load() (*GlobalConfig, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			cfg := &GlobalConfig{Agents: make(map[string]GlobalAgentConfig)}
 			EnsureDefaultRoleCatalog(cfg)
+			EnsureDefaultSkillCatalog(cfg)
 			return cfg, nil
 		}
 		return nil, err
@@ -118,6 +121,7 @@ func Load() (*GlobalConfig, error) {
 		cfg.Agents = make(map[string]GlobalAgentConfig)
 	}
 	EnsureDefaultRoleCatalog(&cfg)
+	EnsureDefaultSkillCatalog(&cfg)
 	return &cfg, nil
 }
 
@@ -130,6 +134,7 @@ func Save(cfg *GlobalConfig) error {
 		cfg.Agents = make(map[string]GlobalAgentConfig)
 	}
 	EnsureDefaultRoleCatalog(cfg)
+	EnsureDefaultSkillCatalog(cfg)
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -260,4 +265,53 @@ func (c *GlobalConfig) RecordRecentCombination(profile, team string) {
 	sort.Slice(out, func(i, j int) bool { return out[i].UsedAt.After(out[j].UsedAt) })
 
 	c.RecentCombinations = out
+}
+
+// FindSkill returns a pointer to a skill by ID, or nil if not found.
+func (c *GlobalConfig) FindSkill(id string) *Skill {
+	if c == nil {
+		return nil
+	}
+	EnsureDefaultSkillCatalog(c)
+	key := normalizeSkillID(id)
+	for i := range c.Skills {
+		if normalizeSkillID(c.Skills[i].ID) == key {
+			return &c.Skills[i]
+		}
+	}
+	return nil
+}
+
+// AddSkill appends a skill. Returns an error if the ID already exists.
+func (c *GlobalConfig) AddSkill(sk Skill) error {
+	if c == nil {
+		return errors.New("global config is nil")
+	}
+	EnsureDefaultSkillCatalog(c)
+	id := normalizeSkillID(sk.ID)
+	if id == "" {
+		return errors.New("skill id cannot be empty")
+	}
+	if c.FindSkill(id) != nil {
+		return errors.New("skill already exists: " + id)
+	}
+	sk.ID = id
+	c.Skills = append(c.Skills, sk)
+	return nil
+}
+
+// RemoveSkill removes a skill by ID (case-insensitive).
+func (c *GlobalConfig) RemoveSkill(id string) {
+	if c == nil {
+		return
+	}
+	EnsureDefaultSkillCatalog(c)
+	key := normalizeSkillID(id)
+	out := c.Skills[:0]
+	for _, sk := range c.Skills {
+		if normalizeSkillID(sk.ID) != key {
+			out = append(out, sk)
+		}
+	}
+	c.Skills = out
 }

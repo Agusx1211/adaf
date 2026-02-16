@@ -53,6 +53,7 @@ export default function ConfigDetailPanel() {
   var [data, setData] = useState(null);
   var [profiles, setProfiles] = useState([]);
   var [teams, setTeams] = useState([]);
+  var [skills, setSkills] = useState([]);
   var [agentsMeta, setAgentsMeta] = useState(null);
   var [saving, setSaving] = useState(false);
 
@@ -74,12 +75,17 @@ export default function ConfigDetailPanel() {
     try { teamsList = (await apiCall('/api/config/teams', 'GET', null, { allow404: true })) || []; } catch (_) {}
     setTeams(teamsList);
 
+    var skillsList = [];
+    try { skillsList = (await apiCall('/api/config/skills', 'GET', null, { allow404: true })) || []; } catch (_) {}
+    setSkills(skillsList);
+
     if (!sel) { setData(null); return; }
 
     if (sel.isNew) {
       if (sel.type === 'profile') setData({ name: '', agent: 'claude', model: '', reasoning_level: '', description: '', intelligence: 0, max_instances: 0, speed: '' });
       else if (sel.type === 'loop') setData({ name: '', steps: [emptyStep()] });
       else if (sel.type === 'team') setData({ name: '', description: '', delegation: null });
+      else if (sel.type === 'skill') setData({ id: '', short: '', long: '' });
       return;
     }
 
@@ -95,6 +101,9 @@ export default function ConfigDetailPanel() {
       } else if (sel.type === 'team') {
         var t = teamsList.find(function (t) { return t.name === sel.name; });
         setData(t ? deepCopy(t) : null);
+      } else if (sel.type === 'skill') {
+        var sk = skillsList.find(function (s) { return s.id === sel.name; });
+        setData(sk ? deepCopy(sk) : null);
       }
     } catch (err) {
       if (!err.authRequired) console.error('Config load error:', err);
@@ -108,7 +117,7 @@ export default function ConfigDetailPanel() {
       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)' }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, marginBottom: 8 }}>Select a config item</div>
-          <div style={{ fontSize: 11, opacity: 0.6 }}>Choose a profile, loop, or team from the left panel</div>
+          <div style={{ fontSize: 11, opacity: 0.6 }}>Choose a profile, loop, team, or skill from the left panel</div>
         </div>
       </div>
     );
@@ -152,10 +161,18 @@ export default function ConfigDetailPanel() {
         } else {
           await apiCall('/api/config/teams/' + encodeURIComponent(data.name), 'PUT', tOut);
         }
+      } else if (sel.type === 'skill') {
+        var skOut = { id: data.id, short: data.short || '' };
+        if (data.long) skOut.long = data.long;
+        if (sel.isNew) {
+          await apiCall('/api/config/skills', 'POST', skOut);
+        } else {
+          await apiCall('/api/config/skills/' + encodeURIComponent(data.id), 'PUT', skOut);
+        }
       }
       showToast('Saved', 'success');
       if (sel.isNew) {
-        dispatch({ type: 'SET_CONFIG_SELECTION', payload: { type: sel.type, name: data.name } });
+        dispatch({ type: 'SET_CONFIG_SELECTION', payload: { type: sel.type, name: sel.type === 'skill' ? data.id : data.name } });
       }
       if (window.__configReload) window.__configReload();
     } catch (err) {
@@ -167,12 +184,14 @@ export default function ConfigDetailPanel() {
   }
 
   async function handleDelete() {
-    if (!window.confirm('Delete "' + data.name + '"?')) return;
+    var itemName = sel.type === 'skill' ? data.id : data.name;
+    if (!window.confirm('Delete "' + itemName + '"?')) return;
     try {
       var endpoint = sel.type === 'profile' ? '/api/config/profiles/' :
         sel.type === 'loop' ? '/api/config/loops/' :
+        sel.type === 'skill' ? '/api/config/skills/' :
         '/api/config/teams/';
-      await apiCall(endpoint + encodeURIComponent(data.name), 'DELETE');
+      await apiCall(endpoint + encodeURIComponent(itemName), 'DELETE');
       showToast('Deleted', 'success');
       dispatch({ type: 'SET_CONFIG_SELECTION', payload: null });
       if (window.__configReload) window.__configReload();
@@ -186,7 +205,8 @@ export default function ConfigDetailPanel() {
     setData(function (prev) { return { ...prev, [key]: val }; });
   }
 
-  var typeLabel = sel.type === 'profile' ? 'Profile' : sel.type === 'loop' ? 'Loop' : 'Team';
+  var typeLabel = sel.type === 'profile' ? 'Profile' : sel.type === 'loop' ? 'Loop' : sel.type === 'skill' ? 'Skill' : 'Team';
+  var typeColor = sel.type === 'team' ? 'var(--green)' : sel.type === 'skill' ? 'var(--pink)' : 'var(--accent)';
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -200,12 +220,12 @@ export default function ConfigDetailPanel() {
           <span style={{
             fontFamily: "'JetBrains Mono', monospace", fontSize: 9, padding: '2px 6px',
             borderRadius: 3,
-            background: sel.type === 'team' ? 'var(--green)15' : 'var(--accent)15',
-            color: sel.type === 'team' ? 'var(--green)' : 'var(--accent)',
+            background: typeColor + '15',
+            color: typeColor,
             textTransform: 'uppercase', fontWeight: 600,
           }}>{typeLabel}</span>
           <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>
-            {sel.isNew ? 'New ' + typeLabel : data.name}
+            {sel.isNew ? 'New ' + typeLabel : (sel.type === 'skill' ? data.id : data.name)}
           </span>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -219,8 +239,9 @@ export default function ConfigDetailPanel() {
       {/* Body */}
       <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px' }}>
         {sel.type === 'profile' && <ProfileEditor data={data} set={set} setData={setData} isNew={sel.isNew} agentsMeta={agentsMeta} onRefreshAgents={fetchAgentsMeta} showToast={showToast} />}
-        {sel.type === 'loop' && <LoopEditor data={data} setData={setData} profiles={profiles} teams={teams} isNew={sel.isNew} />}
-        {sel.type === 'team' && <TeamEditor data={data} set={set} setData={setData} profiles={profiles} isNew={sel.isNew} />}
+        {sel.type === 'loop' && <LoopEditor data={data} setData={setData} profiles={profiles} teams={teams} skills={skills} isNew={sel.isNew} />}
+        {sel.type === 'team' && <TeamEditor data={data} set={set} setData={setData} profiles={profiles} skills={skills} isNew={sel.isNew} />}
+        {sel.type === 'skill' && <SkillEditor data={data} set={set} isNew={sel.isNew} />}
       </div>
     </div>
   );
@@ -311,9 +332,27 @@ function ProfileEditor({ data, set, setData, isNew, agentsMeta, onRefreshAgents,
   );
 }
 
+// ── Skill Editor ──
+
+function SkillEditor({ data, set, isNew }) {
+  return (
+    <div style={{ maxWidth: 700, display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Field label="Skill ID" value={data.id} onChange={function (v) { set('id', v); }} disabled={!isNew} placeholder="my_skill" />
+      <div>
+        <label style={labelStyle}>Short (embedded in prompt)</label>
+        <textarea value={data.short || ''} onChange={function (e) { set('short', e.target.value); }} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} placeholder="Concise instruction (1-4 sentences) for prompt embedding..." />
+      </div>
+      <div>
+        <label style={labelStyle}>Long (full documentation, shown via `adaf skill`)</label>
+        <textarea value={data.long || ''} onChange={function (e) { set('long', e.target.value); }} style={{ ...inputStyle, minHeight: 200, resize: 'vertical' }} placeholder="Full documentation in Markdown..." />
+      </div>
+    </div>
+  );
+}
+
 // ── Loop Editor ──
 
-function LoopEditor({ data, setData, profiles, teams, isNew }) {
+function LoopEditor({ data, setData, profiles, teams, skills, isNew }) {
   function setName(val) {
     setData(function (prev) { return { ...prev, name: val }; });
   }
@@ -389,6 +428,13 @@ function LoopEditor({ data, setData, profiles, teams, isNew }) {
                 </select>
               </div>
 
+              {/* Skills picker */}
+              <SkillsPicker
+                selected={step.skills || []}
+                available={skills}
+                onChange={function (v) { setStep(idx, 'skills', v); }}
+              />
+
               <div>
                 <label style={labelStyle}>Instructions (optional)</label>
                 <textarea value={step.instructions || ''} onChange={function (e) { setStep(idx, 'instructions', e.target.value); }} style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} placeholder="Step-specific instructions" />
@@ -410,7 +456,7 @@ function LoopEditor({ data, setData, profiles, teams, isNew }) {
 
 // ── Team Editor ──
 
-function TeamEditor({ data, set, setData, profiles, isNew }) {
+function TeamEditor({ data, set, setData, profiles, skills, isNew }) {
   function setDelegation(deleg) {
     setData(function (prev) { return { ...prev, delegation: deleg }; });
   }
@@ -428,6 +474,7 @@ function TeamEditor({ data, set, setData, profiles, isNew }) {
         delegation={data.delegation}
         onChange={setDelegation}
         profiles={profiles}
+        skills={skills}
         label="Team Sub-Agent Delegation"
       />
     </div>
@@ -436,7 +483,7 @@ function TeamEditor({ data, set, setData, profiles, isNew }) {
 
 // ── Delegation Editor (reusable) ──
 
-function DelegationEditor({ delegation, onChange, profiles, label }) {
+function DelegationEditor({ delegation, onChange, profiles, skills, label }) {
   var hasDeleg = delegation && delegation.profiles && delegation.profiles.length > 0;
   var [expanded, setExpanded] = useState(hasDeleg);
 
@@ -540,8 +587,17 @@ function DelegationEditor({ delegation, onChange, profiles, label }) {
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <div style={{ flex: 1 }}>
-                      <label style={labelStyle}>Role</label>
-                      <select value={dp.role || ''} onChange={function (e) { setProfile(idx, 'role', e.target.value); }} style={selectStyle}>
+                      <label style={labelStyle}>Roles</label>
+                      <select
+                        multiple
+                        value={Array.isArray(dp.roles) && dp.roles.length ? dp.roles : (dp.role ? [dp.role] : [])}
+                        onChange={function (e) {
+                          var roles = Array.prototype.slice.call(e.target.selectedOptions).map(function (o) { return o.value; }).filter(function (v) { return v !== ''; });
+                          setProfile(idx, 'roles', roles);
+                          setProfile(idx, 'role', '');
+                        }}
+                        style={selectStyle}
+                      >
                         <option value="">Default (developer)</option>
                         {ROLES.map(function (r) { return <option key={r} value={r}>{r}</option>; })}
                       </select>
@@ -564,11 +620,19 @@ function DelegationEditor({ delegation, onChange, profiles, label }) {
                     </div>
                   </div>
 
+                  {/* Skills picker for sub-agent */}
+                  <SkillsPicker
+                    selected={dp.skills || []}
+                    available={skills || []}
+                    onChange={function (v) { setProfile(idx, 'skills', v); }}
+                  />
+
                   {/* Nested delegation for this sub-agent */}
                   <DelegationEditor
                     delegation={dp.delegation}
                     onChange={function (d) { setProfileDelegation(idx, d); }}
                     profiles={profiles}
+                    skills={skills}
                     label={'Sub-Agent ' + (idx + 1) + ' Child Delegation'}
                   />
                 </div>
@@ -577,6 +641,102 @@ function DelegationEditor({ delegation, onChange, profiles, label }) {
           })}
 
           <button onClick={addProfile} style={{ ...btnStyle, fontSize: 10, alignSelf: 'flex-start' }}>+ Add Sub-Agent</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Skills Picker (reusable multi-select) ──
+
+function SkillsPicker({ selected, available, onChange }) {
+  var [isOpen, setIsOpen] = useState(false);
+  var selectedSet = {};
+  (selected || []).forEach(function (id) { selectedSet[id] = true; });
+
+  function toggle(id) {
+    if (selectedSet[id]) {
+      onChange((selected || []).filter(function (s) { return s !== id; }));
+    } else {
+      onChange((selected || []).concat([id]));
+    }
+  }
+
+  function selectAll() {
+    onChange((available || []).map(function (s) { return s.id; }));
+  }
+
+  function clearAll() {
+    onChange([]);
+  }
+
+  var count = (selected || []).length;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+        <label style={{ ...labelStyle, marginBottom: 0 }}>Skills ({count} selected)</label>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {count > 0 && (
+            <button type="button" onClick={clearAll} style={{ ...btnStyle, fontSize: 9, padding: '1px 6px', color: 'var(--text-3)' }}>Clear</button>
+          )}
+          <button type="button" onClick={function () { setIsOpen(!isOpen); }} style={{ ...btnStyle, fontSize: 9, padding: '1px 6px' }}>
+            {isOpen ? 'Close' : 'Edit'}
+          </button>
+        </div>
+      </div>
+
+      {/* Compact display of selected skills */}
+      {count > 0 && !isOpen && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          {(selected || []).map(function (id) {
+            return (
+              <span key={id} style={{
+                padding: '2px 6px', borderRadius: 3, fontSize: 9,
+                fontFamily: "'JetBrains Mono', monospace",
+                background: 'var(--pink)15', color: 'var(--pink)',
+                border: '1px solid var(--pink)30',
+              }}>{id}</span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Expanded picker */}
+      {isOpen && (
+        <div style={{
+          border: '1px solid var(--border)', borderRadius: 4, background: 'var(--bg-2)',
+          padding: 8, maxHeight: 200, overflow: 'auto',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+            <button type="button" onClick={selectAll} style={{ ...btnStyle, fontSize: 9, padding: '1px 6px', color: 'var(--text-3)' }}>Select All</button>
+          </div>
+          {(available || []).map(function (sk) {
+            var isChecked = !!selectedSet[sk.id];
+            var shortText = sk.short || '';
+            if (shortText.length > 80) shortText = shortText.slice(0, 80) + '\u2026';
+            return (
+              <label key={sk.id} style={{
+                display: 'flex', alignItems: 'flex-start', gap: 6, padding: '3px 0',
+                cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+                color: isChecked ? 'var(--text-0)' : 'var(--text-2)',
+              }}>
+                <input type="checkbox" checked={isChecked} onChange={function () { toggle(sk.id); }}
+                  style={{ marginTop: 2, flexShrink: 0 }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: isChecked ? 600 : 400 }}>{sk.id}</div>
+                  <div style={{ fontSize: 9, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {shortText}
+                  </div>
+                </div>
+              </label>
+            );
+          })}
+          {(available || []).length === 0 && (
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', textAlign: 'center', padding: 8 }}>
+              No skills available
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -616,11 +776,11 @@ function Checkbox({ label, checked, onChange }) {
 // ── Helpers ──
 
 function emptyStep() {
-  return { profile: '', role: '', turns: 1, instructions: '', can_stop: false, can_message: false, can_pushover: false, team: '' };
+  return { profile: '', role: '', turns: 1, instructions: '', can_stop: false, can_message: false, can_pushover: false, team: '', skills: [] };
 }
 
 function emptyDelegationProfile() {
-  return { name: '', role: '', max_instances: 0, speed: '', handoff: false, delegation: null };
+  return { name: '', role: '', roles: [], max_instances: 0, speed: '', handoff: false, delegation: null, skills: [] };
 }
 
 function cleanStep(s) {
@@ -632,6 +792,7 @@ function cleanStep(s) {
   if (s.can_message) out.can_message = true;
   if (s.can_pushover) out.can_pushover = true;
   if (s.team) out.team = s.team;
+  if (s.skills && s.skills.length > 0) out.skills = s.skills;
   return out;
 }
 
@@ -643,10 +804,15 @@ function cleanDelegation(d) {
   else if (d.style) out.style = d.style;
   out.profiles = (d.profiles || []).map(function (p) {
     var dp = { name: p.name };
-    if (p.role) dp.role = p.role;
+    if (Array.isArray(p.roles) && p.roles.length) {
+      dp.roles = p.roles.filter(function (r) { return r; });
+    } else if (p.role) {
+      dp.role = p.role;
+    }
     if (p.max_instances) dp.max_instances = Number(p.max_instances);
     if (p.speed) dp.speed = p.speed;
     if (p.handoff) dp.handoff = true;
+    if (p.skills && p.skills.length > 0) dp.skills = p.skills;
     if (p.delegation && p.delegation.profiles && p.delegation.profiles.length > 0) {
       dp.delegation = cleanDelegation(p.delegation);
     }

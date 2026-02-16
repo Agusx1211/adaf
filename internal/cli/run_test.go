@@ -35,7 +35,7 @@ func TestRunTurnConfig(t *testing.T) {
 }
 
 func TestBuildRunLoopDefinition(t *testing.T) {
-	loopDef, maxCycles := buildRunLoopDefinition("codex", "run:codex", "fix bug", 4, nil)
+	loopDef, maxCycles := buildRunLoopDefinition("codex", "run:codex", "fix bug", 4, nil, nil)
 	if maxCycles != 1 {
 		t.Fatalf("maxCycles = %d, want 1", maxCycles)
 	}

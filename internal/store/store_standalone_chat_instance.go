@@ -79,7 +79,7 @@ func (s *Store) GetChatInstance(id string) (*StandaloneChatInstance, error) {
 }
 
 // CreateChatInstance creates a new chat instance for a profile+team combination.
-func (s *Store) CreateChatInstance(profile, team string) (*StandaloneChatInstance, error) {
+func (s *Store) CreateChatInstance(profile, team string, skills []string) (*StandaloneChatInstance, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -94,6 +94,7 @@ func (s *Store) CreateChatInstance(profile, team string) (*StandaloneChatInstanc
 		ID:        id,
 		Profile:   profile,
 		Team:      team,
+		Skills:    skills,
 		Title:     "New Chat",
 		CreatedAt: now,
 		UpdatedAt: now,
