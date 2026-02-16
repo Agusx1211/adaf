@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { apiCall, apiBase } from './client.js';
 import { useAppState, useDispatch, normalizeSessions, normalizeSpawns, normalizeIssues, normalizeDocs, normalizePlans, normalizePlan, normalizeTurns, normalizeLoopMessages, pickActiveLoopRun, normalizeAllLoopRuns, aggregateUsageFromProfileStats } from '../state/store.js';
 import { arrayOrEmpty, normalizeStatus, parseTimestamp } from '../utils/format.js';
+import { readProjectIDFromURL, persistProjectSelection } from '../utils/projectLink.js';
 
 var POLL_MS = 5000;
 var USAGE_POLL_MS = 60000;
@@ -186,15 +187,22 @@ export function useInitProjects() {
         var list = arrayOrEmpty(projects);
         dispatch({ type: 'SET_PROJECTS', payload: list });
 
+        var urlID = readProjectIDFromURL();
         var savedID = '';
         try { savedID = localStorage.getItem('adaf_project_id') || ''; } catch (_) {}
 
-        if (savedID && list.find(function (p) { return p && String(p.id || '') === savedID; })) {
-          dispatch({ type: 'SET_PROJECT_ID', payload: savedID });
+        var nextProjectID = '';
+        if (urlID && list.find(function (p) { return p && String(p.id || '') === urlID; })) {
+          nextProjectID = urlID;
+        } else if (savedID && list.find(function (p) { return p && String(p.id || '') === savedID; })) {
+          nextProjectID = savedID;
         } else {
           var defaultProject = list.find(function (p) { return !!(p && p.is_default); }) || list[0] || null;
-          dispatch({ type: 'SET_PROJECT_ID', payload: defaultProject && defaultProject.id ? String(defaultProject.id) : '' });
+          nextProjectID = defaultProject && defaultProject.id ? String(defaultProject.id) : '';
         }
+
+        dispatch({ type: 'SET_PROJECT_ID', payload: nextProjectID });
+        persistProjectSelection(nextProjectID);
       })
       .catch(function (err) {
         if (err && err.authRequired) {

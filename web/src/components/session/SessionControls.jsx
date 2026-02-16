@@ -3,6 +3,7 @@ import { apiCall, apiBase } from '../../api/client.js';
 import { useAppState, useDispatch, normalizePlans } from '../../state/store.js';
 import { normalizeStatus, arrayOrEmpty, withAlpha } from '../../utils/format.js';
 import { STATUS_RUNNING, statusColor } from '../../utils/colors.js';
+import { persistProjectSelection } from '../../utils/projectLink.js';
 import Modal from '../common/Modal.jsx';
 import { useToast } from '../common/Toast.jsx';
 
@@ -82,7 +83,7 @@ function NewSessionModal({ onClose }) {
         if (selectedProject !== state.currentProjectID) {
           dispatch({ type: 'SET_PROJECT_ID', payload: selectedProject });
           dispatch({ type: 'RESET_PROJECT_STATE' });
-          try { localStorage.setItem('adaf_project_id', selectedProject); } catch (_) {}
+          persistProjectSelection(selectedProject);
         }
         dispatch({ type: 'SET_SELECTED_SCOPE', payload: 'session-' + sessionID });
       }

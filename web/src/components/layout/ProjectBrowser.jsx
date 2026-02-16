@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useDispatch } from '../../state/store.js';
 import { apiFSBrowse, apiFSMkdir, apiProjectInit, apiProjectOpen } from '../../api/client.js';
+import { persistProjectSelection } from '../../utils/projectLink.js';
 import Modal from '../common/Modal.jsx';
 
 export default function ProjectBrowser({ onClose }) {
@@ -77,9 +78,10 @@ export default function ProjectBrowser({ onClose }) {
     apiProjectOpen(openPath)
       .then(function (data) {
         if (data && data.id) {
-          dispatch({ type: 'SET_PROJECT_ID', payload: data.id });
+          var nextProjectID = String(data.id);
+          dispatch({ type: 'SET_PROJECT_ID', payload: nextProjectID });
           dispatch({ type: 'RESET_PROJECT_STATE' });
-          try { localStorage.setItem('adaf_project_id', data.id); } catch (_) {}
+          persistProjectSelection(nextProjectID);
           onClose();
         }
       })
