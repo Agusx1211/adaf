@@ -60,14 +60,11 @@ export default function ChatMessageList({
           var hasInspectData = !isUser && (msg._prompt || (msgEvents && msgEvents.length > 0));
           return (
             <div key={msg.id} style={{ marginBottom: 4 }}>
-              <div
-                onClick={function () { if (hasInspectData) setInspectedMessage(msg); }}
-                style={{
-                  padding: '6px 10px', borderRadius: 2,
-                  background: isUser ? 'var(--bg-2)' : 'transparent',
-                  borderLeft: isUser ? '2px solid var(--accent)' : '2px solid var(--green)40',
-                  cursor: hasInspectData ? 'pointer' : 'default',
-                }}>
+              <div style={{
+                padding: '6px 10px', borderRadius: 2,
+                background: isUser ? 'var(--bg-2)' : 'transparent',
+                borderLeft: isUser ? '2px solid var(--accent)' : '2px solid var(--green)40',
+              }}>
                 <div style={{
                   fontSize: 9, fontWeight: 600,
                   color: isUser ? 'var(--accent)' : 'var(--green)',
@@ -80,9 +77,25 @@ export default function ChatMessageList({
                     {timeAgo(msg.created_at)}
                   </span>
                   {hasInspectData && (
-                    <span style={{ fontWeight: 400, color: 'var(--text-3)', textTransform: 'none', letterSpacing: 'normal', marginLeft: 'auto', fontSize: 8, opacity: 0.5 }}>
+                    <button
+                      onClick={function (e) { e.stopPropagation(); setInspectedMessage(msg); }}
+                      style={{
+                        marginLeft: 'auto',
+                        background: 'none',
+                        border: '1px solid var(--border)',
+                        borderRadius: 3,
+                        padding: '2px 6px',
+                        fontSize: 9,
+                        color: 'var(--text-3)',
+                        cursor: 'pointer',
+                        fontFamily: "'JetBrains Mono', monospace",
+                        textTransform: 'none',
+                        letterSpacing: 'normal',
+                      }}
+                      title="View prompt and events"
+                    >
                       inspect
-                    </span>
+                    </button>
                   )}
                 </div>
                 {isUser ? (
