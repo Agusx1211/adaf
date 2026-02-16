@@ -13,7 +13,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -32,7 +31,7 @@ const (
 	webDaemonChildEnv  = "ADAF_WEB_DAEMON_CHILD"
 	webPIDFileName     = "web.pid"
 	webStateFileName   = "web.json"
-	webProjectsFile    = "web-projects.json"
+	webLockFileName    = "web.lock"
 	webMDNSServiceType = "_adaf._tcp"
 )
 
@@ -42,15 +41,6 @@ type webRuntimeState struct {
 	Port   int    `json:"port"`
 	Host   string `json:"host"`
 	Scheme string `json:"scheme"`
-}
-
-type webProjectRecord struct {
-	ID   string `json:"id"`
-	Path string `json:"path"`
-}
-
-type webProjectRegistryFile struct {
-	Projects []webProjectRecord `json:"projects"`
 }
 
 var webCmd = &cobra.Command{
@@ -74,30 +64,9 @@ var webStatusCmd = &cobra.Command{
 	RunE:  runWebStatus,
 }
 
-var webRegisterCmd = &cobra.Command{
-	Use:   "register",
-	Short: "Register the current project for --registry web serving",
-	Args:  cobra.NoArgs,
-	RunE:  runWebRegister,
-}
-
-var webUnregisterCmd = &cobra.Command{
-	Use:   "unregister",
-	Short: "Unregister the current project from the web registry",
-	Args:  cobra.NoArgs,
-	RunE:  runWebUnregister,
-}
-
-var webListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List projects registered for web serving",
-	Args:  cobra.NoArgs,
-	RunE:  runWebList,
-}
-
 func init() {
 	addWebServerFlags(webCmd, "open", "Open browser automatically", false)
-	webCmd.AddCommand(webStopCmd, webStatusCmd, webRegisterCmd, webUnregisterCmd, webListCmd)
+	webCmd.AddCommand(webStopCmd, webStatusCmd)
 	rootCmd.AddCommand(webCmd)
 }
 
@@ -117,9 +86,6 @@ func addWebServerFlags(cmd *cobra.Command, openFlagName, openFlagUsage string, d
 	cmd.Flags().String("key", "", "Path to TLS key file (for --tls=custom)")
 	cmd.Flags().String("auth-token", "", "Require Bearer token for API access")
 	cmd.Flags().Float64("rate-limit", 0, "Max requests per second per IP (0 = unlimited)")
-	cmd.Flags().StringSlice("projects", nil, "Comma-separated list of project directories to serve")
-	cmd.Flags().Bool("multi", false, "Auto-discover projects in parent directory")
-	cmd.Flags().Bool("registry", false, "Serve projects from ~/.adaf/web-projects.json")
 	cmd.Flags().Bool("daemon", daemonDefault, "Run web server in background")
 	cmd.Flags().Bool("mdns", false, "Advertise server on local network via mDNS/Bonjour")
 	cmd.Flags().Bool(openFlagName, false, openFlagUsage)
@@ -138,21 +104,10 @@ func runWebServe(cmd *cobra.Command, args []string) error {
 	keyFile, _ := cmd.Flags().GetString("key")
 	authToken, _ := cmd.Flags().GetString("auth-token")
 	rateLimit, _ := cmd.Flags().GetFloat64("rate-limit")
-	projects, _ := cmd.Flags().GetStringSlice("projects")
-	multi, _ := cmd.Flags().GetBool("multi")
-	useRegistry, _ := cmd.Flags().GetBool("registry")
 	daemon, _ := cmd.Flags().GetBool("daemon")
 	enableMDNS, _ := cmd.Flags().GetBool("mdns")
 	daemonChild := os.Getenv(webDaemonChildEnv) == "1"
-	useProjects := cmd.Flags().Changed("projects")
 	userProvidedAuthToken := cmd.Flags().Changed("auth-token")
-
-	if useProjects && multi {
-		return fmt.Errorf("--projects and --multi cannot be used together")
-	}
-	if useRegistry && (useProjects || multi) {
-		return fmt.Errorf("--registry cannot be used with --projects or --multi")
-	}
 
 	if expose {
 		host = "0.0.0.0"
@@ -181,15 +136,12 @@ func runWebServe(cmd *cobra.Command, args []string) error {
 		open, _ := cmd.Flags().GetBool("open")
 		return runWebDaemonParent(authToken, shouldInjectAuthToken, expose, open)
 	}
-	if daemonChild {
-		state, running, err := loadWebDaemonState(webPIDFilePath(), webStateFilePath(), isPIDAlive)
-		if err != nil {
-			return fmt.Errorf("checking existing web daemon: %w", err)
-		}
-		if running && state.PID != os.Getpid() {
-			return fmt.Errorf("web server is already running (pid %d)", state.PID)
-		}
+	// Acquire an exclusive file lock to prevent overlapping instances.
+	lockFile, err := acquireWebDaemonLock()
+	if err != nil {
+		return fmt.Errorf("cannot start web server: %w", err)
 	}
+	defer lockFile.Close()
 
 	opts := webserver.Options{
 		Host:      host,
@@ -201,86 +153,15 @@ func runWebServe(cmd *cobra.Command, args []string) error {
 		RateLimit: rateLimit,
 	}
 
-	var srv *webserver.Server
-	var servedProjectIDs []string
+	rootDir, err := currentDirAbs()
+	if err != nil {
+		return err
+	}
+	opts.RootDir = rootDir
 	mdnsServiceName := "adaf"
 
-	if useProjects {
-		registry := webserver.NewProjectRegistry()
-		currentDir, err := currentDirAbs()
-		if err != nil {
-			return err
-		}
-		entries := make([]webProjectRecord, 0, len(projects))
-		for _, projectPath := range projects {
-			entries = append(entries, webProjectRecord{Path: projectPath})
-		}
-		servedProjectIDs, err = registerProjectsIntoRegistry(registry, entries, currentDir, "--projects")
-		if err != nil {
-			return err
-		}
-		srv = webserver.NewMulti(registry, opts)
-	} else if multi {
-		currentDir, err := currentDirAbs()
-		if err != nil {
-			return err
-		}
-
-		registry := webserver.NewProjectRegistry()
-		parentDir := filepath.Dir(currentDir)
-		count, err := registry.ScanDirectory(parentDir)
-		if err != nil {
-			return fmt.Errorf("scanning parent directory %q for projects: %w", parentDir, err)
-		}
-		if count == 0 {
-			return fmt.Errorf("no adaf projects found in parent directory %s", parentDir)
-		}
-
-		currentID := filepath.Base(currentDir)
-		if _, ok := registry.Get(currentID); ok {
-			if err := registry.SetDefault(currentID); err != nil {
-				return fmt.Errorf("setting default project %q: %w", currentID, err)
-			}
-		}
-
-		entries := registry.List()
-		servedProjectIDs = make([]string, 0, len(entries))
-		for _, entry := range entries {
-			servedProjectIDs = append(servedProjectIDs, entry.ID)
-		}
-
-		srv = webserver.NewMulti(registry, opts)
-	} else if useRegistry {
-		currentDir, err := currentDirAbs()
-		if err != nil {
-			return err
-		}
-		registryFile, err := loadWebProjectRegistry(webProjectsRegistryPath())
-		if err != nil {
-			return fmt.Errorf("loading web registry: %w", err)
-		}
-		if len(registryFile.Projects) == 0 {
-			return fmt.Errorf("no registered projects found (run 'adaf web register')")
-		}
-
-		registry := webserver.NewProjectRegistry()
-		servedProjectIDs, err = registerProjectsIntoRegistry(registry, registryFile.Projects, currentDir, "--registry")
-		if err != nil {
-			return err
-		}
-		srv = webserver.NewMulti(registry, opts)
-	} else {
-		s, err := openStoreRequired()
-		if err != nil {
-			return err
-		}
-		if cfg, err := s.LoadProject(); err == nil {
-			if name := strings.TrimSpace(cfg.Name); name != "" {
-				mdnsServiceName = name
-			}
-		}
-		srv = webserver.New(s, opts)
-	}
+	registry := webserver.NewProjectRegistry()
+	srv := webserver.NewMulti(registry, opts)
 
 	if err := srv.Start(); err != nil {
 		// Check for port-in-use error
@@ -321,13 +202,6 @@ func runWebServe(cmd *cobra.Command, args []string) error {
 			if err := printWebQRCode(url); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to render QR code: %v\n", err)
 			}
-		}
-		if len(servedProjectIDs) > 0 {
-			label := "projects"
-			if len(servedProjectIDs) == 1 {
-				label = "project"
-			}
-			fmt.Printf("Serving %d %s: %s\n", len(servedProjectIDs), label, strings.Join(servedProjectIDs, ", "))
 		}
 		if authToken != "" {
 			fmt.Printf("Auth token required for API access.\n")
@@ -514,147 +388,6 @@ func runWebStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runWebRegister(cmd *cobra.Command, args []string) error {
-	project, err := currentWebProjectRecord()
-	if err != nil {
-		return err
-	}
-
-	registryPath := webProjectsRegistryPath()
-	registry, err := loadWebProjectRegistry(registryPath)
-	if err != nil {
-		return fmt.Errorf("loading web project registry: %w", err)
-	}
-	if !addWebProject(registry, project) {
-		fmt.Fprintf(cmd.OutOrStdout(), "Project already registered: %s\n", project.Path)
-		return nil
-	}
-	if err := saveWebProjectRegistry(registryPath, registry); err != nil {
-		return fmt.Errorf("saving web project registry: %w", err)
-	}
-
-	fmt.Fprintf(cmd.OutOrStdout(), "Registered project %q at %s\n", project.ID, project.Path)
-	return nil
-}
-
-func runWebUnregister(cmd *cobra.Command, args []string) error {
-	project, err := currentWebProjectRecord()
-	if err != nil {
-		return err
-	}
-
-	registryPath := webProjectsRegistryPath()
-	registry, err := loadWebProjectRegistry(registryPath)
-	if err != nil {
-		return fmt.Errorf("loading web project registry: %w", err)
-	}
-	if !removeWebProject(registry, project.Path) {
-		fmt.Fprintf(cmd.OutOrStdout(), "Project not registered: %s\n", project.Path)
-		return nil
-	}
-	if err := saveWebProjectRegistry(registryPath, registry); err != nil {
-		return fmt.Errorf("saving web project registry: %w", err)
-	}
-
-	fmt.Fprintf(cmd.OutOrStdout(), "Unregistered project %q (%s)\n", project.ID, project.Path)
-	return nil
-}
-
-func runWebList(cmd *cobra.Command, args []string) error {
-	registry, err := loadWebProjectRegistry(webProjectsRegistryPath())
-	if err != nil {
-		return fmt.Errorf("loading web project registry: %w", err)
-	}
-	if len(registry.Projects) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "No registered web projects.")
-		return nil
-	}
-
-	for _, project := range registry.Projects {
-		fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\n", project.ID, project.Path)
-	}
-	return nil
-}
-
-func registerProjectsIntoRegistry(registry *webserver.ProjectRegistry, projects []webProjectRecord, currentDir string, sourceLabel string) ([]string, error) {
-	defaultID := ""
-	for _, entry := range projects {
-		projectPath := strings.TrimSpace(entry.Path)
-		if projectPath == "" {
-			continue
-		}
-		absPath, err := filepath.Abs(projectPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to resolve project path %q: %v\n", projectPath, err)
-			continue
-		}
-		absPath = filepath.Clean(absPath)
-
-		info, err := os.Stat(absPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				fmt.Fprintf(os.Stderr, "Warning: project directory does not exist, skipping: %s\n", absPath)
-			} else {
-				fmt.Fprintf(os.Stderr, "Warning: cannot access project directory %q, skipping: %v\n", absPath, err)
-			}
-			continue
-		}
-		if !info.IsDir() {
-			fmt.Fprintf(os.Stderr, "Warning: project path is not a directory, skipping: %s\n", absPath)
-			continue
-		}
-
-		projectID := strings.TrimSpace(entry.ID)
-		if projectID == "" {
-			projectID = filepath.Base(absPath)
-		}
-
-		if err := registry.Register(projectID, absPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: skipping project %q: %v\n", absPath, err)
-			continue
-		}
-		if currentDir != "" && absPath == currentDir {
-			defaultID = projectID
-		}
-	}
-
-	if registry.Count() == 0 {
-		if sourceLabel != "" {
-			return nil, fmt.Errorf("no valid projects to serve from %s", sourceLabel)
-		}
-		return nil, fmt.Errorf("no valid projects to serve")
-	}
-	if defaultID != "" {
-		if err := registry.SetDefault(defaultID); err != nil {
-			return nil, fmt.Errorf("setting default project %q: %w", defaultID, err)
-		}
-	}
-
-	entries := registry.List()
-	servedProjectIDs := make([]string, 0, len(entries))
-	for _, e := range entries {
-		servedProjectIDs = append(servedProjectIDs, e.ID)
-	}
-	return servedProjectIDs, nil
-}
-
-func currentWebProjectRecord() (webProjectRecord, error) {
-	s, err := openStoreRequired()
-	if err != nil {
-		return webProjectRecord{}, err
-	}
-	projectDir := filepath.Dir(s.Root())
-	absPath, err := filepath.Abs(projectDir)
-	if err != nil {
-		return webProjectRecord{}, fmt.Errorf("resolving project path: %w", err)
-	}
-	absPath = filepath.Clean(absPath)
-	return webProjectRecord{
-		ID:   filepath.Base(absPath),
-		Path: absPath,
-	}, nil
-}
-
 func webPIDFilePath() string {
 	return filepath.Join(config.Dir(), webPIDFileName)
 }
@@ -663,8 +396,29 @@ func webStateFilePath() string {
 	return filepath.Join(config.Dir(), webStateFileName)
 }
 
-func webProjectsRegistryPath() string {
-	return filepath.Join(config.Dir(), webProjectsFile)
+func webLockFilePath() string {
+	return filepath.Join(config.Dir(), webLockFileName)
+}
+
+// acquireWebDaemonLock takes an exclusive flock on the lock file, preventing
+// two daemon instances from running concurrently. The returned file must be
+// kept open for the lifetime of the daemon; closing it releases the lock.
+func acquireWebDaemonLock() (*os.File, error) {
+	if err := os.MkdirAll(config.Dir(), 0755); err != nil {
+		return nil, fmt.Errorf("creating config dir: %w", err)
+	}
+
+	f, err := os.OpenFile(webLockFilePath(), os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("opening lock file: %w", err)
+	}
+
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("another web daemon is already running")
+	}
+
+	return f, nil
 }
 
 func writeWebRuntimeFiles(pidPath, statePath string, state webRuntimeState) error {
@@ -832,80 +586,6 @@ func splitHostPort(addr string) (string, int) {
 		return host, 0
 	}
 	return host, port
-}
-
-func loadWebProjectRegistry(path string) (*webProjectRegistryFile, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return &webProjectRegistryFile{Projects: []webProjectRecord{}}, nil
-		}
-		return nil, err
-	}
-	var registry webProjectRegistryFile
-	if err := json.Unmarshal(data, &registry); err != nil {
-		return nil, err
-	}
-	if registry.Projects == nil {
-		registry.Projects = []webProjectRecord{}
-	}
-	return &registry, nil
-}
-
-func saveWebProjectRegistry(path string, registry *webProjectRegistryFile) error {
-	if registry == nil {
-		registry = &webProjectRegistryFile{}
-	}
-	if registry.Projects == nil {
-		registry.Projects = []webProjectRecord{}
-	}
-	data, err := json.MarshalIndent(registry, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0644)
-}
-
-func addWebProject(registry *webProjectRegistryFile, project webProjectRecord) bool {
-	if registry == nil {
-		return false
-	}
-	project.Path = filepath.Clean(strings.TrimSpace(project.Path))
-	project.ID = strings.TrimSpace(project.ID)
-	for _, existing := range registry.Projects {
-		if filepath.Clean(existing.Path) == project.Path {
-			return false
-		}
-	}
-	registry.Projects = append(registry.Projects, project)
-	sort.Slice(registry.Projects, func(i, j int) bool {
-		if registry.Projects[i].ID == registry.Projects[j].ID {
-			return registry.Projects[i].Path < registry.Projects[j].Path
-		}
-		return registry.Projects[i].ID < registry.Projects[j].ID
-	})
-	return true
-}
-
-func removeWebProject(registry *webProjectRegistryFile, projectPath string) bool {
-	if registry == nil {
-		return false
-	}
-	cleanedPath := filepath.Clean(strings.TrimSpace(projectPath))
-	if cleanedPath == "" {
-		return false
-	}
-	out := registry.Projects[:0]
-	removed := false
-	for _, project := range registry.Projects {
-		if filepath.Clean(project.Path) == cleanedPath {
-			removed = true
-			continue
-		}
-		out = append(out, project)
-	}
-	registry.Projects = out
-	return removed
 }
 
 func openBrowser(url string) error {

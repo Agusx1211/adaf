@@ -28,12 +28,13 @@ type Options struct {
 	KeyFile   string
 	AuthToken string
 	RateLimit float64
+	RootDir   string
 }
 
 // Server hosts the HTTP API and WebSocket session stream bridge.
 type Server struct {
-	store      *store.Store // default store (backward compat)
 	registry   *ProjectRegistry
+	rootDir    string
 	httpServer *http.Server
 	port       int
 	host       string
@@ -44,21 +45,12 @@ type Server struct {
 	rateLimit  float64
 }
 
-// New constructs a web server bound to host:port with a single project store.
-func New(s *store.Store, opts Options) *Server {
-	reg := NewProjectRegistry()
-	reg.registerStore("default", s)
-
-	return newServer(s, reg, opts)
-}
-
 // NewMulti constructs a web server with a pre-populated project registry.
 func NewMulti(registry *ProjectRegistry, opts Options) *Server {
-	defaultStore, _ := registry.Default()
-	return newServer(defaultStore, registry, opts)
+	return newServer(registry, opts)
 }
 
-func newServer(defaultStore *store.Store, registry *ProjectRegistry, opts Options) *Server {
+func newServer(registry *ProjectRegistry, opts Options) *Server {
 	host := strings.TrimSpace(opts.Host)
 	if host == "" {
 		host = "127.0.0.1"
@@ -70,8 +62,8 @@ func newServer(defaultStore *store.Store, registry *ProjectRegistry, opts Option
 	}
 
 	srv := &Server{
-		store:     defaultStore,
 		registry:  registry,
+		rootDir:   opts.RootDir,
 		host:      host,
 		port:      port,
 		tlsMode:   strings.TrimSpace(opts.TLSMode),
@@ -183,8 +175,18 @@ func (srv *Server) resolveProjectStore(r *http.Request) (*store.Store, string, b
 		}
 		return s, projectID, true
 	}
-	// Legacy route — use default store
-	return srv.store, "", true
+	// Legacy route — use default store from registry
+	s, _ := srv.registry.Default()
+	if s == nil {
+		return nil, "", false
+	}
+	return s, "", true
+}
+
+// defaultStore returns the default project store from the registry.
+func (srv *Server) defaultStore() *store.Store {
+	s, _ := srv.registry.Default()
+	return s
 }
 
 // projectHandler wraps a handler that needs a project store, resolving
@@ -210,6 +212,12 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 
 	// Register legacy routes under /api/... (backward compat, uses default project)
 	srv.registerProjectRoutes(mux, "/api")
+
+	// Filesystem browsing endpoints
+	mux.HandleFunc("GET /api/fs/browse", srv.handleFSBrowse)
+	mux.HandleFunc("POST /api/fs/mkdir", srv.handleFSMkdir)
+	mux.HandleFunc("POST /api/projects/init", srv.handleProjectInit)
+	mux.HandleFunc("POST /api/projects/open", srv.handleProjectOpen)
 
 	// Config endpoints (global, not project-scoped)
 	mux.HandleFunc("GET /api/config", srv.handleConfig)

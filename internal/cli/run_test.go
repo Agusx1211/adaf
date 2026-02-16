@@ -82,9 +82,9 @@ func TestLoopStartRejectsAgentContext(t *testing.T) {
 	}
 }
 
-func TestLoopStartForegroundFlagExists(t *testing.T) {
-	flag := loopStartCmd.Flags().Lookup("foreground")
+func TestLoopStartPlanFlagExists(t *testing.T) {
+	flag := loopStartCmd.Flags().Lookup("plan")
 	if flag == nil {
-		t.Fatal("loop start --foreground flag missing")
+		t.Fatal("loop start --plan flag missing")
 	}
 }

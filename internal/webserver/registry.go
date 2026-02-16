@@ -34,12 +34,16 @@ func NewProjectRegistry() *ProjectRegistry {
 }
 
 // Register adds a project store to the registry. The first registered project
-// becomes the default unless overridden.
+// becomes the default unless overridden. If the ID already exists with the
+// same path, it returns nil (idempotent).
 func (r *ProjectRegistry) Register(id, projectDir string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.projects[id]; exists {
+	if existing, exists := r.projects[id]; exists {
+		if filepath.Clean(existing.Path) == filepath.Clean(projectDir) {
+			return nil // already registered with same path
+		}
 		return fmt.Errorf("project %q already registered", id)
 	}
 
@@ -140,28 +144,33 @@ func (r *ProjectRegistry) Count() int {
 	return len(r.projects)
 }
 
-// registerStore adds a store directly (used by New() for backward compat).
-func (r *ProjectRegistry) registerStore(id string, s *store.Store) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	name := id
-	if cfg, err := s.LoadProject(); err == nil {
-		name = cfg.Name
+// RegisterByPath registers a project by its absolute path, computing the ID
+// as the relative path from rootDir.
+func (r *ProjectRegistry) RegisterByPath(rootDir, absPath string) (string, error) {
+	rel, err := filepath.Rel(rootDir, absPath)
+	if err != nil {
+		return "", fmt.Errorf("computing relative path: %w", err)
 	}
-
-	entry := &ProjectEntry{
-		ID:    id,
-		Name:  name,
-		Path:  filepath.Dir(s.Root()),
-		store: s,
+	// Use the relative path as the project ID (e.g. "my-project" or "subdir/my-project").
+	id := filepath.ToSlash(rel)
+	if err := r.Register(id, absPath); err != nil {
+		return "", err
 	}
+	return id, nil
+}
 
-	r.projects[id] = entry
-	if r.defaultID == "" {
-		r.defaultID = id
-		entry.IsDefault = true
+// GetByPath returns the project entry for a given absolute path.
+func (r *ProjectRegistry) GetByPath(absPath string) (*ProjectEntry, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	cleaned := filepath.Clean(absPath)
+	for _, entry := range r.projects {
+		if filepath.Clean(entry.Path) == cleaned {
+			return entry, true
+		}
 	}
+	return nil, false
 }
 
 // ScanDirectory scans a parent directory for subdirectories containing

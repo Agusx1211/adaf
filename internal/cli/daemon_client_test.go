@@ -10,33 +10,6 @@ import (
 	"testing"
 )
 
-func TestProjectIDFromPathReturnsExistingRegistryID(t *testing.T) {
-	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
-
-	projectDir := filepath.Join(t.TempDir(), "project-a")
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatalf("creating project dir: %v", err)
-	}
-
-	registry := &webProjectRegistryFile{
-		Projects: []webProjectRecord{
-			{
-				ID:   "project-a-id",
-				Path: projectDir,
-			},
-		},
-	}
-	if err := saveWebProjectRegistry(webProjectsRegistryPath(), registry); err != nil {
-		t.Fatalf("saving registry: %v", err)
-	}
-
-	got := projectIDFromPath(projectDir)
-	if got != "project-a-id" {
-		t.Fatalf("projectIDFromPath() = %q, want %q", got, "project-a-id")
-	}
-}
-
 func TestProjectIDFromPathDeterministicForUnregisteredPath(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)

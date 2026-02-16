@@ -101,9 +101,9 @@ func runDocList(cmd *cobra.Command, args []string) error {
 		if err := validatePlanID(planFilter); err != nil {
 			return err
 		}
-		plan, err := s.GetPlan(planFilter)
-		if err != nil {
-			return fmt.Errorf("loading plan %q: %w", planFilter, err)
+		plan, getPlanErr := s.GetPlan(planFilter)
+		if getPlanErr != nil {
+			return fmt.Errorf("loading plan %q: %w", planFilter, getPlanErr)
 		}
 		if plan == nil {
 			return fmt.Errorf("plan %q not found", planFilter)

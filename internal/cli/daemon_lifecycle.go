@@ -95,17 +95,10 @@ func runDaemonLifecycleStatus(cmd *cobra.Command, args []string) error {
 
 func printDaemonStatusLine(cmd *cobra.Command, state webRuntimeState) {
 	url := daemonStatusURL(state)
-	registry, err := loadWebProjectRegistry(webProjectsRegistryPath())
-	registeredCount := 0
-	if err == nil && registry != nil {
-		registeredCount = len(registry.Projects)
-	}
-
 	fmt.Fprintf(cmd.OutOrStdout(), "Web daemon running (PID %d)\n", state.PID)
 	if url != "" {
 		fmt.Fprintf(cmd.OutOrStdout(), "URL: %s\n", url)
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Registered projects: %d\n", registeredCount)
 }
 
 func daemonStatusURL(state webRuntimeState) string {
@@ -125,9 +118,7 @@ func daemonStatusURL(state webRuntimeState) string {
 	if host == "" {
 		host = "127.0.0.1"
 	}
-	if strings.HasPrefix(host, ":") {
-		host = strings.TrimPrefix(host, ":")
-	}
+	host = strings.TrimPrefix(host, ":")
 	if host == "" {
 		host = "127.0.0.1"
 	}

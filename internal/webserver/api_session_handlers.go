@@ -13,10 +13,6 @@ import (
 	"github.com/agusx1211/adaf/internal/store"
 )
 
-func (srv *Server) handleStartAskSession(w http.ResponseWriter, r *http.Request) {
-	handleStartAskSessionP(srv.store, w, r)
-}
-
 func handleStartAskSessionP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Profile string   `json:"profile"`
@@ -118,10 +114,6 @@ func handleStartAskSessionP(s *store.Store, w http.ResponseWriter, r *http.Reque
 
 	meta, _ := session.LoadMeta(sessionID)
 	writeJSON(w, http.StatusCreated, meta)
-}
-
-func (srv *Server) handleStartLoopSession(w http.ResponseWriter, r *http.Request) {
-	handleStartLoopSessionP(srv.store, w, r)
 }
 
 func handleStartLoopSessionP(s *store.Store, w http.ResponseWriter, r *http.Request) {
@@ -228,10 +220,6 @@ func collectLoopProfiles(cfg *config.GlobalConfig, loopDef *config.LoopDef) []co
 	return profiles
 }
 
-func (srv *Server) handleStopSession(w http.ResponseWriter, r *http.Request) {
-	handleStopSessionP(srv.store, w, r)
-}
-
 func handleStopSessionP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	sessionID, err := parsePathID(r.PathValue("id"))
 	if err != nil {
@@ -281,10 +269,6 @@ func handleStopSessionP(s *store.Store, w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "session_id": sessionID})
-}
-
-func (srv *Server) handleSessionMessage(w http.ResponseWriter, r *http.Request) {
-	handleSessionMessageP(srv.store, w, r)
 }
 
 func handleSessionMessageP(s *store.Store, w http.ResponseWriter, r *http.Request) {
@@ -348,10 +332,6 @@ func handleSessionMessageP(s *store.Store, w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (srv *Server) handleLoopRuns(w http.ResponseWriter, r *http.Request) {
-	handleLoopRunsP(srv.store, w, r)
 }
 
 func handleLoopRunsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
@@ -428,10 +408,6 @@ func backfillDaemonSessionIDs(runs []store.LoopRun) {
 	}
 }
 
-func (srv *Server) handleLoopRunByID(w http.ResponseWriter, r *http.Request) {
-	handleLoopRunByIDP(srv.store, w, r)
-}
-
 func handleLoopRunByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	runID, err := parsePathID(r.PathValue("id"))
 	if err != nil {
@@ -458,10 +434,6 @@ func handleLoopRunByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, run)
 }
 
-func (srv *Server) handleLoopMessages(w http.ResponseWriter, r *http.Request) {
-	handleLoopMessagesP(srv.store, w, r)
-}
-
 func handleLoopMessagesP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	runID, err := parsePathID(r.PathValue("id"))
 	if err != nil {
@@ -480,10 +452,6 @@ func handleLoopMessagesP(s *store.Store, w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, msgs)
 }
 
-func (srv *Server) handleStopLoopRun(w http.ResponseWriter, r *http.Request) {
-	handleStopLoopRunP(srv.store, w, r)
-}
-
 func handleStopLoopRunP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	runID, err := parsePathID(r.PathValue("id"))
 	if err != nil {
@@ -497,10 +465,6 @@ func handleStopLoopRunP(s *store.Store, w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (srv *Server) handleLoopRunMessage(w http.ResponseWriter, r *http.Request) {
-	handleLoopRunMessageP(srv.store, w, r)
 }
 
 func handleLoopRunMessageP(s *store.Store, w http.ResponseWriter, r *http.Request) {

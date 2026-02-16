@@ -91,10 +91,6 @@ type turnWriteRequest struct {
 	StepHexID    string `json:"step_hex_id"`
 }
 
-func (srv *Server) handleCreateIssue(w http.ResponseWriter, r *http.Request) {
-	handleCreateIssueP(srv.store, w, r)
-}
-
 func handleCreateIssueP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	var req issueWriteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -143,10 +139,6 @@ func handleCreateIssueP(s *store.Store, w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusCreated, issue)
-}
-
-func (srv *Server) handleUpdateIssue(w http.ResponseWriter, r *http.Request) {
-	handleUpdateIssueP(srv.store, w, r)
 }
 
 func handleUpdateIssueP(s *store.Store, w http.ResponseWriter, r *http.Request) {
@@ -208,10 +200,6 @@ func handleUpdateIssueP(s *store.Store, w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, issue)
 }
 
-func (srv *Server) handleDeleteIssue(w http.ResponseWriter, r *http.Request) {
-	handleDeleteIssueP(srv.store, w, r)
-}
-
 func handleDeleteIssueP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	id, err := parsePathID(r.PathValue("id"))
 	if err != nil {
@@ -229,10 +217,6 @@ func handleDeleteIssueP(s *store.Store, w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-func (srv *Server) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
-	handleCreatePlanP(srv.store, w, r)
 }
 
 func handleCreatePlanP(s *store.Store, w http.ResponseWriter, r *http.Request) {
@@ -269,10 +253,6 @@ func handleCreatePlanP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, plan)
-}
-
-func (srv *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
-	handleUpdatePlanP(srv.store, w, r)
 }
 
 func handleUpdatePlanP(s *store.Store, w http.ResponseWriter, r *http.Request) {
@@ -322,10 +302,6 @@ func handleUpdatePlanP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, plan)
-}
-
-func (srv *Server) handleUpdatePlanPhase(w http.ResponseWriter, r *http.Request) {
-	handleUpdatePlanPhaseP(srv.store, w, r)
 }
 
 func handleUpdatePlanPhaseP(s *store.Store, w http.ResponseWriter, r *http.Request) {
@@ -394,10 +370,6 @@ func handleUpdatePlanPhaseP(s *store.Store, w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, plan)
 }
 
-func (srv *Server) handleActivatePlan(w http.ResponseWriter, r *http.Request) {
-	handleActivatePlanP(srv.store, w, r)
-}
-
 func handleActivatePlanP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	planID := strings.TrimSpace(r.PathValue("id"))
 	if planID == "" {
@@ -415,10 +387,6 @@ func handleActivatePlanP(s *store.Store, w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-func (srv *Server) handleDeletePlan(w http.ResponseWriter, r *http.Request) {
-	handleDeletePlanP(srv.store, w, r)
 }
 
 func handleDeletePlanP(s *store.Store, w http.ResponseWriter, r *http.Request) {
@@ -455,10 +423,6 @@ func handleDeletePlanP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func (srv *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
-	handleDocsP(srv.store, w, r)
-}
-
 func handleDocsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	planID := strings.TrimSpace(r.URL.Query().Get("plan"))
 
@@ -482,10 +446,6 @@ func handleDocsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, docs)
 }
 
-func (srv *Server) handleDocByID(w http.ResponseWriter, r *http.Request) {
-	handleDocByIDP(srv.store, w, r)
-}
-
 func handleDocByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	docID := strings.TrimSpace(r.PathValue("id"))
 	if docID == "" {
@@ -504,10 +464,6 @@ func handleDocByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, doc)
-}
-
-func (srv *Server) handleCreateDoc(w http.ResponseWriter, r *http.Request) {
-	handleCreateDocP(srv.store, w, r)
 }
 
 func handleCreateDocP(s *store.Store, w http.ResponseWriter, r *http.Request) {
@@ -547,10 +503,6 @@ func handleCreateDocP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, doc)
-}
-
-func (srv *Server) handleUpdateDoc(w http.ResponseWriter, r *http.Request) {
-	handleUpdateDocP(srv.store, w, r)
 }
 
 func handleUpdateDocP(s *store.Store, w http.ResponseWriter, r *http.Request) {
@@ -595,10 +547,6 @@ func handleUpdateDocP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, doc)
 }
 
-func (srv *Server) handleDeleteDoc(w http.ResponseWriter, r *http.Request) {
-	handleDeleteDocP(srv.store, w, r)
-}
-
 func handleDeleteDocP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	docID := strings.TrimSpace(r.PathValue("id"))
 	if docID == "" {
@@ -616,10 +564,6 @@ func handleDeleteDocP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-func (srv *Server) handleUpdateTurn(w http.ResponseWriter, r *http.Request) {
-	handleUpdateTurnP(srv.store, w, r)
 }
 
 func handleUpdateTurnP(s *store.Store, w http.ResponseWriter, r *http.Request) {

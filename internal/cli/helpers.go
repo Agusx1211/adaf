@@ -51,7 +51,6 @@ func openStoreRequired() (*store.Store, error) {
 	if err := s.EnsureDirs(); err != nil {
 		return nil, fmt.Errorf("ensuring project store dirs: %w", err)
 	}
-	go autoRegisterProject(filepath.Dir(s.Root()))
 	return s, nil
 }
 

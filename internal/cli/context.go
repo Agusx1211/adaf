@@ -37,14 +37,3 @@ func resolveOptionalTurnID(turnFlag int) (int, error) {
 	}
 	return 0, nil
 }
-
-func resolveRequiredTurnID(turnFlag int) (int, error) {
-	turnID, err := resolveOptionalTurnID(turnFlag)
-	if err != nil {
-		return 0, err
-	}
-	if turnID <= 0 {
-		return 0, fmt.Errorf("--session is required (or run inside an adaf agent session)")
-	}
-	return turnID, nil
-}

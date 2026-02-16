@@ -28,9 +28,6 @@ func TestWebCommandFlags(t *testing.T) {
 	cmd.Flags().String("key", "", "Path to TLS key file (for --tls=custom)")
 	cmd.Flags().String("auth-token", "", "Require Bearer token for API access")
 	cmd.Flags().Float64("rate-limit", 0, "Max requests per second per IP (0 = unlimited)")
-	cmd.Flags().StringSlice("projects", nil, "Comma-separated list of project directories to serve")
-	cmd.Flags().Bool("multi", false, "Auto-discover projects in parent directory")
-	cmd.Flags().Bool("registry", false, "Serve projects from ~/.adaf/web-projects.json")
 	cmd.Flags().Bool("daemon", false, "Run web server in background")
 	cmd.Flags().Bool("mdns", false, "Advertise server on local network via mDNS/Bonjour")
 	cmd.Flags().Bool("open", false, "Open browser automatically")
@@ -147,56 +144,6 @@ func TestLoadWebDaemonStateStalePIDRemovesFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(statePath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("state file should be removed, stat error = %v", err)
-	}
-}
-
-func TestWebProjectRegistryLoadSaveAddRemove(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "web-projects.json")
-
-	registry, err := loadWebProjectRegistry(path)
-	if err != nil {
-		t.Fatalf("loadWebProjectRegistry() on missing file error = %v", err)
-	}
-	if len(registry.Projects) != 0 {
-		t.Fatalf("missing registry should start empty, got %d entries", len(registry.Projects))
-	}
-
-	projectA := webProjectRecord{ID: "alpha", Path: "/tmp/alpha"}
-	projectB := webProjectRecord{ID: "beta", Path: "/tmp/beta"}
-
-	if !addWebProject(registry, projectA) {
-		t.Fatalf("addWebProject(alpha) = false, want true")
-	}
-	if addWebProject(registry, projectA) {
-		t.Fatalf("addWebProject(alpha duplicate) = true, want false")
-	}
-	if !addWebProject(registry, projectB) {
-		t.Fatalf("addWebProject(beta) = false, want true")
-	}
-
-	if err := saveWebProjectRegistry(path, registry); err != nil {
-		t.Fatalf("saveWebProjectRegistry() error = %v", err)
-	}
-
-	loaded, err := loadWebProjectRegistry(path)
-	if err != nil {
-		t.Fatalf("loadWebProjectRegistry() after save error = %v", err)
-	}
-	if len(loaded.Projects) != 2 {
-		t.Fatalf("loaded project count = %d, want 2", len(loaded.Projects))
-	}
-	if loaded.Projects[0].ID != "alpha" || loaded.Projects[1].ID != "beta" {
-		t.Fatalf("loaded projects not sorted or unexpected: %+v", loaded.Projects)
-	}
-
-	if !removeWebProject(loaded, projectA.Path) {
-		t.Fatalf("removeWebProject(alpha) = false, want true")
-	}
-	if removeWebProject(loaded, projectA.Path) {
-		t.Fatalf("removeWebProject(alpha again) = true, want false")
-	}
-	if len(loaded.Projects) != 1 || loaded.Projects[0].ID != "beta" {
-		t.Fatalf("remaining projects = %+v, want only beta", loaded.Projects)
 	}
 }
 

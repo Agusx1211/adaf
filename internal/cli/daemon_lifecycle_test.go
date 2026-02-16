@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -32,7 +31,7 @@ func TestDaemonStartCommandFlags(t *testing.T) {
 	}
 }
 
-func TestRunDaemonLifecycleStatusIncludesRegisteredProjectCount(t *testing.T) {
+func TestRunDaemonLifecycleStatusShowsURLAndPID(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 
@@ -45,16 +44,6 @@ func TestRunDaemonLifecycleStatusIncludesRegisteredProjectCount(t *testing.T) {
 	}
 	if err := writeWebRuntimeFiles(webPIDFilePath(), webStateFilePath(), state); err != nil {
 		t.Fatalf("writing runtime files: %v", err)
-	}
-
-	registry := &webProjectRegistryFile{
-		Projects: []webProjectRecord{
-			{ID: "one", Path: filepath.Join(homeDir, "one")},
-			{ID: "two", Path: filepath.Join(homeDir, "two")},
-		},
-	}
-	if err := saveWebProjectRegistry(webProjectsRegistryPath(), registry); err != nil {
-		t.Fatalf("saving registry: %v", err)
 	}
 
 	cmd := &cobra.Command{}
@@ -71,9 +60,6 @@ func TestRunDaemonLifecycleStatusIncludesRegisteredProjectCount(t *testing.T) {
 	}
 	if !strings.Contains(got, "URL: http://127.0.0.1:8181") {
 		t.Fatalf("status output missing URL: %q", got)
-	}
-	if !strings.Contains(got, "Registered projects: 2") {
-		t.Fatalf("status output missing registered project count: %q", got)
 	}
 }
 

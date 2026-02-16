@@ -1346,7 +1346,7 @@ func (o *Orchestrator) WaitForRunningSpawns(parentTurnIDs []int, timeout time.Du
 	)
 
 	waitCtx := context.Background()
-	cancel := func() {}
+	var cancel context.CancelFunc
 	if timeout <= 0 {
 		waitCtx, cancel = context.WithCancel(waitCtx)
 	} else {

@@ -88,3 +88,22 @@ export function apiBase(projectID) {
   }
   return '/api';
 }
+
+export function apiFSBrowse(path) {
+  var query = path ? '?path=' + encodeURIComponent(path) : '';
+  return apiCall('/api/fs/browse' + query);
+}
+
+export function apiFSMkdir(path) {
+  return apiCall('/api/fs/mkdir', 'POST', { path: path });
+}
+
+export function apiProjectInit(path, name) {
+  var body = { path: path };
+  if (name) body.name = name;
+  return apiCall('/api/projects/init', 'POST', body);
+}
+
+export function apiProjectOpen(path) {
+  return apiCall('/api/projects/open', 'POST', { path: path });
+}

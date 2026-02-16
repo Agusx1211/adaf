@@ -5,6 +5,7 @@ import { STATUS_RUNNING, statusColor } from '../../utils/colors.js';
 import StatusDot from '../common/StatusDot.jsx';
 import { StopSessionButton, SessionMessageBar } from '../session/SessionControls.jsx';
 import { useUsageLimits } from '../../api/hooks.js';
+import ProjectBrowser from './ProjectBrowser.jsx';
 
 var NAV_ITEMS = [
   { id: 'loops', label: 'Loops' },
@@ -22,6 +23,7 @@ export default function TopBar() {
   var { sessions, spawns, projects, currentProjectID, wsConnected, termWSConnected, usage, loopRun, leftView, usageLimits } = state;
   var [showRunning, setShowRunning] = useState(false);
   var [showUsage, setShowUsage] = useState(false);
+  var [showProjectBrowser, setShowProjectBrowser] = useState(false);
   var dropdownRef = useRef(null);
   var usageDropdownRef = useRef(null);
 
@@ -102,27 +104,17 @@ export default function TopBar() {
           letterSpacing: '0.08em',
         }}>ADAF</span>
         <span style={{ width: 1, height: 16, background: 'var(--border)' }} />
-        <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 12, color: 'var(--text-2)', fontWeight: 400 }}>
+        <span
+          onClick={function () { setShowProjectBrowser(true); }}
+          style={{
+            fontFamily: "'Outfit', sans-serif", fontSize: 12, color: 'var(--text-2)', fontWeight: 400,
+            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+          }}
+          title="Browse projects"
+        >
           {projectName}
+          <span style={{ fontSize: 7, opacity: 0.6 }}>{'\u25BE'}</span>
         </span>
-        {projects.length > 1 && (
-          <select
-            value={currentProjectID}
-            onChange={switchProject}
-            style={{
-              background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 3,
-              color: 'var(--text-1)', fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
-              padding: '2px 4px', cursor: 'pointer',
-            }}
-          >
-            {projects.map(function (p) {
-              var id = p && p.id ? String(p.id) : '';
-              var label = p && p.name ? p.name : id || 'Unnamed';
-              if (p && p.is_default) label += ' (default)';
-              return <option key={id} value={id}>{label}</option>;
-            })}
-          </select>
-        )}
       </div>
 
       {/* Navigation */}
@@ -291,6 +283,9 @@ export default function TopBar() {
           </span>
         </span>
       </div>
+      {showProjectBrowser && (
+        <ProjectBrowser onClose={function () { setShowProjectBrowser(false); }} />
+      )}
     </div>
   );
 }

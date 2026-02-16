@@ -136,20 +136,7 @@ func (c *DaemonClient) doJSON(method, path string, req map[string]interface{}, o
 }
 
 func projectIDFromPath(projectDir string) string {
-	cleanedPath := normalizeProjectDir(projectDir)
-
-	// Check registry first for existing ID
-	registry, err := loadWebProjectRegistry(webProjectsRegistryPath())
-	if err == nil && registry != nil {
-		for _, project := range registry.Projects {
-			if normalizeProjectDir(project.Path) == cleanedPath && project.ID != "" {
-				return project.ID
-			}
-		}
-	}
-
-	// Derive using the canonical function
-	return session.ProjectIDFromDir(cleanedPath)
+	return session.ProjectIDFromDir(normalizeProjectDir(projectDir))
 }
 
 func normalizeProjectDir(projectDir string) string {

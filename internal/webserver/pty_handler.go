@@ -161,9 +161,11 @@ func (srv *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Reques
 }
 
 func (srv *Server) terminalWorkDir() string {
-	if srv != nil && srv.store != nil {
-		if root := strings.TrimSpace(srv.store.Root()); root != "" {
-			return root
+	if srv != nil {
+		if s := srv.defaultStore(); s != nil {
+			if root := strings.TrimSpace(s.Root()); root != "" {
+				return root
+			}
 		}
 	}
 

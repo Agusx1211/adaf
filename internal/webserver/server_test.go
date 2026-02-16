@@ -25,7 +25,12 @@ func newTestServer(t *testing.T) (*Server, *store.Store) {
 		t.Fatalf("store.Init: %v", err)
 	}
 
-	return New(s, Options{}), s
+	registry := NewProjectRegistry()
+	if err := registry.Register("test-project", projectDir); err != nil {
+		t.Fatalf("registry.Register: %v", err)
+	}
+
+	return NewMulti(registry, Options{RootDir: projectDir}), s
 }
 
 func performRequest(t *testing.T, srv *Server, method, target string) *httptest.ResponseRecorder {
