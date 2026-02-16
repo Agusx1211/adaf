@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "provider": "claude",
+  "version": "2.1.42",
+  "version_raw": "2.1.42 (Claude Code)",
+  "binary": "claude",
+  "captured_at": "2026-02-16T15:53:12Z",
+  "prompt": "In the current directory, create a file named fixture_note.txt with exactly this content: CLAUDE_FIXTURE_FILE_CONTENT. Then answer with exactly: CLAUDE_FIXTURE_OK.",
+  "args": [
+    "--dangerously-skip-permissions",
+    "--max-turns",
+    "5"
+  ],
+  "result": {
+    "exit_code": 0,
+    "output": "CLAUDE_FIXTURE_OK",
+    "error": "",
+    "agent_session_id": "c41ff8dc-6527-46d9-95ad-b71222cf6df0"
+  },
+  "summary": {
+    "raw_events": 5,
+    "parsed_events": 5,
+    "system_events": 1,
+    "assistant_events": 2,
+    "user_events": 1,
+    "result_events": 1,
+    "error_events": 0,
+    "text_blocks": 1,
+    "thinking_blocks": 0,
+    "tool_use_blocks": 1,
+    "tool_result_blocks": 1,
+    "delta_events": 0
+  },
+  "stream": [
+    "{\"type\":\"system\",\"subtype\":\"init\",\"cwd\":\"/tmp/adaf-claude-demo-repo\",\"session_id\":\"c41ff8dc-6527-46d9-95ad-b71222cf6df0\",\"tools\":[\"Task\",\"TaskOutput\",\"Bash\",\"Glob\",\"Grep\",\"ExitPlanMode\",\"Read\",\"Edit\",\"Write\",\"NotebookEdit\",\"WebFetch\",\"TodoWrite\",\"WebSearch\",\"TaskStop\",\"AskUserQuestion\",\"Skill\",\"EnterPlanMode\",\"ToolSearch\"],\"mcp_servers\":[],\"model\":\"claude-opus-4-6\",\"permissionMode\":\"bypassPermissions\",\"slash_commands\":[\"keybindings-help\",\"debug\",\"refactor-pass\",\"orchestrate\",\"compact\",\"context\",\"cost\",\"init\",\"pr-comments\",\"release-notes\",\"review\",\"security-review\",\"insights\"],\"apiKeySource\":\"none\",\"claude_code_version\":\"2.1.42\",\"output_style\":\"default\",\"agents\":[\"Bash\",\"general-purpose\",\"statusline-setup\",\"Explore\",\"Plan\"],\"skills\":[\"keybindings-help\",\"debug\"],\"plugins\":[{\"name\":\"gopls-lsp\",\"path\":\"/home/agusx1211/.claude/plugins/cache/claude-plugins-official/gopls-lsp/1.0.0\"},{\"name\":\"rust-analyzer-lsp\",\"path\":\"/home/agusx1211/.claude/plugins/cache/claude-plugins-official/rust-analyzer-lsp/1.0.0\"}],\"uuid\":\"104ad809-5894-4cfd-8672-2f28f47caf57\",\"fast_mode_state\":\"off\"}",
+    "{\"type\":\"assistant\",\"message\":{\"model\":\"claude-opus-4-6\",\"id\":\"msg_013mSDURa49Nq1iaVzqHiGWN\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_01BUVSwDcv3rhTAjU6Ckim2T\",\"name\":\"Write\",\"input\":{\"file_path\":\"/tmp/adaf-claude-demo-repo/fixture_note.txt\",\"content\":\"CLAUDE_FIXTURE_FILE_CONTENT\"},\"caller\":{\"type\":\"direct\"}}],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":3,\"cache_creation_input_tokens\":921,\"cache_read_input_tokens\":17836,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":921},\"output_tokens\":26,\"service_tier\":\"standard\",\"inference_geo\":\"not_available\"},\"context_management\":null},\"parent_tool_use_id\":null,\"session_id\":\"c41ff8dc-6527-46d9-95ad-b71222cf6df0\",\"uuid\":\"f252b2be-a75b-4bcd-bc08-59f5cb336186\"}",
+    "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"tool_use_id\":\"toolu_01BUVSwDcv3rhTAjU6Ckim2T\",\"type\":\"tool_result\",\"content\":\"File created successfully at: /tmp/adaf-claude-demo-repo/fixture_note.txt\"}]},\"parent_tool_use_id\":null,\"session_id\":\"c41ff8dc-6527-46d9-95ad-b71222cf6df0\",\"uuid\":\"57ea9088-1e3b-4aa6-bca7-5300845e6aba\",\"tool_use_result\":{\"type\":\"create\",\"filePath\":\"/tmp/adaf-claude-demo-repo/fixture_note.txt\",\"content\":\"CLAUDE_FIXTURE_FILE_CONTENT\",\"structuredPatch\":[],\"originalFile\":null}}",
+    "{\"type\":\"assistant\",\"message\":{\"model\":\"claude-opus-4-6\",\"id\":\"msg_01RZDap71FYWMapCEH3DpqTg\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"CLAUDE_FIXTURE_OK\"}],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":1,\"cache_creation_input_tokens\":132,\"cache_read_input_tokens\":18757,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":132},\"output_tokens\":7,\"service_tier\":\"standard\",\"inference_geo\":\"not_available\"},\"context_management\":null},\"parent_tool_use_id\":null,\"session_id\":\"c41ff8dc-6527-46d9-95ad-b71222cf6df0\",\"uuid\":\"2ca2adaf-08b3-4be0-93fe-65c475c96d53\"}",
+    "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"duration_ms\":9576,\"duration_api_ms\":8585,\"num_turns\":2,\"result\":\"CLAUDE_FIXTURE_OK\",\"stop_reason\":null,\"session_id\":\"c41ff8dc-6527-46d9-95ad-b71222cf6df0\",\"total_cost_usd\":0.02809575,\"usage\":{\"input_tokens\":4,\"cache_creation_input_tokens\":1053,\"cache_read_input_tokens\":36593,\"output_tokens\":106,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":1053,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{\"claude-haiku-4-5-20251001\":{\"inputTokens\":123,\"outputTokens\":85,\"cacheReadInputTokens\":0,\"cacheCreationInputTokens\":0,\"webSearchRequests\":0,\"costUSD\":0.0005480000000000001,\"contextWindow\":200000,\"maxOutputTokens\":32000},\"claude-opus-4-6\":{\"inputTokens\":4,\"outputTokens\":106,\"cacheReadInputTokens\":36593,\"cacheCreationInputTokens\":1053,\"webSearchRequests\":0,\"costUSD\":0.02754775,\"contextWindow\":200000,\"maxOutputTokens\":32000}},\"permission_denials\":[],\"uuid\":\"239a1faf-97c7-4809-8685-0c2f3e0f9cf9\"}"
+  ],
+  "events": [
+    {
+      "type": "stdin",
+      "data": "In the current directory, create a file named fixture_note.txt with exactly this content: CLAUDE_FIXTURE_FILE_CONTENT. Then answer with exactly: CLAUDE_FIXTURE_OK."
+    },
+    {
+      "type": "meta",
+      "data": "agent=claude"
+    },
+    {
+      "type": "meta",
+      "data": "command=/home/agusx1211/.local/bin/claude --dangerously-skip-permissions --max-turns 5 --print --output-format stream-json --verbose"
+    },
+    {
+      "type": "meta",
+      "data": "workdir=/tmp/adaf-claude-demo-repo"
+    }
+  ],
+  "workspace": {
+    "fixture_note.txt": "CLAUDE_FIXTURE_FILE_CONTENT"
+  },
+  "metadata": {
+    "demo_repo": "/tmp/adaf-claude-demo-repo",
+    "record_env": "ADAF_RECORD_CLAUDE_FIXTURE"
+  }
+}

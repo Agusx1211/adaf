@@ -454,6 +454,9 @@ make record-opencode-fixture
 # Record Codex replay fixture (requires codex + credentials)
 make record-codex-fixture
 
+# Record Claude replay fixture (requires claude + credentials)
+make record-claude-fixture
+
 # Format code
 make fmt
 
