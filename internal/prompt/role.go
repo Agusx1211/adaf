@@ -72,11 +72,6 @@ func RolePrompt(profile *config.Profile, stepRole string, globalCfg *config.Glob
 		b.WriteString(body + "\n\n")
 	}
 
-	if profile.Description != "" {
-		b.WriteString("## Your Description\n\n")
-		b.WriteString(profile.Description + "\n\n")
-	}
-
 	return b.String()
 }
 
@@ -114,11 +109,6 @@ func RolePromptSlim(profile *config.Profile, stepRole string, globalCfg *config.
 		b.WriteString(roleDesc + "\n\n")
 	}
 
-	if profile.Description != "" {
-		b.WriteString("## Your Description\n\n")
-		b.WriteString(profile.Description + "\n\n")
-	}
-
 	return b.String()
 }
 
@@ -153,24 +143,8 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 		b.WriteString("**Delegation style:** " + style + "\n\n")
 	}
 
-	// Delegation commands.
-	b.WriteString(delegationCommands())
-
-	// Task quality guidance.
-	b.WriteString("When spawning, write a thorough task description — sub-agents only see what you give them. Include relevant context, goals, constraints, and what \"done\" looks like. Use `--task-file` for anything non-trivial.\n\n")
-	b.WriteString("If the same profile is allowed with multiple roles, you MUST pass `--role <role>` in the spawn command.\n\n")
-
-	// Quick-start example.
-	b.WriteString("### Quick-Start Example\n\n")
-	b.WriteString("```bash\n")
-	b.WriteString("# 1. Spawn a scout to understand the codebase\n")
-	b.WriteString("adaf spawn --profile <name> --role <role> --read-only --task \"Examine the repo structure, summarize key files, list failing tests\"\n")
-	b.WriteString("# 2. Spawn workers for independent tasks\n")
-	b.WriteString("adaf spawn --profile <name> --role <role> --task-file /tmp/task1.md\n")
-	b.WriteString("adaf spawn --profile <name> --role <role> --task-file /tmp/task2.md\n")
-	b.WriteString("# 3. Suspend — costs zero tokens while waiting\n")
-	b.WriteString("adaf wait-for-spawns\n")
-	b.WriteString("```\n\n")
+	// Command reference pointer — full docs available via `adaf skill delegation`.
+	b.WriteString("Run `adaf skill delegation` for command reference and spawn patterns.\n\n")
 
 	if len(runningSpawns) > 0 {
 		b.WriteString("## Currently Running Spawns\n\n")
@@ -248,54 +222,6 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 
 	maxPar := deleg.EffectiveMaxParallel()
 	fmt.Fprintf(&b, "Maximum concurrent sub-agents: %d\n\n", maxPar)
-
-	return b.String()
-}
-
-func delegationCommands() string {
-	var b strings.Builder
-	b.WriteString("## Delegation Commands\n\n")
-
-	// Spawn flow — strong guidance.
-	b.WriteString("### Spawn Flow\n\n")
-	b.WriteString("**ALWAYS use this pattern:**\n")
-	b.WriteString("1. Spawn ALL independent tasks at once (without `--wait`)\n")
-	b.WriteString("2. Call `adaf wait-for-spawns` immediately after\n")
-	b.WriteString("3. Stop immediately after that command. Do not run more commands in this turn — the loop will pause this turn and resume you automatically when children complete.\n\n")
-	b.WriteString("This is critical: `wait-for-spawns` suspends your session with zero token cost. ")
-	b.WriteString("Using `--wait` keeps your session alive and burns tokens while you idle. ")
-	b.WriteString("**Only use `--wait` when you absolutely need a child's output before you can spawn the next task in the same turn** (rare).\n\n")
-
-	// Scout pattern.
-	b.WriteString("### Scouts (read-only sub-agents)\n\n")
-	b.WriteString("Use `--read-only` spawns for any information gathering:\n")
-	b.WriteString("- Inspecting repo structure, reading files, understanding code\n")
-	b.WriteString("- Reviewing git history, checking test status, analyzing dependencies\n")
-	b.WriteString("- Exploring the codebase before deciding how to break down work\n\n")
-	b.WriteString("Scouts are cheap and fast. Prefer spawning a scout over reading files yourself.\n\n")
-	b.WriteString("**Important:** Read-only scouts run in an isolated worktree snapshot at HEAD. They do NOT see uncommitted or staged changes from the parent. If a scout needs to inspect in-flight work, commit or stash first.\n\n")
-
-	// Command reference.
-	b.WriteString("### Command Reference\n\n")
-	b.WriteString("**Spawning:**\n")
-	b.WriteString("- `adaf spawn --profile <name> [--role <role>] --task \"...\" [--read-only]` — Spawn a sub-agent (non-blocking)\n")
-	b.WriteString("- `adaf spawn --profile <name> [--role <role>] --task-file <path> [--read-only]` — Spawn with detailed task from file\n")
-	b.WriteString("- `adaf wait-for-spawns` — Suspend until all spawns complete (TOKEN-FREE wait)\n\n")
-	b.WriteString("**Monitoring (use sparingly — prefer wait-for-spawns):**\n")
-	b.WriteString("- `adaf spawn-status [--spawn-id N]` — Check spawn status\n")
-	b.WriteString("- `adaf spawn-watch --spawn-id N` — Watch spawn output in real-time\n\n")
-	b.WriteString("**Review & merge:**\n")
-	b.WriteString("- `adaf spawn-diff --spawn-id N` — View diff of spawn's changes\n")
-	b.WriteString("- `adaf spawn-merge --spawn-id N [--squash]` — Merge spawn's changes\n")
-	b.WriteString("- `adaf spawn-reject --spawn-id N` — Reject spawn's changes (destroys branch — see below)\n\n")
-	b.WriteString("**Replying to child questions:**\n")
-	b.WriteString("- `adaf spawn-reply --spawn-id N \"answer\"` — Reply to child's question\n\n")
-
-	// Reject guidance.
-	b.WriteString("### On Rejecting Work\n\n")
-	b.WriteString("`spawn-reject` destroys the branch entirely. The next spawn starts from scratch. Before rejecting, consider:\n")
-	b.WriteString("- If the issue is minor (e.g. stale files in diff), write a more detailed task description for the next spawn rather than iterating blindly\n")
-	b.WriteString("- If you've already rejected the same task twice, stop and rethink your task description — you are wasting resources\n\n")
 
 	return b.String()
 }

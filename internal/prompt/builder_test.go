@@ -516,9 +516,9 @@ func TestBuild_NoSkillsMinimalPrompt(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	// Should have role header and objective but no skills section content.
-	if !strings.Contains(got, "# Objective") {
-		t.Fatalf("missing Objective section\nprompt:\n%s", got)
+	// Should have role header and project section but no skills section content.
+	if !strings.Contains(got, "# Project") {
+		t.Fatalf("missing Project section\nprompt:\n%s", got)
 	}
 	// Should NOT have the legacy rules section.
 	if strings.Contains(got, "# Rules\n") {
@@ -606,7 +606,7 @@ func TestBuild_SessionContextSkillGatesLogs(t *testing.T) {
 		t.Fatalf("session logs should be gated by session_context skill\nprompt:\n%s", got)
 	}
 
-	// With session_context skill: logs present.
+	// With session_context skill: logs are NOT inlined (agents use `adaf log`).
 	got, err = Build(BuildOpts{
 		Store:     s,
 		Project:   project,
@@ -617,8 +617,12 @@ func TestBuild_SessionContextSkillGatesLogs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if !strings.Contains(got, "Recent Session Logs") {
-		t.Fatalf("session logs should be present with session_context skill\nprompt:\n%s", got)
+	if strings.Contains(got, "Recent Session Logs") {
+		t.Fatalf("skills-driven prompt should not inline session logs\nprompt:\n%s", got)
+	}
+	// The session_context skill short text should still be present.
+	if !strings.Contains(got, "adaf log") {
+		t.Fatalf("session_context skill should reference adaf log\nprompt:\n%s", got)
 	}
 }
 
@@ -667,6 +671,53 @@ func TestBuild_NilSkillsFallsBackToLegacy(t *testing.T) {
 	// Legacy path has "# Rules" section.
 	if !strings.Contains(got, "# Rules\n") {
 		t.Fatalf("nil Skills should use legacy path with Rules section\nprompt:\n%s", got)
+	}
+}
+
+func TestBuild_ProfileDescriptionNotInOwnPrompt(t *testing.T) {
+	s, project := initPromptTestStore(t)
+	globalCfg := &config.GlobalConfig{}
+	config.EnsureDefaultSkillCatalog(globalCfg)
+
+	profile := &config.Profile{
+		Name:        "fast-dev",
+		Agent:       "claude",
+		Description: "very fast worker for small tasks",
+	}
+
+	// Skills-driven path.
+	got, err := Build(BuildOpts{
+		Store:     s,
+		Project:   project,
+		Profile:   profile,
+		GlobalCfg: globalCfg,
+		Skills:    []string{"autonomy"},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if strings.Contains(got, "Your Description") {
+		t.Fatalf("agent should not see its own description heading\nprompt:\n%s", got)
+	}
+	if strings.Contains(got, "very fast worker") {
+		t.Fatalf("agent should not see its own description text\nprompt:\n%s", got)
+	}
+
+	// Legacy path.
+	got, err = Build(BuildOpts{
+		Store:   s,
+		Project: project,
+		Profile: profile,
+		Skills:  nil,
+	})
+	if err != nil {
+		t.Fatalf("Build (legacy): %v", err)
+	}
+	if strings.Contains(got, "Your Description") {
+		t.Fatalf("agent should not see its own description heading (legacy)\nprompt:\n%s", got)
+	}
+	if strings.Contains(got, "very fast worker") {
+		t.Fatalf("agent should not see its own description text (legacy)\nprompt:\n%s", got)
 	}
 }
 

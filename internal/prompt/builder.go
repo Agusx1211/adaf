@@ -162,14 +162,13 @@ func hasSkill(skills []string, id string) bool {
 func buildSkillsPrompt(opts BuildOpts) (string, error) {
 	var b strings.Builder
 
-	s := opts.Store
 	project := opts.Project
 
 	if project == nil {
 		return "Explore the codebase and address any open issues.", nil
 	}
 
-	effectivePlanID, plan := resolvePlan(opts)
+	_, plan := resolvePlan(opts)
 
 	// Role header (slim: title + identity + description only).
 	if opts.Profile != nil {
@@ -207,19 +206,6 @@ func buildSkillsPrompt(opts BuildOpts) (string, error) {
 
 	// Dynamic context sections gated by active skills.
 
-	// Session context.
-	if hasSkill(resolvedSkills, config.SkillSessionContext) {
-		allTurns, _ := s.ListTurns()
-		if len(allTurns) > 0 {
-			b.WriteString(renderSessionLogs(allTurns))
-		}
-	}
-
-	// Issues.
-	if hasSkill(resolvedSkills, config.SkillIssues) {
-		b.WriteString(renderIssues(s, effectivePlanID))
-	}
-
 	// Loop control.
 	if hasSkill(resolvedSkills, config.SkillLoopControl) && opts.LoopContext != nil {
 		b.WriteString(renderLoopContext(opts))
@@ -254,8 +240,8 @@ func buildSkillsPrompt(opts BuildOpts) (string, error) {
 	b.WriteString(renderWaitResults(opts.WaitResults))
 	b.WriteString(renderHandoffs(opts.Handoffs))
 
-	// Objective.
-	b.WriteString(renderObjective(opts, project, plan, resolvedSkills))
+	// Project context (lightweight — agents discover details via CLI).
+	b.WriteString(renderContextSection(opts, project, plan))
 
 	return b.String(), nil
 }
@@ -598,6 +584,28 @@ func renderHandoffs(handoffs []store.HandoffInfo) string {
 		fmt.Fprintf(&b, "  Use `adaf spawn-status --spawn-id %d` to check progress.\n\n", h.SpawnID)
 	}
 	b.WriteString("You can manage these exactly like your own spawns (wait, diff, merge, reject).\n\n")
+	return b.String()
+}
+
+// renderContextSection formats a lightweight project context section for the skills-driven path.
+// Agents discover plan details, issues, and session history via CLI commands.
+func renderContextSection(opts BuildOpts, project *store.ProjectConfig, plan *store.Plan) string {
+	var b strings.Builder
+	b.WriteString("# Project\n\n")
+	b.WriteString("Project: " + project.Name + "\n\n")
+
+	if plan != nil {
+		fmt.Fprintf(&b, "Active plan: **%s**", plan.ID)
+		if plan.Title != "" {
+			fmt.Fprintf(&b, " — %s", plan.Title)
+		}
+		b.WriteString("\n\n")
+	}
+
+	if opts.Task != "" {
+		b.WriteString(opts.Task + "\n\n")
+	}
+
 	return b.String()
 }
 

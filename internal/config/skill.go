@@ -105,7 +105,7 @@ func DefaultSkills() []Skill {
 		},
 		{
 			ID:    SkillDelegation,
-			Short: "You can spawn sub-agents to delegate work. Use `adaf spawn` to spawn, `adaf wait-for-spawns` to wait, and `adaf spawn-diff`/`adaf spawn-merge`/`adaf spawn-reject` to review. Spawn all independent tasks at once, then wait. Run `adaf skill delegation` for full delegation documentation.",
+			Short: "You can spawn sub-agents. Run `adaf spawn info` to see available profiles, roles, and capacity. Run `adaf skill delegation` for full command reference and patterns.",
 			Long: "# Delegation\n\n" +
 				"## Spawn Flow\n\n" +
 				"**ALWAYS use this pattern:**\n" +
@@ -161,7 +161,7 @@ func DefaultSkills() []Skill {
 		},
 		{
 			ID:    SkillIssues,
-			Short: "Track work items via `adaf issues`. Review open issues before starting. Log new issues you discover during work.",
+			Short: "Use `adaf issues` to check open work items before starting. Log new issues you discover with `adaf issue create`.",
 			Long: "# Issues\n\n" +
 				"Track work items via `adaf issues`. Review open issues before starting.\n" +
 				"Log new issues you discover during work rather than addressing them immediately.\n\n" +
@@ -172,7 +172,7 @@ func DefaultSkills() []Skill {
 		},
 		{
 			ID:    SkillPlan,
-			Short: "Follow the active plan. Work on the current phase. Use `adaf plan` to view plan status and phases.",
+			Short: "Use `adaf plan` to view the active plan, phases, and status. Work on the current phase. Mark phases complete as you finish them.",
 			Long: "# Plan\n\n" +
 				"Follow the active plan. Work on the current phase.\n\n" +
 				"Commands:\n" +
@@ -183,7 +183,7 @@ func DefaultSkills() []Skill {
 		},
 		{
 			ID:    SkillSessionContext,
-			Short: "Review recent session logs before starting. Previous agents left notes about what was built, decisions made, and next steps.",
+			Short: "Use `adaf log` to review session history before starting. Previous agents left notes about progress, decisions, and next steps.",
 			Long: "# Session Context\n\n" +
 				"Review recent session logs before starting. Previous agents left notes about:\n" +
 				"- What was built\n" +
