@@ -4,6 +4,7 @@ import { useAppState, useDispatch, normalizeSessions, normalizeSpawns, normalize
 import { arrayOrEmpty, normalizeStatus, parseTimestamp } from '../utils/format.js';
 
 var POLL_MS = 5000;
+var USAGE_POLL_MS = 60000;
 
 export function usePolling() {
   var state = useAppState();
@@ -201,4 +202,37 @@ export function useInitProjects() {
         }
       });
   }, [dispatch]);
+}
+
+export function useUsageLimits() {
+  var dispatch = useDispatch();
+  var timerRef = useRef(null);
+  var mountedRef = useRef(true);
+
+  var fetchUsage = useCallback(async function () {
+    if (!mountedRef.current) return;
+    try {
+      var data = await apiCall('/api/usage', 'GET', null, { allow404: true });
+      if (!mountedRef.current) return;
+      dispatch({ type: 'SET', payload: { usageLimits: data || null } });
+    } catch (err) {
+      // Silently ignore usage errors
+    }
+  }, [dispatch]);
+
+  useEffect(function () {
+    mountedRef.current = true;
+    fetchUsage();
+
+    timerRef.current = setInterval(function () {
+      fetchUsage();
+    }, USAGE_POLL_MS);
+
+    return function () {
+      mountedRef.current = false;
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [fetchUsage]);
+
+  return fetchUsage;
 }
