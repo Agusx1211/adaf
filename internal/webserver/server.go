@@ -21,28 +21,30 @@ var staticFS embed.FS
 
 // Options configures web server behavior.
 type Options struct {
-	Host      string
-	Port      int
-	TLSMode   string
-	CertFile  string
-	KeyFile   string
-	AuthToken string
-	RateLimit float64
-	RootDir   string
+	Host        string
+	Port        int
+	TLSMode     string
+	CertFile    string
+	KeyFile     string
+	AuthToken   string
+	RateLimit   float64
+	RootDir     string
+	AllowedRoot string
 }
 
 // Server hosts the HTTP API and WebSocket session stream bridge.
 type Server struct {
-	registry   *ProjectRegistry
-	rootDir    string
-	httpServer *http.Server
-	port       int
-	host       string
-	tlsMode    string
-	certFile   string
-	keyFile    string
-	authToken  string
-	rateLimit  float64
+	registry    *ProjectRegistry
+	rootDir     string
+	allowedRoot string
+	httpServer  *http.Server
+	port        int
+	host        string
+	tlsMode     string
+	certFile    string
+	keyFile     string
+	authToken   string
+	rateLimit   float64
 }
 
 // NewMulti constructs a web server with a pre-populated project registry.
@@ -62,15 +64,19 @@ func newServer(registry *ProjectRegistry, opts Options) *Server {
 	}
 
 	srv := &Server{
-		registry:  registry,
-		rootDir:   opts.RootDir,
-		host:      host,
-		port:      port,
-		tlsMode:   strings.TrimSpace(opts.TLSMode),
-		certFile:  strings.TrimSpace(opts.CertFile),
-		keyFile:   strings.TrimSpace(opts.KeyFile),
-		authToken: strings.TrimSpace(opts.AuthToken),
-		rateLimit: opts.RateLimit,
+		registry:    registry,
+		rootDir:     opts.RootDir,
+		allowedRoot: opts.AllowedRoot,
+		host:        host,
+		port:        port,
+		tlsMode:     strings.TrimSpace(opts.TLSMode),
+		certFile:    strings.TrimSpace(opts.CertFile),
+		keyFile:     strings.TrimSpace(opts.KeyFile),
+		authToken:   strings.TrimSpace(opts.AuthToken),
+		rateLimit:   opts.RateLimit,
+	}
+	if srv.allowedRoot == "" {
+		srv.allowedRoot = srv.rootDir
 	}
 
 	mux := http.NewServeMux()

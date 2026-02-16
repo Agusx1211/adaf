@@ -11,17 +11,30 @@ import (
 	"github.com/agusx1211/adaf/internal/store"
 )
 
-// resolveBrowsePath converts the query path to a clean absolute path.
-// If the path is empty it defaults to the server's rootDir.
-// Both relative (resolved against rootDir) and absolute paths are accepted.
+func (srv *Server) isWithinAllowedRoot(path string) bool {
+	if srv.allowedRoot == "" {
+		return true
+	}
+	rel, err := filepath.Rel(srv.allowedRoot, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || !strings.HasPrefix(rel, "..")
+}
+
 func (srv *Server) resolveBrowsePath(raw string) (string, error) {
+	var absPath string
 	if raw == "" {
-		return filepath.Clean(srv.rootDir), nil
+		absPath = filepath.Clean(srv.allowedRoot)
+	} else if filepath.IsAbs(raw) {
+		absPath = filepath.Clean(raw)
+	} else {
+		absPath = filepath.Clean(filepath.Join(srv.allowedRoot, raw))
 	}
-	if filepath.IsAbs(raw) {
-		return filepath.Clean(raw), nil
+	if !srv.isWithinAllowedRoot(absPath) {
+		return "", os.ErrPermission
 	}
-	return filepath.Clean(filepath.Join(srv.rootDir, raw)), nil
+	return absPath, nil
 }
 
 type fsBrowseEntry struct {
@@ -41,7 +54,11 @@ func (srv *Server) handleFSBrowse(w http.ResponseWriter, r *http.Request) {
 
 	absPath, err := srv.resolveBrowsePath(rawPath)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		if os.IsPermission(err) {
+			writeError(w, http.StatusForbidden, "access denied")
+		} else {
+			writeError(w, http.StatusBadRequest, err.Error())
+		}
 		return
 	}
 
@@ -67,7 +84,6 @@ func (srv *Server) handleFSBrowse(w http.ResponseWriter, r *http.Request) {
 
 	result := make([]fsBrowseEntry, 0, len(dirEntries))
 	for _, entry := range dirEntries {
-		// Skip hidden entries
 		if strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
@@ -77,7 +93,6 @@ func (srv *Server) handleFSBrowse(w http.ResponseWriter, r *http.Request) {
 			IsDir: entry.IsDir(),
 		}
 
-		// Check if directory is an adaf project
 		if entry.IsDir() {
 			entryPath := filepath.Join(absPath, entry.Name())
 			projectFile := filepath.Join(entryPath, store.AdafDir, "project.json")
@@ -90,17 +105,15 @@ func (srv *Server) handleFSBrowse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sort.Slice(result, func(i, j int) bool {
-		// Directories first, then files; within each group alphabetical
 		if result[i].IsDir != result[j].IsDir {
 			return result[i].IsDir
 		}
 		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
 	})
 
-	// Parent is the directory above, unless we're at filesystem root
-	parent := filepath.Dir(absPath)
-	if parent == absPath {
-		parent = "" // at filesystem root
+	parent := ""
+	if parentPath := filepath.Dir(absPath); parentPath != absPath && srv.isWithinAllowedRoot(parentPath) {
+		parent = parentPath
 	}
 
 	resp := fsBrowseResponse{

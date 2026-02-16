@@ -88,6 +88,7 @@ func addWebServerFlags(cmd *cobra.Command, openFlagName, openFlagUsage string, d
 	cmd.Flags().Float64("rate-limit", 0, "Max requests per second per IP (0 = unlimited)")
 	cmd.Flags().Bool("daemon", daemonDefault, "Run web server in background")
 	cmd.Flags().Bool("mdns", false, "Advertise server on local network via mDNS/Bonjour")
+	cmd.Flags().String("allowed-root", "", "Root path for file browser (defaults to current directory)")
 	cmd.Flags().Bool(openFlagName, false, openFlagUsage)
 }
 
@@ -158,6 +159,15 @@ func runWebServe(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	opts.RootDir = rootDir
+
+	allowedRoot, _ := cmd.Flags().GetString("allowed-root")
+	if allowedRoot != "" {
+		allowedRoot, err = filepath.Abs(allowedRoot)
+		if err != nil {
+			return fmt.Errorf("resolving allowed-root path: %w", err)
+		}
+		opts.AllowedRoot = filepath.Clean(allowedRoot)
+	}
 	mdnsServiceName := "adaf"
 
 	registry := webserver.NewProjectRegistry()
