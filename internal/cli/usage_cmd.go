@@ -45,6 +45,8 @@ func runUsage(cmd *cobra.Command, args []string) error {
 	providers := []usage.Provider{
 		usage.NewClaudeProvider(),
 		usage.NewCodexProvider(),
+		usage.NewMistralProvider(),
+		usage.NewOpenAIProvider(),
 	}
 
 	if providerFlag != "" {

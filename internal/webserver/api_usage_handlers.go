@@ -35,6 +35,8 @@ func (srv *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	providers := []usage.Provider{
 		usage.NewClaudeProvider(),
 		usage.NewCodexProvider(),
+		usage.NewMistralProvider(),
+		usage.NewOpenAIProvider(),
 	}
 
 	var resp usageResponse

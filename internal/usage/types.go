@@ -7,9 +7,11 @@ import (
 type ProviderKind string
 
 const (
-	ProviderClaude ProviderKind = "claude"
-	ProviderCodex  ProviderKind = "codex"
-	ProviderGemini ProviderKind = "gemini"
+	ProviderClaude  ProviderKind = "claude"
+	ProviderCodex   ProviderKind = "codex"
+	ProviderGemini  ProviderKind = "gemini"
+	ProviderMistral ProviderKind = "mistral"
+	ProviderOpenAI  ProviderKind = "openai"
 )
 
 func (p ProviderKind) String() string {
@@ -24,6 +26,10 @@ func (p ProviderKind) DisplayName() string {
 		return "Codex"
 	case ProviderGemini:
 		return "Gemini"
+	case ProviderMistral:
+		return "Mistral (Vibe)"
+	case ProviderOpenAI:
+		return "OpenAI"
 	default:
 		return string(p)
 	}
