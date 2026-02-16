@@ -4,6 +4,7 @@ import { normalizeStatus, formatNumber, formatElapsed } from '../../utils/format
 import { STATUS_RUNNING, statusColor } from '../../utils/colors.js';
 import StatusDot from '../common/StatusDot.jsx';
 import { StopSessionButton, SessionMessageBar } from '../session/SessionControls.jsx';
+import { useUsageLimits } from '../../api/hooks.js';
 
 var NAV_ITEMS = [
   { id: 'loops', label: 'Loops' },
@@ -18,9 +19,13 @@ var NAV_ITEMS = [
 export default function TopBar() {
   var state = useAppState();
   var dispatch = useDispatch();
-  var { sessions, spawns, projects, currentProjectID, wsConnected, termWSConnected, usage, loopRun, leftView } = state;
+  var { sessions, spawns, projects, currentProjectID, wsConnected, termWSConnected, usage, loopRun, leftView, usageLimits } = state;
   var [showRunning, setShowRunning] = useState(false);
+  var [showUsage, setShowUsage] = useState(false);
   var dropdownRef = useRef(null);
+  var usageDropdownRef = useRef(null);
+
+  useUsageLimits();
 
   var counts = useMemo(function () {
     var running = 0;
@@ -45,6 +50,18 @@ export default function TopBar() {
     document.addEventListener('mousedown', handleClick);
     return function () { document.removeEventListener('mousedown', handleClick); };
   }, [showRunning]);
+
+  // Close usage dropdown on outside click
+  useEffect(function () {
+    if (!showUsage) return;
+    function handleClick(e) {
+      if (usageDropdownRef.current && !usageDropdownRef.current.contains(e.target)) {
+        setShowUsage(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return function () { document.removeEventListener('mousedown', handleClick); };
+  }, [showUsage]);
 
   var projectName = useMemo(function () {
     if (!currentProjectID && projects.length) {
@@ -135,11 +152,21 @@ export default function TopBar() {
 
       {/* Right stats */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'flex', gap: 8 }}>
-          <span>in={formatNumber(u.input_tokens || 0)}</span>
-          <span>out={formatNumber(u.output_tokens || 0)}</span>
-          <span style={{ color: 'var(--green)' }}>${Number(u.cost_usd || 0).toFixed(4)}</span>
-        </span>
+        {/* Usage limits dropdown */}
+        <div ref={usageDropdownRef} style={{ position: 'relative' }}>
+          <UsagePill
+            usageLimits={usageLimits}
+            showUsage={showUsage}
+            onClick={function () { setShowUsage(!showUsage); }}
+          />
+          {showUsage && (
+            <UsageDropdown
+              usageLimits={usageLimits}
+              usage={usage}
+              onClose={function () { setShowUsage(false); }}
+            />
+          )}
+        </div>
 
         {/* Running sessions dropdown */}
         <div ref={dropdownRef} style={{ position: 'relative' }}>
@@ -264,6 +291,180 @@ export default function TopBar() {
           </span>
         </span>
       </div>
+    </div>
+  );
+}
+
+function getLevelColor(level) {
+  if (level === 'exhausted') return 'var(--red)';
+  if (level === 'critical') return 'var(--orange)';
+  if (level === 'warning') return 'var(--yellow)';
+  return 'var(--green)';
+}
+
+function getHighestLevel(snapshots) {
+  if (!snapshots || !snapshots.length) return 'normal';
+  var levels = { normal: 0, warning: 1, critical: 2, exhausted: 3 };
+  var highest = 'normal';
+  for (var i = 0; i < snapshots.length; i++) {
+    var s = snapshots[i];
+    if (levels[s.level] > levels[highest]) highest = s.level;
+  }
+  return highest;
+}
+
+function UsagePill(props) {
+  var usageLimits = props.usageLimits;
+  var showUsage = props.showUsage;
+  var onClick = props.onClick;
+
+  var highestLevel = getHighestLevel(usageLimits && usageLimits.snapshots);
+  var color = getLevelColor(highestLevel);
+  var hasLimits = usageLimits && usageLimits.snapshots && usageLimits.snapshots.length > 0;
+
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 5,
+        padding: '3px 8px',
+        border: '1px solid ' + (showUsage ? 'var(--accent)' : hasLimits ? color + '40' : 'var(--border)'),
+        background: showUsage ? 'var(--accent)15' : hasLimits ? color + '15' : 'var(--bg-2)',
+        borderRadius: 4, cursor: 'pointer',
+        fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+        color: hasLimits ? color : 'var(--text-3)',
+        transition: 'all 0.15s ease',
+      }}
+    >
+      {highestLevel !== 'normal' && (
+        <span style={{
+          width: 5, height: 5, borderRadius: '50%',
+          background: color,
+          animation: 'pulse 2s ease-in-out infinite',
+          flexShrink: 0,
+        }} />
+      )}
+      <span>{hasLimits ? 'Usage' : 'Limits'}</span>
+      <span style={{ fontSize: 7, opacity: 0.6 }}>{'\u25BE'}</span>
+    </button>
+  );
+}
+
+function UsageDropdown(props) {
+  var usageLimits = props.usageLimits;
+  var usage = props.usage || { input_tokens: 0, output_tokens: 0, cost_usd: 0 };
+
+  var snapshots = (usageLimits && usageLimits.snapshots) || [];
+  var errors = (usageLimits && usageLimits.errors) || [];
+
+  return (
+    <div style={{
+      position: 'absolute', top: 'calc(100% + 6px)', right: 0,
+      width: 380, maxHeight: 420,
+      background: 'var(--bg-1)', border: '1px solid var(--border)',
+      borderRadius: 6, boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+      zIndex: 1000, display: 'flex', flexDirection: 'column',
+      overflow: 'hidden', animation: 'slideIn 0.12s ease-out',
+    }}>
+      <div style={{
+        padding: '8px 12px', borderBottom: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <span style={{
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
+          color: 'var(--text-1)',
+        }}>Usage Limits</span>
+      </div>
+
+      <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+        {snapshots.length === 0 && errors.length === 0 && (
+          <div style={{
+            padding: 20, textAlign: 'center', color: 'var(--text-3)',
+            fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+          }}>
+            No usage data available.<br/>
+            Configure Claude or Codex to see limits.
+          </div>
+        )}
+
+        {snapshots.map(function (snapshot) {
+          return (
+            <div key={snapshot.provider} style={{
+              padding: '8px 12px',
+              borderBottom: '1px solid var(--bg-3)',
+            }}>
+              <div style={{
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
+                color: 'var(--text-1)', marginBottom: 6,
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <span style={{
+                  width: 6, height: 6, borderRadius: '50%',
+                  background: getLevelColor(snapshot.level),
+                }} />
+                {snapshot.provider}
+              </div>
+              {snapshot.limits && snapshot.limits.map(function (limit) {
+                var pct = limit.utilization_pct;
+                var barWidth = 100;
+                var filled = Math.min(pct, 100) * barWidth / 100;
+                var color = getLevelColor(limit.level);
+                return (
+                  <div key={limit.name} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    marginBottom: 4,
+                  }}>
+                    <span style={{
+                      fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+                      color: 'var(--text-3)', width: 90, flexShrink: 0,
+                    }}>{limit.name}</span>
+                    <div style={{
+                      flex: 1, height: 4, background: 'var(--bg-3)', borderRadius: 2,
+                      overflow: 'hidden',
+                    }}>
+                      <div style={{
+                        width: filled + '%', height: '100%',
+                        background: color, borderRadius: 2,
+                        transition: 'width 0.3s ease',
+                      }} />
+                    </div>
+                    <span style={{
+                      fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+                      color: color, width: 40, textAlign: 'right',
+                    }}>{Math.round(pct)}%</span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+
+        {errors.length > 0 && (
+          <div style={{ padding: '8px 12px' }}>
+            {errors.map(function (err, i) {
+              return (
+                <div key={i} style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+                  color: 'var(--text-3)', marginBottom: 2,
+                }}>{err}</div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {usage && (usage.input_tokens || usage.output_tokens || usage.cost_usd) && (
+        <div style={{
+          padding: '8px 12px', borderTop: '1px solid var(--border)',
+          display: 'flex', gap: 12,
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+          color: 'var(--text-3)',
+        }}>
+          <span>in={formatNumber(usage.input_tokens || 0)}</span>
+          <span>out={formatNumber(usage.output_tokens || 0)}</span>
+          <span style={{ color: 'var(--green)' }}>${Number(usage.cost_usd || 0).toFixed(4)}</span>
+        </div>
+      )}
     </div>
   );
 }

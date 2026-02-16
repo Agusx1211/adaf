@@ -23,6 +23,7 @@ var initialState = {
   loopRun: null,
   usage: null,
   projectMeta: null,
+  usageLimits: null,
 
   selectedScope: null,
   selectedIssue: null,

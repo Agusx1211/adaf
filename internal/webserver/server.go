@@ -237,6 +237,9 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/config/agents", srv.handleListAgents)
 	mux.HandleFunc("POST /api/config/agents/detect", srv.handleDetectAgents)
 
+	// Usage endpoints (global, not project-scoped)
+	mux.HandleFunc("GET /api/usage", srv.handleUsage)
+
 	// WebSocket endpoints
 	mux.HandleFunc("GET /ws/sessions/{id}", srv.handleSessionWebSocket)
 	mux.HandleFunc("GET /ws/terminal", srv.handleTerminalWebSocket)
