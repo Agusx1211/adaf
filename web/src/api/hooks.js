@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { apiCall, apiBase } from './client.js';
-import { useAppState, useDispatch, normalizeSessions, normalizeSpawns, normalizeIssues, normalizeDocs, normalizePlans, normalizePlan, normalizeTurns, normalizeLoopMessages, pickActiveLoopRun, aggregateUsageFromProfileStats } from '../state/store.js';
+import { useAppState, useDispatch, normalizeSessions, normalizeSpawns, normalizeIssues, normalizeDocs, normalizePlans, normalizePlan, normalizeTurns, normalizeLoopMessages, pickActiveLoopRun, normalizeAllLoopRuns, aggregateUsageFromProfileStats } from '../state/store.js';
 import { arrayOrEmpty, normalizeStatus, parseTimestamp } from '../utils/format.js';
 
 var POLL_MS = 5000;
@@ -30,12 +30,13 @@ export function usePolling() {
       var sessions = normalizeSessions(results[1]);
       var spawns = normalizeSpawns(results[2]);
       var loopRun = pickActiveLoopRun(results[3]);
+      var loopRuns = normalizeAllLoopRuns(results[3]);
 
       var usageFromStats = aggregateUsageFromProfileStats(results[4]);
 
       dispatch({
         type: 'SET_CORE_DATA',
-        payload: { projectMeta, sessions, spawns, loopRun, usage: usageFromStats },
+        payload: { projectMeta, sessions, spawns, loopRun, loopRuns, usage: usageFromStats },
       });
 
       return { loopRun, sessions, spawns };
@@ -98,7 +99,7 @@ export function useViewData(view, projectID) {
   }, [projectID, dispatch]);
 
   useEffect(function () {
-    if (view && view !== 'agents') {
+    if (view && view !== 'loops') {
       loadView(view);
     }
   }, [view, loadView]);
@@ -142,6 +143,37 @@ export function useLoopMessages(loopID, projectID) {
       })
       .catch(function () {});
   }, [loopID, projectID, dispatch]);
+}
+
+export function fetchTurnRecordingEvents(turnID, projectID, dispatch) {
+  var base = apiBase(projectID);
+  var url = base + '/turns/' + encodeURIComponent(String(turnID)) + '/events';
+
+  var headers = { Accept: 'application/x-ndjson' };
+  var token = '';
+  try { token = localStorage.getItem('adaf_token') || ''; } catch (_) {}
+  if (token) headers.Authorization = 'Bearer ' + token;
+
+  return fetch(url, { headers: headers })
+    .then(function (res) {
+      if (!res.ok) return null;
+      return res.text();
+    })
+    .then(function (text) {
+      if (!text) return;
+      var events = [];
+      var lines = text.split('\n');
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].trim();
+        if (!line) continue;
+        try {
+          var ev = JSON.parse(line);
+          events.push(ev);
+        } catch (_) {}
+      }
+      dispatch({ type: 'SET_HISTORICAL_EVENTS', payload: { turnID: turnID, events: events } });
+    })
+    .catch(function () {});
 }
 
 export function useInitProjects() {

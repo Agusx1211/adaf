@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useAppState, useDispatch } from '../../state/store.js';
 import { apiBase } from '../../api/client.js';
 import ProjectStatus from '../project/ProjectStatus.jsx';
-import AgentTree from '../tree/AgentTree.jsx';
+import LoopTree from '../tree/LoopTree.jsx';
 import IssuesView from '../views/IssuesView.jsx';
 import DocsView from '../views/DocsView.jsx';
 import PlanView from '../views/PlanView.jsx';
@@ -15,12 +15,12 @@ import { STATUSES } from '../../utils/colors.js';
 export default function LeftPanel() {
   var state = useAppState();
   var dispatch = useDispatch();
-  var { leftView, sessions, spawns } = state;
+  var { leftView, sessions, loopRuns } = state;
   var [showNewChat, setShowNewChat] = useState(false);
   var base = apiBase(state.currentProjectID);
 
   function renderContent() {
-    if (leftView === 'agents') return <AgentTree />;
+    if (leftView === 'loops') return <LoopTree />;
     if (leftView === 'standalone') return <StandaloneConversationList />;
     if (leftView === 'issues') return <IssuesView />;
     if (leftView === 'docs') return <DocsView />;
@@ -32,7 +32,7 @@ export default function LeftPanel() {
 
   return (
     <div style={{
-      width: 440, flexShrink: 0, display: 'flex', flexDirection: 'column',
+      width: 380, flexShrink: 0, display: 'flex', flexDirection: 'column',
       borderRight: '1px solid var(--border)', background: 'var(--bg-1)',
     }}>
       <ProjectStatus />
@@ -56,16 +56,16 @@ export default function LeftPanel() {
         </div>
       )}
 
-      {/* View header for agents */}
-      {leftView === 'agents' && (
+      {/* View header for loops */}
+      {leftView === 'loops' && (
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '8px 14px', borderBottom: '1px solid var(--border)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: 'var(--text-1)' }}>Sessions</span>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: 'var(--text-1)' }}>Loops</span>
             <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>
-              {sessions.length} turns {'\u00B7'} {spawns.length} spawns
+              {loopRuns.length} runs {'\u00B7'} {sessions.length} turns
             </span>
           </div>
           <NewSessionButton />
@@ -76,25 +76,6 @@ export default function LeftPanel() {
       <div style={{ flex: 1, overflow: 'auto' }}>
         {renderContent()}
       </div>
-
-      {/* Legend for agents view */}
-      {leftView === 'agents' && (
-        <div style={{
-          padding: '8px 14px', borderTop: '1px solid var(--border)',
-          display: 'flex', gap: 12, flexWrap: 'wrap',
-        }}>
-          {Object.entries(STATUSES).map(function ([name, color]) {
-            return (
-              <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
-                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 8, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  {name}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
 
       {/* New Chat modal */}
       {showNewChat && (

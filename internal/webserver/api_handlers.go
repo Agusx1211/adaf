@@ -252,6 +252,29 @@ func handleTurnByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, turn)
 }
 
+func handleTurnRecordingEventsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	turnID, err := parsePathID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "turn not found")
+		return
+	}
+
+	eventsPath := filepath.Join(s.RecordsDirs()[0], fmt.Sprintf("%d", turnID), "events.jsonl")
+	data, err := os.ReadFile(eventsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeError(w, http.StatusNotFound, "no recording found for this turn")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to read recording")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
 func handleSpawnsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	spawns, err := s.ListSpawns()
 	if err != nil {

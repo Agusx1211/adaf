@@ -115,7 +115,7 @@ export default function App() {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
             <CenterPanel />
-            {leftView === 'agents' && <RightSidebar />}
+            {leftView !== 'loops' && leftView !== 'standalone' && <RightSidebar />}
           </div>
         </div>
       </div>

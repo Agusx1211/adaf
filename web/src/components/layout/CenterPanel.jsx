@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useAppState } from '../../state/store.js';
 import TabBar from '../common/TabBar.jsx';
-import AgentDetail from '../detail/AgentDetail.jsx';
+import AgentInfoBar from '../detail/AgentInfoBar.jsx';
 import AgentOutput from '../detail/AgentOutput.jsx';
 import LoopVisualizer from '../loop/LoopVisualizer.jsx';
 import StandaloneChatView from '../views/StandaloneChatView.jsx';
@@ -13,19 +13,15 @@ import ConfigDetailPanel from '../detail/ConfigDetailPanel.jsx';
 
 export default function CenterPanel() {
   var state = useAppState();
-  var [activeTab, setActiveTab] = useState('detail');
+  var [activeTab, setActiveTab] = useState('output');
   var { selectedScope, loopRun, leftView } = state;
 
   var isStandalone = leftView === 'standalone';
-  var isAgents = leftView === 'agents';
+  var isLoops = leftView === 'loops';
 
   var loopName = loopRun ? (loopRun.loop_name || 'loop') : null;
 
   var tabs = [
-    {
-      id: 'detail', label: 'Agent Detail', icon: '\u25C9',
-      color: selectedScope ? undefined : 'var(--accent)',
-    },
     {
       id: 'output', label: 'Output', icon: '\u25A3',
     },
@@ -45,14 +41,13 @@ export default function CenterPanel() {
         <StandaloneChatView />
       </div>
 
-      {/* Normal agent view - only for agents view */}
-      {isAgents && (
+      {/* Loops view */}
+      {isLoops && (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-          <TabBar tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
+          <AgentInfoBar scope={selectedScope} />
+          {tabs.length > 1 && <TabBar tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />}
           <div style={{ flex: 1, overflow: 'hidden' }}>
-            {activeTab === 'detail' ? (
-              <AgentDetail scope={selectedScope} />
-            ) : activeTab === 'output' ? (
+            {activeTab === 'output' ? (
               <AgentOutput scope={selectedScope} />
             ) : activeTab === 'loop' ? (
               <LoopVisualizer />

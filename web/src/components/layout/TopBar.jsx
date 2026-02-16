@@ -6,7 +6,7 @@ import StatusDot from '../common/StatusDot.jsx';
 import { StopSessionButton, SessionMessageBar } from '../session/SessionControls.jsx';
 
 var NAV_ITEMS = [
-  { id: 'agents', label: 'Agents' },
+  { id: 'loops', label: 'Loops' },
   { id: 'standalone', label: 'Standalone' },
   { id: 'issues', label: 'Issues' },
   { id: 'docs', label: 'Docs' },

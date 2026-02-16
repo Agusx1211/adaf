@@ -30,7 +30,7 @@ var initialState = {
   selectedDoc: null,
   selectedTurn: null,
   expandedNodes: {},
-  leftView: 'agents',
+  leftView: 'loops',
   rightLayer: 'raw',
   autoScroll: true,
 
@@ -45,6 +45,8 @@ var initialState = {
   configSelection: null, // { type: 'profile'|'loop'|'team', name: string } or null
   standaloneChatID: '', // active chat instance ID
   standaloneChatStatuses: {}, // { [chatID]: 'thinking' | 'responding' }
+  loopRuns: [], // all loop runs (not just active)
+  historicalEvents: {}, // { [turnID]: [ event, ... ] } cached recording events
 };
 
 function reducer(state, action) {
@@ -102,6 +104,17 @@ function reducer(state, action) {
       return { ...state, standaloneChatStatuses: nextStatuses };
     }
 
+    case 'SET_LOOP_RUNS':
+      return { ...state, loopRuns: action.payload };
+
+    case 'SET_HISTORICAL_EVENTS': {
+      var hTurnID = action.payload.turnID;
+      var hEvents = action.payload.events;
+      var nextHistorical = { ...state.historicalEvents };
+      nextHistorical[hTurnID] = hEvents;
+      return { ...state, historicalEvents: nextHistorical };
+    }
+
     case 'TOGGLE_NODE': {
       var nodeID = action.payload;
       var next = { ...state.expandedNodes };
@@ -154,9 +167,10 @@ function reducer(state, action) {
       return {
         ...state,
         sessions: [], spawns: [], messages: [], streamEvents: [], activity: [], activityLast: null,
-        issues: [], plans: [], activePlan: null, docs: [], turns: [], loopRun: null, usage: null,
+        issues: [], plans: [], activePlan: null, docs: [], turns: [], loopRun: null, loopRuns: [], usage: null,
         selectedIssue: null, selectedPlan: null, selectedDoc: null, selectedTurn: null, selectedScope: null,
         expandedNodes: {}, projectMeta: null, activeLoopIDForMessages: 0, standaloneChatStatuses: {},
+        historicalEvents: {},
         viewLoaded: { issues: false, docs: false, plan: false, logs: false },
       };
 
@@ -345,6 +359,8 @@ export function normalizeLoopRun(run) {
     cycle: Number(run && run.cycle) || 0,
     step_index: Number(run && run.step_index) || 0,
     started_at: run && run.started_at ? run.started_at : '',
+    stopped_at: run && run.stopped_at ? run.stopped_at : '',
+    turn_ids: arrayOrEmpty(run && run.turn_ids).map(function (id) { return Number(id) || 0; }),
     steps: arrayOrEmpty(run && run.steps).map(function (step) {
       return { profile: step && step.profile ? String(step.profile) : '', role: step && step.role ? String(step.role) : '' };
     }),
@@ -363,6 +379,11 @@ export function normalizeLoopMessages(rawMessages) {
       step_index: msg && Number.isFinite(Number(msg.step_index)) ? Number(msg.step_index) : null,
     };
   }).filter(function (m) { return m.id > 0 || !!m.content; });
+}
+
+export function normalizeAllLoopRuns(runs) {
+  return arrayOrEmpty(runs).map(normalizeLoopRun).filter(function (r) { return r.id > 0; })
+    .sort(function (a, b) { return parseTimestamp(b.started_at) - parseTimestamp(a.started_at); });
 }
 
 export function pickActiveLoopRun(runs) {
