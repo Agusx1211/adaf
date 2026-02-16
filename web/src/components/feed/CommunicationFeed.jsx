@@ -1,11 +1,16 @@
 import { useMemo } from 'react';
 import { useAppState } from '../../state/store.js';
 import { normalizeStatus, timeAgo, parseTimestamp } from '../../utils/format.js';
+import { buildSpawnScopeMaps, parseScope } from '../../utils/scopes.js';
 import SectionHeader from '../common/SectionHeader.jsx';
 
 export default function CommunicationFeed() {
   var state = useAppState();
-  var { messages, spawns, selectedScope } = state;
+  var { messages, spawns, loopRuns, selectedScope } = state;
+
+  var spawnScopeMaps = useMemo(function () {
+    return buildSpawnScopeMaps(spawns, loopRuns);
+  }, [spawns, loopRuns]);
 
   var displayMessages = useMemo(function () {
     var list = messages.slice();
@@ -42,26 +47,26 @@ export default function CommunicationFeed() {
     });
 
     // Filter by scope
-    if (selectedScope && selectedScope.indexOf('spawn-') === 0) {
-      var targetSpawn = parseInt(selectedScope.slice(6), 10);
-      if (!Number.isNaN(targetSpawn)) {
+    var parsedScope = parseScope(selectedScope);
+    if (parsedScope.kind === 'spawn') {
+      var targetSpawn = parsedScope.id;
+      if (targetSpawn > 0) {
         list = list.filter(function (m) { return Number(m.spawn_id) === targetSpawn; });
       }
-    } else if (selectedScope && selectedScope.indexOf('session-') === 0) {
-      var targetSession = parseInt(selectedScope.slice(8), 10);
-      if (!Number.isNaN(targetSession)) {
+    } else if (parsedScope.kind === 'session') {
+      var targetSession = parsedScope.id;
+      if (targetSession > 0) {
         list = list.filter(function (m) {
           if (!m.spawn_id) return true;
-          var spawn = spawns.find(function (s) { return s.id === Number(m.spawn_id); });
-          if (!spawn) return false;
-          return spawn.parent_turn_id === targetSession || spawn.child_turn_id === targetSession;
+          var mappedSession = spawnScopeMaps.spawnToSession[Number(m.spawn_id)] || 0;
+          return mappedSession === targetSession;
         });
       }
     }
 
     list.sort(function (a, b) { return parseTimestamp(b.created_at) - parseTimestamp(a.created_at); });
     return list;
-  }, [messages, spawns, selectedScope]);
+  }, [messages, spawns, selectedScope, spawnScopeMaps]);
 
   var pendingQuestions = displayMessages.filter(function (m) { return m.type === 'ask'; }).length;
 

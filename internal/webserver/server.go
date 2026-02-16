@@ -328,6 +328,7 @@ func (srv *Server) registerProjectRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("POST "+prefix+"/sessions/{id}/message", srv.projectHandler(handleSessionMessageP))
 	mux.HandleFunc("GET "+prefix+"/sessions", srv.projectHandler(handleSessionsP))
 	mux.HandleFunc("GET "+prefix+"/sessions/{id}", srv.projectHandler(handleSessionByIDP))
+	mux.HandleFunc("GET "+prefix+"/sessions/{id}/events", srv.projectHandler(handleSessionRecordingEventsP))
 
 	// Loop runs
 	mux.HandleFunc("GET "+prefix+"/loops", srv.projectHandler(handleLoopRunsP))

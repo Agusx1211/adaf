@@ -31,7 +31,7 @@ export default function AgentTree({ onSelectScope }) {
         childrenByParent[spawn.parent_spawn_id].push(spawn);
       } else {
         var storeTurnID = spawn.parent_turn_id || 0;
-        var sessionKey = storeTurnToDaemonSession[storeTurnID] || storeTurnID;
+        var sessionKey = spawn.parent_daemon_session_id || storeTurnToDaemonSession[storeTurnID] || storeTurnID;
         if (!rootsBySession[sessionKey]) rootsBySession[sessionKey] = [];
         rootsBySession[sessionKey].push(spawn);
       }

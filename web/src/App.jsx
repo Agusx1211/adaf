@@ -6,6 +6,7 @@ import { useSessionSocket } from './api/websocket.js';
 import { normalizeStatus, parseTimestamp } from './utils/format.js';
 import { STATUS_RUNNING } from './utils/colors.js';
 import { stateToHash, hashToActions } from './utils/deeplink.js';
+import { buildSpawnScopeMaps, parseScope } from './utils/scopes.js';
 import TopBar from './components/layout/TopBar.jsx';
 import LeftPanel from './components/layout/LeftPanel.jsx';
 import CenterPanel from './components/layout/CenterPanel.jsx';
@@ -101,27 +102,23 @@ export default function App() {
   useLoopMessages(loopID, currentProjectID);
 
   // WebSocket for selected session
+  var spawnScopeMaps = useMemo(function () {
+    return buildSpawnScopeMaps(state.spawns, state.loopRuns);
+  }, [state.spawns, state.loopRuns]);
+
   var targetSessionID = useMemo(function () {
     if (!selectedScope) {
       var running = sessions.find(function (s) { return !!STATUS_RUNNING[normalizeStatus(s.status)]; });
       return running ? running.id : (sessions.length ? sessions[0].id : 0);
     }
-    if (selectedScope.indexOf('session-') === 0) {
-      var sid = parseInt(selectedScope.slice(8), 10);
-      return Number.isNaN(sid) ? 0 : sid;
-    }
-    if (selectedScope.indexOf('spawn-') === 0) {
-      var spawnID = parseInt(selectedScope.slice(6), 10);
-      if (!Number.isNaN(spawnID)) {
-        var spawn = state.spawns.find(function (s) { return s.id === spawnID; });
-        if (spawn) {
-          if (spawn.parent_turn_id > 0) return spawn.parent_turn_id;
-          if (spawn.child_turn_id > 0) return spawn.child_turn_id;
-        }
-      }
+    var parsedScope = parseScope(selectedScope);
+    if (parsedScope.kind === 'session') return parsedScope.id;
+    if (parsedScope.kind === 'spawn') {
+      var mapped = spawnScopeMaps.spawnToSession[parsedScope.id] || 0;
+      if (mapped > 0) return mapped;
     }
     return sessions.length ? sessions[0].id : 0;
-  }, [selectedScope, sessions, state.spawns]);
+  }, [selectedScope, sessions, spawnScopeMaps]);
 
   // Only open WebSocket for running sessions. Non-running sessions load
   // historical recordings via the REST API (see AgentOutput.jsx).

@@ -140,6 +140,8 @@ export default function StandaloneChatView() {
   function pushEventForChat(forChatID, evt, spawnID) {
     var entry = chatSessionsRef.current[forChatID];
     if (!entry) return;
+    var eventScope = (spawnID && spawnID > 0) ? ('spawn-' + spawnID) : 'parent';
+    var scopedEvt = Object.assign({}, evt, { scope: eventScope });
 
     // Route to correct events array
     var events;
@@ -151,12 +153,12 @@ export default function StandaloneChatView() {
     }
 
     var last = events.length > 0 ? events[events.length - 1] : null;
-    if (evt.type === 'text' && last && last.type === 'text') {
-      last.content += evt.content;
-    } else if (evt.type === 'thinking' && last && last.type === 'thinking') {
-      last.content += evt.content;
+    if (scopedEvt.type === 'text' && last && last.type === 'text') {
+      last.content += scopedEvt.content;
+    } else if (scopedEvt.type === 'thinking' && last && last.type === 'thinking') {
+      last.content += scopedEvt.content;
     } else {
-      events.push(evt);
+      events.push(scopedEvt);
     }
 
     // Also push to allEvents with source tag
@@ -170,7 +172,7 @@ export default function StandaloneChatView() {
       sourceLabel = entry.parentProfile || 'parent';
       sourceColor = agentInfo(entry.parentProfile || '').color;
     }
-    var taggedEvt = Object.assign({}, evt, { _sourceLabel: sourceLabel, _sourceColor: sourceColor, _spawnID: spawnID || 0 });
+    var taggedEvt = Object.assign({}, scopedEvt, { _sourceLabel: sourceLabel, _sourceColor: sourceColor, _spawnID: spawnID || 0 });
     var allLast = entry.allEvents.length > 0 ? entry.allEvents[entry.allEvents.length - 1] : null;
     if (taggedEvt.type === 'text' && allLast && allLast.type === 'text' && allLast._spawnID === taggedEvt._spawnID) {
       allLast.content += taggedEvt.content;
@@ -196,7 +198,7 @@ export default function StandaloneChatView() {
     }
 
     // Update global status to 'responding' once we have content
-    if (evt.type === 'text' || evt.type === 'tool_use' || evt.type === 'tool_result') {
+    if (scopedEvt.type === 'text' || scopedEvt.type === 'tool_use' || scopedEvt.type === 'tool_result') {
       dispatchRef.current({ type: 'SET_STANDALONE_CHAT_STATUS', payload: { chatID: forChatID, status: 'responding' } });
     }
   }
@@ -219,8 +221,10 @@ export default function StandaloneChatView() {
     });
     var finalText = cleanResponse(textParts.join(''));
 
-    if (finalText || entry.events.length > 0) {
-      saveAssistantResponseForChat(forChatID, finalText || '(no text output)', entry.events.slice(), entry.promptData, entry.base);
+    var payload = buildStandaloneEventPayload(entry.events, entry.allEvents, entry.spawnEvents);
+    var hasPayloadEvents = payload.parent.length > 0 || payload.all.length > 0;
+    if (finalText || hasPayloadEvents) {
+      saveAssistantResponseForChat(forChatID, finalText || '(no text output)', payload, entry.promptData, entry.base);
     }
 
     // Close WS
@@ -319,6 +323,7 @@ export default function StandaloneChatView() {
                 type: '_spawn_status', _spawnID: ns.id,
                 _action: 'started', _profile: ns.profile, _role: ns.role || '',
                 _sourceLabel: ns.profile, _sourceColor: agentInfo(ns.profile).color,
+                scope: 'spawn-' + ns.id,
               });
             } else if (old.status !== ns.status) {
               if (ns.status === 'completed' || ns.status === 'failed') {
@@ -326,6 +331,7 @@ export default function StandaloneChatView() {
                   type: '_spawn_status', _spawnID: ns.id,
                   _action: ns.status, _profile: ns.profile, _role: ns.role || '',
                   _sourceLabel: ns.profile, _sourceColor: agentInfo(ns.profile).color,
+                  scope: 'spawn-' + ns.id,
                 });
               }
               if (ns.status === 'awaiting_input' && ns.question) {
@@ -333,6 +339,7 @@ export default function StandaloneChatView() {
                   type: '_spawn_status', _spawnID: ns.id,
                   _action: 'asking', _profile: ns.profile, _question: ns.question,
                   _sourceLabel: ns.profile, _sourceColor: agentInfo(ns.profile).color,
+                  scope: 'spawn-' + ns.id,
                 });
               }
             }
@@ -497,6 +504,7 @@ export default function StandaloneChatView() {
       id: Date.now(),
       role: 'assistant',
       content: content,
+      events: structuredEvents || null,
       _events: structuredEvents || null,
       _prompt: promptData || null,
       created_at: new Date().toISOString(),
@@ -511,7 +519,10 @@ export default function StandaloneChatView() {
     if (window.__reloadChatInstances) window.__reloadChatInstances();
 
     try {
-      await apiCall((capturedBase || base) + '/chat-instances/' + encodeURIComponent(forChatID) + '/response', 'POST', { content: content, events: structuredEvents || null });
+      await apiCall((capturedBase || base) + '/chat-instances/' + encodeURIComponent(forChatID) + '/response', 'POST', {
+        content: content,
+        events: structuredEvents || null,
+      });
     } catch (err) {
       console.error('Failed to save assistant response:', err);
     }
@@ -658,6 +669,7 @@ export default function StandaloneChatView() {
     var focusedSID = parseInt(focusScope.slice(6));
     focusedSpawn = spawns.find(function (s) { return s.id === focusedSID; }) || null;
   }
+  var displayMessages = filterStandaloneMessagesByScope(messages, focusScope);
 
   return (
     <div style={{ height: '100%', display: 'flex' }}>
@@ -843,7 +855,7 @@ export default function StandaloneChatView() {
 
         {/* Messages area */}
         <ChatMessageList
-          messages={messages}
+          messages={displayMessages}
           streamEvents={streamEvents}
           isStreaming={sending}
           loading={loading}
@@ -922,6 +934,106 @@ export default function StandaloneChatView() {
       )}
     </div>
   );
+}
+
+function buildStandaloneEventPayload(parentEvents, allEvents, spawnEvents) {
+  var bySpawn = {};
+  var spawnMap = spawnEvents && typeof spawnEvents === 'object' ? spawnEvents : {};
+  Object.keys(spawnMap).forEach(function (key) {
+    var list = sanitizeStandaloneEvents(spawnMap[key], 'spawn-' + key, 'spawn-' + key, key);
+    if (list.length > 0) bySpawn[key] = list;
+  });
+  return {
+    version: 2,
+    parent: sanitizeStandaloneEvents(parentEvents, 'parent', 'parent', 0),
+    all: sanitizeStandaloneEvents(allEvents, 'all', '', 0),
+    by_spawn: bySpawn,
+  };
+}
+
+function sanitizeStandaloneEvents(events, defaultScope, defaultLabel, defaultSpawnID) {
+  var list = Array.isArray(events) ? events : [];
+  return list.map(function (evt) {
+    if (!evt || typeof evt !== 'object') return null;
+    var scoped = Object.assign({}, evt);
+    if (!scoped.scope && defaultScope && defaultScope !== 'all') scoped.scope = defaultScope;
+    if (!scoped._sourceLabel && defaultLabel) scoped._sourceLabel = defaultLabel;
+    if (scoped._sourceColor == null && defaultLabel) scoped._sourceColor = agentInfo(defaultLabel).color;
+    if (scoped._spawnID == null && defaultSpawnID != null) scoped._spawnID = Number(defaultSpawnID) || 0;
+    return scoped;
+  }).filter(function (evt) { return !!evt; });
+}
+
+function normalizeStandaloneEventPayload(rawEvents) {
+  var parsed = rawEvents;
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed); } catch (_) { parsed = null; }
+  }
+
+  if (Array.isArray(parsed)) {
+    return {
+      parent: sanitizeStandaloneEvents(parsed, 'parent', 'parent', 0),
+      all: sanitizeStandaloneEvents(parsed, 'parent', 'parent', 0),
+      bySpawn: {},
+    };
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return { parent: [], all: [], bySpawn: {} };
+  }
+
+  var bySpawn = {};
+  var bySpawnRaw = parsed.by_spawn && typeof parsed.by_spawn === 'object' ? parsed.by_spawn : {};
+  Object.keys(bySpawnRaw).forEach(function (key) {
+    bySpawn[key] = sanitizeStandaloneEvents(bySpawnRaw[key], 'spawn-' + key, 'spawn-' + key, key);
+  });
+
+  var parent = sanitizeStandaloneEvents(parsed.parent, 'parent', 'parent', 0);
+  var all = sanitizeStandaloneEvents(parsed.all, 'all', '', 0);
+  if (all.length === 0 && parent.length > 0) {
+    all = sanitizeStandaloneEvents(parent, 'parent', 'parent', 0);
+  }
+
+  return { parent: parent, all: all, bySpawn: bySpawn };
+}
+
+function eventsForStandaloneScope(rawEvents, focusScope) {
+  var payload = normalizeStandaloneEventPayload(rawEvents);
+  if (focusScope === 'all') {
+    return payload.all;
+  }
+  if (focusScope && focusScope.indexOf('spawn-') === 0) {
+    var spawnID = String(parseInt(focusScope.slice(6), 10) || 0);
+    return payload.bySpawn[spawnID] || [];
+  }
+  return payload.parent;
+}
+
+function filterStandaloneMessagesByScope(messages, focusScope) {
+  var list = Array.isArray(messages) ? messages : [];
+  var filtered = [];
+
+  list.forEach(function (msg) {
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.role === 'user') {
+      filtered.push(msg);
+      return;
+    }
+
+    var rawEvents = msg.events != null ? msg.events : msg._events;
+    var selectedEvents = eventsForStandaloneScope(rawEvents, focusScope);
+    if (selectedEvents.length > 0) {
+      filtered.push(Object.assign({}, msg, { _events: selectedEvents }));
+      return;
+    }
+
+    // Legacy assistant messages without structured events only belong to parent scope.
+    if (focusScope === 'parent' && msg.content) {
+      filtered.push(Object.assign({}, msg, { _events: null }));
+    }
+  });
+
+  return filtered;
 }
 
 // --- SpawnSidebar component ---

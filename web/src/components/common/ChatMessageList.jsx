@@ -102,7 +102,7 @@ export default function ChatMessageList({
                 {isUser ? (
                   <MarkdownContent text={msg.content} style={{ fontSize: 13, color: 'var(--text-0)', lineHeight: 1.5 }} />
                 ) : msgEvents && msgEvents.length > 0 ? (
-                  <EventBlockList events={msgEvents} />
+                  showSourceLabels ? renderLabeledEvents(msgEvents) : <EventBlockList events={msgEvents} />
                 ) : (
                   <MarkdownContent text={msg.content} />
                 )}
