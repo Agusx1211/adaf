@@ -319,7 +319,7 @@ export function stateEventsToBlocks(stateEvents) {
       _ts: Number(evt && evt.ts) || 0,
     };
     if (evt.type === 'initial_prompt') {
-      return { type: 'initial_prompt', content: evt.text || evt.content || '', _scope: meta._scope };
+      return Object.assign({ type: 'initial_prompt', content: evt.text || evt.content || '' }, meta);
     }
     if (evt.type === 'tool_use') {
       var parsedInput = evt.input;

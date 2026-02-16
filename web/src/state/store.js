@@ -1,7 +1,7 @@
 import { createContext, useContext, useReducer, useCallback } from 'react';
 import { arrayOrEmpty, normalizeStatus, numberOr, parseTimestamp, safeJSONString, stringifyToolPayload, cropText } from '../utils/format.js';
 
-var MAX_STREAM_EVENTS = 900;
+var MAX_STREAM_EVENTS = 0; // 0 means unlimited
 var MAX_ACTIVITY_EVENTS = 240;
 
 var initialState = {
@@ -143,7 +143,7 @@ function reducer(state, action) {
         return state;
       }
       var nextEvents = events.concat([entry]);
-      if (nextEvents.length > MAX_STREAM_EVENTS) {
+      if (MAX_STREAM_EVENTS > 0 && nextEvents.length > MAX_STREAM_EVENTS) {
         nextEvents = nextEvents.slice(nextEvents.length - MAX_STREAM_EVENTS);
       }
 

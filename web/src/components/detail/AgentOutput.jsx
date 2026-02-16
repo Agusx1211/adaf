@@ -1,4 +1,4 @@
-import { useMemo, useEffect, useState } from 'react';
+import { useMemo, useEffect, useState, useRef } from 'react';
 import { useAppState, useDispatch } from '../../state/store.js';
 import { fetchSessionRecordingEvents } from '../../api/hooks.js';
 import { normalizeStatus, cropText, safeJSONString, parseTimestamp } from '../../utils/format.js';
@@ -11,8 +11,9 @@ import { buildSpawnScopeMaps, parseScope } from '../../utils/scopes.js';
 export default function AgentOutput({ scope }) {
   var state = useAppState();
   var dispatch = useDispatch();
-  var { streamEvents, autoScroll, sessions, spawns, loopRuns, historicalEvents, currentProjectID } = state;
+  var { streamEvents, autoScroll, sessions, spawns, loopRuns, historicalEvents, currentProjectID, wsConnected, currentSessionSocketID } = state;
   var [loadingHistory, setLoadingHistory] = useState(false);
+  var historySocketLiveRef = useRef({});
 
   useEffect(function () { injectEventBlockStyles(); }, []);
 
@@ -62,7 +63,6 @@ export default function AgentOutput({ scope }) {
   var isRunning = (scopeInfo.kind === 'session' || scopeInfo.kind === 'session_main' || scopeInfo.kind === 'turn' || scopeInfo.kind === 'turn_main')
     ? sessionRunning
     : (scopeInfo.kind === 'spawn' ? (sessionRunning || spawnRunning) : false);
-  var isCompleted = !isRunning;
 
   var sessionsByID = useMemo(function () {
     var index = {};
@@ -90,19 +90,26 @@ export default function AgentOutput({ scope }) {
     return stateEventsToBlocks(filteredEvents);
   }, [filteredEvents]);
 
-  // Historical replay for completed sessions/spawns.
-  // Spawn replay is sourced from the owning daemon session event stream.
+  // Historical replay is sourced from the owning daemon session event stream,
+  // and merged with live events to preserve continuity across wait/resume cycles.
   var historySessionID = selectedSessionID;
 
   useEffect(function () {
-    if (!historySessionID || !isCompleted) return;
-    if (blockEvents.length > 0) return;
-    if (historicalEvents[historySessionID]) return;
-    setLoadingHistory(true);
+    if (!historySessionID) return;
+    var socketLiveForHistory = !!(wsConnected && Number(currentSessionSocketID || 0) === historySessionID);
+    var wasSocketLive = !!historySocketLiveRef.current[historySessionID];
+    var justReconnected = socketLiveForHistory && !wasSocketLive;
+    historySocketLiveRef.current[historySessionID] = socketLiveForHistory;
+
+    var hasCachedHistory = !!historicalEvents[historySessionID];
+    if (hasCachedHistory && !justReconnected) return;
+
+    var shouldShowLoading = !isRunning && blockEvents.length === 0;
+    if (shouldShowLoading) setLoadingHistory(true);
     fetchSessionRecordingEvents(historySessionID, currentProjectID, dispatch)
-      .then(function () { setLoadingHistory(false); })
-      .catch(function () { setLoadingHistory(false); });
-  }, [historySessionID, isCompleted, blockEvents.length, historicalEvents, currentProjectID, dispatch]);
+      .then(function () { if (shouldShowLoading) setLoadingHistory(false); })
+      .catch(function () { if (shouldShowLoading) setLoadingHistory(false); });
+  }, [historySessionID, isRunning, blockEvents.length, historicalEvents, currentProjectID, dispatch, wsConnected, currentSessionSocketID]);
 
   var historicalData = useMemo(function () {
     if (!historySessionID || !historicalEvents[historySessionID]) {
@@ -138,8 +145,10 @@ export default function AgentOutput({ scope }) {
     return stateEventsToBlocks(historicalData.events);
   }, [historicalData.events]);
 
-  // Use historical blocks only when no live stream blocks are available.
-  var displayBlocks = blockEvents.length > 0 ? blockEvents : historicalBlocks;
+  // Merge historical+live so resumed parent turns preserve context before/after wait-for-spawns.
+  var displayBlocks = useMemo(function () {
+    return mergeHistoricalAndLiveBlocks(historicalBlocks, blockEvents);
+  }, [historicalBlocks, blockEvents]);
 
   // Transform flat blocks into ChatMessageList messages format.
   var transformed = useMemo(function () {
@@ -212,7 +221,7 @@ export default function AgentOutput({ scope }) {
       messages={transformed.messages}
       streamEvents={transformed.pendingStreamEvents}
       isStreaming={!!isRunning}
-      loading={loadingHistory}
+      loading={loadingHistory && displayBlocks.length === 0}
       emptyMessage="No output yet"
       autoScroll={autoScroll}
       showSourceLabels={scopeInfo.kind === 'session' || scopeInfo.kind === 'turn'}
@@ -449,6 +458,61 @@ function parseHistoricalEvents(events, sessionID, onMissing) {
   });
 
   return output;
+}
+
+function mergeHistoricalAndLiveBlocks(historicalBlocks, liveBlocks) {
+  var hist = Array.isArray(historicalBlocks) ? historicalBlocks : [];
+  var live = Array.isArray(liveBlocks) ? liveBlocks : [];
+  if (!hist.length) return live;
+  if (!live.length) return hist;
+
+  var maxOverlap = Math.min(120, hist.length, live.length);
+  var overlap = 0;
+  for (var size = maxOverlap; size > 0; size--) {
+    var matches = true;
+    for (var i = 0; i < size; i++) {
+      var left = hist[hist.length - size + i];
+      var right = live[i];
+      if (blockSignature(left) !== blockSignature(right)) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) {
+      overlap = size;
+      break;
+    }
+  }
+
+  return hist.concat(live.slice(overlap));
+}
+
+function blockSignature(block) {
+  if (!block || typeof block !== 'object') return '';
+  var scope = String(block._scope || block.scope || '');
+  var type = String(block.type || 'text');
+  if (type === 'tool_use') {
+    return scope + '|' + type + '|' + stableString(block.tool) + '|' + stableString(block.input);
+  }
+  if (type === 'tool_result') {
+    return scope + '|' + type + '|' + stableString(block.tool) + '|' + stableString(block.result) + '|' + (block.isError ? '1' : '0');
+  }
+  if (type === 'initial_prompt' || type === 'thinking' || type === 'text') {
+    return scope + '|' + type + '|' + stableString(block.content || block.text || '');
+  }
+  return scope + '|' + type + '|' + stableString(block.content || block.text || block.result || '');
+}
+
+function stableString(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value.length > 500 ? value.slice(0, 500) : value;
+  try {
+    var json = JSON.stringify(value);
+    return json.length > 500 ? json.slice(0, 500) : json;
+  } catch (_) {
+    var text = String(value);
+    return text.length > 500 ? text.slice(0, 500) : text;
+  }
 }
 
 function decodeData(raw) {
