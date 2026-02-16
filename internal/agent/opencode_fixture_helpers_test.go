@@ -241,6 +241,14 @@ func summarizeOpencodeFixtureStream(ndjson string) (opencodeFixtureReplaySummary
 					}
 				}
 			}
+		case "user":
+			if ev.Parsed.AssistantMessage != nil {
+				for _, block := range ev.Parsed.AssistantMessage.Content {
+					if block.Type == "tool_result" {
+						summary.ToolResultBlocks++
+					}
+				}
+			}
 		case "result":
 			summary.ResultEvents++
 		case "error":

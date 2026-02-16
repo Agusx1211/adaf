@@ -164,3 +164,50 @@ func TestParseOpencodeMultipleEvents(t *testing.T) {
 		t.Errorf("event 2: expected result, got %q", events[2].Parsed.Type)
 	}
 }
+
+func TestParseOpencodeToolUseEmitsUserToolResult(t *testing.T) {
+	input := `{"type":"tool_use","timestamp":1700000000000,"sessionID":"sess-789","part":{"id":"p5","type":"tool","callID":"call-1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"file.txt"}}}`
+	ch := ParseOpencode(context.Background(), strings.NewReader(input+"\n"))
+
+	var events []RawEvent
+	for ev := range ch {
+		if ev.Err != nil {
+			t.Fatalf("unexpected error: %v", ev.Err)
+		}
+		events = append(events, ev)
+	}
+
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events for tool_use line, got %d", len(events))
+	}
+
+	if events[0].Parsed.Type != "assistant" {
+		t.Fatalf("event[0] type = %q, want assistant", events[0].Parsed.Type)
+	}
+	if events[0].Parsed.AssistantMessage == nil || len(events[0].Parsed.AssistantMessage.Content) == 0 {
+		t.Fatal("event[0] missing assistant content")
+	}
+	if events[0].Parsed.AssistantMessage.Content[0].Type != "tool_use" {
+		t.Fatalf("event[0] block type = %q, want tool_use", events[0].Parsed.AssistantMessage.Content[0].Type)
+	}
+
+	if events[1].Parsed.Type != "user" {
+		t.Fatalf("event[1] type = %q, want user", events[1].Parsed.Type)
+	}
+	if events[1].Parsed.AssistantMessage == nil || len(events[1].Parsed.AssistantMessage.Content) == 0 {
+		t.Fatal("event[1] missing user content")
+	}
+	if events[1].Parsed.AssistantMessage.Content[0].Type != "tool_result" {
+		t.Fatalf("event[1] block type = %q, want tool_result", events[1].Parsed.AssistantMessage.Content[0].Type)
+	}
+	if events[1].Parsed.AssistantMessage.Content[0].ToolUseID != events[0].Parsed.AssistantMessage.Content[0].ID {
+		t.Fatal("tool_result ToolUseID does not match tool_use ID")
+	}
+
+	if len(events[0].Raw) == 0 {
+		t.Fatal("event[0] should carry raw line")
+	}
+	if len(events[1].Raw) != 0 {
+		t.Fatal("event[1] should not duplicate raw line")
+	}
+}
