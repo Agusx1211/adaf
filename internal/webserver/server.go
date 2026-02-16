@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/store"
 )
@@ -176,10 +177,17 @@ func (srv *Server) resolveProjectStore(r *http.Request) (*store.Store, string, b
 	projectID := r.PathValue("projectID")
 	if projectID != "" {
 		s, ok := srv.registry.Get(projectID)
-		if !ok {
-			return nil, projectID, false
+		if ok {
+			return s, projectID, true
 		}
-		return s, projectID, true
+		// Try auto-registering from disk if the project exists.
+		if srv.rootDir != "" {
+			if s, ok := srv.registry.TryAutoRegister(srv.rootDir, projectID); ok {
+				go srv.persistRecentProject(projectID)
+				return s, projectID, true
+			}
+		}
+		return nil, projectID, false
 	}
 	// Legacy route — use default store from registry
 	s, _ := srv.registry.Default()
@@ -208,6 +216,23 @@ func (srv *Server) projectHandler(handler func(*store.Store, http.ResponseWriter
 	}
 }
 
+// persistRecentProject saves a project to the global config's recent projects list.
+func (srv *Server) persistRecentProject(projectID string) {
+	entry, ok := srv.registry.GetByID(projectID)
+	if !ok {
+		return
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		debug.LogKV("webserver", "failed to load config for recent project", "error", err)
+		return
+	}
+	cfg.RecordRecentProject(projectID, entry.Path, entry.Name, srv.rootDir)
+	if err := config.Save(cfg); err != nil {
+		debug.LogKV("webserver", "failed to save recent project", "error", err)
+	}
+}
+
 func (srv *Server) setupRoutes(mux *http.ServeMux) {
 	// Multi-project management endpoints
 	mux.HandleFunc("GET /api/projects", srv.handleListProjects)
@@ -224,6 +249,7 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/fs/mkdir", srv.handleFSMkdir)
 	mux.HandleFunc("POST /api/projects/init", srv.handleProjectInit)
 	mux.HandleFunc("POST /api/projects/open", srv.handleProjectOpen)
+	mux.HandleFunc("GET /api/projects/recent", srv.handleRecentProjects)
 
 	// Config endpoints (global, not project-scoped)
 	mux.HandleFunc("GET /api/config", srv.handleConfig)

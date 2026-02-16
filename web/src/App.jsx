@@ -10,6 +10,7 @@ import TopBar from './components/layout/TopBar.jsx';
 import LeftPanel from './components/layout/LeftPanel.jsx';
 import CenterPanel from './components/layout/CenterPanel.jsx';
 import Modal from './components/common/Modal.jsx';
+import ProjectPicker from './components/layout/ProjectPicker.jsx';
 
 export default function App() {
   var state = useAppState();
@@ -221,6 +222,11 @@ export default function App() {
     dispatch({ type: 'SET', payload: { authRequired: false } });
     setShowAuthModal(false);
   }, [dispatch]);
+
+  // Show project picker when no project is selected and picker is needed
+  if (state.needsProjectPicker && !currentProjectID) {
+    return <ProjectPicker />;
+  }
 
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-0)', overflow: 'hidden' }}>

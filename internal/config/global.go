@@ -64,6 +64,15 @@ type RecentCombination struct {
 	UsedAt  time.Time `json:"used_at"`
 }
 
+// RecentProject tracks a recently opened project for persistence across web server restarts.
+type RecentProject struct {
+	ID       string    `json:"id"`
+	Path     string    `json:"path"`
+	Name     string    `json:"name"`
+	RootDir  string    `json:"root_dir"`
+	OpenedAt time.Time `json:"opened_at"`
+}
+
 // GlobalConfig holds user-level preferences stored in ~/.adaf/config.json.
 type GlobalConfig struct {
 	Agents             map[string]GlobalAgentConfig `json:"agents,omitempty"`
@@ -71,6 +80,7 @@ type GlobalConfig struct {
 	Loops              []LoopDef                    `json:"loops,omitempty"`
 	Teams              []Team                       `json:"teams,omitempty"`
 	RecentCombinations []RecentCombination          `json:"recent_combinations,omitempty"`
+	RecentProjects     []RecentProject               `json:"recent_projects,omitempty"`
 	Pushover           PushoverConfig               `json:"pushover,omitempty"`
 	PromptRules        []PromptRule                 `json:"prompt_rules,omitempty"`
 	Roles              []RoleDefinition             `json:"roles,omitempty"`
@@ -265,6 +275,34 @@ func (c *GlobalConfig) RecordRecentCombination(profile, team string) {
 	sort.Slice(out, func(i, j int) bool { return out[i].UsedAt.After(out[j].UsedAt) })
 
 	c.RecentCombinations = out
+}
+
+const maxRecentProjects = 50
+
+// RecordRecentProject adds or bumps a project to the top of the recent projects list.
+func (c *GlobalConfig) RecordRecentProject(id, path, name, rootDir string) {
+	now := time.Now().UTC()
+
+	// Remove existing entry for this path.
+	out := make([]RecentProject, 0, len(c.RecentProjects))
+	for _, rp := range c.RecentProjects {
+		if rp.Path != path {
+			out = append(out, rp)
+		}
+	}
+
+	// Prepend new entry.
+	out = append([]RecentProject{{ID: id, Path: path, Name: name, RootDir: rootDir, OpenedAt: now}}, out...)
+
+	// Cap at max.
+	if len(out) > maxRecentProjects {
+		out = out[:maxRecentProjects]
+	}
+
+	// Sort by most recent first.
+	sort.Slice(out, func(i, j int) bool { return out[i].OpenedAt.After(out[j].OpenedAt) })
+
+	c.RecentProjects = out
 }
 
 // FindSkill returns a pointer to a skill by ID, or nil if not found.

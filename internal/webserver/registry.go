@@ -2,6 +2,7 @@ package webserver
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -130,6 +131,35 @@ func (r *ProjectRegistry) RegisterByPath(rootDir, absPath string) (string, error
 		return "", err
 	}
 	return id, nil
+}
+
+// GetByID returns the project entry for a given ID.
+func (r *ProjectRegistry) GetByID(id string) (*ProjectEntry, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	entry, ok := r.projects[id]
+	if !ok {
+		return nil, false
+	}
+	cp := *entry
+	return &cp, true
+}
+
+// TryAutoRegister attempts to register a project by reconstructing its filesystem
+// path from rootDir + projectID. It checks if the project exists on disk before
+// registering. Returns the store and true on success, nil and false on failure.
+func (r *ProjectRegistry) TryAutoRegister(rootDir, projectID string) (*store.Store, bool) {
+	projectDir := filepath.Join(rootDir, filepath.FromSlash(projectID))
+	projectFile := filepath.Join(projectDir, store.AdafDir, "project.json")
+	if _, err := os.Stat(projectFile); err != nil {
+		return nil, false
+	}
+	if err := r.Register(projectID, projectDir); err != nil {
+		return nil, false
+	}
+	s, ok := r.Get(projectID)
+	return s, ok
 }
 
 // GetByPath returns the project entry for a given absolute path.

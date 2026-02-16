@@ -201,6 +201,14 @@ export function useInitProjects() {
           nextProjectID = defaultProject && defaultProject.id ? String(defaultProject.id) : '';
         }
 
+        // Detect unresolved project: URL has ?project=X but X is not registered
+        if (urlID && !nextProjectID) {
+          dispatch({ type: 'SET', payload: { needsProjectPicker: true, unresolvedProjectID: urlID } });
+        } else if (!nextProjectID && list.length === 0) {
+          // No projects at all — show picker
+          dispatch({ type: 'SET', payload: { needsProjectPicker: true, unresolvedProjectID: '' } });
+        }
+
         dispatch({ type: 'SET_PROJECT_ID', payload: nextProjectID });
         persistProjectSelection(nextProjectID);
       })

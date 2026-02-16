@@ -171,6 +171,22 @@ func runWebServe(cmd *cobra.Command, args []string) error {
 	mdnsServiceName := "adaf"
 
 	registry := webserver.NewProjectRegistry()
+
+	// Restore recently-opened projects from global config.
+	if gcfg, err := config.Load(); err == nil {
+		for _, rp := range gcfg.RecentProjects {
+			if rp.RootDir != rootDir {
+				continue
+			}
+			rel, err := filepath.Rel(rootDir, rp.Path)
+			if err != nil || strings.HasPrefix(rel, "..") {
+				continue
+			}
+			id := filepath.ToSlash(rel)
+			_ = registry.Register(id, rp.Path)
+		}
+	}
+
 	srv := webserver.NewMulti(registry, opts)
 
 	if err := srv.Start(); err != nil {

@@ -48,6 +48,8 @@ var initialState = {
   standaloneChatStatuses: {}, // { [chatID]: 'thinking' | 'responding' }
   loopRuns: [], // all loop runs (not just active)
   historicalEvents: {}, // { [turnID]: [ event, ... ] } cached recording events
+  needsProjectPicker: false, // show project picker overlay
+  unresolvedProjectID: '', // project ID from URL that wasn't found
 };
 
 function reducer(state, action) {
@@ -174,6 +176,7 @@ function reducer(state, action) {
         expandedNodes: {}, projectMeta: null, activeLoopIDForMessages: 0, standaloneChatStatuses: {},
         historicalEvents: {},
         viewLoaded: { issues: false, docs: false, plan: false, logs: false },
+        needsProjectPicker: false, unresolvedProjectID: '',
       };
 
     default:

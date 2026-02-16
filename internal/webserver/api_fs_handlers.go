@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/store"
 )
 
@@ -217,6 +218,16 @@ func (srv *Server) handleProjectInit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (srv *Server) handleRecentProjects(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load config: "+err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(cfg.RecentProjects)
+}
+
 func (srv *Server) handleProjectOpen(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Path string `json:"path"`
@@ -249,6 +260,8 @@ func (srv *Server) handleProjectOpen(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to register project: "+err.Error())
 		return
 	}
+
+	go srv.persistRecentProject(id)
 
 	entry, ok := srv.registry.GetByPath(absPath)
 	if !ok {
