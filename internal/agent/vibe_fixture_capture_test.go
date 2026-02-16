@@ -82,7 +82,7 @@ func TestRecordVibeFixture(t *testing.T) {
 			Error:          result.Error,
 			AgentSessionID: result.AgentSessionID,
 		},
-		Stream:    dedupeStreamLinesFromRecording(rec.Events()),
+		Stream:    streamLinesFromRecording(rec.Events()),
 		Events:    captureFixtureEvents(rec.Events(), workspace),
 		Workspace: collectWorkspaceSnapshot(t, workspace),
 		Metadata: map[string]string{

@@ -445,6 +445,9 @@ make test
 # Record Vibe replay fixture (requires vibe + credentials)
 make record-vibe-fixture
 
+# Record Gemini replay fixture (requires gemini + credentials)
+make record-gemini-fixture
+
 # Format code
 make fmt
 

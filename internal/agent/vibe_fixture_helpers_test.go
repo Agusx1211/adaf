@@ -191,7 +191,7 @@ func captureFixtureEvents(events []store.RecordingEvent, workspace string) []vib
 func fixtureNDJSON(fixture vibeFixture) string {
 	lines := fixture.Stream
 	if len(lines) == 0 {
-		lines = dedupeStreamLinesFromEvents(fixture.Events)
+		lines = streamLinesFromEvents(fixture.Events)
 	}
 	if len(lines) == 0 {
 		return ""
@@ -199,34 +199,24 @@ func fixtureNDJSON(fixture vibeFixture) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-func dedupeStreamLinesFromEvents(events []vibeFixtureEvent) []string {
+func streamLinesFromEvents(events []vibeFixtureEvent) []string {
 	var lines []string
-	last := ""
 	for _, ev := range events {
 		if ev.Type != "claude_stream" {
 			continue
 		}
-		if len(lines) > 0 && ev.Data == last {
-			continue
-		}
 		lines = append(lines, ev.Data)
-		last = ev.Data
 	}
 	return lines
 }
 
-func dedupeStreamLinesFromRecording(events []store.RecordingEvent) []string {
+func streamLinesFromRecording(events []store.RecordingEvent) []string {
 	var lines []string
-	last := ""
 	for _, ev := range events {
 		if ev.Type != "claude_stream" {
 			continue
 		}
-		if len(lines) > 0 && ev.Data == last {
-			continue
-		}
 		lines = append(lines, ev.Data)
-		last = ev.Data
 	}
 	return lines
 }

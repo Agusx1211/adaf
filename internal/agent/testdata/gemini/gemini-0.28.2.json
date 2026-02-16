@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "provider": "gemini",
+  "version": "0.28.2",
+  "version_raw": "(node:1068988) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.\n(Use `node --trace-deprecation ...` to show where the warning was created)\n0.28.2",
+  "binary": "gemini",
+  "captured_at": "2026-02-16T15:24:23Z",
+  "prompt": "In the current directory, create a file named fixture_note.txt with exactly this content: GEMINI_FIXTURE_FILE_CONTENT. Then answer with exactly: GEMINI_FIXTURE_OK.",
+  "args": [
+    "-y"
+  ],
+  "result": {
+    "exit_code": 0,
+    "output": "GEMINI_FIXTURE_OK.",
+    "error": "(node:1068662) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.\n(Use `node --trace-deprecation ...` to show where the warning was created)\n\n(process:1068662): libsecret-WARNING **: 15:23:59.674: couldn't get session bus: Cannot autolaunch D-Bus without X11 $DISPLAY\n(node:1068724) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.\n(Use `node --trace-deprecation ...` to show where the warning was created)\n\n(process:1068724): libsecret-WARNING **: 15:24:02.453: couldn't get session bus: Cannot autolaunch D-Bus without X11 $DISPLAY\nYOLO mode is enabled. All tool calls will be automatically approved.\nLoaded cached credentials.\nYOLO mode is enabled. All tool calls will be automatically approved.\nHook registry initialized with 0 hook entries\nAttempt 1 failed: You have exhausted your capacity on this model. Your quota will reset after 0s.. Retrying after 302.880906ms...\n",
+    "agent_session_id": "47c51ad5-abe1-4132-aa5f-35b3a82dc462"
+  },
+  "summary": {
+    "raw_events": 8,
+    "parsed_events": 7,
+    "assistant_events": 1,
+    "delta_events": 3,
+    "tool_use_blocks": 1,
+    "tool_result_blocks": 1,
+    "result_events": 1
+  },
+  "stream": [
+    "{\"type\":\"init\",\"timestamp\":\"2026-02-16T15:24:06.807Z\",\"session_id\":\"47c51ad5-abe1-4132-aa5f-35b3a82dc462\",\"model\":\"auto-gemini-3\"}",
+    "{\"type\":\"message\",\"timestamp\":\"2026-02-16T15:24:06.808Z\",\"role\":\"user\",\"content\":\"In the current directory, create a file named fixture_note.txt with exactly this content: GEMINI_FIXTURE_FILE_CONTENT. Then answer with exactly: GEMINI_FIXTURE_OK.\"}",
+    "{\"type\":\"message\",\"timestamp\":\"2026-02-16T15:24:19.320Z\",\"role\":\"assistant\",\"content\":\"I will create a file named `fixture_note.txt` with the specified\",\"delta\":true}",
+    "{\"type\":\"message\",\"timestamp\":\"2026-02-16T15:24:19.447Z\",\"role\":\"assistant\",\"content\":\" content.\\n\",\"delta\":true}",
+    "{\"type\":\"tool_use\",\"timestamp\":\"2026-02-16T15:24:19.647Z\",\"tool_name\":\"write_file\",\"tool_id\":\"write_file-1771255459647-ed50160743387\",\"parameters\":{\"file_path\":\"fixture_note.txt\",\"content\":\"GEMINI_FIXTURE_FILE_CONTENT\\n\"}}",
+    "{\"type\":\"tool_result\",\"timestamp\":\"2026-02-16T15:24:19.656Z\",\"tool_id\":\"write_file-1771255459647-ed50160743387\",\"status\":\"success\"}",
+    "{\"type\":\"message\",\"timestamp\":\"2026-02-16T15:24:22.431Z\",\"role\":\"assistant\",\"content\":\"GEMINI_FIXTURE_OK.\",\"delta\":true}",
+    "{\"type\":\"result\",\"timestamp\":\"2026-02-16T15:24:22.439Z\",\"status\":\"success\",\"stats\":{\"total_tokens\":17343,\"input_tokens\":17062,\"output_tokens\":89,\"cached\":11082,\"input\":5980,\"duration_ms\":15632,\"tool_calls\":1}}"
+  ],
+  "events": [
+    {
+      "type": "stdin",
+      "data": "In the current directory, create a file named fixture_note.txt with exactly this content: GEMINI_FIXTURE_FILE_CONTENT. Then answer with exactly: GEMINI_FIXTURE_OK."
+    },
+    {
+      "type": "meta",
+      "data": "agent=gemini"
+    },
+    {
+      "type": "meta",
+      "data": "command=/home/agusx1211/.nvm/versions/node/v22.3.0/bin/gemini -y --output-format stream-json -p "
+    },
+    {
+      "type": "meta",
+      "data": "workdir=/tmp/adaf-gemini-demo-repo"
+    },
+    {
+      "type": "stderr",
+      "data": "(node:1068662) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.\n(Use `node --trace-deprecation ...` to show where the warning was created)\n"
+    },
+    {
+      "type": "stderr",
+      "data": "\n(process:1068662): libsecret-WARNING **: 15:23:59.674: couldn't get session bus: Cannot autolaunch D-Bus without X11 $DISPLAY\n"
+    },
+    {
+      "type": "stderr",
+      "data": "(node:1068724) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.\n(Use `node --trace-deprecation ...` to show where the warning was created)\n"
+    },
+    {
+      "type": "stderr",
+      "data": "\n(process:1068724): libsecret-WARNING **: 15:24:02.453: couldn't get session bus: Cannot autolaunch D-Bus without X11 $DISPLAY\n"
+    },
+    {
+      "type": "stderr",
+      "data": "YOLO mode is enabled. All tool calls will be automatically approved.\nLoaded cached credentials.\nYOLO mode is enabled. All tool calls will be automatically approved.\nHook registry initialized with 0 hook entries\n"
+    },
+    {
+      "type": "stderr",
+      "data": "Attempt 1 failed: You have exhausted your capacity on this model. Your quota will reset after 0s.. Retrying after 302.880906ms...\n"
+    }
+  ],
+  "workspace": {
+    "fixture_note.txt": "GEMINI_FIXTURE_FILE_CONTENT\n"
+  },
+  "metadata": {
+    "demo_repo": "/tmp/adaf-gemini-demo-repo",
+    "record_env": "ADAF_RECORD_GEMINI_FIXTURE"
+  }
+}
