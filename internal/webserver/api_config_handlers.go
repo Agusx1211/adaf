@@ -284,6 +284,47 @@ func (srv *Server) handleCreateRole(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, role)
 }
 
+func (srv *Server) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load config")
+		return
+	}
+
+	config.EnsureDefaultRoleCatalog(cfg)
+
+	found := false
+	for i := range cfg.Roles {
+		if strings.EqualFold(cfg.Roles[i].Name, name) {
+			if err := json.NewDecoder(r.Body).Decode(&cfg.Roles[i]); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid request body")
+				return
+			}
+			cfg.Roles[i].Name = name
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		writeError(w, http.StatusNotFound, "role not found: "+name)
+		return
+	}
+
+	if err := config.Save(cfg); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save config")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 func (srv *Server) handleDeleteRole(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
