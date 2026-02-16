@@ -207,6 +207,12 @@ export default function StandaloneChatView() {
     entry.finalized = true;
     entry.sending = false;
 
+    // Some resumed sessions do not replay previous assistant turns. In that case,
+    // the skip counter can hide the only assistant event; recover it as fallback.
+    if (entry.events.length === 0 && entry.skippedAssistantFallback && entry.skippedAssistantFallback.length > 0) {
+      entry.events = entry.skippedAssistantFallback.slice();
+    }
+
     var textParts = [];
     entry.events.forEach(function (e) {
       if (e.type === 'text') textParts.push(e.content);
@@ -370,27 +376,28 @@ export default function StandaloneChatView() {
           }
 
           if (ev.type === 'assistant') {
-            // Turn skipping only applies to parent events (replay on reconnect)
+            // Turn skipping only applies to parent events (replay on reconnect).
+            var shouldSkipReplay = false;
             if (spawnID === 0) {
               assistantTurnsSeen++;
-              if (assistantTurnsSeen <= turnsToSkip) return;
+              shouldSkipReplay = assistantTurnsSeen <= turnsToSkip;
             }
-
             var blocks = (ev.message && Array.isArray(ev.message.content)) ? ev.message.content : (Array.isArray(ev.content) ? ev.content : []);
+            var parsedAssistantBlocks = [];
             blocks.forEach(function (block) {
               if (!block) return;
               if (block.type === 'text' && block.text) {
-                if (!ss.isStreaming && !ss.hasRawText) pushEventForChat(forChatID, { type: 'text', content: block.text }, spawnID);
+                if (!ss.isStreaming && !ss.hasRawText) parsedAssistantBlocks.push({ type: 'text', content: block.text });
               } else if (block.type === 'thinking' && block.text) {
-                if (!ss.isStreaming) pushEventForChat(forChatID, { type: 'thinking', content: block.text }, spawnID);
+                if (!ss.isStreaming) parsedAssistantBlocks.push({ type: 'thinking', content: block.text });
               } else if (block.type === 'tool_use') {
-                pushEventForChat(forChatID, { type: 'tool_use', tool: block.name || 'tool', input: block.input || {} }, spawnID);
+                parsedAssistantBlocks.push({ type: 'tool_use', tool: block.name || 'tool', input: block.input || {} });
               } else if (block.type === 'tool_result') {
-                pushEventForChat(forChatID, {
+                parsedAssistantBlocks.push({
                   type: 'tool_result', tool: block.name || '',
                   result: block.content || block.tool_content || block.output || block.text || '',
                   isError: !!block.is_error,
-                }, spawnID);
+                });
               } else if (block && typeof block === 'object') {
                 reportMissing({
                   reason: 'unknown_assistant_block',
@@ -398,6 +405,16 @@ export default function StandaloneChatView() {
                   payload: block,
                 });
               }
+            });
+            // Keep skipped parent blocks so we can recover if skip logic over-skips.
+            if (shouldSkipReplay) {
+              if (parsedAssistantBlocks.length > 0) {
+                entry.skippedAssistantFallback = parsedAssistantBlocks.slice();
+              }
+              return;
+            }
+            parsedAssistantBlocks.forEach(function (evt) {
+              pushEventForChat(forChatID, evt, spawnID);
             });
             return;
           }
@@ -525,6 +542,7 @@ export default function StandaloneChatView() {
       allEvents: [],
       spawns: [],
       parentProfile: (chatMeta && chatMeta.profile) || '',
+      skippedAssistantFallback: null,
       ws: null,
       sending: true,
       finalized: false,
