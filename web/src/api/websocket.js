@@ -209,7 +209,8 @@ export function useSessionSocket(sessionID) {
           var promptSessionID = Number(data.session_id || data.sessionID || 0);
           if (Number.isFinite(promptSessionID) && promptSessionID < 0) {
             promptScope = 'spawn-' + (-promptSessionID);
-          } else if (Number.isFinite(promptSessionID) && promptSessionID > 0) {
+          } else if (Number.isFinite(promptSessionID) && promptSessionID > 0 && promptSessionID === sid) {
+            // Positive session_id can be a turn ID in loop mode.
             promptScope = 'session-' + promptSessionID;
           }
         }
@@ -220,7 +221,16 @@ export function useSessionSocket(sessionID) {
 
     if (type === 'event') {
       var wireEvent = data && data.event ? data.event : data;
-      var eventScope = (data && data.spawn_id > 0) ? 'spawn-' + data.spawn_id : 'session-' + sid;
+      var eventScope = 'session-' + sid;
+      var eventSpawnID = Number(data && (data.spawn_id || data.spawnID) || 0);
+      if (Number.isFinite(eventSpawnID) && eventSpawnID > 0) {
+        eventScope = 'spawn-' + eventSpawnID;
+      } else {
+        var eventSessionID = Number(data && (data.session_id || data.sessionID) || 0);
+        if (Number.isFinite(eventSessionID) && eventSessionID < 0) {
+          eventScope = 'spawn-' + (-eventSessionID);
+        }
+      }
       handleAgentStreamEvent(eventScope, wireEvent);
       return;
     }

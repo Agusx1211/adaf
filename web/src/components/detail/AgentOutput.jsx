@@ -466,25 +466,58 @@ function mergeHistoricalAndLiveBlocks(historicalBlocks, liveBlocks) {
   if (!hist.length) return live;
   if (!live.length) return hist;
 
-  var maxOverlap = Math.min(120, hist.length, live.length);
-  var overlap = 0;
+  var histSig = hist.map(blockSignature);
+  var liveSig = live.map(blockSignature);
+
+  // Fast path: live stream is usually a suffix replay of historical data.
+  var overlap = longestSuffixPrefixOverlap(histSig, liveSig);
+  if (overlap > 0) {
+    return hist.concat(live.slice(overlap));
+  }
+
+  // Fallback: if live starts from earlier history (e.g. reconnect snapshot),
+  // consume the longest live prefix that already exists contiguously in history.
+  var containedPrefix = longestContainedPrefix(histSig, liveSig);
+  if (containedPrefix > 0) {
+    return hist.concat(live.slice(containedPrefix));
+  }
+
+  return hist.concat(live);
+}
+
+function longestSuffixPrefixOverlap(histSig, liveSig) {
+  var maxOverlap = Math.min(histSig.length, liveSig.length);
   for (var size = maxOverlap; size > 0; size--) {
+    var start = histSig.length - size;
     var matches = true;
     for (var i = 0; i < size; i++) {
-      var left = hist[hist.length - size + i];
-      var right = live[i];
-      if (blockSignature(left) !== blockSignature(right)) {
+      if (histSig[start + i] !== liveSig[i]) {
         matches = false;
         break;
       }
     }
-    if (matches) {
-      overlap = size;
-      break;
+    if (matches) return size;
+  }
+  return 0;
+}
+
+function longestContainedPrefix(histSig, liveSig) {
+  if (!histSig.length || !liveSig.length) return 0;
+  var anchor = liveSig[0];
+  var best = 0;
+
+  for (var i = 0; i < histSig.length; i++) {
+    if (histSig[i] !== anchor) continue;
+    var matched = 0;
+    while (i + matched < histSig.length && matched < liveSig.length) {
+      if (histSig[i + matched] !== liveSig[matched]) break;
+      matched += 1;
     }
+    if (matched > best) best = matched;
+    if (best === liveSig.length) return best;
   }
 
-  return hist.concat(live.slice(overlap));
+  return best;
 }
 
 function blockSignature(block) {
@@ -535,6 +568,8 @@ function wireScope(data, fallbackSessionID) {
     return 'spawn-' + (-sessionID);
   }
   if (Number.isFinite(sessionID) && sessionID > 0) {
+    // In loop recordings this is often a turn ID, not daemon session ID.
+    if (fallbackSessionID > 0 && sessionID !== fallbackSessionID) return fallbackScope;
     return 'session-' + sessionID;
   }
   return fallbackScope;
