@@ -2,6 +2,17 @@ import { arrayOrEmpty, numberOr } from './format.js';
 
 export function parseScope(scope) {
   var raw = String(scope || '');
+  if (raw.indexOf('session-main-') === 0) {
+    var mainSessionID = parseInt(raw.slice(13), 10);
+    if (!Number.isNaN(mainSessionID) && mainSessionID > 0) {
+      return {
+        kind: 'session_main',
+        id: mainSessionID,
+        scope: 'session-main-' + mainSessionID,
+        sessionScope: 'session-' + mainSessionID,
+      };
+    }
+  }
   if (raw.indexOf('session-') === 0) {
     var sessionID = parseInt(raw.slice(8), 10);
     if (!Number.isNaN(sessionID) && sessionID > 0) {
@@ -89,7 +100,7 @@ export function buildSpawnScopeMaps(spawns, loopRuns) {
 
 export function resolveScopeSessionID(scope, sessions, spawns, loopRuns) {
   var parsed = parseScope(scope);
-  if (parsed.kind === 'session') return parsed.id;
+  if (parsed.kind === 'session' || parsed.kind === 'session_main') return parsed.id;
   if (parsed.kind === 'spawn') {
     var maps = buildSpawnScopeMaps(spawns, loopRuns);
     var sid = numberOr(0, maps.spawnToSession[parsed.id]);

@@ -196,7 +196,19 @@ export function useSessionSocket(sessionID) {
     if (type === 'prompt') {
       // Extract and display the prompt as a formatted block
       if (data && data.prompt) {
-        addStreamEvent({ scope: 'session-' + sid, type: 'initial_prompt', text: String(data.prompt) });
+        var promptScope = 'session-' + sid;
+        var promptSpawnID = Number(data.spawn_id || data.spawnID || 0);
+        if (Number.isFinite(promptSpawnID) && promptSpawnID > 0) {
+          promptScope = 'spawn-' + promptSpawnID;
+        } else {
+          var promptSessionID = Number(data.session_id || data.sessionID || 0);
+          if (Number.isFinite(promptSessionID) && promptSessionID < 0) {
+            promptScope = 'spawn-' + (-promptSessionID);
+          } else if (Number.isFinite(promptSessionID) && promptSessionID > 0) {
+            promptScope = 'session-' + promptSessionID;
+          }
+        }
+        addStreamEvent({ scope: promptScope, type: 'initial_prompt', text: String(data.prompt) });
       }
       return;
     }

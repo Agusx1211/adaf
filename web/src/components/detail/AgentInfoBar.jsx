@@ -9,6 +9,10 @@ export default function AgentInfoBar({ scope }) {
 
   var agent = useMemo(function () {
     if (!scope) return null;
+    if (scope.indexOf('session-main-') === 0) {
+      var mainSessionID = parseInt(scope.slice(13), 10);
+      return sessions.find(function (s) { return s.id === mainSessionID; }) || null;
+    }
     if (scope.indexOf('session-') === 0) {
       var sessionID = parseInt(scope.slice(8), 10);
       return sessions.find(function (s) { return s.id === sessionID; }) || null;

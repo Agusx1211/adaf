@@ -324,8 +324,13 @@ export function SessionMessageBar() {
 
   // Find running session for scope
   var target = null;
-  if (selectedScope && selectedScope.indexOf('session-') === 0) {
-    var sessionID = parseInt(selectedScope.slice(8), 10);
+  var sessionID = 0;
+  if (selectedScope && selectedScope.indexOf('session-main-') === 0) {
+    sessionID = parseInt(selectedScope.slice(13), 10);
+  } else if (selectedScope && selectedScope.indexOf('session-') === 0) {
+    sessionID = parseInt(selectedScope.slice(8), 10);
+  }
+  if (sessionID > 0) {
     var session = sessions.find(function (s) { return s.id === sessionID; });
     if (session && STATUS_RUNNING[normalizeStatus(session.status)]) {
       var loopID = loopRun && loopRun.id;

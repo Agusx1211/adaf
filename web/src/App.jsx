@@ -113,7 +113,7 @@ export default function App() {
       return running ? running.id : (sessions.length ? sessions[0].id : 0);
     }
     var parsedScope = parseScope(selectedScope);
-    if (parsedScope.kind === 'session') return parsedScope.id;
+    if (parsedScope.kind === 'session' || parsedScope.kind === 'session_main') return parsedScope.id;
     if (parsedScope.kind === 'spawn') {
       var mapped = spawnScopeMaps.spawnToSession[parsedScope.id] || 0;
       if (mapped > 0) return mapped;

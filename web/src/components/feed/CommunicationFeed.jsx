@@ -53,7 +53,7 @@ export default function CommunicationFeed() {
       if (targetSpawn > 0) {
         list = list.filter(function (m) { return Number(m.spawn_id) === targetSpawn; });
       }
-    } else if (parsedScope.kind === 'session') {
+    } else if (parsedScope.kind === 'session' || parsedScope.kind === 'session_main') {
       var targetSession = parsedScope.id;
       if (targetSession > 0) {
         list = list.filter(function (m) {
