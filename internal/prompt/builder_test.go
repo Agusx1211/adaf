@@ -128,6 +128,9 @@ func TestBuild_SubAgentIncludesParentCommunicationCommands(t *testing.T) {
 	if !strings.Contains(got, "adaf parent-ask") {
 		t.Fatalf("missing parent-ask guidance in sub-agent prompt\nprompt:\n%s", got)
 	}
+	if strings.Contains(got, "adaf turn finish") || strings.Contains(got, "adaf turn update") {
+		t.Fatalf("sub-agent prompt should not instruct turn-log publishing\nprompt:\n%s", got)
+	}
 }
 
 func TestBuild_MainAgentDoesNotIncludeParentCommunicationCommands(t *testing.T) {
@@ -595,7 +598,7 @@ func TestBuild_SessionContextSkillGatesLogs(t *testing.T) {
 	config.EnsureDefaultSkillCatalog(globalCfg)
 	if err := globalCfg.AddSkill(config.Skill{
 		ID:    config.SkillSessionContext,
-		Short: "Use `adaf log` before work and `adaf turn update` at the end of the turn.",
+		Short: "Use `adaf log` before work and `adaf turn finish` at the end of the turn.",
 	}); err != nil {
 		t.Fatalf("AddSkill(session_context): %v", err)
 	}
@@ -643,11 +646,14 @@ func TestBuild_SessionContextSkillGatesLogs(t *testing.T) {
 	if !strings.Contains(got, "adaf log") {
 		t.Fatalf("session_context skill should reference adaf log\nprompt:\n%s", got)
 	}
-	if !strings.Contains(got, "adaf turn update") {
-		t.Fatalf("session_context skill should reference adaf turn update\nprompt:\n%s", got)
+	if !strings.Contains(got, "adaf turn finish") {
+		t.Fatalf("session_context skill should reference adaf turn finish\nprompt:\n%s", got)
 	}
 	if !strings.Contains(got, "## Turn Handoff") {
 		t.Fatalf("session_context skill should render turn handoff section\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "--challenges") {
+		t.Fatalf("turn handoff guidance should include all required sections\nprompt:\n%s", got)
 	}
 }
 

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -102,6 +103,9 @@ func enforceCommandAccessForView(cmd *cobra.Command, view cliRuntimeView) error 
 	if path == "" {
 		return nil
 	}
+	if view == cliRuntimeViewAgent && isSpawnedSubAgentRuntimeContext() && isTurnCommandPath(path) {
+		return fmt.Errorf("%s is not available inside a spawned sub-agent context: spawned sub-agents cannot manage turns", cmd.CommandPath())
+	}
 
 	audience := audienceForPath(path)
 	switch {
@@ -187,6 +191,9 @@ func isVisibleInView(path string, view cliRuntimeView) bool {
 	if path == "" {
 		return true
 	}
+	if view == cliRuntimeViewAgent && isSpawnedSubAgentRuntimeContext() && isTurnCommandPath(path) {
+		return false
+	}
 
 	audience := audienceForPath(path)
 	switch view {
@@ -235,6 +242,15 @@ func applyLongForView(cmd *cobra.Command, path string, view cliRuntimeView) {
 	}
 
 	cmd.Long = longText
+}
+
+func isTurnCommandPath(path string) bool {
+	path = strings.TrimSpace(path)
+	return path == "turn" || strings.HasPrefix(path, "turn ")
+}
+
+func isSpawnedSubAgentRuntimeContext() bool {
+	return strings.TrimSpace(os.Getenv("ADAF_PARENT_TURN")) != ""
 }
 
 func rootAgentLong() string {

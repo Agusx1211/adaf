@@ -48,6 +48,10 @@ type waitResumeSessionCarryStubAgent struct {
 	runs  []agent.Config
 }
 
+type diaryWritingStubAgent struct {
+	store *store.Store
+}
+
 func (a *stubAgent) Name() string { return "stub" }
 
 func (a *stubAgent) Run(ctx context.Context, cfg agent.Config, recorder *recording.Recorder) (*agent.Result, error) {
@@ -194,6 +198,24 @@ func (a *waitResumeSessionCarryStubAgent) Run(ctx context.Context, cfg agent.Con
 	}
 }
 
+func (a *diaryWritingStubAgent) Name() string { return "stub" }
+
+func (a *diaryWritingStubAgent) Run(ctx context.Context, cfg agent.Config, recorder *recording.Recorder) (*agent.Result, error) {
+	turn, err := a.store.GetTurn(cfg.TurnID)
+	if err != nil {
+		return nil, err
+	}
+	turn.WhatWasBuilt = "agent-built"
+	turn.KeyDecisions = "agent-decisions"
+	turn.CurrentState = "agent-state"
+	turn.KnownIssues = "agent-issues"
+	turn.NextSteps = "agent-next"
+	if err := a.store.UpdateTurn(turn); err != nil {
+		return nil, err
+	}
+	return &agent.Result{ExitCode: 0, Duration: time.Millisecond}, nil
+}
+
 func TestLoopPromptFuncReceivesTurnID(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -301,6 +323,94 @@ func TestLoopRunReturnsContextCanceledAndMarksCancelled(t *testing.T) {
 	}
 	if turns[0].BuildState != "cancelled" {
 		t.Fatalf("build state = %q, want %q", turns[0].BuildState, "cancelled")
+	}
+}
+
+func TestLoopRunPreservesAgentAuthoredTurnDiaryFields(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "test", RepoPath: dir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
+	}
+
+	l := &Loop{
+		Store: s,
+		Agent: &diaryWritingStubAgent{store: s},
+		Config: agent.Config{
+			Prompt:   "base",
+			MaxTurns: 1,
+		},
+	}
+
+	if err := l.Run(context.Background()); err != nil {
+		t.Fatalf("Loop.Run() error = %v", err)
+	}
+
+	turns, err := s.ListTurns()
+	if err != nil {
+		t.Fatalf("ListTurns() error = %v", err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("turns count = %d, want 1", len(turns))
+	}
+	if turns[0].WhatWasBuilt != "agent-built" {
+		t.Fatalf("WhatWasBuilt = %q, want %q", turns[0].WhatWasBuilt, "agent-built")
+	}
+	if turns[0].KeyDecisions != "agent-decisions" {
+		t.Fatalf("KeyDecisions = %q, want %q", turns[0].KeyDecisions, "agent-decisions")
+	}
+	if turns[0].CurrentState != "agent-state" {
+		t.Fatalf("CurrentState = %q, want %q", turns[0].CurrentState, "agent-state")
+	}
+	if turns[0].KnownIssues != "agent-issues" {
+		t.Fatalf("KnownIssues = %q, want %q", turns[0].KnownIssues, "agent-issues")
+	}
+	if turns[0].NextSteps != "agent-next" {
+		t.Fatalf("NextSteps = %q, want %q", turns[0].NextSteps, "agent-next")
+	}
+}
+
+func TestLoopRunFinalizesTurnAndRejectsFutureUpdates(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "test", RepoPath: dir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
+	}
+
+	l := &Loop{
+		Store: s,
+		Agent: &stubAgent{},
+		Config: agent.Config{
+			Prompt:   "base",
+			MaxTurns: 1,
+		},
+	}
+
+	if err := l.Run(context.Background()); err != nil {
+		t.Fatalf("Loop.Run() error = %v", err)
+	}
+
+	turns, err := s.ListTurns()
+	if err != nil {
+		t.Fatalf("ListTurns() error = %v", err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("turns count = %d, want 1", len(turns))
+	}
+	if turns[0].FinalizedAt.IsZero() {
+		t.Fatal("FinalizedAt is zero, want non-zero after turn end")
+	}
+
+	turns[0].WhatWasBuilt = "late-write"
+	err = s.UpdateTurn(&turns[0])
+	if !errors.Is(err, store.ErrTurnFrozen) {
+		t.Fatalf("UpdateTurn() error = %v, want ErrTurnFrozen", err)
 	}
 }
 

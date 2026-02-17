@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestInit(t *testing.T) {
@@ -202,6 +203,54 @@ func TestTurns(t *testing.T) {
 	latest, _ := s.LatestTurn()
 	if latest.Agent != "codex" {
 		t.Errorf("expected latest agent 'codex', got %q", latest.Agent)
+	}
+}
+
+func TestIsTurnFrozen(t *testing.T) {
+	now := time.Now().UTC()
+	tests := []struct {
+		name string
+		turn *Turn
+		want bool
+	}{
+		{
+			name: "nil",
+			turn: nil,
+			want: false,
+		},
+		{
+			name: "active",
+			turn: &Turn{BuildState: ""},
+			want: false,
+		},
+		{
+			name: "waiting",
+			turn: &Turn{BuildState: "waiting_for_spawns"},
+			want: false,
+		},
+		{
+			name: "success",
+			turn: &Turn{BuildState: "success"},
+			want: true,
+		},
+		{
+			name: "exit code",
+			turn: &Turn{BuildState: "exit_code_1"},
+			want: true,
+		},
+		{
+			name: "finalized timestamp",
+			turn: &Turn{FinalizedAt: now, BuildState: ""},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsTurnFrozen(tt.turn); got != tt.want {
+				t.Fatalf("IsTurnFrozen() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

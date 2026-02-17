@@ -12,6 +12,12 @@ func TestPositionPrompt_ManagerRequiresTurnLogLanguage(t *testing.T) {
 	if !strings.Contains(got, "MUST publish a manager handoff") {
 		t.Fatalf("manager prompt should require turn log\nprompt:\n%s", got)
 	}
+	if !strings.Contains(got, "adaf turn finish") {
+		t.Fatalf("manager prompt should reference turn finish\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "--challenges") {
+		t.Fatalf("manager prompt should include required handoff sections\nprompt:\n%s", got)
+	}
 	if !strings.Contains(got, "`adaf spawn --profile ... --task ...`") {
 		t.Fatalf("manager prompt should include delegation commands when delegation exists\nprompt:\n%s", got)
 	}

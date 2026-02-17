@@ -37,7 +37,7 @@ func PositionPrompt(position, workerRole string, hasDelegation bool) string {
 		b.WriteString("- Verify plan and issue alignment: `adaf plan` and `adaf issues`\n")
 		b.WriteString("- Inspect repository signal (status/history/diff) to detect drift early\n")
 		b.WriteString("- If correction is needed, send a concrete instruction to the next step: `adaf loop message \"guidance\"`\n")
-		b.WriteString("- Before finishing, you MUST publish a supervisor handoff: `adaf turn update --built \"...\" --decisions \"...\" --state \"...\" --issues \"...\" --next \"...\"`\n\n")
+		b.WriteString("- Before finishing, you MUST publish a supervisor handoff: `adaf turn finish --built \"...\" --decisions \"...\" --challenges \"...\" --state \"...\" --issues \"...\" --next \"...\"`\n\n")
 
 	case config.PositionManager:
 		b.WriteString("# Manager Duties\n\n")
@@ -49,7 +49,7 @@ func PositionPrompt(position, workerRole string, hasDelegation bool) string {
 		b.WriteString("- Track and communicate with workers: `adaf spawn-status`, `adaf spawn-watch`, `adaf spawn-message`, `adaf spawn-reply`\n")
 		b.WriteString("- For each writable spawn, review and land work: `adaf spawn-diff --spawn-id N` then `adaf spawn-merge --spawn-id N`\n")
 		b.WriteString("- Keep plan/issues/docs current: `adaf plan`, `adaf issues`, `adaf issue create ...`, `adaf doc ...`\n")
-		b.WriteString("- Before finishing, you MUST publish a manager handoff: `adaf turn update --built \"...\" --decisions \"...\" --state \"...\" --issues \"...\" --next \"...\"`\n\n")
+		b.WriteString("- Before finishing, you MUST publish a manager handoff: `adaf turn finish --built \"...\" --decisions \"...\" --challenges \"...\" --state \"...\" --issues \"...\" --next \"...\"`\n\n")
 
 	case config.PositionLead:
 		b.WriteString("# Lead Duties\n\n")
@@ -62,7 +62,7 @@ func PositionPrompt(position, workerRole string, hasDelegation bool) string {
 			b.WriteString("- Delegate parallelizable or investigative work via `adaf spawn --profile ... --task ...`\n")
 			b.WriteString("- Merge completed worker branches with `adaf spawn-diff` + `adaf spawn-merge`\n")
 		}
-		b.WriteString("- Record a precise handoff at the end: `adaf turn update --built \"...\" --decisions \"...\" --state \"...\" --issues \"...\" --next \"...\"`\n\n")
+		b.WriteString("- Record a precise handoff at the end: `adaf turn finish --built \"...\" --decisions \"...\" --challenges \"...\" --state \"...\" --issues \"...\" --next \"...\"`\n\n")
 
 	default:
 		b.WriteString("# Worker Duties\n\n")
@@ -75,7 +75,7 @@ func PositionPrompt(position, workerRole string, hasDelegation bool) string {
 		b.WriteString("- Ask parent for missing context: `adaf parent-ask \"question\"`\n")
 		b.WriteString("- Review context/history when needed: `adaf log`, `adaf turn show [id]`\n")
 		b.WriteString("- Track issues/docs as required by task: `adaf issues`, `adaf doc ...`\n")
-		b.WriteString("- Publish end-of-turn handoff: `adaf turn update --built \"...\" --decisions \"...\" --state \"...\" --issues \"...\" --next \"...\"`\n\n")
+		b.WriteString("- Publish end-of-turn handoff: `adaf turn finish --built \"...\" --decisions \"...\" --challenges \"...\" --state \"...\" --issues \"...\" --next \"...\"`\n\n")
 	}
 
 	return b.String()

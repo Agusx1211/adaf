@@ -64,6 +64,7 @@ type Turn struct {
 	StepHexID    string    `json:"step_hex_id,omitempty"`
 	PlanID       string    `json:"plan_id,omitempty"`
 	Date         time.Time `json:"date"`
+	FinalizedAt  time.Time `json:"finalized_at,omitempty"`
 	Agent        string    `json:"agent"` // "claude", "codex", "vibe", etc.
 	AgentModel   string    `json:"agent_model,omitempty"`
 	ProfileName  string    `json:"profile_name,omitempty"`

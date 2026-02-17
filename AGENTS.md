@@ -6,6 +6,10 @@ Instructions and practices for AI agents working on this codebase.
 
 ADAF (Autonomous Developer Agent Flow) is a Go CLI + React web UI that orchestrates AI coding agents (Claude, Codex, Gemini, Vibe, OpenCode, and arbitrary generic CLIs). It wraps these tools as child processes, parses their streaming output, records all I/O, and manages multi-agent collaboration through structured session handoffs, worktree isolation, and a persistent project store. A built-in web server with WebSocket support provides a real-time dashboard for monitoring and interacting with running sessions.
 
+## Development Phase
+
+This project is in early active development. There are no external users or deployments to maintain compatibility with. Storage formats, APIs, CLI flags, and data structures can change freely at any time — just wipe `.adaf/` and start fresh. Prefer the simplest, cleanest implementation over any backwards-compatibility concern. Aggressively refactor, rename, delete dead code, and restructure without hesitation. Never add migration logic, deprecation shims, or compatibility layers.
+
 ## Architecture
 
 ```

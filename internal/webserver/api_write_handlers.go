@@ -2,6 +2,7 @@ package webserver
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
 	"strings"
@@ -607,6 +608,10 @@ func handleUpdateTurnP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	turn.DurationSecs = req.DurationSecs
 
 	if err := s.UpdateTurn(turn); err != nil {
+		if errors.Is(err, store.ErrTurnFrozen) {
+			writeError(w, http.StatusConflict, "turn is frozen")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to update turn")
 		return
 	}

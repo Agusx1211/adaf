@@ -25,7 +25,7 @@ Examples:
   adaf turn latest                                  # Show most recent
   adaf turn show 5                                  # Show turn #5
   adaf turn create --agent claude --objective "Fix auth" --built "JWT implementation"
-  adaf turn update --built "Added JWT auth" --next "Add refresh tokens"`,
+  adaf turn finish --built "Added JWT auth" --decisions "Kept single-file flow" --challenges "Fixed toggle regression" --state "Demo restored" --issues "None" --next "Add refresh tokens"`,
 	RunE: runTurnList,
 }
 
@@ -58,12 +58,12 @@ var turnCreateCmd = &cobra.Command{
 	RunE:    runTurnCreate,
 }
 
-var turnUpdateCmd = &cobra.Command{
-	Use:     "update [id]",
-	Aliases: []string{"edit", "set"},
-	Short:   "Update an existing turn record entry",
+var turnFinishCmd = &cobra.Command{
+	Use:     "finish [id]",
+	Aliases: []string{"complete"},
+	Short:   "Publish final handoff report for a turn",
 	Args:    cobra.MaximumNArgs(1),
-	RunE:    runTurnUpdate,
+	RunE:    runTurnFinish,
 }
 
 var turnSearchCmd = &cobra.Command{
@@ -100,15 +100,7 @@ func init() {
 	_ = turnCreateCmd.MarkFlagRequired("agent")
 	_ = turnCreateCmd.MarkFlagRequired("objective")
 
-	turnUpdateCmd.Flags().String("objective", "", "Turn objective")
-	turnUpdateCmd.Flags().String("built", "", "What was built")
-	turnUpdateCmd.Flags().String("decisions", "", "Key decisions made")
-	turnUpdateCmd.Flags().String("challenges", "", "Challenges encountered")
-	turnUpdateCmd.Flags().String("state", "", "Current state of the project")
-	turnUpdateCmd.Flags().String("issues", "", "Known issues")
-	turnUpdateCmd.Flags().String("next", "", "Next steps")
-	turnUpdateCmd.Flags().String("build-state", "", "Build state (compiles, tests pass, etc.)")
-	turnUpdateCmd.Flags().Int("duration", 0, "Turn duration in seconds")
+	addTurnFinishFlags(turnFinishCmd)
 
 	turnSearchCmd.Flags().String("query", "", "Search query (required)")
 	turnSearchCmd.Flags().String("plan", "", "Filter by plan ID")
@@ -120,9 +112,25 @@ func init() {
 	turnCmd.AddCommand(turnShowCmd)
 	turnCmd.AddCommand(turnLatestCmd)
 	turnCmd.AddCommand(turnCreateCmd)
-	turnCmd.AddCommand(turnUpdateCmd)
+	turnCmd.AddCommand(turnFinishCmd)
 	turnCmd.AddCommand(turnSearchCmd)
 	rootCmd.AddCommand(turnCmd)
+}
+
+func addTurnFinishFlags(cmd *cobra.Command) {
+	cmd.Flags().String("objective", "", "Turn objective override")
+	cmd.Flags().String("built", "", "What was built (required)")
+	cmd.Flags().String("decisions", "", "Key decisions made (required)")
+	cmd.Flags().String("challenges", "", "Challenges encountered (required)")
+	cmd.Flags().String("state", "", "Current state of the project (required)")
+	cmd.Flags().String("issues", "", "Known issues (required)")
+	cmd.Flags().String("next", "", "Next steps (required)")
+	_ = cmd.MarkFlagRequired("built")
+	_ = cmd.MarkFlagRequired("decisions")
+	_ = cmd.MarkFlagRequired("challenges")
+	_ = cmd.MarkFlagRequired("state")
+	_ = cmd.MarkFlagRequired("issues")
+	_ = cmd.MarkFlagRequired("next")
 }
 
 func runTurnList(cmd *cobra.Command, args []string) error {
@@ -286,7 +294,7 @@ func runTurnCreate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runTurnUpdate(cmd *cobra.Command, args []string) error {
+func runTurnFinish(cmd *cobra.Command, args []string) error {
 	s, err := openStoreRequired()
 	if err != nil {
 		return err
@@ -296,67 +304,91 @@ func runTurnUpdate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if store.IsTurnFrozen(turn) {
+		return fmt.Errorf("turn #%d is frozen and cannot be finished", turn.ID)
+	}
 
-	updated := 0
-	setStringFlag := func(flag string, target *string) error {
-		if !cmd.Flags().Changed(flag) {
-			return nil
+	type finishSection struct {
+		flag   string
+		target *string
+	}
+	sections := []finishSection{
+		{flag: "built", target: &turn.WhatWasBuilt},
+		{flag: "decisions", target: &turn.KeyDecisions},
+		{flag: "challenges", target: &turn.Challenges},
+		{flag: "state", target: &turn.CurrentState},
+		{flag: "issues", target: &turn.KnownIssues},
+		{flag: "next", target: &turn.NextSteps},
+	}
+
+	values := make(map[string]string, len(sections))
+	missing := make([]string, 0, len(sections))
+	for _, sec := range sections {
+		if !cmd.Flags().Changed(sec.flag) {
+			missing = append(missing, "--"+sec.flag)
+			continue
 		}
-		value, err := cmd.Flags().GetString(flag)
+		value, err := cmd.Flags().GetString(sec.flag)
 		if err != nil {
 			return err
 		}
-		*target = value
-		updated++
-		return nil
+		if strings.TrimSpace(value) == "" {
+			missing = append(missing, "--"+sec.flag)
+			continue
+		}
+		values[sec.flag] = value
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("turn finish requires all sections; missing: %s", strings.Join(missing, ", "))
 	}
 
-	if err := setStringFlag("objective", &turn.Objective); err != nil {
-		return err
-	}
-	if err := setStringFlag("built", &turn.WhatWasBuilt); err != nil {
-		return err
-	}
-	if err := setStringFlag("decisions", &turn.KeyDecisions); err != nil {
-		return err
-	}
-	if err := setStringFlag("challenges", &turn.Challenges); err != nil {
-		return err
-	}
-	if err := setStringFlag("state", &turn.CurrentState); err != nil {
-		return err
-	}
-	if err := setStringFlag("issues", &turn.KnownIssues); err != nil {
-		return err
-	}
-	if err := setStringFlag("next", &turn.NextSteps); err != nil {
-		return err
-	}
-	if err := setStringFlag("build-state", &turn.BuildState); err != nil {
-		return err
-	}
-	if cmd.Flags().Changed("duration") {
-		duration, err := cmd.Flags().GetInt("duration")
+	wasComplete := turnHasCompleteFinishReport(turn)
+
+	if cmd.Flags().Changed("objective") {
+		objective, err := cmd.Flags().GetString("objective")
 		if err != nil {
 			return err
 		}
-		if duration < 0 {
-			return fmt.Errorf("--duration must be >= 0")
+		if strings.TrimSpace(objective) == "" {
+			return fmt.Errorf("--objective cannot be empty when provided")
 		}
-		turn.DurationSecs = duration
-		updated++
+		turn.Objective = objective
+	}
+	for _, sec := range sections {
+		*sec.target = values[sec.flag]
 	}
 
-	if updated == 0 {
-		return fmt.Errorf("no fields provided to update")
-	}
 	if err := s.UpdateTurn(turn); err != nil {
 		return fmt.Errorf("updating turn #%d: %w", turn.ID, err)
 	}
 
 	fmt.Println()
-	fmt.Printf("  %sTurn #%d updated.%s\n\n", styleBoldGreen, turn.ID, colorReset)
+	if wasComplete {
+		fmt.Printf("  %sTurn #%d finish report saved and overwrote the previous finish report.%s\n\n", styleBoldGreen, turn.ID, colorReset)
+	} else {
+		fmt.Printf("  %sTurn #%d finished with a complete handoff report.%s\n\n", styleBoldGreen, turn.ID, colorReset)
+	}
 	return nil
+}
+
+func turnHasCompleteFinishReport(turn *store.Turn) bool {
+	if turn == nil {
+		return false
+	}
+	required := []string{
+		turn.WhatWasBuilt,
+		turn.KeyDecisions,
+		turn.Challenges,
+		turn.CurrentState,
+		turn.KnownIssues,
+		turn.NextSteps,
+	}
+	for _, section := range required {
+		if strings.TrimSpace(section) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func resolveTurnToUpdate(s *store.Store, args []string) (*store.Turn, error) {
@@ -381,7 +413,7 @@ func resolveTurnToUpdate(s *store.Store, args []string) (*store.Turn, error) {
 		return nil, fmt.Errorf("getting latest turn: %w", err)
 	}
 	if latest == nil {
-		return nil, fmt.Errorf("no turns found to update")
+		return nil, fmt.Errorf("no turns found to finish")
 	}
 	return latest, nil
 }

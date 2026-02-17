@@ -177,3 +177,51 @@ func TestEnforceCommandAccessForView(t *testing.T) {
 		})
 	}
 }
+
+func TestEnforceCommandAccessForView_SpawnedSubAgentBlocksTurnCommands(t *testing.T) {
+	root := &cobra.Command{Use: "adaf"}
+	turn := &cobra.Command{Use: "turn"}
+	finish := &cobra.Command{Use: "finish"}
+	turn.AddCommand(finish)
+	root.AddCommand(turn)
+
+	t.Setenv("ADAF_PARENT_TURN", "42")
+
+	err := enforceCommandAccessForView(turn, cliRuntimeViewAgent)
+	if err == nil {
+		t.Fatal("expected spawned sub-agent turn command to be blocked")
+	}
+	if !strings.Contains(err.Error(), "spawned sub-agents cannot manage turns") {
+		t.Fatalf("error = %q, want spawned sub-agent turn block message", err.Error())
+	}
+
+	err = enforceCommandAccessForView(finish, cliRuntimeViewAgent)
+	if err == nil {
+		t.Fatal("expected spawned sub-agent turn finish command to be blocked")
+	}
+	if !strings.Contains(err.Error(), "spawned sub-agents cannot manage turns") {
+		t.Fatalf("error = %q, want spawned sub-agent turn block message", err.Error())
+	}
+}
+
+func TestApplyRuntimeView_HidesTurnForSpawnedSubAgent(t *testing.T) {
+	root := &cobra.Command{Use: "adaf"}
+	turn := &cobra.Command{Use: "turn"}
+	finish := &cobra.Command{Use: "finish"}
+	spawn := &cobra.Command{Use: "spawn"}
+	turn.AddCommand(finish)
+	root.AddCommand(turn, spawn)
+
+	t.Setenv("ADAF_PARENT_TURN", "42")
+	applyRuntimeView(root, cliRuntimeViewAgent)
+
+	if !turn.Hidden {
+		t.Fatal("turn should be hidden for spawned sub-agent agent view")
+	}
+	if !finish.Hidden {
+		t.Fatal("turn finish should be hidden for spawned sub-agent agent view")
+	}
+	if spawn.Hidden {
+		t.Fatal("spawn should remain visible for spawned sub-agent agent view")
+	}
+}

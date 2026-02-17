@@ -2,6 +2,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,8 +11,27 @@ import (
 	"time"
 )
 
+var ErrTurnFrozen = errors.New("turn is frozen")
+
 func (s *Store) turnsDir() string {
 	return s.localDir("turns")
+}
+
+func IsTurnFrozen(turn *Turn) bool {
+	if turn == nil {
+		return false
+	}
+	if !turn.FinalizedAt.IsZero() {
+		return true
+	}
+	buildState := strings.TrimSpace(turn.BuildState)
+	if buildState == "" || buildState == "waiting_for_spawns" {
+		return false
+	}
+	if buildState == "success" || buildState == "cancelled" || buildState == "error" {
+		return true
+	}
+	return strings.HasPrefix(buildState, "exit_code_")
 }
 
 func (s *Store) ListTurns() ([]Turn, error) {
@@ -61,7 +81,21 @@ func (s *Store) GetTurn(id int) (*Turn, error) {
 }
 
 func (s *Store) UpdateTurn(turn *Turn) error {
-	return s.writeJSON(filepath.Join(s.turnsDir(), fmt.Sprintf("%d.json", turn.ID)), turn)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	path := filepath.Join(s.turnsDir(), fmt.Sprintf("%d.json", turn.ID))
+	var existing Turn
+	if err := s.readJSON(path, &existing); err != nil {
+		return err
+	}
+	if IsTurnFrozen(&existing) {
+		if !existing.FinalizedAt.IsZero() {
+			return fmt.Errorf("%w: turn #%d finalized at %s", ErrTurnFrozen, existing.ID, existing.FinalizedAt.Format(time.RFC3339))
+		}
+		return fmt.Errorf("%w: turn #%d has terminal build state %q", ErrTurnFrozen, existing.ID, existing.BuildState)
+	}
+	return s.writeJSON(path, turn)
 }
 
 func (s *Store) LatestTurn() (*Turn, error) {

@@ -36,7 +36,7 @@ func buildSubAgentPrompt(opts BuildOpts) (string, error) {
 	}
 
 	b.WriteString("If you need to communicate with your parent agent use: adaf parent-ask \"question\"\n")
-	b.WriteString("Before finishing your turn, update handoff notes with adaf turn update.\n")
+	b.WriteString("Do NOT manage turn logs with `adaf turn ...`; your parent agent owns turn handoff publication.\n")
 
 	if opts.Delegation != nil && len(opts.Delegation.Profiles) > 0 {
 		b.WriteString(delegationSection(opts.Delegation, opts.GlobalCfg, nil))
@@ -584,12 +584,13 @@ func renderTurnHandoffInstructions(required bool) string {
 	var b strings.Builder
 	b.WriteString("## Turn Handoff\n\n")
 	if required {
-		b.WriteString("Before finishing your turn, you MUST update the turn log so the next agent can continue without re-discovery.\n")
+		b.WriteString("Before finishing your turn, you MUST publish a complete handoff so the next agent can continue without re-discovery.\n")
 	} else {
-		b.WriteString("Before finishing your turn, update the turn log so the next agent can continue without re-discovery.\n")
+		b.WriteString("Before finishing your turn, publish a complete handoff so the next agent can continue without re-discovery.\n")
 	}
-	b.WriteString("Run `adaf turn update --built \"...\" --decisions \"...\" --state \"...\" --issues \"...\" --next \"...\"`.\n")
-	b.WriteString("If `ADAF_TURN_ID` is set, `adaf turn update` targets the current turn automatically.\n\n")
+	b.WriteString("Run `adaf turn finish --built \"...\" --decisions \"...\" --challenges \"...\" --state \"...\" --issues \"...\" --next \"...\"`.\n")
+	b.WriteString("`adaf turn finish` fails if any required section is missing.\n")
+	b.WriteString("If `ADAF_TURN_ID` is set, `adaf turn finish` targets the current turn automatically.\n\n")
 	return b.String()
 }
 

@@ -498,7 +498,15 @@ func (l *Loop) Run(ctx context.Context) error {
 			"run_error", runErr != nil,
 		)
 
-		// Update the turn with results.
+		// Refresh the latest turn snapshot before final metadata write so we
+		// never clobber handoff fields an agent updated during the turn.
+		if latestTurn, err := l.Store.GetTurn(turnID); err != nil {
+			debug.LogKV("loop", "turn refresh failed before finalize", "turn_id", turnID, "error", err)
+		} else {
+			turnLog = latestTurn
+		}
+
+		// Update system-owned metadata.
 		if result != nil {
 			durationSecs := int(result.Duration.Seconds())
 			if resumingTurn && turnLog.DurationSecs > 0 {
@@ -509,25 +517,23 @@ func (l *Loop) Run(ctx context.Context) error {
 		}
 		if waitingForSpawns {
 			turnLog.BuildState = "waiting_for_spawns"
-			turnLog.CurrentState = fmt.Sprintf("Turn %d waiting for spawns", turn+1)
 		} else if runErr != nil {
 			if errors.Is(runErr, context.Canceled) {
 				turnLog.BuildState = "cancelled"
 			} else {
 				turnLog.BuildState = "error"
 			}
-			turnLog.KnownIssues = runErr.Error()
 		} else if result != nil {
 			if result.ExitCode == 0 {
 				turnLog.BuildState = "success"
-				turnLog.CurrentState = fmt.Sprintf("Turn %d completed", turn+1)
 			} else {
 				turnLog.BuildState = fmt.Sprintf("exit_code_%d", result.ExitCode)
-				turnLog.CurrentState = fmt.Sprintf("Turn %d completed", turn+1)
 			}
 		} else {
 			turnLog.BuildState = "error"
-			turnLog.KnownIssues = "agent returned no result"
+		}
+		if !waitingForSpawns && turnLog.FinalizedAt.IsZero() {
+			turnLog.FinalizedAt = time.Now().UTC()
 		}
 
 		// Best-effort update of the turn. We re-read the ID since
