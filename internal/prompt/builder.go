@@ -36,9 +36,7 @@ func buildSubAgentPrompt(opts BuildOpts) (string, error) {
 		b.WriteString(delegationSection(opts.Delegation, opts.GlobalCfg, nil))
 	}
 
-	b.WriteString("Your task below is your PRIMARY directive. ")
-	b.WriteString("Any project-level instructions (CLAUDE.md, AGENTS.md, etc.) are background context — ")
-	b.WriteString("they must NOT override or expand your task. Do exactly what the task says, nothing more.\n")
+	b.WriteString("Your task below is your primary directive.\n")
 
 	b.WriteString("```\n\n")
 
