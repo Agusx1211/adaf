@@ -2,7 +2,7 @@
 // Hash format: #/view[/selection...]
 // Coexists with #token=xxx auth flow (different prefix).
 
-var VALID_VIEWS = ['loops', 'standalone', 'issues', 'docs', 'plan', 'logs', 'config'];
+var VALID_VIEWS = ['loops', 'standalone', 'issues', 'wiki', 'plan', 'logs', 'config'];
 
 /**
  * Converts current navigation state to a hash string.
@@ -31,9 +31,9 @@ export function stateToHash(state) {
       }
       break;
 
-    case 'docs':
-      if (state.selectedDoc != null) {
-        parts.push(encodeURIComponent(String(state.selectedDoc)));
+    case 'wiki':
+      if (state.selectedWiki != null) {
+        parts.push(encodeURIComponent(String(state.selectedWiki)));
       }
       break;
 
@@ -96,9 +96,9 @@ export function hashToActions(hash) {
       break;
     }
 
-    case 'docs':
+    case 'wiki':
       if (segments[1]) {
-        actions.push({ type: 'SET_SELECTED_DOC', payload: segments[1] });
+        actions.push({ type: 'SET_SELECTED_WIKI', payload: segments[1] });
       }
       break;
 

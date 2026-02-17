@@ -29,7 +29,7 @@ var askCmd = &cobra.Command{
 one-shot usage: the agent runs once and adaf exits.
 
 If no prompt is provided, the agent runs in standalone mode using the full
-project context (rules, plan, docs, etc.) — similar to opening a vibe coding
+project context (rules, plan, wiki, etc.) — similar to opening a vibe coding
 agent directly, but with ADAF's context injection.
 
 The prompt can be provided as:

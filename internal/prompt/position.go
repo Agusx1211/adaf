@@ -35,6 +35,7 @@ func PositionPrompt(position, workerRole string, hasDelegation, canCallSuperviso
 		b.WriteString("## Required Workflow\n\n")
 		b.WriteString("- Review recent execution logs: `adaf log` and `adaf turn show [id]`\n")
 		b.WriteString("- Verify plan and issue alignment: `adaf plan` and `adaf issues`\n")
+		b.WriteString("- Validate shared memory freshness in wiki: `adaf wiki list`, `adaf wiki search \"...\"`, `adaf wiki update ...`\n")
 		b.WriteString("- Inspect repository signal (status/history/diff) to detect drift early\n")
 		b.WriteString("- If correction is needed, send a concrete instruction to the next step: `adaf loop message \"guidance\"`\n")
 		b.WriteString("- Before finishing, you MUST publish a supervisor handoff: `adaf turn finish --built \"...\" --decisions \"...\" --challenges \"...\" --state \"...\" --issues \"...\" --next \"...\"`\n\n")
@@ -51,7 +52,8 @@ func PositionPrompt(position, workerRole string, hasDelegation, canCallSuperviso
 		if canCallSupervisor {
 			b.WriteString("- If you need supervisor direction or have no actionable manager work left, escalate: `adaf loop call-supervisor \"status + concrete ask\"`\n")
 		}
-		b.WriteString("- Keep plan/issues/docs current: `adaf plan`, `adaf issues`, `adaf issue create ...`, `adaf doc ...`\n")
+		b.WriteString("- Keep plan/issues/wiki current: `adaf plan`, `adaf issues`, `adaf issue create ...`, `adaf wiki ...`\n")
+		b.WriteString("- Wiki is cross-session memory for all agents. If an entry is stale, update it immediately.\n")
 		b.WriteString("- Before finishing, you MUST publish a manager handoff: `adaf turn finish --built \"...\" --decisions \"...\" --challenges \"...\" --state \"...\" --issues \"...\" --next \"...\"`\n\n")
 
 	case config.PositionLead:
@@ -59,12 +61,13 @@ func PositionPrompt(position, workerRole string, hasDelegation, canCallSuperviso
 		b.WriteString("You are responsible for delivering code and maintaining technical direction.\n")
 		b.WriteString("You can implement work directly and, when a team is available, delegate selected sub-tasks.\n\n")
 		b.WriteString("## Recommended Workflow\n\n")
-		b.WriteString("- Start by checking context: `adaf plan`, `adaf issues`, `adaf log`\n")
+		b.WriteString("- Start by checking context: `adaf plan`, `adaf issues`, `adaf wiki list`, `adaf log`\n")
 		b.WriteString("- Implement and validate changes in your branch\n")
 		if hasDelegation {
 			b.WriteString("- Delegate parallelizable or investigative work via `adaf spawn --profile ... --task ...`\n")
 			b.WriteString("- Merge completed worker branches with `adaf spawn-diff` + `adaf spawn-merge`\n")
 		}
+		b.WriteString("- Keep wiki concise and current for handoff continuity: `adaf wiki search \"...\"`, `adaf wiki update ...`\n")
 		b.WriteString("- Record a precise handoff at the end: `adaf turn finish --built \"...\" --decisions \"...\" --challenges \"...\" --state \"...\" --issues \"...\" --next \"...\"`\n\n")
 
 	default:
@@ -77,7 +80,8 @@ func PositionPrompt(position, workerRole string, hasDelegation, canCallSuperviso
 		b.WriteString("## Worker Commands\n\n")
 		b.WriteString("- Ask parent for missing context: `adaf parent-ask \"question\"`\n")
 		b.WriteString("- Review context/history when needed: `adaf log`, `adaf turn show [id]`\n")
-		b.WriteString("- Track issues/docs as required by task: `adaf issues`, `adaf doc ...`\n")
+		b.WriteString("- Track issues/wiki as required by task: `adaf issues`, `adaf wiki ...`\n")
+		b.WriteString("- Wiki is shared memory for all agents. If you see stale wiki info, update it before finishing.\n")
 		b.WriteString("- Publish end-of-turn handoff: `adaf turn finish --built \"...\" --decisions \"...\" --challenges \"...\" --state \"...\" --issues \"...\" --next \"...\"`\n\n")
 	}
 

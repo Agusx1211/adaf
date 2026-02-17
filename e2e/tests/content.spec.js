@@ -163,26 +163,26 @@ test('issues detail edit persists to backend store', async ({ page, request }) =
   expect(issue.description).toBe(nextDescription);
 });
 
-test('docs detail edit persists to backend store', async ({ page, request }) => {
+test('wiki detail edit persists to backend store', async ({ page, request }) => {
   const { state, fixture } = await gotoFixture(page, request);
-  const nextTitle = uniqueName('doc-title');
-  const nextContent = `# ${nextTitle}\n\nUpdated by real e2e doc test.`;
+  const nextTitle = uniqueName('wiki-title');
+  const nextContent = `# ${nextTitle}\n\nUpdated by real e2e wiki test.`;
 
-  await page.getByRole('button', { name: 'Docs' }).click();
-  await page.getByText('Seed Doc', { exact: true }).click();
+  await page.getByRole('button', { name: 'Wiki' }).click();
+  await page.getByText('Seed Wiki', { exact: true }).click();
 
-  const panel = page.locator('div').filter({ hasText: 'Documentation' }).first();
+  const panel = page.locator('div').filter({ hasText: 'Wiki' }).first();
   await panel.getByRole('button', { name: 'Edit' }).click();
-  await panel.getByPlaceholder('Doc title').fill(nextTitle);
+  await panel.getByPlaceholder('Wiki title').fill(nextTitle);
   await panel.locator('textarea').first().fill(nextContent);
   await panel.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByText('Doc updated')).toBeVisible();
+  await expect(page.getByText('Wiki entry updated')).toBeVisible();
 
-  const docResponse = await request.get(`${projectBaseURL(state, fixture.id)}/docs/seed-doc`);
-  expect(docResponse.status()).toBe(200);
-  const doc = await docResponse.json();
-  expect(doc.title).toBe(nextTitle);
-  expect(doc.content).toBe(nextContent);
+  const wikiResponse = await request.get(`${projectBaseURL(state, fixture.id)}/wiki/seed-wiki`);
+  expect(wikiResponse.status()).toBe(200);
+  const wiki = await wikiResponse.json();
+  expect(wiki.title).toBe(nextTitle);
+  expect(wiki.content).toBe(nextContent);
 });
 
 test('plan detail edit persists to backend store', async ({ page, request }) => {

@@ -5,141 +5,197 @@ import { MarkdownContent, injectEventBlockStyles } from '../common/EventBlocks.j
 import SectionHeader from '../common/SectionHeader.jsx';
 import { useToast } from '../common/Toast.jsx';
 
-export default function DocsDetailPanel() {
+export default function WikiDetailPanel() {
   var state = useAppState();
   var dispatch = useDispatch();
   var toast = useToast();
   var base = apiBase(state.currentProjectID);
-  var doc = state.docs.find(function (item) { return item.id === state.selectedDoc; });
+  var entry = state.wiki.find(function (item) { return item.id === state.selectedWiki; });
 
   var [isEditing, setIsEditing] = useState(false);
   var [saving, setSaving] = useState(false);
+  var [deleting, setDeleting] = useState(false);
   var [editTitle, setEditTitle] = useState('');
   var [editPlanID, setEditPlanID] = useState('');
   var [editContent, setEditContent] = useState('');
+  var [editBy, setEditBy] = useState('web-ui');
 
   useEffect(function () {
     injectEventBlockStyles();
   }, []);
 
   useEffect(function () {
-    if (!doc) {
+    if (!entry) {
       setIsEditing(false);
       setEditTitle('');
       setEditPlanID('');
       setEditContent('');
+      setEditBy('web-ui');
       return;
     }
     if (!isEditing) {
-      setEditTitle(doc.title || '');
-      setEditPlanID(doc.plan_id || '');
-      setEditContent(doc.content || '');
+      setEditTitle(entry.title || '');
+      setEditPlanID(entry.plan_id || '');
+      setEditContent(entry.content || '');
+      setEditBy(entry.updated_by || entry.created_by || 'web-ui');
     }
-  }, [doc && doc.id]);
+  }, [entry && entry.id]);
 
-  if (!doc) {
+  if (!entry) {
     return (
       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)' }}>
-        Select a doc
+        Select a wiki entry
       </div>
     );
   }
 
   function buildMarkdown(data) {
+    var history = Array.isArray(data.history) ? data.history : [];
+    var lastHistory = history.slice(history.length > 5 ? history.length - 5 : 0);
+    var historyLines = lastHistory.map(function (change) {
+      var action = change && change.action ? change.action : 'update';
+      var by = change && change.by ? change.by : 'unknown';
+      var at = change && change.at ? String(change.at) : '';
+      return '- v' + (Number(change && change.version) || '?') + ' ' + action + ' by ' + by + (at ? ' @ ' + at : '');
+    }).join('\n');
     return (
-      '# ' + (data.title || 'Untitled Doc') + '\n\n' +
-      '**Document ID:** `' + (data.id || 'n/a') + '`  \n' +
+      '# ' + (data.title || 'Untitled Wiki Entry') + '\n\n' +
+      '**Wiki ID:** `' + (data.id || 'n/a') + '`  \n' +
       '**Plan:** ' + (data.plan_id || 'shared') + '  \n\n' +
-      (data.content || '_No content yet._')
+      '**Version:** ' + (Number(data.version) || 1) + '  \n' +
+      '**Created By:** ' + (data.created_by || 'unknown') + '  \n' +
+      '**Updated By:** ' + (data.updated_by || data.created_by || 'unknown') + '  \n' +
+      '**Updated At:** ' + (data.updated || 'n/a') + '  \n\n' +
+      (data.content || '_No content yet._') +
+      '\n\n## Recent Changes\n\n' +
+      (historyLines || '_No history yet._')
     );
   }
 
   function beginEdit() {
-    setEditTitle(doc.title || '');
-    setEditPlanID(doc.plan_id || '');
-    setEditContent(doc.content || '');
+    setEditTitle(entry.title || '');
+    setEditPlanID(entry.plan_id || '');
+    setEditContent(entry.content || '');
+    setEditBy(entry.updated_by || entry.created_by || 'web-ui');
     setIsEditing(true);
   }
 
   function cancelEdit() {
-    setEditTitle(doc.title || '');
-    setEditPlanID(doc.plan_id || '');
-    setEditContent(doc.content || '');
+    setEditTitle(entry.title || '');
+    setEditPlanID(entry.plan_id || '');
+    setEditContent(entry.content || '');
+    setEditBy(entry.updated_by || entry.created_by || 'web-ui');
     setIsEditing(false);
   }
 
-  async function saveDoc() {
+  async function saveWiki() {
     setSaving(true);
 
     var payload = {
-      title: editTitle.trim() || doc.title,
+      title: editTitle.trim() || entry.title,
       plan_id: editPlanID.trim(),
       content: editContent,
+      updated_by: editBy.trim() || 'web-ui',
     };
 
     try {
-      var updated = await apiCall(base + '/docs/' + encodeURIComponent(doc.id), 'PUT', payload);
+      var updated = await apiCall(base + '/wiki/' + encodeURIComponent(entry.id), 'PUT', payload);
       dispatch({
         type: 'SET',
         payload: {
-          docs: state.docs.map(function (item) {
+          wiki: state.wiki.map(function (item) {
             return item.id === updated.id ? updated : item;
           }),
         },
       });
       setIsEditing(false);
-      toast('Doc updated', 'success');
+      toast('Wiki entry updated', 'success');
     } catch (err) {
       if (!err.authRequired) {
-        toast('Failed to save doc: ' + (err.message || err), 'error');
+        toast('Failed to save wiki entry: ' + (err.message || err), 'error');
       }
     } finally {
       setSaving(false);
     }
   }
 
+  async function deleteWiki() {
+    var confirmed = window.confirm('Delete wiki entry "' + (entry.title || entry.id) + '"?');
+    if (!confirmed) return;
+
+    setDeleting(true);
+    try {
+      await apiCall(base + '/wiki/' + encodeURIComponent(entry.id), 'DELETE');
+      dispatch({
+        type: 'SET',
+        payload: {
+          wiki: state.wiki.filter(function (item) { return item.id !== entry.id; }),
+          selectedWiki: null,
+        },
+      });
+      setIsEditing(false);
+      toast('Wiki entry deleted', 'success');
+    } catch (err) {
+      if (!err.authRequired) {
+        toast('Failed to delete wiki entry: ' + (err.message || err), 'error');
+      }
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', animation: 'fadeIn 0.2s ease' }}>
       <SectionHeader
-        count={doc.id ? 1 : 0}
+        count={entry.id ? 1 : 0}
         action={(
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             {isEditing ? (
               <>
                 <button
                   onClick={cancelEdit}
-                  disabled={saving}
+                  disabled={saving || deleting}
                   style={{
                     background: 'transparent', color: 'var(--text-3)', border: '1px solid var(--border)',
                     borderRadius: 4, padding: '4px 8px', fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: 10, cursor: saving ? 'not-allowed' : 'pointer',
+                    fontSize: 10, cursor: saving || deleting ? 'not-allowed' : 'pointer',
                   }}
                 >Cancel</button>
                 <button
-                  onClick={saveDoc}
-                  disabled={saving}
+                  onClick={saveWiki}
+                  disabled={saving || deleting}
                   style={{
-                    background: saving ? 'var(--bg-3)' : 'var(--green)', color: '#000',
+                    background: saving || deleting ? 'var(--bg-3)' : 'var(--green)', color: '#000',
                     border: '1px solid transparent', borderRadius: 4, padding: '4px 8px',
                     fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
-                    fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer',
+                    fontWeight: 600, cursor: saving || deleting ? 'not-allowed' : 'pointer',
                   }}
                 >{saving ? 'Saving...' : 'Save'}</button>
               </>
             ) : (
               <button
                 onClick={beginEdit}
+                disabled={deleting}
                 style={{
                   background: 'transparent', color: 'var(--accent)', border: '1px solid var(--accent)40',
                   borderRadius: 4, padding: '4px 8px', fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: 10, cursor: 'pointer',
+                  fontSize: 10, cursor: deleting ? 'not-allowed' : 'pointer',
                 }}
               >Edit</button>
             )}
+            <button
+              onClick={deleteWiki}
+              disabled={saving || deleting}
+              style={{
+                background: 'transparent', color: 'var(--red)', border: '1px solid var(--red)40',
+                borderRadius: 4, padding: '4px 8px', fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 10, cursor: saving || deleting ? 'not-allowed' : 'pointer',
+              }}
+            >{deleting ? 'Deleting...' : 'Delete'}</button>
           </div>
         )}
       >
-        Documentation
+        Wiki
       </SectionHeader>
 
       <div style={{ flex: 1, overflow: 'auto', padding: '0 0 16px 0' }}>
@@ -151,7 +207,7 @@ export default function DocsDetailPanel() {
                 value={editTitle}
                 onChange={function (event) { setEditTitle(event.target.value); }}
                 style={inputStyle}
-                placeholder="Doc title"
+                placeholder="Wiki title"
               />
 
               <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-2)' }}>Plan ID</label>
@@ -169,9 +225,17 @@ export default function DocsDetailPanel() {
                 style={textareaStyle}
                 rows={18}
               />
+
+              <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-2)' }}>Updated By</label>
+              <input
+                value={editBy}
+                onChange={function (event) { setEditBy(event.target.value); }}
+                style={inputStyle}
+                placeholder="agent/profile/user"
+              />
             </div>
           ) : (
-            <MarkdownContent text={buildMarkdown(doc)} style={markdownContentStyle} />
+            <MarkdownContent text={buildMarkdown(entry)} style={markdownContentStyle} />
           )}
         </div>
       </div>

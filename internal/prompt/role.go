@@ -139,7 +139,7 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 		b.WriteString("**Delegation style:** " + style + "\n\n")
 	}
 
-	// Command reference pointer — full docs available via `adaf skill delegation`.
+	// Command reference pointer — full command reference available via `adaf skill delegation`.
 	b.WriteString("Run `adaf skill delegation` for command reference and spawn patterns.\n\n")
 
 	if len(runningSpawns) > 0 {

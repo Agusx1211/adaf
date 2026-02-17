@@ -34,6 +34,7 @@ func buildSubAgentPrompt(opts BuildOpts) (string, error) {
 	} else {
 		b.WriteString("Commit your work when you finish.\n")
 	}
+	b.WriteString("Wiki is shared memory across all agents and sessions. Check it before acting and update stale entries when needed using `adaf wiki ...`.\n")
 
 	b.WriteString("If you need to communicate with your parent agent use: adaf parent-ask \"question\"\n")
 	b.WriteString("Do NOT manage turn logs with `adaf turn ...`; your parent agent owns turn handoff publication.\n")
@@ -626,7 +627,8 @@ func renderObjective(opts BuildOpts, project *store.ProjectConfig, plan *store.P
 			} else {
 				b.WriteString("Use `adaf plan` to inspect active plan details, phase status, and dependencies.\n")
 			}
-			b.WriteString("Use `adaf issues` and `adaf log` to validate progress and then publish concrete guidance for the next step.\n\n")
+			b.WriteString("Use `adaf issues`, `adaf wiki list`, and `adaf log` to validate progress and then publish concrete guidance for the next step.\n")
+			b.WriteString("If wiki context is stale, update it with `adaf wiki update ...` before finishing.\n\n")
 			return b.String()
 		}
 
@@ -716,7 +718,7 @@ func formatWaitResultInfo(wr WaitResultInfo) string {
 
 // buildStandaloneChatContext generates a minimal prompt for interactive chat sessions.
 // It includes only role identity, project name, tool pointers, and the conversation —
-// no autonomous rules, session logs, issues, loop context, or delegation docs.
+// no autonomous rules, session logs, issues, loop context, or delegation guidance.
 func buildStandaloneChatContext(opts BuildOpts) (string, error) {
 	var b strings.Builder
 
@@ -753,6 +755,7 @@ func buildStandaloneChatContext(opts BuildOpts) (string, error) {
 	b.WriteString("## Tools\n")
 	b.WriteString("The `adaf` CLI provides project management tools. Run `adaf --help` for available commands.\n")
 	b.WriteString("Do not access the adaf project store directly (for example `~/.adaf/projects/<id>/`) — use `adaf` commands.\n\n")
+	b.WriteString("Wiki is the shared memory layer across sessions and agents. Use `adaf wiki list`, `adaf wiki search \"...\"`, and `adaf wiki update ...` to keep it current.\n\n")
 
 	// Delegation pointer (brief).
 	if opts.Delegation != nil && len(opts.Delegation.Profiles) > 0 {

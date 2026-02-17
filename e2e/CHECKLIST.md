@@ -45,7 +45,7 @@ Priority legend:
 
 ## C) Top Bar and Global Navigation
 
-- [x] `E2E-027 (P0)` switching between `Loops/Standalone/Issues/Docs/Plan/Logs/Config` works.
+- [x] `E2E-027 (P0)` switching between `Loops/Standalone/Issues/Wiki/Plan/Logs/Config` works.
 - [x] `E2E-028 (P0)` selected left view updates URL hash and survives refresh.
 - [ ] `E2E-029 (P1)` running counter updates when session status changes.
 - [ ] `E2E-030 (P1)` running sessions dropdown lists active sessions with stop controls.
@@ -132,13 +132,13 @@ Priority legend:
 - [ ] `E2E-093 (P1)` phase dependency fields persist and reload.
 - [ ] `E2E-094 (P2)` plan detail view renders after reload with deep link state.
 
-## J) Docs View and CRUD
+## J) Wiki View and CRUD
 
-- [ ] `E2E-095 (P0)` create doc from UI.
-- [x] `E2E-096 (P0)` edit doc title/content and persist.
-- [ ] `E2E-097 (P0)` delete doc and verify list update.
+- [ ] `E2E-095 (P0)` create wiki entry from UI.
+- [x] `E2E-096 (P0)` edit wiki title/content and persist.
+- [ ] `E2E-097 (P0)` delete wiki entry and verify list update.
 - [ ] `E2E-098 (P1)` markdown-like content round-trips without truncation.
-- [ ] `E2E-099 (P1)` docs filtered by plan ID work when active plan changes.
+- [ ] `E2E-099 (P1)` wiki filtered by plan ID works when active plan changes.
 
 ## K) Logs View, Turn Details, and Recordings
 
@@ -236,7 +236,7 @@ Priority legend:
 
 ## T) Deep Linking, Browser History, and Persistence
 
-- [ ] `E2E-167 (P0)` selected issue/doc/plan/turn/scope deep links restore correctly on refresh.
+- [ ] `E2E-167 (P0)` selected issue/wiki/plan/turn/scope deep links restore correctly on refresh.
 - [ ] `E2E-168 (P0)` back/forward browser navigation restores prior view state.
 - [ ] `E2E-169 (P1)` switching project resets incompatible selections and avoids stale detail panels.
 - [ ] `E2E-170 (P1)` chat selection deep link survives refresh and loads same chat.
@@ -288,4 +288,3 @@ Priority legend:
 - [ ] `E2E-198 (P0)` full core suite passes on clean machine with no external agent CLIs.
 - [ ] `E2E-199 (ENV,P1)` full live-agent suite passes in environment with configured CLIs.
 - [ ] `E2E-200 (P0)` CI artifacts include traces/videos for failing tests only.
-

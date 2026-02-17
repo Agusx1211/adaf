@@ -38,7 +38,7 @@ const (
 	roleIdentityBackendDesigner = "You are a BACKEND DESIGNER role. Focus on API contracts, data modeling, reliability, performance, and operability.\n\n" +
 		"Design for maintainability and explicit interface boundaries."
 	roleIdentityDocumentator = "You are a DOCUMENTATOR role. Focus on clear technical writing, task handoff clarity, and accurate developer/user documentation.\n\n" +
-		"Keep docs concise, actionable, and aligned with actual behavior."
+		"Keep wiki content concise, actionable, and aligned with actual behavior."
 	roleIdentityReviewer = "You are a REVIEWER role. Focus on correctness, regressions, risks, and missing tests.\n\n" +
 		"Provide concrete findings and required changes with file-level precision."
 	roleIdentityScout = "You are a SCOUT role. Focus on rapid investigation and evidence gathering.\n\n" +

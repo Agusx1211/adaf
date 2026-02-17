@@ -350,11 +350,12 @@ func (srv *Server) registerProjectRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("PUT "+prefix+"/issues/{id}", srv.projectHandler(handleUpdateIssueP))
 	mux.HandleFunc("DELETE "+prefix+"/issues/{id}", srv.projectHandler(handleDeleteIssueP))
 
-	mux.HandleFunc("GET "+prefix+"/docs", srv.projectHandler(handleDocsP))
-	mux.HandleFunc("GET "+prefix+"/docs/{id}", srv.projectHandler(handleDocByIDP))
-	mux.HandleFunc("POST "+prefix+"/docs", srv.projectHandler(handleCreateDocP))
-	mux.HandleFunc("PUT "+prefix+"/docs/{id}", srv.projectHandler(handleUpdateDocP))
-	mux.HandleFunc("DELETE "+prefix+"/docs/{id}", srv.projectHandler(handleDeleteDocP))
+	mux.HandleFunc("GET "+prefix+"/wiki", srv.projectHandler(handleWikiP))
+	mux.HandleFunc("GET "+prefix+"/wiki/search", srv.projectHandler(handleWikiSearchP))
+	mux.HandleFunc("GET "+prefix+"/wiki/{id}", srv.projectHandler(handleWikiByIDP))
+	mux.HandleFunc("POST "+prefix+"/wiki", srv.projectHandler(handleCreateWikiP))
+	mux.HandleFunc("PUT "+prefix+"/wiki/{id}", srv.projectHandler(handleUpdateWikiP))
+	mux.HandleFunc("DELETE "+prefix+"/wiki/{id}", srv.projectHandler(handleDeleteWikiP))
 
 	mux.HandleFunc("GET "+prefix+"/turns", srv.projectHandler(handleTurnsP))
 	mux.HandleFunc("GET "+prefix+"/turns/{id}", srv.projectHandler(handleTurnByIDP))

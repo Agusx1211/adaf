@@ -50,12 +50,12 @@ func runPlanStatusChange(planID, newStatus string) error {
 	}
 
 	mergedIssues := 0
-	mergedDocs := 0
+	mergedWiki := 0
 	closedIssues := 0
 
 	switch newStatus {
 	case "done":
-		mergedIssues, mergedDocs, err = mergePlanToShared(s, planID)
+		mergedIssues, mergedWiki, err = mergePlanToShared(s, planID)
 		if err != nil {
 			return err
 		}
@@ -74,7 +74,12 @@ func runPlanStatusChange(planID, newStatus string) error {
 	fmt.Println()
 	fmt.Printf("  Plan %s%s%s: %s -> %s\n", styleBoldWhite, planID, colorReset, statusBadge(oldStatus), statusBadge(newStatus))
 	if newStatus == "done" {
-		fmt.Printf("  %sMerged:%s %d issue(s), %d doc(s) to shared scope\n", colorDim, colorReset, mergedIssues, mergedDocs)
+		fmt.Printf("  %sMerged:%s %d issue(s), %d wiki entr", colorDim, colorReset, mergedIssues, mergedWiki)
+		if mergedWiki == 1 {
+			fmt.Printf("y to shared scope\n")
+		} else {
+			fmt.Printf("ies to shared scope\n")
+		}
 	}
 	if newStatus == "cancelled" {
 		fmt.Printf("  %sClosed:%s %d issue(s) as wontfix\n", colorDim, colorReset, closedIssues)
@@ -105,24 +110,24 @@ func mergePlanToShared(s *store.Store, planID string) (int, int, error) {
 		mergedIssues++
 	}
 
-	docs, err := s.ListDocs()
+	wiki, err := s.ListWiki()
 	if err != nil {
-		return 0, 0, fmt.Errorf("listing docs: %w", err)
+		return 0, 0, fmt.Errorf("listing wiki: %w", err)
 	}
-	mergedDocs := 0
-	for i := range docs {
-		doc := docs[i]
-		if doc.PlanID != planID {
+	mergedWiki := 0
+	for i := range wiki {
+		entry := wiki[i]
+		if entry.PlanID != planID {
 			continue
 		}
-		doc.PlanID = ""
-		if err := s.UpdateDoc(&doc); err != nil {
-			return 0, 0, fmt.Errorf("updating doc %s: %w", doc.ID, err)
+		entry.PlanID = ""
+		if err := s.UpdateWikiEntry(&entry); err != nil {
+			return 0, 0, fmt.Errorf("updating wiki entry %s: %w", entry.ID, err)
 		}
-		mergedDocs++
+		mergedWiki++
 	}
 
-	return mergedIssues, mergedDocs, nil
+	return mergedIssues, mergedWiki, nil
 }
 
 func closePlanIssuesAsWontfix(s *store.Store, planID string) (int, error) {

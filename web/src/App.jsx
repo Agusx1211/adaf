@@ -65,7 +65,7 @@ export default function App() {
   // Deep link: sync state → URL hash
   var selectedIssue = state.selectedIssue;
   var selectedPlan = state.selectedPlan;
-  var selectedDoc = state.selectedDoc;
+  var selectedWiki = state.selectedWiki;
   var selectedTurn = state.selectedTurn;
   var configSelection = state.configSelection;
   var standaloneChatID = state.standaloneChatID;
@@ -77,7 +77,7 @@ export default function App() {
       selectedScope: selectedScope,
       selectedIssue: selectedIssue,
       selectedPlan: selectedPlan,
-      selectedDoc: selectedDoc,
+      selectedWiki: selectedWiki,
       selectedTurn: selectedTurn,
       configSelection: configSelection,
       standaloneChatID: standaloneChatID,
@@ -96,7 +96,7 @@ export default function App() {
       history.replaceState(null, '', hash);
     }
     prevViewRef.current = leftView;
-  }, [leftView, selectedScope, selectedIssue, selectedPlan, selectedDoc, selectedTurn, configSelection, standaloneChatID]);
+  }, [leftView, selectedScope, selectedIssue, selectedPlan, selectedWiki, selectedTurn, configSelection, standaloneChatID]);
 
   // Load loop messages when loop changes
   var loopID = loopRun && loopRun.id ? loopRun.id : 0;

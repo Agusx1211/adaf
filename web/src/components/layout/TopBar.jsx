@@ -13,7 +13,7 @@ var NAV_ITEMS = [
   { id: 'loops', label: 'Loops' },
   { id: 'standalone', label: 'Standalone' },
   { id: 'issues', label: 'Issues' },
-  { id: 'docs', label: 'Docs' },
+  { id: 'wiki', label: 'Wiki' },
   { id: 'plan', label: 'Plan' },
   { id: 'logs', label: 'Logs' },
   { id: 'config', label: 'Config' },

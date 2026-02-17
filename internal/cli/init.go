@@ -16,8 +16,8 @@ var initCmd = &cobra.Command{
 	Aliases: []string{"initialize", "setup"},
 	Short:   "Initialize a new adaf project",
 	Long: `Initialize a new adaf project in the current directory (or specified directory).
-Creates a .adaf.json marker in the repo and initializes the project store
-under ~/.adaf/projects/<id> with plans, issues, docs, turn logs, and recordings.
+	Creates a .adaf.json marker in the repo and initializes the project store
+	under ~/.adaf/projects/<id> with plans, issues, wiki, turn logs, and recordings.
 
 Also scans PATH for installed AI agent tools (claude, codex, vibe, etc.)
 and caches the results for future runs.
@@ -122,7 +122,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("    %s/plans/\n", s.Root())
 	fmt.Printf("    %s/local/turns/\n", s.Root())
 	fmt.Printf("    %s/issues/\n", s.Root())
-	fmt.Printf("    %s/docs/\n", s.Root())
+	fmt.Printf("    %s/wiki/\n", s.Root())
 	fmt.Printf("    %s/local/records/\n", s.Root())
 	if agentsCfg != nil {
 		detected := 0
