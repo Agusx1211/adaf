@@ -21,7 +21,6 @@ import (
 	"github.com/agusx1211/adaf/internal/hexid"
 	"github.com/agusx1211/adaf/internal/loop"
 	"github.com/agusx1211/adaf/internal/orchestrator"
-	promptpkg "github.com/agusx1211/adaf/internal/prompt"
 	"github.com/agusx1211/adaf/internal/stats"
 	"github.com/agusx1211/adaf/internal/store"
 	"github.com/agusx1211/adaf/internal/stream"
@@ -178,8 +177,6 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			if err := config.ValidateLoopStepPosition(stepDef, cfg.GlobalCfg); err != nil {
 				return fmt.Errorf("step %d (%s) position validation failed: %w", stepIdx, stepDef.Profile, err)
 			}
-			stepPosition := config.EffectiveStepPosition(stepDef)
-			stepWorkerRole := config.EffectiveWorkerRoleForPosition(stepPosition, stepDef.Role, cfg.GlobalCfg)
 
 			// Resolve agent.
 			agentInstance, ok := agent.Get(prof.Agent)
@@ -228,52 +225,33 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			// Gather unseen messages for this step.
 			unseenMsgs := gatherUnseenMessages(cfg.Store, run, stepIdx)
 
-			// Build prompt with loop context.
-			loopCtx := &promptpkg.LoopPromptContext{
-				LoopName:      loopDef.Name,
-				Cycle:         cycle,
-				StepIndex:     stepIdx,
-				TotalSteps:    len(loopDef.Steps),
-				Instructions:  stepDef.Instructions,
-				InitialPrompt: cfg.InitialPrompt,
-				CanStop:       stepDef.CanStop,
-				CanMessage:    stepDef.CanMessage,
-				CanPushover:   stepDef.CanPushover,
-				Messages:      unseenMsgs,
-				RunID:         run.ID,
-			}
-
 			// Pass any pending handoffs from previous step and clear them.
 			handoffs := run.PendingHandoffs
 			run.PendingHandoffs = nil
 			cfg.Store.UpdateLoopRun(run)
 
-			promptOpts := promptpkg.BuildOpts{
-				Store:          cfg.Store,
-				Project:        cfg.Project,
-				Profile:        prof,
-				Role:           stepWorkerRole,
-				Position:       stepPosition,
-				GlobalCfg:      cfg.GlobalCfg,
-				PlanID:         cfg.PlanID,
-				LoopContext:    loopCtx,
-				Delegation:     effectiveDelegation,
-				Handoffs:       handoffs,
-				StandaloneChat: stepDef.StandaloneChat,
-				Skills:         stepDef.Skills,
+			stepPromptInput := StepPromptInput{
+				Store:           cfg.Store,
+				Project:         cfg.Project,
+				GlobalCfg:       cfg.GlobalCfg,
+				PlanID:          cfg.PlanID,
+				InitialPrompt:   cfg.InitialPrompt,
+				LoopName:        loopDef.Name,
+				RunID:           run.ID,
+				Cycle:           cycle,
+				StepIndex:       stepIdx,
+				TotalSteps:      len(loopDef.Steps),
+				Step:            stepDef,
+				Profile:         prof,
+				Delegation:      effectiveDelegation,
+				Messages:        unseenMsgs,
+				Handoffs:        handoffs,
+				ResumeSessionID: stepResumeSessionID,
 			}
 
-			// When resuming a standalone chat, the agent already has full context.
-			// Just send the user message (step instructions) as the prompt.
-			var prompt string
-			if stepResumeSessionID != "" && stepDef.StandaloneChat {
-				prompt = stepDef.Instructions
-			} else {
-				var err error
-				prompt, err = promptpkg.Build(promptOpts)
-				if err != nil {
-					return fmt.Errorf("building prompt for step %d: %w", stepIdx, err)
-				}
+			prompt, err := BuildStepPrompt(stepPromptInput)
+			if err != nil {
+				return fmt.Errorf("building prompt for step %d: %w", stepIdx, err)
 			}
 			agentCfg.Prompt = prompt
 			agentCfg.MaxTurns = turns
@@ -346,14 +324,9 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				StepHexID:              stepHexID,
 				InitialResumeSessionID: stepInitialResumeSessionID,
 				PromptFunc: func(turnID int) string {
-					// When resuming a standalone chat, skip prompt building —
-					// the agent already has full context from the previous session.
-					if cfg.ResumeSessionID != "" && stepDef.StandaloneChat {
-						return basePrompt
-					}
-					opts := promptOpts
-					opts.CurrentTurnID = turnID
-					built, err := promptpkg.Build(opts)
+					currentPromptInput := stepPromptInput
+					currentPromptInput.CurrentTurnID = turnID
+					built, err := BuildStepPrompt(currentPromptInput)
 					if err != nil {
 						return basePrompt
 					}

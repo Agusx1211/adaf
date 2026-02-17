@@ -261,6 +261,7 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/config/profiles/{name}", srv.handleDeleteProfile)
 	mux.HandleFunc("GET /api/config/loops", srv.handleListLoopDefs)
 	mux.HandleFunc("POST /api/config/loops", srv.handleCreateLoopDef)
+	mux.HandleFunc("POST /api/config/loops/prompt-preview", srv.handleLoopPromptPreview)
 	mux.HandleFunc("PUT /api/config/loops/{name}", srv.handleUpdateLoopDef)
 	mux.HandleFunc("DELETE /api/config/loops/{name}", srv.handleDeleteLoopDef)
 	mux.HandleFunc("GET /api/config/roles", srv.handleListRoles)

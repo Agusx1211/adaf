@@ -617,6 +617,80 @@ func TestConfigLoopDefUpdateClearsOptionalStepFields(t *testing.T) {
 	}
 }
 
+func TestLoopPromptPreviewEndpoint(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	performJSONRequest(t, srv, http.MethodPost, "/api/config/profiles", `{"name":"preview-prof","agent":"generic"}`)
+
+	rec := performJSONRequest(t, srv, http.MethodPost, "/api/config/loops/prompt-preview", `{
+		"loop":{
+			"name":"preview-loop",
+			"steps":[
+				{"profile":"preview-prof","position":"lead","turns":2,"instructions":"Implement the selected step objective.","can_message":true}
+			]
+		},
+		"step_index":0
+	}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var out struct {
+		RuntimePath string `json:"runtime_path"`
+		LoopName    string `json:"loop_name"`
+		Profile     string `json:"profile"`
+		Position    string `json:"position"`
+		Scenarios   []struct {
+			ID     string `json:"id"`
+			Prompt string `json:"prompt"`
+			Exact  bool   `json:"exact"`
+		} `json:"scenarios"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if out.RuntimePath != "looprun.BuildStepPrompt + loop.BuildResumePrompt" {
+		t.Fatalf("runtime_path = %q, want %q", out.RuntimePath, "looprun.BuildStepPrompt + loop.BuildResumePrompt")
+	}
+	if out.LoopName != "preview-loop" {
+		t.Fatalf("loop_name = %q, want %q", out.LoopName, "preview-loop")
+	}
+	if out.Profile != "preview-prof" {
+		t.Fatalf("profile = %q, want %q", out.Profile, "preview-prof")
+	}
+	if out.Position != config.PositionLead {
+		t.Fatalf("position = %q, want %q", out.Position, config.PositionLead)
+	}
+	if len(out.Scenarios) != 2 {
+		t.Fatalf("scenario count = %d, want 2", len(out.Scenarios))
+	}
+
+	var freshPrompt, resumePrompt string
+	for _, sc := range out.Scenarios {
+		if !sc.Exact {
+			t.Fatalf("scenario %q exact = false, want true", sc.ID)
+		}
+		switch sc.ID {
+		case "fresh_turn":
+			freshPrompt = sc.Prompt
+		case "resume_turn":
+			resumePrompt = sc.Prompt
+		}
+	}
+	if freshPrompt == "" {
+		t.Fatal("fresh_turn prompt missing")
+	}
+	if !strings.Contains(freshPrompt, "Project: test-project") {
+		t.Fatalf("fresh prompt missing project context:\n%s", freshPrompt)
+	}
+	if !strings.Contains(freshPrompt, "Implement the selected step objective.") {
+		t.Fatalf("fresh prompt missing step instructions:\n%s", freshPrompt)
+	}
+	if !strings.Contains(resumePrompt, "Continue from where you left off.") {
+		t.Fatalf("resume prompt = %q, want continuation lead", resumePrompt)
+	}
+}
+
 func TestConfigTeamUpdateClearsDelegation(t *testing.T) {
 	srv, _ := newTestServer(t)
 

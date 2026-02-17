@@ -9,6 +9,9 @@ import (
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/agentmeta"
 	"github.com/agusx1211/adaf/internal/config"
+	loopctrl "github.com/agusx1211/adaf/internal/loop"
+	"github.com/agusx1211/adaf/internal/looprun"
+	"github.com/agusx1211/adaf/internal/store"
 )
 
 var errInvalidRequestBody = errors.New("invalid request body")
@@ -324,6 +327,167 @@ func (srv *Server) handleListLoopDefs(w http.ResponseWriter, r *http.Request) {
 		loops = []config.LoopDef{}
 	}
 	writeJSON(w, http.StatusOK, loops)
+}
+
+type loopPromptPreviewRequest struct {
+	ProjectID     string         `json:"project_id,omitempty"`
+	Loop          config.LoopDef `json:"loop"`
+	StepIndex     int            `json:"step_index"`
+	Cycle         int            `json:"cycle,omitempty"`
+	PlanID        string         `json:"plan_id,omitempty"`
+	InitialPrompt string         `json:"initial_prompt,omitempty"`
+}
+
+type loopPromptPreviewScenario struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Prompt      string `json:"prompt"`
+	Exact       bool   `json:"exact"`
+}
+
+type loopPromptPreviewResponse struct {
+	RuntimePath string                      `json:"runtime_path"`
+	LoopName    string                      `json:"loop_name"`
+	StepIndex   int                         `json:"step_index"`
+	StepCount   int                         `json:"step_count"`
+	Profile     string                      `json:"profile"`
+	Position    string                      `json:"position"`
+	Role        string                      `json:"role,omitempty"`
+	Scenarios   []loopPromptPreviewScenario `json:"scenarios"`
+}
+
+func (srv *Server) handleLoopPromptPreview(w http.ResponseWriter, r *http.Request) {
+	var req loopPromptPreviewRequest
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+	if len(req.Loop.Steps) == 0 {
+		writeError(w, http.StatusBadRequest, "loop must include at least one step")
+		return
+	}
+	if req.StepIndex < 0 || req.StepIndex >= len(req.Loop.Steps) {
+		writeError(w, http.StatusBadRequest, "step_index is out of range")
+		return
+	}
+
+	step := req.Loop.Steps[req.StepIndex]
+	if strings.TrimSpace(step.Profile) == "" {
+		writeError(w, http.StatusBadRequest, "selected step must include a profile")
+		return
+	}
+
+	cfg, ok := loadConfigOrError(w)
+	if !ok {
+		return
+	}
+	config.EnsureDefaultRoleCatalog(cfg)
+	config.EnsureDefaultSkillCatalog(cfg)
+
+	prof := cfg.FindProfile(step.Profile)
+	if prof == nil {
+		writeError(w, http.StatusBadRequest, "profile not found: "+step.Profile)
+		return
+	}
+	if err := config.ValidateLoopStepPosition(step, cfg); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var projectStore *store.Store
+	projectID := strings.TrimSpace(req.ProjectID)
+	if projectID == "" {
+		projectStore = srv.defaultStore()
+	} else {
+		var found bool
+		projectStore, found = srv.registry.Get(projectID)
+		if !found {
+			writeError(w, http.StatusNotFound, "project not found: "+projectID)
+			return
+		}
+	}
+
+	var projectCfg *store.ProjectConfig
+	if projectStore != nil {
+		var err error
+		projectCfg, err = projectStore.LoadProject()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load project config")
+			return
+		}
+	}
+
+	var effectiveDelegation *config.DelegationConfig
+	if teamName := strings.TrimSpace(step.Team); teamName != "" {
+		team := cfg.FindTeam(teamName)
+		if team == nil {
+			writeError(w, http.StatusBadRequest, "team not found: "+teamName)
+			return
+		}
+		effectiveDelegation = team.Delegation
+	}
+
+	loopName := strings.TrimSpace(req.Loop.Name)
+	if loopName == "" {
+		loopName = "preview-loop"
+	}
+	cycle := req.Cycle
+	if cycle < 0 {
+		cycle = 0
+	}
+
+	stepPromptInput := looprun.StepPromptInput{
+		Store:         projectStore,
+		Project:       projectCfg,
+		GlobalCfg:     cfg,
+		PlanID:        strings.TrimSpace(req.PlanID),
+		InitialPrompt: req.InitialPrompt,
+		LoopName:      loopName,
+		RunID:         1,
+		Cycle:         cycle,
+		StepIndex:     req.StepIndex,
+		TotalSteps:    len(req.Loop.Steps),
+		Step:          step,
+		Profile:       prof,
+		Delegation:    effectiveDelegation,
+	}
+
+	freshPrompt, err := looprun.BuildStepPrompt(stepPromptInput)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build loop prompt: "+err.Error())
+		return
+	}
+	resumePrompt := loopctrl.BuildResumePrompt(nil, false, "", true)
+
+	position := config.EffectiveStepPosition(step)
+	workerRole := config.EffectiveWorkerRoleForPosition(position, step.Role, cfg)
+	resp := loopPromptPreviewResponse{
+		RuntimePath: "looprun.BuildStepPrompt + loop.BuildResumePrompt",
+		LoopName:    loopName,
+		StepIndex:   req.StepIndex,
+		StepCount:   len(req.Loop.Steps),
+		Profile:     prof.Name,
+		Position:    position,
+		Role:        workerRole,
+		Scenarios: []loopPromptPreviewScenario{
+			{
+				ID:          "fresh_turn",
+				Title:       "Turn 1 (fresh prompt)",
+				Description: "Exact prompt sent for the first turn of this step.",
+				Prompt:      freshPrompt,
+				Exact:       true,
+			},
+			{
+				ID:          "resume_turn",
+				Title:       "Turn 2+ (resume continuation)",
+				Description: "Exact continuation prompt when the same agent session is resumed with no wait results or interrupts.",
+				Prompt:      resumePrompt,
+				Exact:       true,
+			},
+		},
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (srv *Server) handleCreateLoopDef(w http.ResponseWriter, r *http.Request) {

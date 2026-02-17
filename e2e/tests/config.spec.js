@@ -148,6 +148,43 @@ test('config loop CRUD works with real profile step', async ({ page, request }) 
   await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(profileName)}`);
 });
 
+test('loop editor renders runtime prompt preview scenarios', async ({ page, request }) => {
+  const { state } = await gotoConfig(page, request);
+  const profileName = uniqueName('preview-profile');
+  const loopName = uniqueName('preview-loop');
+
+  const profileCreate = await request.post(`${state.baseURL}/api/config/profiles`, {
+    data: { name: profileName, agent: 'generic' },
+  });
+  expect(profileCreate.status()).toBe(201);
+
+  await clickSectionNew(page, /Loops \(\d+\)/);
+  await page.getByPlaceholder('my-loop').fill(loopName);
+  const profileSelect = page.locator('label', { hasText: 'Profile' }).first().locator('xpath=following-sibling::select[1]');
+  await profileSelect.selectOption(profileName);
+
+  const previewPanel = page.getByTestId('loop-prompt-preview-panel');
+  await expect(previewPanel).toBeVisible();
+  const stepLabelText = await page.getByLabel('Prompt preview step').evaluate((el) =>
+    Array.from(el.options).map((opt) => String(opt.textContent || '')).join(' || ')
+  );
+  expect(stepLabelText).toContain(`Step 1: ${profileName} (lead)`);
+  const previewBody = page.getByTestId('loop-prompt-preview-body');
+
+  await expect.poll(async () => {
+    const text = await previewBody.textContent();
+    return String(text || '');
+  }).toContain(`"${loopName}"`);
+
+  await page.getByRole('button', { name: /Turn 2\+ \(resume continuation\)/ }).click();
+  await expect(previewBody).toContainText('Continue from where you left off.');
+
+  const hasHorizontalOverflow = await previewBody.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+  expect(hasHorizontalOverflow).toBe(false);
+
+  await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(profileName)}`);
+});
+
 test('config team and role CRUD persists', async ({ page, request }) => {
   const { state } = await gotoConfig(page, request);
   const teamName = uniqueName('team');

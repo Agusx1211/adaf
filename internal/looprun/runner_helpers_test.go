@@ -206,6 +206,67 @@ func TestTruncatePromptForEvent_LongPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildStepPrompt_IncludesLoopAndProjectContext(t *testing.T) {
+	s := newLooprunTestStore(t)
+	project, err := s.LoadProject()
+	if err != nil {
+		t.Fatalf("LoadProject() error = %v", err)
+	}
+
+	globalCfg := &config.GlobalConfig{}
+	config.EnsureDefaultRoleCatalog(globalCfg)
+	config.EnsureDefaultSkillCatalog(globalCfg)
+
+	prof := &config.Profile{Name: "p", Agent: "generic"}
+	step := config.LoopStep{
+		Profile:      "p",
+		Position:     config.PositionLead,
+		Instructions: "Ship the selected feature.",
+		CanMessage:   true,
+	}
+
+	prompt, err := BuildStepPrompt(StepPromptInput{
+		Store:         s,
+		Project:       project,
+		GlobalCfg:     globalCfg,
+		LoopName:      "preview-loop",
+		Cycle:         0,
+		StepIndex:     1,
+		TotalSteps:    3,
+		Step:          step,
+		Profile:       prof,
+		CurrentTurnID: 0,
+	})
+	if err != nil {
+		t.Fatalf("BuildStepPrompt() error = %v", err)
+	}
+	if !strings.Contains(prompt, "preview-loop") {
+		t.Fatalf("prompt missing loop name:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Project: test") {
+		t.Fatalf("prompt missing project name:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Ship the selected feature.") {
+		t.Fatalf("prompt missing step instructions:\n%s", prompt)
+	}
+}
+
+func TestBuildStepPrompt_StandaloneResumeReturnsInstructionsOnly(t *testing.T) {
+	prompt, err := BuildStepPrompt(StepPromptInput{
+		ResumeSessionID: "sess-123",
+		Step: config.LoopStep{
+			StandaloneChat: true,
+			Instructions:   "user follow-up",
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildStepPrompt() error = %v", err)
+	}
+	if prompt != "user follow-up" {
+		t.Fatalf("prompt = %q, want %q", prompt, "user follow-up")
+	}
+}
+
 func TestBuildAgentConfig_SetsEnvironmentVariables(t *testing.T) {
 	prof := &config.Profile{
 		Name:  "test-profile",

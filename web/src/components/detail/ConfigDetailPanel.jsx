@@ -267,12 +267,12 @@ export default function ConfigDetailPanel() {
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column' }}>
           {sel.type === 'profile' && <ProfileEditor data={data} set={set} setData={setData} isNew={sel.isNew} agentsMeta={agentsMeta} onRefreshAgents={fetchAgentsMeta} showToast={showToast} />}
-          {sel.type === 'loop' && <LoopEditor data={data} setData={setData} profiles={profiles} teams={teams} skills={skills} isNew={sel.isNew} onPreview={setPreviewItem} />}
+          {sel.type === 'loop' && <LoopEditor data={data} setData={setData} profiles={profiles} teams={teams} skills={skills} isNew={sel.isNew} projectID={state.currentProjectID} />}
           {sel.type === 'team' && <TeamEditor data={data} set={set} setData={setData} profiles={profiles} skills={skills} roleDefs={roleDefs} isNew={sel.isNew} onPreview={setPreviewItem} />}
           {sel.type === 'skill' && <SkillEditor data={data} set={set} isNew={sel.isNew} />}
           {sel.type === 'role' && <RoleEditor data={data} set={set} isNew={sel.isNew} />}
         </div>
-        {previewItem && <PreviewPanel item={previewItem} onClose={function () { setPreviewItem(null); }} />}
+        {sel.type !== 'loop' && previewItem && <PreviewPanel item={previewItem} onClose={function () { setPreviewItem(null); }} />}
       </div>
     </div>
   );
@@ -405,7 +405,69 @@ function RoleEditor({ data, set, isNew }) {
 
 // ── Loop Editor ──
 
-function LoopEditor({ data, setData, profiles, teams, skills, isNew, onPreview }) {
+function LoopEditor({ data, setData, profiles, teams, skills, isNew, projectID }) {
+  var [previewStepIndex, setPreviewStepIndex] = useState(0);
+  var [previewScenarioID, setPreviewScenarioID] = useState('fresh_turn');
+  var [promptPreview, setPromptPreview] = useState({ loading: false, error: '', data: null });
+
+  useEffect(function () {
+    var stepCount = (data.steps || []).length;
+    if (stepCount <= 0) {
+      if (previewStepIndex !== 0) setPreviewStepIndex(0);
+      return;
+    }
+    if (previewStepIndex >= stepCount) {
+      setPreviewStepIndex(stepCount - 1);
+    }
+  }, [data.steps, previewStepIndex]);
+
+  useEffect(function () {
+    var steps = data.steps || [];
+    if (!steps.length) {
+      setPromptPreview({ loading: false, error: 'Add a step to preview prompts.', data: null });
+      return;
+    }
+    if (previewStepIndex < 0 || previewStepIndex >= steps.length) return;
+
+    var step = steps[previewStepIndex];
+    if (!step || !String(step.profile || '').trim()) {
+      setPromptPreview({ loading: false, error: 'Select a profile for this step to preview prompts.', data: null });
+      return;
+    }
+
+    var cancelled = false;
+    setPromptPreview(function (prev) { return { ...prev, loading: true, error: '' }; });
+
+    var timer = setTimeout(function () {
+      apiCall('/api/config/loops/prompt-preview', 'POST', {
+        project_id: projectID || '',
+        loop: {
+          name: data.name || '',
+          steps: steps.map(cleanStep),
+        },
+        step_index: previewStepIndex,
+      })
+        .then(function (resp) {
+          if (cancelled) return;
+          setPromptPreview({ loading: false, error: '', data: resp || null });
+          var scenarios = resp && Array.isArray(resp.scenarios) ? resp.scenarios : [];
+          setPreviewScenarioID(function (prev) {
+            if (!scenarios.length) return '';
+            return scenarios.some(function (s) { return s.id === prev; }) ? prev : scenarios[0].id;
+          });
+        })
+        .catch(function (err) {
+          if (cancelled || (err && err.authRequired)) return;
+          setPromptPreview({ loading: false, error: err.message || String(err), data: null });
+        });
+    }, 180);
+
+    return function () {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [data, previewStepIndex, projectID]);
+
   function setName(val) {
     setData(function (prev) { return { ...prev, name: val }; });
   }
@@ -433,95 +495,248 @@ function LoopEditor({ data, setData, profiles, teams, skills, isNew, onPreview }
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <Field label="Loop Name" value={data.name} onChange={function (v) { setName(v); }} disabled={!isNew} placeholder="my-loop" />
+    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+      <div style={{ flex: '999 1 560px', minWidth: 300, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <Field label="Loop Name" value={data.name} onChange={function (v) { setName(v); }} disabled={!isNew} placeholder="my-loop" />
 
-      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 600, color: 'var(--text-1)' }}>
-        Steps ({(data.steps || []).length})
-      </div>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 600, color: 'var(--text-1)' }}>
+          Steps ({(data.steps || []).length})
+        </div>
 
-      {(data.steps || []).map(function (step, idx) {
-        return (
-          <div key={idx} style={{ padding: 16, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-1)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: 'var(--accent)' }}>
-                Step {idx + 1}
-              </span>
-              {(data.steps || []).length > 1 && (
-                <button onClick={function () { removeStep(idx); }} style={btnDangerStyle}>Remove Step</button>
-              )}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div>
-                <label style={labelStyle}>Profile</label>
-                <select value={step.profile || ''} onChange={function (e) { setStep(idx, 'profile', e.target.value); }} style={selectStyle}>
-                  <option value="">Select profile</option>
-                  {profiles.map(function (p) { return <option key={p.name} value={p.name}>{p.name} ({p.agent})</option>; })}
-                </select>
+        {(data.steps || []).map(function (step, idx) {
+          var previewing = idx === previewStepIndex;
+          return (
+            <div key={idx} style={{ padding: 16, border: previewing ? '1px solid var(--accent)55' : '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-1)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: previewing ? 'var(--accent)' : 'var(--text-1)' }}>
+                  Step {idx + 1}
+                </span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={function () { setPreviewStepIndex(idx); }} style={{ ...btnStyle, fontSize: 10, padding: '2px 8px', border: previewing ? '1px solid var(--accent)' : btnStyle.border, color: previewing ? '#000' : btnStyle.color, background: previewing ? 'var(--accent)' : btnStyle.background }}>
+                    Preview
+                  </button>
+                  {(data.steps || []).length > 1 && (
+                    <button onClick={function () { removeStep(idx); }} style={btnDangerStyle}>Remove Step</button>
+                  )}
+                </div>
               </div>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>Position</label>
-                  <select value={step.position || 'lead'} onChange={function (e) { setStep(idx, 'position', e.target.value); }} style={selectStyle}>
-                    {LOOP_STEP_POSITIONS.map(function (p) { return <option key={p} value={p}>{p}</option>; })}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div>
+                  <label style={labelStyle}>Profile</label>
+                  <select value={step.profile || ''} onChange={function (e) { setStep(idx, 'profile', e.target.value); }} style={selectStyle}>
+                    <option value="">Select profile</option>
+                    {profiles.map(function (p) { return <option key={p.name} value={p.name}>{p.name} ({p.agent})</option>; })}
                   </select>
                 </div>
-                <div style={{ width: 100 }}>
-                  <label style={labelStyle}>Turns</label>
-                  <input type="number" min="1" value={step.turns || 1} onChange={function (e) { setStep(idx, 'turns', parseInt(e.target.value, 10) || 1); }} style={inputStyle} />
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Position</label>
+                    <select value={step.position || 'lead'} onChange={function (e) { setStep(idx, 'position', e.target.value); }} style={selectStyle}>
+                      {LOOP_STEP_POSITIONS.map(function (p) { return <option key={p} value={p}>{p}</option>; })}
+                    </select>
+                  </div>
+                  <div style={{ width: 100 }}>
+                    <label style={labelStyle}>Turns</label>
+                    <input type="number" min="1" value={step.turns || 1} onChange={function (e) { setStep(idx, 'turns', parseInt(e.target.value, 10) || 1); }} style={inputStyle} />
+                  </div>
+                </div>
+
+                {/* Team dropdown */}
+                <div>
+                  <label style={labelStyle}>Team (optional)</label>
+                  <select
+                    value={step.team || ''}
+                    onChange={function (e) { setStep(idx, 'team', e.target.value); }}
+                    style={selectStyle}
+                    disabled={step.position === 'supervisor'}
+                  >
+                    <option value="">No team</option>
+                    {(teams || []).map(function (t) {
+                      var subCount = t.delegation && t.delegation.profiles ? t.delegation.profiles.length : 0;
+                      return <option key={t.name} value={t.name}>{t.name} ({subCount} sub-agents)</option>;
+                    })}
+                  </select>
+                  {step.position === 'supervisor' && (
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                      Supervisor steps cannot have teams.
+                    </div>
+                  )}
+                  {step.position === 'manager' && !step.team && (
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                      Manager steps require a team.
+                    </div>
+                  )}
+                </div>
+
+                {/* Skills picker */}
+                <SkillsPicker
+                  selected={step.skills || []}
+                  available={skills}
+                  onChange={function (v) { setStep(idx, 'skills', v); }}
+                />
+
+                <div>
+                  <label style={labelStyle}>Instructions (optional)</label>
+                  <textarea value={step.instructions || ''} onChange={function (e) { setStep(idx, 'instructions', e.target.value); }} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} placeholder="Step-specific instructions" />
+                </div>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <Checkbox label="can_stop" checked={!!step.can_stop} onChange={function (v) { setStep(idx, 'can_stop', v); }} />
+                  <Checkbox label="can_message" checked={!!step.can_message} onChange={function (v) { setStep(idx, 'can_message', v); }} />
+                  <Checkbox label="can_pushover" checked={!!step.can_pushover} onChange={function (v) { setStep(idx, 'can_pushover', v); }} />
                 </div>
               </div>
-
-              {/* Team dropdown */}
-              <div>
-                <label style={labelStyle}>Team (optional)</label>
-                <select
-                  value={step.team || ''}
-                  onChange={function (e) { setStep(idx, 'team', e.target.value); }}
-                  style={selectStyle}
-                  disabled={step.position === 'supervisor'}
-                >
-                  <option value="">No team</option>
-                  {(teams || []).map(function (t) {
-                    var subCount = t.delegation && t.delegation.profiles ? t.delegation.profiles.length : 0;
-                    return <option key={t.name} value={t.name}>{t.name} ({subCount} sub-agents)</option>;
-                  })}
-                </select>
-                {step.position === 'supervisor' && (
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
-                    Supervisor steps cannot have teams.
-                  </div>
-                )}
-                {step.position === 'manager' && !step.team && (
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
-                    Manager steps require a team.
-                  </div>
-                )}
-              </div>
-
-              {/* Skills picker */}
-              <SkillsPicker
-                selected={step.skills || []}
-                available={skills}
-                onChange={function (v) { setStep(idx, 'skills', v); }}
-                onPreview={onPreview}
-              />
-
-              <div>
-                <label style={labelStyle}>Instructions (optional)</label>
-                <textarea value={step.instructions || ''} onChange={function (e) { setStep(idx, 'instructions', e.target.value); }} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} placeholder="Step-specific instructions" />
-              </div>
-              <div style={{ display: 'flex', gap: 16 }}>
-                <Checkbox label="can_stop" checked={!!step.can_stop} onChange={function (v) { setStep(idx, 'can_stop', v); }} />
-                <Checkbox label="can_message" checked={!!step.can_message} onChange={function (v) { setStep(idx, 'can_message', v); }} />
-                <Checkbox label="can_pushover" checked={!!step.can_pushover} onChange={function (v) { setStep(idx, 'can_pushover', v); }} />
-              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
 
-      <button onClick={addStep} style={{ ...btnStyle, alignSelf: 'flex-start' }}>+ Add Step</button>
+        <button onClick={addStep} style={{ ...btnStyle, alignSelf: 'flex-start' }}>+ Add Step</button>
+      </div>
+
+      <LoopPromptPreviewPanel
+        loopName={data.name}
+        steps={data.steps || []}
+        previewStepIndex={previewStepIndex}
+        setPreviewStepIndex={setPreviewStepIndex}
+        previewScenarioID={previewScenarioID}
+        setPreviewScenarioID={setPreviewScenarioID}
+        promptPreview={promptPreview}
+      />
+    </div>
+  );
+}
+
+function LoopPromptPreviewPanel({
+  loopName,
+  steps,
+  previewStepIndex,
+  setPreviewStepIndex,
+  previewScenarioID,
+  setPreviewScenarioID,
+  promptPreview,
+}) {
+  var scenarios = promptPreview && promptPreview.data && Array.isArray(promptPreview.data.scenarios)
+    ? promptPreview.data.scenarios
+    : [];
+  var activeScenario = scenarios.find(function (s) { return s.id === previewScenarioID; }) || (scenarios[0] || null);
+  var runtimePath = promptPreview && promptPreview.data && promptPreview.data.runtime_path
+    ? String(promptPreview.data.runtime_path)
+    : '';
+
+  return (
+    <div data-testid="loop-prompt-preview-panel" style={{
+      flex: '1 1 360px',
+      minWidth: 300,
+      maxWidth: 520,
+      border: '1px solid var(--border)',
+      borderRadius: 6,
+      background: 'var(--bg-1)',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+      minHeight: 0,
+      maxHeight: 'calc(100vh - 210px)',
+    }}>
+      <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 600, color: 'var(--text-0)' }}>
+          Prompt Preview
+        </div>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>
+          This panel is generated by the same runtime prompt builders.
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <label style={{ ...labelStyle, marginBottom: 0 }}>Step</label>
+          <select
+            aria-label="Prompt preview step"
+            value={String(previewStepIndex)}
+            onChange={function (e) {
+              setPreviewStepIndex(parseInt(e.target.value, 10) || 0);
+            }}
+            style={{ ...selectStyle, flex: 1, width: 'auto', minWidth: 0, padding: '4px 8px', fontSize: 11 }}
+          >
+            {(steps || []).map(function (step, idx) {
+              var profileLabel = step && step.profile ? step.profile : 'no profile';
+              var positionLabel = step && step.position ? String(step.position) : 'lead';
+              return <option key={idx} value={idx}>Step {idx + 1}: {profileLabel} ({positionLabel})</option>;
+            })}
+          </select>
+        </div>
+        {!!loopName && (
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-2)' }}>
+            Loop: {loopName}
+          </div>
+        )}
+        {!!runtimePath && (
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)' }}>
+            Runtime path: {runtimePath}
+          </div>
+        )}
+      </div>
+
+      <div style={{ padding: 12, overflow: 'auto', minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {promptPreview.loading && (
+          <div data-testid="loop-prompt-preview-loading" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--text-3)' }}>
+            Building prompt preview...
+          </div>
+        )}
+
+        {!promptPreview.loading && promptPreview.error && (
+          <div data-testid="loop-prompt-preview-error" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--orange)', whiteSpace: 'pre-wrap' }}>
+            {promptPreview.error}
+          </div>
+        )}
+
+        {!promptPreview.loading && !promptPreview.error && scenarios.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {scenarios.map(function (scenario) {
+              var selected = scenario.id === (activeScenario && activeScenario.id);
+              return (
+                <button
+                  key={scenario.id}
+                  type="button"
+                  onClick={function () { setPreviewScenarioID(scenario.id); }}
+                  style={{
+                    ...btnStyle,
+                    fontSize: 10,
+                    padding: '3px 8px',
+                    border: selected ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    color: selected ? '#000' : 'var(--text-1)',
+                    background: selected ? 'var(--accent)' : 'var(--bg-2)',
+                  }}
+                >
+                  {scenario.title}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {!promptPreview.loading && !promptPreview.error && activeScenario && (
+          <>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>
+              {activeScenario.description}
+            </div>
+            <pre data-testid="loop-prompt-preview-body" style={{
+              margin: 0,
+              padding: '12px 14px',
+              background: 'var(--bg-2)',
+              border: '1px solid var(--border)',
+              borderRadius: 4,
+              color: 'var(--text-1)',
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: 10,
+              lineHeight: 1.5,
+              whiteSpace: 'pre-wrap',
+              overflowWrap: 'anywhere',
+              wordBreak: 'break-word',
+              overflow: 'auto',
+              maxWidth: '100%',
+              minHeight: 180,
+            }}>
+              {activeScenario.prompt || '(empty prompt)'}
+            </pre>
+          </>
+        )}
+      </div>
     </div>
   );
 }

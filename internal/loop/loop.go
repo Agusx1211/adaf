@@ -743,6 +743,12 @@ func (l *Loop) LastAgentSessionID() string {
 	return strings.TrimSpace(l.lastAgentSessionID)
 }
 
+// BuildResumePrompt returns the exact continuation prompt used by the loop
+// runtime when resuming an existing agent session.
+func BuildResumePrompt(waitResults []WaitResult, moreSpawnsPending bool, interruptMsg string, includeContinueLead bool) string {
+	return buildResumePrompt(waitResults, moreSpawnsPending, interruptMsg, includeContinueLead)
+}
+
 // buildResumePrompt constructs a minimal continuation prompt for a resumed
 // agent session. Unlike a fresh turn, the agent already has the full system
 // prompt and conversation history — we only send new information.
