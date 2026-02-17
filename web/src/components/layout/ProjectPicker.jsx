@@ -131,27 +131,35 @@ export default function ProjectPicker({ inline, onClose }) {
     }
   }, [showBrowser, browserEntries.length, browserLoading, browse]);
 
+  var refreshProjects = useCallback(function () {
+    return apiCall('/api/projects', 'GET', null, { allow404: true })
+      .then(function (projects) {
+        dispatch({ type: 'SET_PROJECTS', payload: Array.isArray(projects) ? projects : [] });
+      })
+      .catch(function () {});
+  }, [dispatch]);
+
+  var activateOpenedProject = useCallback(function (id) {
+    var nextProjectID = String(id || '');
+    if (!nextProjectID) return;
+    dispatch({ type: 'SET_PROJECT_ID', payload: nextProjectID });
+    dispatch({ type: 'RESET_PROJECT_STATE' });
+    persistProjectSelection(nextProjectID);
+    refreshProjects().finally(function () {
+      if (onClose) onClose();
+    });
+  }, [dispatch, onClose, refreshProjects]);
+
   var handleSelectProject = useCallback(function (project) {
     setError('');
     apiProjectOpen(project.path)
       .then(function (data) {
-        if (data && data.id) {
-          var nextProjectID = String(data.id);
-          dispatch({ type: 'SET_PROJECT_ID', payload: nextProjectID });
-          dispatch({ type: 'RESET_PROJECT_STATE' });
-          persistProjectSelection(nextProjectID);
-          apiCall('/api/projects', 'GET', null, { allow404: true })
-            .then(function (projects) {
-              dispatch({ type: 'SET_PROJECTS', payload: Array.isArray(projects) ? projects : [] });
-            })
-            .catch(function () {});
-          if (onClose) onClose();
-        }
+        if (data && data.id) activateOpenedProject(data.id);
       })
       .catch(function (err) {
         setError(err.message || 'Failed to open project');
       });
-  }, [dispatch, onClose]);
+  }, [activateOpenedProject]);
 
   var handleSelectRegistered = useCallback(function (project) {
     var nextProjectID = String(project.id || '');
@@ -323,13 +331,7 @@ export default function ProjectPicker({ inline, onClose }) {
     var openPath = browserPath + '/' + entryName;
     apiProjectOpen(openPath)
       .then(function (data) {
-        if (data && data.id) {
-          var nextProjectID = String(data.id);
-          dispatch({ type: 'SET_PROJECT_ID', payload: nextProjectID });
-          dispatch({ type: 'RESET_PROJECT_STATE' });
-          persistProjectSelection(nextProjectID);
-          if (onClose) onClose();
-        }
+        if (data && data.id) activateOpenedProject(data.id);
       })
       .catch(function (err) {
         setBrowserError(err.message || 'Failed to open project');
@@ -609,13 +611,7 @@ export default function ProjectPicker({ inline, onClose }) {
                               if (entry.is_project && entry.full_path) {
                                 apiProjectOpen(entry.full_path)
                                   .then(function (data) {
-                                    if (data && data.id) {
-                                      var nextProjectID = String(data.id);
-                                      dispatch({ type: 'SET_PROJECT_ID', payload: nextProjectID });
-                                      dispatch({ type: 'RESET_PROJECT_STATE' });
-                                      persistProjectSelection(nextProjectID);
-                                      if (onClose) onClose();
-                                    }
+                                    if (data && data.id) activateOpenedProject(data.id);
                                   })
                                   .catch(function (err) {
                                     setError(err.message || 'Failed to open project');

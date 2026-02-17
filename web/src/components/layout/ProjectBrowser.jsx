@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useDispatch } from '../../state/store.js';
-import { apiFSBrowse, apiFSMkdir, apiProjectInit, apiProjectOpen } from '../../api/client.js';
+import { apiCall, apiFSBrowse, apiFSMkdir, apiProjectInit, apiProjectOpen } from '../../api/client.js';
 import { persistProjectSelection } from '../../utils/projectLink.js';
 import Modal from '../common/Modal.jsx';
 
@@ -32,6 +32,14 @@ export default function ProjectBrowser({ onClose }) {
   }, []);
 
   useEffect(function () { browse(''); }, [browse]);
+
+  var refreshProjects = useCallback(function () {
+    return apiCall('/api/projects', 'GET', null, { allow404: true })
+      .then(function (projects) {
+        dispatch({ type: 'SET_PROJECTS', payload: Array.isArray(projects) ? projects : [] });
+      })
+      .catch(function () {});
+  }, [dispatch]);
 
   function handleNavigate(entry) {
     if (!entry.is_dir) return;
@@ -82,7 +90,9 @@ export default function ProjectBrowser({ onClose }) {
           dispatch({ type: 'SET_PROJECT_ID', payload: nextProjectID });
           dispatch({ type: 'RESET_PROJECT_STATE' });
           persistProjectSelection(nextProjectID);
-          onClose();
+          refreshProjects().finally(function () {
+            onClose();
+          });
         }
       })
       .catch(function (err) {

@@ -60,6 +60,45 @@ test('project browser creates, initializes, opens, and switches projects', async
   await expect.poll(async () => page.evaluate(() => localStorage.getItem('adaf_project_id'))).toBe(String(fixture.id));
 });
 
+test('start loop project dropdown updates immediately after opening a project', async ({ page, request }) => {
+  const state = loadState();
+  const fixture = await fixtureProject(request, state);
+  const newProjectName = uniqueName('start-loop-project');
+  const newProjectPath = path.join(state.workspaceRoot, newProjectName);
+
+  const initResponse = await request.post(`${state.baseURL}/api/projects/init`, {
+    data: { path: newProjectPath },
+  });
+  expect(initResponse.status()).toBe(201);
+
+  await page.goto(projectAppURL(state, fixture.id));
+
+  const browseTrigger = page.getByTitle('Browse projects').first();
+  await browseTrigger.click();
+  await expect(page.getByRole('heading', { name: 'Open Project' })).toBeVisible();
+
+  const searchInput = page.getByPlaceholder('Search projects or type a path...');
+  await searchInput.fill(newProjectPath);
+
+  const filesystemMatch = page
+    .locator('div')
+    .filter({ hasText: 'Filesystem Matches' })
+    .locator('div')
+    .filter({ hasText: newProjectName })
+    .first();
+  await expect(filesystemMatch).toBeVisible();
+  await filesystemMatch.click();
+
+  await expect(page.getByRole('heading', { name: 'Open Project' })).toHaveCount(0);
+  await expect(browseTrigger).toContainText(newProjectName);
+
+  await page.getByRole('button', { name: 'Start Loop' }).first().click();
+  const startLoopDialog = page.getByRole('dialog', { name: 'Start Loop' });
+  await expect(startLoopDialog).toBeVisible();
+  await expect(startLoopDialog.getByText('Project', { exact: true })).toBeVisible();
+  await expect(startLoopDialog.locator('option').filter({ hasText: newProjectName })).toHaveCount(1);
+});
+
 test('filesystem browse and mkdir endpoints operate inside allowed root', async ({ request }) => {
   const state = loadState();
   const folderName = uniqueName('mkdir');

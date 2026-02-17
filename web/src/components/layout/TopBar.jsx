@@ -404,6 +404,7 @@ function UsageDropdown(props) {
 
   var snapshots = (usageLimits && usageLimits.snapshots) || [];
   var errors = (usageLimits && usageLimits.errors) || [];
+  var hasUsageTotals = !!(usage && (usage.input_tokens || usage.output_tokens || usage.cost_usd));
 
   return (
     <div style={{
@@ -520,7 +521,7 @@ function UsageDropdown(props) {
         )}
       </div>
 
-      {usage && (usage.input_tokens || usage.output_tokens || usage.cost_usd) && (
+      {hasUsageTotals && (
         <div style={{
           padding: '8px 12px', borderTop: '1px solid var(--border)',
           display: 'flex', gap: 12,

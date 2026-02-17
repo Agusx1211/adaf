@@ -105,6 +105,38 @@ test('usage limits dropdown opens from top bar', async ({ page, request }) => {
   await expect(page.getByText('Usage Limits', { exact: true })).toBeVisible();
 });
 
+test('usage limits dropdown does not render stray zero when totals are zero', async ({ page, request }) => {
+  var profileStatsHits = 0;
+  await page.route('**/stats/profiles*', async (route) => {
+    profileStatsHits += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: '[{}]',
+    });
+  });
+
+  await gotoFixture(page, request);
+  await expect.poll(function () { return profileStatsHits; }).toBeGreaterThan(0);
+  await page.waitForResponse(function (response) {
+    return response.url().includes('/stats/profiles') && response.request().method() === 'GET';
+  });
+  await page.getByRole('button', { name: 'Limits' }).click();
+
+  const usagePanel = page.getByText('Usage Limits', { exact: true })
+    .locator('xpath=ancestor::div[contains(@style, "position: absolute")][1]');
+  await expect(usagePanel).toBeVisible();
+  const textTokens = await usagePanel.evaluate(function (el) {
+    var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    var tokens = [];
+    while (walker.nextNode()) {
+      tokens.push(String(walker.currentNode.nodeValue || '').trim());
+    }
+    return tokens.filter(Boolean);
+  });
+  expect(textTokens).not.toContain('0');
+});
+
 test('replays captured fixture outputs in the UI', async ({ page, request }) => {
   const { state } = await gotoFixture(page, request);
   await openReplayLoop(page);
