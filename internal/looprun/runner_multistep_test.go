@@ -9,6 +9,7 @@ import (
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
+	loopctrl "github.com/agusx1211/adaf/internal/loop"
 	"github.com/agusx1211/adaf/internal/store"
 )
 
@@ -295,7 +296,7 @@ func TestRun_CanStopSignalExitsLoop(t *testing.T) {
 	loopDef := &config.LoopDef{
 		Name: "stop-test",
 		Steps: []config.LoopStep{
-			{Profile: "p1", Turns: 1, CanStop: true},
+			{Profile: "p1", Position: config.PositionSupervisor, Turns: 1},
 		},
 	}
 	globalCfg := &config.GlobalConfig{
@@ -351,5 +352,211 @@ func TestRun_CanStopSignalExitsLoop(t *testing.T) {
 	}
 	if runs[0].Cycle >= 4 {
 		t.Errorf("runs[0].Cycle = %d, want < 4", runs[0].Cycle)
+	}
+}
+
+func TestRun_CallSupervisorFastForwardSkipsIntermediateSteps(t *testing.T) {
+	s := newLooprunTestStore(t)
+	proj, err := s.LoadProject()
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+
+	tmp := t.TempDir()
+	scriptPath := filepath.Join(tmp, "slow.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nsleep 2\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	loopDef := &config.LoopDef{
+		Name: "call-supervisor-skip",
+		Steps: []config.LoopStep{
+			{Profile: "mgr", Position: config.PositionManager, Team: "workers", Turns: 1},
+			{Profile: "lead-1", Position: config.PositionLead, Turns: 1},
+			{Profile: "lead-2", Position: config.PositionLead, Turns: 1},
+			{Profile: "sup", Position: config.PositionSupervisor, Turns: 1},
+		},
+	}
+	globalCfg := &config.GlobalConfig{
+		Profiles: []config.Profile{
+			{Name: "mgr", Agent: "generic"},
+			{Name: "lead-1", Agent: "generic"},
+			{Name: "lead-2", Agent: "generic"},
+			{Name: "sup", Agent: "generic"},
+		},
+		Teams: []config.Team{
+			{
+				Name: "workers",
+				Delegation: &config.DelegationConfig{
+					Profiles: []config.DelegationProfile{
+						{Name: "lead-1", Position: config.PositionWorker, Role: config.RoleDeveloper},
+					},
+				},
+			},
+		},
+	}
+	agentsCfg := &agent.AgentsConfig{
+		Agents: map[string]agent.AgentRecord{
+			"generic": {Name: "generic", Path: scriptPath},
+		},
+	}
+
+	go func() {
+		var runID int
+		var turnID int
+		deadline := time.Now().Add(4 * time.Second)
+		for time.Now().Before(deadline) {
+			runs, _ := s.ListLoopRuns()
+			if len(runs) > 0 {
+				runID = runs[0].ID
+			}
+			turns, _ := s.ListTurns()
+			if len(turns) > 0 {
+				turnID = turns[0].ID
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if runID == 0 || turnID == 0 {
+			return
+		}
+		_ = s.SignalLoopCallSupervisor(runID, 0, 3, "need supervisor")
+		_ = s.SignalInterrupt(turnID, loopctrl.InterruptMessageCallSupervisor)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = Run(ctx, RunConfig{
+		Store:     s,
+		GlobalCfg: globalCfg,
+		LoopDef:   loopDef,
+		Project:   proj,
+		AgentsCfg: agentsCfg,
+		WorkDir:   proj.RepoPath,
+		MaxCycles: 1,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	turns, err := s.ListTurns()
+	if err != nil {
+		t.Fatalf("ListTurns: %v", err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("len(turns) = %d, want 2", len(turns))
+	}
+	if turns[0].ProfileName != "mgr" {
+		t.Fatalf("turns[0].ProfileName = %q, want %q", turns[0].ProfileName, "mgr")
+	}
+	if turns[1].ProfileName != "sup" {
+		t.Fatalf("turns[1].ProfileName = %q, want %q", turns[1].ProfileName, "sup")
+	}
+}
+
+func TestRun_CallSupervisorFastForwardWrapsToNextCycleSupervisor(t *testing.T) {
+	s := newLooprunTestStore(t)
+	proj, err := s.LoadProject()
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+
+	tmp := t.TempDir()
+	scriptPath := filepath.Join(tmp, "slow.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nsleep 2\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	loopDef := &config.LoopDef{
+		Name: "call-supervisor-wrap",
+		Steps: []config.LoopStep{
+			{Profile: "sup", Position: config.PositionSupervisor, Turns: 1},
+			{Profile: "lead", Position: config.PositionLead, Turns: 1},
+			{Profile: "mgr", Position: config.PositionManager, Team: "workers", Turns: 1},
+			{Profile: "tail", Position: config.PositionLead, Turns: 1},
+		},
+	}
+	globalCfg := &config.GlobalConfig{
+		Profiles: []config.Profile{
+			{Name: "sup", Agent: "generic"},
+			{Name: "lead", Agent: "generic"},
+			{Name: "mgr", Agent: "generic"},
+			{Name: "tail", Agent: "generic"},
+		},
+		Teams: []config.Team{
+			{
+				Name: "workers",
+				Delegation: &config.DelegationConfig{
+					Profiles: []config.DelegationProfile{
+						{Name: "lead", Position: config.PositionWorker, Role: config.RoleDeveloper},
+					},
+				},
+			},
+		},
+	}
+	agentsCfg := &agent.AgentsConfig{
+		Agents: map[string]agent.AgentRecord{
+			"generic": {Name: "generic", Path: scriptPath},
+		},
+	}
+
+	go func() {
+		var runID int
+		var managerTurnID int
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			runs, _ := s.ListLoopRuns()
+			if len(runs) > 0 {
+				runID = runs[0].ID
+			}
+			turns, _ := s.ListTurns()
+			for _, turn := range turns {
+				if turn.ProfileName == "mgr" {
+					managerTurnID = turn.ID
+					break
+				}
+			}
+			if runID > 0 && managerTurnID > 0 {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if runID == 0 || managerTurnID == 0 {
+			return
+		}
+		_ = s.SignalLoopCallSupervisor(runID, 2, 0, "wrap to supervisor")
+		_ = s.SignalInterrupt(managerTurnID, loopctrl.InterruptMessageCallSupervisor)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 14*time.Second)
+	defer cancel()
+
+	err = Run(ctx, RunConfig{
+		Store:     s,
+		GlobalCfg: globalCfg,
+		LoopDef:   loopDef,
+		Project:   proj,
+		AgentsCfg: agentsCfg,
+		WorkDir:   proj.RepoPath,
+		MaxCycles: 2,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	turns, err := s.ListTurns()
+	if err != nil {
+		t.Fatalf("ListTurns: %v", err)
+	}
+	if len(turns) != 7 {
+		t.Fatalf("len(turns) = %d, want 7", len(turns))
+	}
+
+	if turns[0].ProfileName != "sup" || turns[1].ProfileName != "lead" || turns[2].ProfileName != "mgr" {
+		t.Fatalf("unexpected pre-jump order: [%s %s %s]", turns[0].ProfileName, turns[1].ProfileName, turns[2].ProfileName)
+	}
+	if turns[3].ProfileName != "sup" {
+		t.Fatalf("turns[3].ProfileName = %q, want %q (next-cycle supervisor after manager)", turns[3].ProfileName, "sup")
 	}
 }

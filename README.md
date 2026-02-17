@@ -245,10 +245,10 @@ Loops define cyclic workflows where multiple agent profiles take turns working o
         },
         {
           "profile": "reviewer",
+          "position": "supervisor",
           "role": "lead-developer",
           "turns": 1,
-          "instructions": "Review and fix issues",
-          "can_stop": true
+          "instructions": "Review and decide whether to stop the loop"
         },
         {
           "profile": "tester",
@@ -266,7 +266,10 @@ Loops define cyclic workflows where multiple agent profiles take turns working o
 adaf loop start dev-cycle
 ```
 
-Each step runs the specified profile, and steps can communicate via `adaf loop message`, send notifications via `adaf loop notify`, or signal the loop to stop via `adaf loop stop`.
+Each step runs the specified profile. Loop controls are position-based:
+- supervisors can use `adaf loop message` and `adaf loop stop`
+- managers can escalate with `adaf loop call-supervisor "status + concrete ask"`
+- any step can send notifications via `adaf loop notify` when enabled
 
 ### Sub-Agent Spawning
 

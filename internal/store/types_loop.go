@@ -51,3 +51,13 @@ type LoopMessage struct {
 	Content   string    `json:"content"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// LoopCallSupervisorSignal is a manager-issued control signal that requests
+// fast-forwarding from the current step to the next supervisor step.
+type LoopCallSupervisorSignal struct {
+	RunID           int       `json:"run_id"`
+	FromStepIndex   int       `json:"from_step_index"`
+	TargetStepIndex int       `json:"target_step_index"`
+	Content         string    `json:"content,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+}

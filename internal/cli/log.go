@@ -82,7 +82,11 @@ Examples:
 }
 
 func init() {
+	turnCmd.Flags().String("plan", "", "Filter turns by plan ID")
+	turnCmd.Flags().Bool("all", false, "Include spawned sub-agent turns")
 	turnListCmd.Flags().String("plan", "", "Filter turns by plan ID")
+	turnListCmd.Flags().Bool("all", false, "Include spawned sub-agent turns")
+	turnLatestCmd.Flags().Bool("all", false, "Include spawned sub-agent turns")
 
 	turnCreateCmd.Flags().String("agent", "", "Agent name (required)")
 	turnCreateCmd.Flags().String("model", "", "Agent model")
@@ -106,6 +110,7 @@ func init() {
 	turnSearchCmd.Flags().String("plan", "", "Filter by plan ID")
 	turnSearchCmd.Flags().String("agent", "", "Filter by agent name")
 	turnSearchCmd.Flags().Int("limit", 10, "Maximum number of results")
+	turnSearchCmd.Flags().Bool("all", false, "Include spawned sub-agent turns")
 	_ = turnSearchCmd.MarkFlagRequired("query")
 
 	turnCmd.AddCommand(turnListCmd)
@@ -139,6 +144,7 @@ func runTurnList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	planFilter, _ := cmd.Flags().GetString("plan")
+	includeSpawned, _ := cmd.Flags().GetBool("all")
 	planFilter = strings.TrimSpace(planFilter)
 	if planFilter != "" {
 		if err := validatePlanID(planFilter); err != nil {
@@ -146,9 +152,9 @@ func runTurnList(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	turns, err := s.ListTurns()
+	turns, err := listTurnsForLogs(s, includeSpawned)
 	if err != nil {
-		return fmt.Errorf("listing turns: %w", err)
+		return err
 	}
 	if planFilter != "" {
 		var filtered []store.Turn
@@ -214,18 +220,20 @@ func runTurnLatest(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	turn, err := s.LatestTurn()
+	includeSpawned, _ := cmd.Flags().GetBool("all")
+	turns, err := listTurnsForLogs(s, includeSpawned)
 	if err != nil {
-		return fmt.Errorf("getting latest turn: %w", err)
+		return err
 	}
 
-	if turn == nil {
+	if len(turns) == 0 {
 		fmt.Println()
 		fmt.Printf("  %sNo turns found.%s\n\n", colorDim, colorReset)
 		return nil
 	}
 
-	printTurn(turn)
+	turn := turns[len(turns)-1]
+	printTurn(&turn)
 	return nil
 }
 
@@ -408,14 +416,15 @@ func resolveTurnToUpdate(s *store.Store, args []string) (*store.Turn, error) {
 		return turn, nil
 	}
 
-	latest, err := s.LatestTurn()
+	turns, err := listTurnsForLogs(s, false)
 	if err != nil {
 		return nil, fmt.Errorf("getting latest turn: %w", err)
 	}
-	if latest == nil {
+	if len(turns) == 0 {
 		return nil, fmt.Errorf("no turns found to finish")
 	}
-	return latest, nil
+	latest := turns[len(turns)-1]
+	return &latest, nil
 }
 
 func findTurnByIdentifier(s *store.Store, rawID string) (*store.Turn, error) {
@@ -498,6 +507,7 @@ func runTurnSearch(cmd *cobra.Command, args []string) error {
 	planFilter, _ := cmd.Flags().GetString("plan")
 	agentFilter, _ := cmd.Flags().GetString("agent")
 	limit, _ := cmd.Flags().GetInt("limit")
+	includeSpawned, _ := cmd.Flags().GetBool("all")
 
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -513,9 +523,9 @@ func runTurnSearch(cmd *cobra.Command, args []string) error {
 	}
 	agentFilter = strings.TrimSpace(strings.ToLower(agentFilter))
 
-	turns, err := s.ListTurns()
+	turns, err := listTurnsForLogs(s, includeSpawned)
 	if err != nil {
-		return fmt.Errorf("listing turns: %w", err)
+		return err
 	}
 
 	var matches []store.Turn
@@ -580,6 +590,50 @@ func turnMatchesQuery(t store.Turn, queryLower string) bool {
 		}
 	}
 	return false
+}
+
+func listTurnsForLogs(s *store.Store, includeSpawned bool) ([]store.Turn, error) {
+	turns, err := s.ListTurns()
+	if err != nil {
+		return nil, fmt.Errorf("listing turns: %w", err)
+	}
+	if includeSpawned || len(turns) == 0 {
+		return turns, nil
+	}
+
+	spawnedTurnIDs, err := childTurnIDSetFromSpawns(s)
+	if err != nil {
+		return nil, err
+	}
+	if len(spawnedTurnIDs) == 0 {
+		return turns, nil
+	}
+
+	filtered := make([]store.Turn, 0, len(turns))
+	for _, turn := range turns {
+		if _, isSpawned := spawnedTurnIDs[turn.ID]; isSpawned {
+			continue
+		}
+		filtered = append(filtered, turn)
+	}
+	return filtered, nil
+}
+
+func childTurnIDSetFromSpawns(s *store.Store) (map[int]struct{}, error) {
+	spawns, err := s.ListSpawns()
+	if err != nil {
+		return nil, fmt.Errorf("listing spawns: %w", err)
+	}
+	if len(spawns) == 0 {
+		return nil, nil
+	}
+	ids := make(map[int]struct{}, len(spawns))
+	for _, rec := range spawns {
+		if rec.ChildTurnID > 0 {
+			ids[rec.ChildTurnID] = struct{}{}
+		}
+	}
+	return ids, nil
 }
 
 func printLogSection(title, content string) {

@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/agusx1211/adaf/internal/store"
 )
 
 func TestApplyRuntimeViewVisibility(t *testing.T) {
@@ -14,9 +17,10 @@ func TestApplyRuntimeViewVisibility(t *testing.T) {
 	loop := &cobra.Command{Use: "loop"}
 	loopStart := &cobra.Command{Use: "start <name>"}
 	loopStop := &cobra.Command{Use: "stop"}
+	loopCallSupervisor := &cobra.Command{Use: "call-supervisor <text>"}
 	internal := &cobra.Command{Use: "_internal", Hidden: true}
 
-	loop.AddCommand(loopStart, loopStop)
+	loop.AddCommand(loopStart, loopStop, loopCallSupervisor)
 	root.AddCommand(run, spawn, loop, internal)
 
 	applyRuntimeView(root, cliRuntimeViewUser)
@@ -32,6 +36,9 @@ func TestApplyRuntimeViewVisibility(t *testing.T) {
 	}
 	if !loopStop.Hidden {
 		t.Fatal("loop stop visible in user view, want hidden")
+	}
+	if !loopCallSupervisor.Hidden {
+		t.Fatal("loop call-supervisor visible in user view, want hidden")
 	}
 	if !internal.Hidden {
 		t.Fatal("internal command visible in user view, want hidden")
@@ -50,6 +57,9 @@ func TestApplyRuntimeViewVisibility(t *testing.T) {
 	}
 	if loopStop.Hidden {
 		t.Fatal("loop stop hidden in agent view, want visible")
+	}
+	if loopCallSupervisor.Hidden {
+		t.Fatal("loop call-supervisor hidden in agent view, want visible")
 	}
 	if !internal.Hidden {
 		t.Fatal("internal command visible in agent view, want hidden")
@@ -223,5 +233,152 @@ func TestApplyRuntimeView_HidesTurnForSpawnedSubAgent(t *testing.T) {
 	}
 	if spawn.Hidden {
 		t.Fatal("spawn should remain visible for spawned sub-agent agent view")
+	}
+}
+
+func TestEnforceCommandAccessForView_LoopRoleCommands(t *testing.T) {
+	root := &cobra.Command{Use: "adaf"}
+	loop := &cobra.Command{Use: "loop"}
+	loopStop := &cobra.Command{Use: "stop"}
+	loopMessage := &cobra.Command{Use: "message"}
+	loopCallSupervisor := &cobra.Command{Use: "call-supervisor"}
+	loop.AddCommand(loopStop, loopMessage, loopCallSupervisor)
+	root.AddCommand(loop)
+
+	projectDir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ADAF_PROJECT_DIR", projectDir)
+	s, err := store.New(projectDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "runtime-view", RepoPath: projectDir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
+	}
+	runWithSupervisor := &store.LoopRun{
+		LoopName: "with-supervisor",
+		Steps: []store.LoopRunStep{
+			{Profile: "manager", Position: "manager"},
+			{Profile: "lead", Position: "lead"},
+			{Profile: "supervisor", Position: "supervisor"},
+		},
+		StepLastSeenMsg: map[int]int{},
+	}
+	if err := s.CreateLoopRun(runWithSupervisor); err != nil {
+		t.Fatalf("CreateLoopRun(with supervisor) error = %v", err)
+	}
+	runWithoutSupervisor := &store.LoopRun{
+		LoopName: "without-supervisor",
+		Steps: []store.LoopRunStep{
+			{Profile: "manager", Position: "manager"},
+			{Profile: "lead", Position: "lead"},
+		},
+		StepLastSeenMsg: map[int]int{},
+	}
+	if err := s.CreateLoopRun(runWithoutSupervisor); err != nil {
+		t.Fatalf("CreateLoopRun(without supervisor) error = %v", err)
+	}
+
+	t.Run("manager cannot stop", func(t *testing.T) {
+		t.Setenv("ADAF_LOOP_RUN_ID", fmt.Sprintf("%d", runWithSupervisor.ID))
+		t.Setenv("ADAF_POSITION", "manager")
+		err := enforceCommandAccessForView(loopStop, cliRuntimeViewAgent)
+		if err == nil || !strings.Contains(err.Error(), "supervisor-only") {
+			t.Fatalf("error = %v, want supervisor-only", err)
+		}
+	})
+
+	t.Run("manager can call supervisor", func(t *testing.T) {
+		t.Setenv("ADAF_LOOP_RUN_ID", fmt.Sprintf("%d", runWithSupervisor.ID))
+		t.Setenv("ADAF_POSITION", "manager")
+		if err := enforceCommandAccessForView(loopCallSupervisor, cliRuntimeViewAgent); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("supervisor can stop", func(t *testing.T) {
+		t.Setenv("ADAF_LOOP_RUN_ID", fmt.Sprintf("%d", runWithSupervisor.ID))
+		t.Setenv("ADAF_POSITION", "supervisor")
+		if err := enforceCommandAccessForView(loopStop, cliRuntimeViewAgent); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("supervisor cannot call supervisor", func(t *testing.T) {
+		t.Setenv("ADAF_LOOP_RUN_ID", fmt.Sprintf("%d", runWithSupervisor.ID))
+		t.Setenv("ADAF_POSITION", "supervisor")
+		err := enforceCommandAccessForView(loopCallSupervisor, cliRuntimeViewAgent)
+		if err == nil || !strings.Contains(err.Error(), "manager-only") {
+			t.Fatalf("error = %v, want manager-only", err)
+		}
+	})
+
+	t.Run("manager gets hint on message", func(t *testing.T) {
+		t.Setenv("ADAF_LOOP_RUN_ID", fmt.Sprintf("%d", runWithSupervisor.ID))
+		t.Setenv("ADAF_POSITION", "manager")
+		err := enforceCommandAccessForView(loopMessage, cliRuntimeViewAgent)
+		if err == nil || !strings.Contains(err.Error(), "call-supervisor") {
+			t.Fatalf("error = %v, want call-supervisor hint", err)
+		}
+	})
+
+	t.Run("manager call-supervisor unavailable when no supervisor step exists", func(t *testing.T) {
+		t.Setenv("ADAF_LOOP_RUN_ID", fmt.Sprintf("%d", runWithoutSupervisor.ID))
+		t.Setenv("ADAF_POSITION", "manager")
+		err := enforceCommandAccessForView(loopCallSupervisor, cliRuntimeViewAgent)
+		if err == nil || !strings.Contains(err.Error(), "unavailable") {
+			t.Fatalf("error = %v, want unavailable", err)
+		}
+	})
+
+	t.Run("manager message omits call-supervisor hint when loop has no supervisor", func(t *testing.T) {
+		t.Setenv("ADAF_LOOP_RUN_ID", fmt.Sprintf("%d", runWithoutSupervisor.ID))
+		t.Setenv("ADAF_POSITION", "manager")
+		err := enforceCommandAccessForView(loopMessage, cliRuntimeViewAgent)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if strings.Contains(err.Error(), "call-supervisor") {
+			t.Fatalf("error = %q, want no call-supervisor hint", err.Error())
+		}
+	})
+}
+
+func TestApplyRuntimeView_HidesCallSupervisorWhenLoopHasNoSupervisor(t *testing.T) {
+	root := &cobra.Command{Use: "adaf"}
+	loop := &cobra.Command{Use: "loop"}
+	loopCallSupervisor := &cobra.Command{Use: "call-supervisor"}
+	loop.AddCommand(loopCallSupervisor)
+	root.AddCommand(loop)
+
+	projectDir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ADAF_PROJECT_DIR", projectDir)
+	t.Setenv("ADAF_POSITION", "manager")
+
+	s, err := store.New(projectDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "runtime-view-hidden", RepoPath: projectDir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
+	}
+
+	run := &store.LoopRun{
+		LoopName: "without-supervisor",
+		Steps: []store.LoopRunStep{
+			{Profile: "manager", Position: "manager"},
+			{Profile: "lead", Position: "lead"},
+		},
+		StepLastSeenMsg: map[int]int{},
+	}
+	if err := s.CreateLoopRun(run); err != nil {
+		t.Fatalf("CreateLoopRun() error = %v", err)
+	}
+	t.Setenv("ADAF_LOOP_RUN_ID", fmt.Sprintf("%d", run.ID))
+
+	applyRuntimeView(root, cliRuntimeViewAgent)
+	if !loopCallSupervisor.Hidden {
+		t.Fatal("loop call-supervisor should be hidden when loop has no supervisor step")
 	}
 }

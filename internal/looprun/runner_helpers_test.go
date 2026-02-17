@@ -305,6 +305,58 @@ func TestBuildStepPrompt_ExplicitEmptySkillsDisableDefaults(t *testing.T) {
 	}
 }
 
+func TestBuildStepPrompt_ManagerCallSupervisorAvailabilityFollowsLoopSupervisorPresence(t *testing.T) {
+	s := newLooprunTestStore(t)
+	project, err := s.LoadProject()
+	if err != nil {
+		t.Fatalf("LoadProject() error = %v", err)
+	}
+
+	globalCfg := &config.GlobalConfig{}
+	config.EnsureDefaultRoleCatalog(globalCfg)
+	config.EnsureDefaultSkillCatalog(globalCfg)
+
+	prof := &config.Profile{Name: "manager", Agent: "generic"}
+	step := config.LoopStep{
+		Profile:  "manager",
+		Position: config.PositionManager,
+	}
+
+	withSupervisorPrompt, err := BuildStepPrompt(StepPromptInput{
+		Store:      s,
+		Project:    project,
+		GlobalCfg:  globalCfg,
+		LoopName:   "with-supervisor",
+		Step:       step,
+		LoopSteps:  []config.LoopStep{{Profile: "manager", Position: config.PositionManager}, {Profile: "supervisor", Position: config.PositionSupervisor}},
+		Profile:    prof,
+		TotalSteps: 2,
+	})
+	if err != nil {
+		t.Fatalf("BuildStepPrompt(with supervisor) error = %v", err)
+	}
+	if !strings.Contains(withSupervisorPrompt, "adaf loop call-supervisor") {
+		t.Fatalf("prompt should include call-supervisor when loop has supervisor:\n%s", withSupervisorPrompt)
+	}
+
+	withoutSupervisorPrompt, err := BuildStepPrompt(StepPromptInput{
+		Store:      s,
+		Project:    project,
+		GlobalCfg:  globalCfg,
+		LoopName:   "without-supervisor",
+		Step:       step,
+		LoopSteps:  []config.LoopStep{{Profile: "manager", Position: config.PositionManager}, {Profile: "lead", Position: config.PositionLead}},
+		Profile:    prof,
+		TotalSteps: 2,
+	})
+	if err != nil {
+		t.Fatalf("BuildStepPrompt(without supervisor) error = %v", err)
+	}
+	if strings.Contains(withoutSupervisorPrompt, "adaf loop call-supervisor") {
+		t.Fatalf("prompt should omit call-supervisor when loop has no supervisor:\n%s", withoutSupervisorPrompt)
+	}
+}
+
 func TestBuildAgentConfig_SetsEnvironmentVariables(t *testing.T) {
 	prof := &config.Profile{
 		Name:  "test-profile",

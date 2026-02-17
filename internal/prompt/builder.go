@@ -67,17 +67,18 @@ func buildSubAgentPrompt(opts BuildOpts) (string, error) {
 
 // LoopPromptContext provides loop-specific context for prompt generation.
 type LoopPromptContext struct {
-	LoopName      string
-	Cycle         int
-	StepIndex     int
-	TotalSteps    int
-	Instructions  string // step-specific custom instructions
-	InitialPrompt string // general objective injected across all steps
-	CanStop       bool
-	CanMessage    bool
-	CanPushover   bool
-	Messages      []store.LoopMessage // unseen messages from other steps
-	RunID         int
+	LoopName          string
+	Cycle             int
+	StepIndex         int
+	TotalSteps        int
+	Instructions      string // step-specific custom instructions
+	InitialPrompt     string // general objective injected across all steps
+	CanStop           bool
+	CanMessage        bool
+	CanCallSupervisor bool
+	CanPushover       bool
+	Messages          []store.LoopMessage // unseen messages from other steps
+	RunID             int
 }
 
 // BuildOpts configures prompt generation.
@@ -208,10 +209,14 @@ func buildSkillsPrompt(opts BuildOpts) (string, error) {
 	effectivePosition := normalizePromptPosition(opts.Position, false)
 	workerRole := config.EffectiveWorkerRoleForPosition(effectivePosition, opts.Role, opts.GlobalCfg)
 	hasDelegation := opts.Delegation != nil && len(opts.Delegation.Profiles) > 0
+	canCallSupervisor := true
+	if opts.LoopContext != nil && effectivePosition == config.PositionManager {
+		canCallSupervisor = opts.LoopContext.CanCallSupervisor
+	}
 
 	// Position header and duties.
 	if opts.Profile != nil {
-		posSection := PositionPrompt(effectivePosition, workerRole, hasDelegation)
+		posSection := PositionPrompt(effectivePosition, workerRole, hasDelegation, canCallSupervisor)
 		if posSection != "" {
 			b.WriteString(posSection)
 			b.WriteString("\n")
@@ -477,6 +482,9 @@ func renderLoopContext(opts BuildOpts) string {
 	}
 	if lc.CanMessage {
 		b.WriteString("You can send a message to subsequent steps by running: `adaf loop message \"your message\"`\n\n")
+	}
+	if lc.CanCallSupervisor {
+		b.WriteString("If you need supervisor direction or have no actionable work left, escalate with: `adaf loop call-supervisor \"status + concrete ask\"`\n\n")
 	}
 	return b.String()
 }

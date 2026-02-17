@@ -36,6 +36,10 @@ type WaitResult struct {
 	Branch   string // worktree branch (empty for read-only)
 }
 
+const InterruptMessageCallSupervisor = "__adaf_control:call_supervisor__"
+
+var ErrStepEndedByControlSignal = errors.New("step ended by control signal")
+
 // Loop is the main agent loop controller. It runs an agent one or more times,
 // creating turn recordings in the store. Normal iterations create new turns;
 // wait-for-spawns resumes continue on the same turn.
@@ -614,6 +618,10 @@ func (l *Loop) Run(ctx context.Context) error {
 			if errors.Is(runErr, context.Canceled) {
 				if msg := l.drainInterrupt(); msg != "" {
 					debug.LogKV("loop", "interrupt drained after cancel", "turn_id", turnID, "msg_len", len(msg))
+					if isCallSupervisorControlInterrupt(msg) {
+						debug.LogKV("loop", "ending step from control interrupt", "turn_id", turnID)
+						return ErrStepEndedByControlSignal
+					}
 					// Interrupted (e.g. parent signal) — continue to next
 					// turn with the interrupt message injected.
 					// Don't increment turn count — interrupt turns don't count
@@ -651,6 +659,10 @@ func (l *Loop) Run(ctx context.Context) error {
 		// (nil, context.Canceled). We must still drain the interrupt channel
 		// so the message is injected into the next turn.
 		if msg := l.drainInterrupt(); msg != "" {
+			if isCallSupervisorControlInterrupt(msg) {
+				debug.LogKV("loop", "ending step from control interrupt", "turn_id", turnID)
+				return ErrStepEndedByControlSignal
+			}
 			l.lastInterruptMsg = msg
 			debug.LogKV("loop", "interrupt drained after successful run",
 				"turn_id", turnID,
@@ -733,6 +745,10 @@ func (l *Loop) drainInterrupt() string {
 	default:
 		return ""
 	}
+}
+
+func isCallSupervisorControlInterrupt(msg string) bool {
+	return strings.TrimSpace(msg) == InterruptMessageCallSupervisor
 }
 
 func (l *Loop) ensureSeenSpawnIDs(turnID int) map[int]struct{} {

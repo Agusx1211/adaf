@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/agusx1211/adaf/internal/buildinfo"
+	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/session"
 )
 
@@ -52,20 +53,21 @@ var commandAudienceByPath = map[string]commandAudience{
 	"loop list":       commandAudienceUserOnly,
 	"loop start":      commandAudienceUserOnly,
 
-	"spawn":           commandAudienceAgentOnly,
-	"spawn-status":    commandAudienceAgentOnly,
-	"spawn-wait":      commandAudienceAgentOnly,
-	"spawn-diff":      commandAudienceAgentOnly,
-	"spawn-merge":     commandAudienceAgentOnly,
-	"spawn-reject":    commandAudienceAgentOnly,
-	"spawn-watch":     commandAudienceAgentOnly,
-	"spawn-inspect":   commandAudienceAgentOnly,
-	"spawn-reply":     commandAudienceAgentOnly,
-	"parent-ask":      commandAudienceAgentOnly,
-	"wait-for-spawns": commandAudienceAgentOnly,
-	"loop stop":       commandAudienceAgentOnly,
-	"loop message":    commandAudienceAgentOnly,
-	"loop notify":     commandAudienceAgentOnly,
+	"spawn":                commandAudienceAgentOnly,
+	"spawn-status":         commandAudienceAgentOnly,
+	"spawn-wait":           commandAudienceAgentOnly,
+	"spawn-diff":           commandAudienceAgentOnly,
+	"spawn-merge":          commandAudienceAgentOnly,
+	"spawn-reject":         commandAudienceAgentOnly,
+	"spawn-watch":          commandAudienceAgentOnly,
+	"spawn-inspect":        commandAudienceAgentOnly,
+	"spawn-reply":          commandAudienceAgentOnly,
+	"parent-ask":           commandAudienceAgentOnly,
+	"wait-for-spawns":      commandAudienceAgentOnly,
+	"loop stop":            commandAudienceAgentOnly,
+	"loop message":         commandAudienceAgentOnly,
+	"loop call-supervisor": commandAudienceAgentOnly,
+	"loop notify":          commandAudienceAgentOnly,
 }
 
 var commandShortByPath = map[string]shortVariants{
@@ -114,6 +116,11 @@ func enforceCommandAccessForView(cmd *cobra.Command, view cliRuntimeView) error 
 	case view == cliRuntimeViewUser && audience == commandAudienceAgentOnly:
 		return fmt.Errorf("%s is only available inside an agent context", cmd.CommandPath())
 	default:
+		if view == cliRuntimeViewAgent {
+			if err := enforceLoopRoleCommandAccess(path, cmd.CommandPath()); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 }
@@ -198,7 +205,11 @@ func isVisibleInView(path string, view cliRuntimeView) bool {
 	audience := audienceForPath(path)
 	switch view {
 	case cliRuntimeViewAgent:
-		return audience != commandAudienceUserOnly
+		if audience == commandAudienceUserOnly {
+			return false
+		}
+		allowed, _ := loopRoleCommandAllowed(path)
+		return allowed
 	default:
 		return audience != commandAudienceAgentOnly
 	}
@@ -251,6 +262,68 @@ func isTurnCommandPath(path string) bool {
 
 func isSpawnedSubAgentRuntimeContext() bool {
 	return strings.TrimSpace(os.Getenv("ADAF_PARENT_TURN")) != ""
+}
+
+func enforceLoopRoleCommandAccess(path, commandPath string) error {
+	allowed, reason := loopRoleCommandAllowed(path)
+	if allowed {
+		return nil
+	}
+	if strings.TrimSpace(reason) == "" {
+		return nil
+	}
+	return fmt.Errorf("%s: %s", commandPath, reason)
+}
+
+func loopRoleCommandAllowed(path string) (bool, string) {
+	path = strings.TrimSpace(path)
+	if path != "loop stop" && path != "loop message" && path != "loop call-supervisor" {
+		return true, ""
+	}
+	if strings.TrimSpace(os.Getenv("ADAF_LOOP_RUN_ID")) == "" {
+		// Outside active loop-step contexts, keep command visible and allow the
+		// command implementation to report missing runtime env as needed.
+		return true, ""
+	}
+	pos := strings.ToLower(strings.TrimSpace(os.Getenv("ADAF_POSITION")))
+	if !config.ValidPosition(pos) {
+		return false, "ADAF_POSITION not set or invalid for this loop step"
+	}
+	switch path {
+	case "loop stop":
+		if config.PositionCanStopLoop(pos) {
+			return true, ""
+		}
+		return false, "loop stop is supervisor-only"
+	case "loop message":
+		if config.PositionCanMessageLoop(pos) {
+			return true, ""
+		}
+		if config.PositionCanCallSupervisor(pos) {
+			if hasSupervisor, _ := currentLoopHasSupervisor(); hasSupervisor {
+				return false, "loop message is supervisor-only; use `adaf loop call-supervisor \"...\"`"
+			}
+			return false, "loop message is supervisor-only"
+		}
+		return false, "loop message is supervisor-only"
+	case "loop call-supervisor":
+		if !config.PositionCanCallSupervisor(pos) {
+			return false, "loop call-supervisor is manager-only"
+		}
+		hasSupervisor, reason := currentLoopHasSupervisor()
+		if hasSupervisor {
+			return true, ""
+		}
+		if strings.TrimSpace(reason) == "" {
+			return false, "loop call-supervisor is unavailable: this loop has no supervisor step"
+		}
+		if reason == "this loop has no supervisor step" {
+			return false, "loop call-supervisor is unavailable: this loop has no supervisor step"
+		}
+		return false, fmt.Sprintf("loop call-supervisor is unavailable: %s", reason)
+	default:
+		return true, ""
+	}
 }
 
 func rootAgentLong() string {

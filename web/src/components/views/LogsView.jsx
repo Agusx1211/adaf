@@ -6,14 +6,24 @@ export default function LogsView() {
   var dispatch = useDispatch();
   var { turns } = state;
   var selectedTurn = state.selectedTurn;
+  var childTurnIDs = {};
+  (state.spawns || []).forEach(function (spawn) {
+    var childTurnID = Number((spawn && (spawn.child_turn_id || spawn.child_session_id)) || 0);
+    if (childTurnID > 0) {
+      childTurnIDs[childTurnID] = true;
+    }
+  });
+  var visibleTurns = turns.filter(function (turn) {
+    return !childTurnIDs[turn.id];
+  });
 
-  if (!turns.length) {
+  if (!visibleTurns.length) {
     return <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>No turns recorded yet.</div>;
   }
 
   return (
     <div style={{ overflow: 'auto', flex: 1 }}>
-      {turns.map(function (turn) {
+      {visibleTurns.map(function (turn) {
         var status = normalizeStatus(turn.build_state || 'unknown');
         var border = status === 'passing' ? '#a6e3a1' : '#f38ba8';
         var selected = selectedTurn === turn.id;

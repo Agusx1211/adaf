@@ -218,3 +218,58 @@ func (s *Store) IsLoopStopped(runID int) bool {
 	_, err := os.Stat(filepath.Join(s.loopRunDir(runID), "stop"))
 	return err == nil
 }
+
+func (s *Store) loopCallSupervisorSignalPath(runID int) string {
+	return filepath.Join(s.loopRunDir(runID), "call_supervisor.json")
+}
+
+// SignalLoopCallSupervisor persists a fast-forward signal for a loop run.
+func (s *Store) SignalLoopCallSupervisor(runID, fromStepIndex, targetStepIndex int, content string) error {
+	dir := s.loopRunDir(runID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	sig := &LoopCallSupervisorSignal{
+		RunID:           runID,
+		FromStepIndex:   fromStepIndex,
+		TargetStepIndex: targetStepIndex,
+		Content:         content,
+		CreatedAt:       time.Now().UTC(),
+	}
+	return s.writeJSONLocked(s.loopCallSupervisorSignalPath(runID), sig)
+}
+
+// GetLoopCallSupervisorSignal returns the pending fast-forward signal for a run.
+// Returns (nil, nil) when no signal exists.
+func (s *Store) GetLoopCallSupervisorSignal(runID int) (*LoopCallSupervisorSignal, error) {
+	var sig LoopCallSupervisorSignal
+	if err := s.readJSONLocked(s.loopCallSupervisorSignalPath(runID), &sig); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &sig, nil
+}
+
+// ClearLoopCallSupervisorSignal removes the pending fast-forward signal for a run.
+func (s *Store) ClearLoopCallSupervisorSignal(runID int) error {
+	err := os.Remove(s.loopCallSupervisorSignalPath(runID))
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// ConsumeLoopCallSupervisorSignal fetches and removes the pending fast-forward
+// signal for a run.
+func (s *Store) ConsumeLoopCallSupervisorSignal(runID int) (*LoopCallSupervisorSignal, error) {
+	sig, err := s.GetLoopCallSupervisorSignal(runID)
+	if err != nil || sig == nil {
+		return sig, err
+	}
+	if err := s.ClearLoopCallSupervisorSignal(runID); err != nil {
+		return nil, err
+	}
+	return sig, nil
+}

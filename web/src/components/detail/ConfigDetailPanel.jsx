@@ -585,10 +585,13 @@ function LoopEditor({ data, setData, profiles, teams, skills, isNew, projectID }
                   <label style={labelStyle}>Instructions (optional)</label>
                   <textarea value={step.instructions || ''} onChange={function (e) { setStep(idx, 'instructions', e.target.value); }} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} placeholder="Step-specific instructions" />
                 </div>
-                <div style={{ display: 'flex', gap: 16 }}>
-                  <Checkbox label="can_stop" checked={!!step.can_stop} onChange={function (v) { setStep(idx, 'can_stop', v); }} />
-                  <Checkbox label="can_message" checked={!!step.can_message} onChange={function (v) { setStep(idx, 'can_message', v); }} />
-                  <Checkbox label="can_pushover" checked={!!step.can_pushover} onChange={function (v) { setStep(idx, 'can_pushover', v); }} />
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>
+                    Loop controls are built-in by position: supervisors can stop/message, managers can call supervisor.
+                  </div>
+                  <div style={{ display: 'flex', gap: 16 }}>
+                    <Checkbox label="can_pushover" checked={!!step.can_pushover} onChange={function (v) { setStep(idx, 'can_pushover', v); }} />
+                  </div>
                 </div>
               </div>
             </div>
@@ -1767,7 +1770,7 @@ function Checkbox({ label, checked, onChange }) {
 // ── Helpers ──
 
 function emptyStep() {
-  return { profile: '', position: 'lead', turns: 1, instructions: '', can_stop: false, can_message: false, can_pushover: false, team: '', skills: [], skills_explicit: false };
+  return { profile: '', position: 'lead', turns: 1, instructions: '', can_pushover: false, team: '', skills: [], skills_explicit: false };
 }
 
 function emptyDelegationProfile() {
@@ -1779,8 +1782,6 @@ function cleanStep(s) {
   if (s.position) out.position = s.position;
   if (s.turns && s.turns > 0) out.turns = Number(s.turns);
   if (s.instructions) out.instructions = s.instructions;
-  if (s.can_stop) out.can_stop = true;
-  if (s.can_message) out.can_message = true;
   if (s.can_pushover) out.can_pushover = true;
   if (s.team && s.position !== 'supervisor') out.team = s.team;
   if (s.skills_explicit) out.skills_explicit = true;

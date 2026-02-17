@@ -65,6 +65,101 @@ func TestTurnCommand_DoesNotRegisterUpdateSubcommand(t *testing.T) {
 	}
 }
 
+func TestListTurnsForLogs_ExcludesSpawnedByDefault(t *testing.T) {
+	projectDir := t.TempDir()
+	s, err := store.New(projectDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "demo", RepoPath: projectDir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
+	}
+
+	parent := &store.Turn{Agent: "codex", Objective: "parent"}
+	if err := s.CreateTurn(parent); err != nil {
+		t.Fatalf("CreateTurn(parent) error = %v", err)
+	}
+	child := &store.Turn{Agent: "codex", Objective: "spawn child"}
+	if err := s.CreateTurn(child); err != nil {
+		t.Fatalf("CreateTurn(child) error = %v", err)
+	}
+	another := &store.Turn{Agent: "claude", Objective: "another parent"}
+	if err := s.CreateTurn(another); err != nil {
+		t.Fatalf("CreateTurn(another) error = %v", err)
+	}
+
+	if err := s.CreateSpawn(&store.SpawnRecord{
+		ParentTurnID:  parent.ID,
+		ChildTurnID:   child.ID,
+		ParentProfile: "manager",
+		ChildProfile:  "worker",
+		Task:          "implement x",
+		Status:        "completed",
+	}); err != nil {
+		t.Fatalf("CreateSpawn() error = %v", err)
+	}
+
+	filtered, err := listTurnsForLogs(s, false)
+	if err != nil {
+		t.Fatalf("listTurnsForLogs(includeSpawned=false) error = %v", err)
+	}
+	if len(filtered) != 2 {
+		t.Fatalf("filtered turns len = %d, want 2", len(filtered))
+	}
+	if filtered[0].ID != parent.ID || filtered[1].ID != another.ID {
+		t.Fatalf("filtered turn IDs = [%d,%d], want [%d,%d]", filtered[0].ID, filtered[1].ID, parent.ID, another.ID)
+	}
+
+	allTurns, err := listTurnsForLogs(s, true)
+	if err != nil {
+		t.Fatalf("listTurnsForLogs(includeSpawned=true) error = %v", err)
+	}
+	if len(allTurns) != 3 {
+		t.Fatalf("all turns len = %d, want 3", len(allTurns))
+	}
+}
+
+func TestResolveTurnToUpdate_SkipsLatestSpawnedTurn(t *testing.T) {
+	projectDir := t.TempDir()
+	s, err := store.New(projectDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "demo", RepoPath: projectDir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
+	}
+
+	parent := &store.Turn{Agent: "codex", Objective: "parent"}
+	if err := s.CreateTurn(parent); err != nil {
+		t.Fatalf("CreateTurn(parent) error = %v", err)
+	}
+	child := &store.Turn{Agent: "codex", Objective: "spawn child"}
+	if err := s.CreateTurn(child); err != nil {
+		t.Fatalf("CreateTurn(child) error = %v", err)
+	}
+
+	if err := s.CreateSpawn(&store.SpawnRecord{
+		ParentTurnID:  parent.ID,
+		ChildTurnID:   child.ID,
+		ParentProfile: "manager",
+		ChildProfile:  "worker",
+		Task:          "implement x",
+		Status:        "completed",
+	}); err != nil {
+		t.Fatalf("CreateSpawn() error = %v", err)
+	}
+
+	t.Setenv("ADAF_TURN_ID", "")
+
+	got, err := resolveTurnToUpdate(s, nil)
+	if err != nil {
+		t.Fatalf("resolveTurnToUpdate() error = %v", err)
+	}
+	if got.ID != parent.ID {
+		t.Fatalf("resolveTurnToUpdate() ID = %d, want %d", got.ID, parent.ID)
+	}
+}
+
 func TestRunTurnFinish_UsesADAFTurnID(t *testing.T) {
 	projectDir := t.TempDir()
 	s, err := store.New(projectDir)

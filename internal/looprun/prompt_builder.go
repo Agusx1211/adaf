@@ -25,6 +25,7 @@ type StepPromptInput struct {
 	TotalSteps int
 
 	Step       config.LoopStep
+	LoopSteps  []config.LoopStep
 	Profile    *config.Profile
 	Delegation *config.DelegationConfig
 
@@ -55,18 +56,20 @@ func BuildStepPrompt(input StepPromptInput) (string, error) {
 
 	position := config.EffectiveStepPosition(input.Step)
 	workerRole := config.EffectiveWorkerRoleForPosition(position, input.Step.Role, input.GlobalCfg)
+	canCallSupervisor := config.PositionCanCallSupervisor(position) && loopStepsHaveSupervisor(input.LoopSteps)
 	loopCtx := &promptpkg.LoopPromptContext{
-		LoopName:      loopName,
-		Cycle:         input.Cycle,
-		StepIndex:     input.StepIndex,
-		TotalSteps:    totalSteps,
-		Instructions:  input.Step.Instructions,
-		InitialPrompt: input.InitialPrompt,
-		CanStop:       input.Step.CanStop,
-		CanMessage:    input.Step.CanMessage,
-		CanPushover:   input.Step.CanPushover,
-		Messages:      input.Messages,
-		RunID:         input.RunID,
+		LoopName:          loopName,
+		Cycle:             input.Cycle,
+		StepIndex:         input.StepIndex,
+		TotalSteps:        totalSteps,
+		Instructions:      input.Step.Instructions,
+		InitialPrompt:     input.InitialPrompt,
+		CanStop:           config.PositionCanStopLoop(position),
+		CanMessage:        config.PositionCanMessageLoop(position),
+		CanCallSupervisor: canCallSupervisor,
+		CanPushover:       input.Step.CanPushover,
+		Messages:          input.Messages,
+		RunID:             input.RunID,
 	}
 
 	opts := promptpkg.BuildOpts{
@@ -85,4 +88,13 @@ func BuildStepPrompt(input StepPromptInput) (string, error) {
 		Skills:         config.EffectiveStepSkills(input.Step),
 	}
 	return promptpkg.Build(opts)
+}
+
+func loopStepsHaveSupervisor(steps []config.LoopStep) bool {
+	for _, step := range steps {
+		if config.PositionCanStopLoop(config.EffectiveStepPosition(step)) {
+			return true
+		}
+	}
+	return false
 }

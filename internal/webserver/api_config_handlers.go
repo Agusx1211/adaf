@@ -472,6 +472,7 @@ func (srv *Server) handleLoopPromptPreview(w http.ResponseWriter, r *http.Reques
 		StepIndex:     req.StepIndex,
 		TotalSteps:    len(req.Loop.Steps),
 		Step:          step,
+		LoopSteps:     req.Loop.Steps,
 		Profile:       prof,
 		Delegation:    effectiveDelegation,
 	}

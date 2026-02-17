@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/agusx1211/adaf/internal/config"
+	loopctrl "github.com/agusx1211/adaf/internal/loop"
 	"github.com/agusx1211/adaf/internal/pushover"
 	"github.com/agusx1211/adaf/internal/session"
 	"github.com/agusx1211/adaf/internal/store"
@@ -31,8 +32,9 @@ Examples:
   adaf loop list                          # Show defined loops
   adaf loop start dev-cycle               # Start a loop
   adaf loop status                        # Check active loop
-  adaf loop stop                          # Signal loop to stop
+  adaf loop stop                          # Supervisor: signal loop to stop
   adaf loop message "auth module done"    # Post inter-step message
+  adaf loop call-supervisor "Need direction on scope"  # Manager escalation
   adaf loop notify "Done" "Build passed"  # Send push notification`,
 }
 
@@ -62,10 +64,19 @@ var loopStopCmd = &cobra.Command{
 var loopMessageCmd = &cobra.Command{
 	Use:     "message <text>",
 	Aliases: []string{"msg", "send"},
-	Short:   "Post a message to subsequent loop steps",
-	Long:    "Reads ADAF_LOOP_RUN_ID and ADAF_LOOP_STEP_INDEX from environment.",
+	Short:   "Supervisor: post guidance to subsequent loop steps",
+	Long:    "Reads ADAF_LOOP_RUN_ID and ADAF_LOOP_STEP_INDEX from environment. Supervisor-only.",
 	Args:    cobra.ExactArgs(1),
 	RunE:    loopMessage,
+}
+
+var loopCallSupervisorCmd = &cobra.Command{
+	Use:     "call-supervisor <text>",
+	Aliases: []string{"call_supervisor", "escalate"},
+	Short:   "Manager: escalate to supervisor with a concise status/request",
+	Long:    "Reads ADAF_LOOP_RUN_ID and ADAF_LOOP_STEP_INDEX from environment. Manager-only.",
+	Args:    cobra.ExactArgs(1),
+	RunE:    loopCallSupervisor,
 }
 
 var loopNotifyCmd = &cobra.Command{
@@ -93,7 +104,7 @@ var loopStatusCmd = &cobra.Command{
 func init() {
 	loopStartCmd.Flags().String("plan", "", "Plan ID override for this loop run (defaults to active plan)")
 	loopNotifyCmd.Flags().IntP("priority", "p", 0, "Notification priority (-2 to 1)")
-	loopCmd.AddCommand(loopListCmd, loopStartCmd, loopStopCmd, loopMessageCmd, loopNotifyCmd, loopStatusCmd)
+	loopCmd.AddCommand(loopListCmd, loopStartCmd, loopStopCmd, loopMessageCmd, loopCallSupervisorCmd, loopNotifyCmd, loopStatusCmd)
 	rootCmd.AddCommand(loopCmd)
 }
 
@@ -110,6 +121,7 @@ func loopList(cmd *cobra.Command, args []string) error {
 
 	printHeader("Loops")
 	for _, l := range globalCfg.Loops {
+		loopHasSupervisor := loopStepsHaveSupervisor(l.Steps)
 		fmt.Printf("  %s%s%s\n", styleBoldCyan, l.Name, colorReset)
 		for i, step := range l.Steps {
 			turns := step.Turns
@@ -129,11 +141,14 @@ func loopList(cmd *cobra.Command, args []string) error {
 				}
 			}
 			flags := ""
-			if step.CanStop {
+			if config.PositionCanStopLoop(position) {
 				flags += " [can_stop]"
 			}
-			if step.CanMessage {
+			if config.PositionCanMessageLoop(position) {
 				flags += " [can_message]"
+			}
+			if config.PositionCanCallSupervisor(position) && loopHasSupervisor {
+				flags += " [can_call_supervisor]"
 			}
 			if step.CanPushover {
 				flags += " [can_pushover]"
@@ -295,6 +310,9 @@ func loopStop(cmd *cobra.Command, args []string) error {
 	if runIDStr == "" {
 		return fmt.Errorf("ADAF_LOOP_RUN_ID not set (are you running inside a loop step?)")
 	}
+	if err := requireLoopStepPosition(config.PositionSupervisor, "adaf loop stop"); err != nil {
+		return err
+	}
 	runID, err := strconv.Atoi(runIDStr)
 	if err != nil {
 		return fmt.Errorf("invalid ADAF_LOOP_RUN_ID: %s", runIDStr)
@@ -319,6 +337,9 @@ func loopMessage(cmd *cobra.Command, args []string) error {
 	if runIDStr == "" {
 		return fmt.Errorf("ADAF_LOOP_RUN_ID not set (are you running inside a loop step?)")
 	}
+	if err := requireLoopStepPosition(config.PositionSupervisor, "adaf loop message"); err != nil {
+		return err
+	}
 	runID, err := strconv.Atoi(runIDStr)
 	if err != nil {
 		return fmt.Errorf("invalid ADAF_LOOP_RUN_ID: %s", runIDStr)
@@ -340,6 +361,62 @@ func loopMessage(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("  %sMessage posted for loop run #%d.%s\n", styleBoldGreen, runID, colorReset)
+	return nil
+}
+
+func loopCallSupervisor(cmd *cobra.Command, args []string) error {
+	runIDStr := os.Getenv("ADAF_LOOP_RUN_ID")
+	stepIdxStr := os.Getenv("ADAF_LOOP_STEP_INDEX")
+	if runIDStr == "" {
+		return fmt.Errorf("ADAF_LOOP_RUN_ID not set (are you running inside a loop step?)")
+	}
+	if err := requireLoopStepPosition(config.PositionManager, "adaf loop call-supervisor"); err != nil {
+		return err
+	}
+	runID, err := strconv.Atoi(runIDStr)
+	if err != nil {
+		return fmt.Errorf("invalid ADAF_LOOP_RUN_ID: %s", runIDStr)
+	}
+
+	s, err := openStoreRequired()
+	if err != nil {
+		return err
+	}
+	run, err := s.GetLoopRun(runID)
+	if err != nil {
+		return fmt.Errorf("loading loop run #%d: %w", runID, err)
+	}
+
+	stepIdx := run.StepIndex
+	if parsed, parseErr := strconv.Atoi(stepIdxStr); parseErr == nil && parsed >= 0 {
+		stepIdx = parsed
+	}
+	targetStep, ok := nextSupervisorStepIndexInLoopRun(run, stepIdx)
+	if !ok {
+		return fmt.Errorf("adaf loop call-supervisor is unavailable: loop run #%d has no supervisor step", runID)
+	}
+
+	msg := &store.LoopMessage{
+		RunID:     runID,
+		StepIndex: stepIdx,
+		Content:   args[0],
+	}
+	if err := s.CreateLoopMessage(msg); err != nil {
+		return fmt.Errorf("creating message: %w", err)
+	}
+	if err := s.SignalLoopCallSupervisor(runID, stepIdx, targetStep, args[0]); err != nil {
+		return fmt.Errorf("signaling call-supervisor fast-forward: %w", err)
+	}
+	if turnIDRaw := strings.TrimSpace(os.Getenv("ADAF_TURN_ID")); turnIDRaw != "" {
+		turnID, parseErr := strconv.Atoi(turnIDRaw)
+		if parseErr == nil && turnID > 0 {
+			if err := s.SignalInterrupt(turnID, loopctrl.InterruptMessageCallSupervisor); err != nil {
+				return fmt.Errorf("interrupting current turn for call-supervisor: %w", err)
+			}
+		}
+	}
+
+	fmt.Printf("  %sSupervisor escalation posted for loop run #%d (fast-forward to step %d).%s\n", styleBoldGreen, runID, targetStep+1, colorReset)
 	return nil
 }
 
@@ -427,4 +504,94 @@ func loopNotify(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("  %sPushover notification sent.%s\n", styleBoldGreen, colorReset)
 	return nil
+}
+
+func requireLoopStepPosition(required, commandName string) error {
+	pos := strings.ToLower(strings.TrimSpace(os.Getenv("ADAF_POSITION")))
+	if !config.ValidPosition(pos) {
+		return fmt.Errorf("ADAF_POSITION not set or invalid (are you running inside a loop step?)")
+	}
+	if pos == required {
+		return nil
+	}
+	if commandName == "adaf loop message" && config.PositionCanCallSupervisor(pos) {
+		if hasSupervisor, _ := currentLoopHasSupervisor(); hasSupervisor {
+			return fmt.Errorf("%s is supervisor-only; managers should use `adaf loop call-supervisor \"...\"`", commandName)
+		}
+	}
+	return fmt.Errorf("%s is only available for %s steps (current position: %s)", commandName, required, pos)
+}
+
+func loopStepsHaveSupervisor(steps []config.LoopStep) bool {
+	for _, step := range steps {
+		if config.PositionCanStopLoop(config.EffectiveStepPosition(step)) {
+			return true
+		}
+	}
+	return false
+}
+
+func loopRunHasSupervisor(run *store.LoopRun) bool {
+	if run == nil {
+		return false
+	}
+	for _, step := range run.Steps {
+		if loopRunStepCanStop(step) {
+			return true
+		}
+	}
+	return false
+}
+
+func nextSupervisorStepIndexInLoopRun(run *store.LoopRun, currentStep int) (int, bool) {
+	if run == nil || len(run.Steps) == 0 {
+		return 0, false
+	}
+	if currentStep < -1 {
+		currentStep = -1
+	}
+	if currentStep >= len(run.Steps) {
+		currentStep = len(run.Steps) - 1
+	}
+	for i := currentStep + 1; i < len(run.Steps); i++ {
+		if loopRunStepCanStop(run.Steps[i]) {
+			return i, true
+		}
+	}
+	for i := 0; i <= currentStep && i < len(run.Steps); i++ {
+		if loopRunStepCanStop(run.Steps[i]) {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func loopRunStepCanStop(step store.LoopRunStep) bool {
+	if step.CanStop {
+		return true
+	}
+	return config.PositionCanStopLoop(strings.TrimSpace(step.Position))
+}
+
+func currentLoopHasSupervisor() (bool, string) {
+	runIDStr := strings.TrimSpace(os.Getenv("ADAF_LOOP_RUN_ID"))
+	if runIDStr == "" {
+		return true, ""
+	}
+	runID, err := strconv.Atoi(runIDStr)
+	if err != nil || runID <= 0 {
+		return false, "ADAF_LOOP_RUN_ID is invalid"
+	}
+	s, err := openStoreRequired()
+	if err != nil {
+		return false, "unable to load loop store"
+	}
+	run, err := s.GetLoopRun(runID)
+	if err != nil {
+		return false, "unable to load loop run"
+	}
+	if !loopRunHasSupervisor(run) {
+		return false, "this loop has no supervisor step"
+	}
+	return true, ""
 }

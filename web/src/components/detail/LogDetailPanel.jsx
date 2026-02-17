@@ -12,7 +12,16 @@ export default function LogDetailPanel() {
   var dispatch = useDispatch();
   var toast = useToast();
   var base = apiBase(state.currentProjectID);
-  var turn = state.turns.find(function (item) { return item.id === state.selectedTurn; });
+  var childTurnIDs = {};
+  (state.spawns || []).forEach(function (spawn) {
+    var childTurnID = Number((spawn && (spawn.child_turn_id || spawn.child_session_id)) || 0);
+    if (childTurnID > 0) {
+      childTurnIDs[childTurnID] = true;
+    }
+  });
+  var turn = state.turns.find(function (item) {
+    return item.id === state.selectedTurn && !childTurnIDs[item.id];
+  });
 
   var [isEditing, setIsEditing] = useState(false);
   var [saving, setSaving] = useState(false);

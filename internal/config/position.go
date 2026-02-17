@@ -118,6 +118,24 @@ func PositionCanSpawn(position string) bool {
 	}
 }
 
+// PositionCanStopLoop reports whether the position can signal a loop stop.
+// This is intentionally supervisor-only.
+func PositionCanStopLoop(position string) bool {
+	return normalizePositionName(position) == PositionSupervisor
+}
+
+// PositionCanMessageLoop reports whether the position can post guidance to
+// subsequent loop steps via `adaf loop message`.
+func PositionCanMessageLoop(position string) bool {
+	return normalizePositionName(position) == PositionSupervisor
+}
+
+// PositionCanCallSupervisor reports whether the position can escalate to the
+// supervisor via `adaf loop call-supervisor`.
+func PositionCanCallSupervisor(position string) bool {
+	return normalizePositionName(position) == PositionManager
+}
+
 // PositionCanOwnTurn reports whether this position can be assigned as a loop step owner.
 func PositionCanOwnTurn(position string) bool {
 	return normalizePositionName(position) != PositionWorker

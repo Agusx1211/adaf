@@ -20,7 +20,7 @@ func normalizePromptPosition(position string, isSubAgent bool) string {
 
 // PositionPrompt renders behavior guidance derived from the internal position.
 // The prompt intentionally does not expose position as a user-managed concept.
-func PositionPrompt(position, workerRole string, hasDelegation bool) string {
+func PositionPrompt(position, workerRole string, hasDelegation, canCallSupervisor bool) string {
 	pos := normalizePromptPosition(position, false)
 	if !config.ValidPosition(pos) {
 		pos = config.PositionLead
@@ -48,6 +48,9 @@ func PositionPrompt(position, workerRole string, hasDelegation bool) string {
 		b.WriteString("- Pause with `adaf wait-for-spawns` after launching independent tasks\n")
 		b.WriteString("- Track and communicate with workers: `adaf spawn-status`, `adaf spawn-watch`, `adaf spawn-message`, `adaf spawn-reply`\n")
 		b.WriteString("- For each writable spawn, review and land work: `adaf spawn-diff --spawn-id N` then `adaf spawn-merge --spawn-id N`\n")
+		if canCallSupervisor {
+			b.WriteString("- If you need supervisor direction or have no actionable manager work left, escalate: `adaf loop call-supervisor \"status + concrete ask\"`\n")
+		}
 		b.WriteString("- Keep plan/issues/docs current: `adaf plan`, `adaf issues`, `adaf issue create ...`, `adaf doc ...`\n")
 		b.WriteString("- Before finishing, you MUST publish a manager handoff: `adaf turn finish --built \"...\" --decisions \"...\" --challenges \"...\" --state \"...\" --issues \"...\" --next \"...\"`\n\n")
 

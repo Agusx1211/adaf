@@ -5,12 +5,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/agusx1211/adaf/internal/agent"
@@ -87,14 +89,15 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 	// Create the loop run record.
 	steps := make([]store.LoopRunStep, len(loopDef.Steps))
 	for i, s := range loopDef.Steps {
+		pos := config.EffectiveStepPosition(s)
 		steps[i] = store.LoopRunStep{
 			Profile:      s.Profile,
 			Position:     s.Position,
 			Role:         s.Role,
 			Turns:        s.Turns,
 			Instructions: s.Instructions,
-			CanStop:      s.CanStop,
-			CanMessage:   s.CanMessage,
+			CanStop:      config.PositionCanStopLoop(pos),
+			CanMessage:   config.PositionCanMessageLoop(pos),
 			CanPushover:  s.CanPushover,
 		}
 	}
@@ -132,6 +135,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 	}()
 
 	prevRoleResume := roleResumeState{}
+	nextCycleStartStep := 0
 
 	// Run cycles until stopped/cancelled (or MaxCycles if configured).
 	for cycle := 0; ; cycle++ {
@@ -142,7 +146,14 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 		run.Cycle = cycle
 		cfg.Store.UpdateLoopRun(run)
 
-		for stepIdx, stepDef := range loopDef.Steps {
+		stepStart := nextCycleStartStep
+		nextCycleStartStep = 0
+		if stepStart < 0 || stepStart >= len(loopDef.Steps) {
+			stepStart = 0
+		}
+
+		for stepIdx := stepStart; stepIdx < len(loopDef.Steps); stepIdx++ {
+			stepDef := loopDef.Steps[stepIdx]
 			select {
 			case <-ctx.Done():
 				run.Status = "cancelled"
@@ -242,6 +253,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				StepIndex:       stepIdx,
 				TotalSteps:      len(loopDef.Steps),
 				Step:            stepDef,
+				LoopSteps:       loopDef.Steps,
 				Profile:         prof,
 				Delegation:      effectiveDelegation,
 				Messages:        unseenMsgs,
@@ -287,8 +299,29 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			agentCfg.Stdout = io.Discard
 			agentCfg.Stderr = io.Discard
 
-			var pollCancel context.CancelFunc
-			var pollDone chan struct{}
+			var (
+				pollCancel          context.CancelFunc
+				pollDone            chan struct{}
+				interruptPollCancel context.CancelFunc
+				interruptPollDone   chan struct{}
+				turnCancelMu        sync.RWMutex
+				turnCancelFn        context.CancelFunc
+			)
+			setTurnCancel := func(cancel context.CancelFunc) {
+				turnCancelMu.Lock()
+				turnCancelFn = cancel
+				turnCancelMu.Unlock()
+			}
+			cancelActiveTurn := func() bool {
+				turnCancelMu.RLock()
+				cancel := turnCancelFn
+				turnCancelMu.RUnlock()
+				if cancel == nil {
+					return false
+				}
+				cancel()
+				return true
+			}
 			stopPoll := func() {
 				if pollCancel != nil {
 					pollCancel()
@@ -308,6 +341,65 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				go func() {
 					defer close(pollDone)
 					pollSpawnStatus(pollCtx, cfg.Store, turnID, eventCh)
+				}()
+			}
+			stopInterruptPoll := func() {
+				if interruptPollCancel != nil {
+					interruptPollCancel()
+					interruptPollCancel = nil
+				}
+				if interruptPollDone != nil {
+					<-interruptPollDone
+					interruptPollDone = nil
+				}
+			}
+			startInterruptPoll := func(turnID int) {
+				stopInterruptPoll()
+				if cfg.Store == nil {
+					return
+				}
+				pollCtx, cancel := context.WithCancel(ctx)
+				interruptPollCancel = cancel
+				interruptPollDone = make(chan struct{})
+				go func() {
+					defer close(interruptPollDone)
+					defer cfg.Store.ReleaseInterruptSignal(turnID)
+
+					interruptSignalCh := cfg.Store.InterruptSignalChan(turnID)
+					pollTicker := time.NewTicker(250 * time.Millisecond)
+					defer pollTicker.Stop()
+
+					for {
+						select {
+						case <-pollCtx.Done():
+							return
+						case <-interruptSignalCh:
+						case <-pollTicker.C:
+						}
+
+						msg := strings.TrimSpace(cfg.Store.CheckInterrupt(turnID))
+						if msg == "" {
+							continue
+						}
+
+						// Preserve the signal file until the turn cancel hook is
+						// available, then atomically deliver/cancel/clear.
+						if !cancelActiveTurn() {
+							continue
+						}
+
+						select {
+						case interruptCh <- msg:
+						default:
+						}
+						if err := cfg.Store.ClearInterrupt(turnID); err != nil {
+							debug.LogKV("looprun", "clear interrupt failed",
+								"turn_id", turnID,
+								"error", err,
+							)
+						}
+						return
+					}
 				}()
 			}
 			basePrompt := agentCfg.Prompt
@@ -364,11 +456,16 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 					})
 
 					startPoll(turnID)
+					startInterruptPoll(turnID)
+				},
+				OnTurnContext: func(cancel context.CancelFunc) {
+					setTurnCancel(cancel)
 				},
 				OnEnd: func(turnID int, turnHexID string, result *agent.Result) {
 					// Keep the spawn poller alive here: if this turn entered
 					// wait-for-spawns, loop.OnWait will block next and we still
 					// need realtime child output/status updates in live consumers.
+					setTurnCancel(nil)
 					waitingForSpawns := cfg.Store != nil && cfg.Store.IsWaiting(turnID)
 					if result != nil {
 						if sid := strings.TrimSpace(result.AgentSessionID); sid != "" {
@@ -395,6 +492,8 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				"error", loopErr,
 			)
 			stopPoll()
+			stopInterruptPoll()
+			setTurnCancel(nil)
 			close(streamCh)
 			<-bridgeDone
 
@@ -427,6 +526,10 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			}
 			prevRoleResume = nextRoleResumeState(stepDef, prof, stepAgentSessionID)
 
+			if errors.Is(loopErr, loop.ErrStepEndedByControlSignal) {
+				loopErr = nil
+			}
+
 			if loopErr != nil {
 				if ctx.Err() != nil {
 					run.Status = "cancelled"
@@ -440,8 +543,21 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			run.PendingHandoffs = collectHandoffs(cfg.Store, stepTurnIDs)
 			cfg.Store.UpdateLoopRun(run)
 
-			// Check stop signal after steps with can_stop.
-			if stepDef.CanStop && cfg.Store.IsLoopStopped(run.ID) {
+			targetStep, nextCycle, shouldJump, err := consumeCallSupervisorJump(cfg.Store, run, loopDef.Steps, stepIdx)
+			if err != nil {
+				return fmt.Errorf("processing call-supervisor signal: %w", err)
+			}
+			if shouldJump {
+				if nextCycle {
+					nextCycleStartStep = targetStep
+					break
+				}
+				stepIdx = targetStep - 1
+				continue
+			}
+
+			// Stop is supervisor-owned and checked after each step completion.
+			if config.PositionCanStopLoop(config.EffectiveStepPosition(stepDef)) && cfg.Store.IsLoopStopped(run.ID) {
 				return nil
 			}
 		}
@@ -1037,4 +1153,80 @@ func gatherUnseenMessages(s *store.Store, run *store.LoopRun, stepIndex int) []s
 		}
 	}
 	return unseen
+}
+
+func consumeCallSupervisorJump(s *store.Store, run *store.LoopRun, steps []config.LoopStep, currentStep int) (targetStep int, nextCycle bool, shouldJump bool, err error) {
+	if s == nil || run == nil {
+		return 0, false, false, nil
+	}
+
+	sig, err := s.ConsumeLoopCallSupervisorSignal(run.ID)
+	if err != nil {
+		return 0, false, false, err
+	}
+	if sig == nil {
+		return 0, false, false, nil
+	}
+
+	if sig.FromStepIndex != currentStep {
+		debug.LogKV("looprun", "ignoring stale call-supervisor signal",
+			"run_id", run.ID,
+			"current_step", currentStep,
+			"signal_from_step", sig.FromStepIndex,
+		)
+		return 0, false, false, nil
+	}
+
+	target, ok := resolveCallSupervisorTarget(sig, steps, currentStep)
+	if !ok {
+		debug.LogKV("looprun", "call-supervisor signal has no supervisor target",
+			"run_id", run.ID,
+			"current_step", currentStep,
+		)
+		return 0, false, false, nil
+	}
+
+	debug.LogKV("looprun", "call-supervisor fast-forward",
+		"run_id", run.ID,
+		"from_step", currentStep,
+		"target_step", target,
+	)
+	return target, target <= currentStep, true, nil
+}
+
+func resolveCallSupervisorTarget(sig *store.LoopCallSupervisorSignal, steps []config.LoopStep, currentStep int) (int, bool) {
+	if len(steps) == 0 {
+		return 0, false
+	}
+	if sig != nil {
+		target := sig.TargetStepIndex
+		if target >= 0 && target < len(steps) && config.PositionCanStopLoop(config.EffectiveStepPosition(steps[target])) {
+			return target, true
+		}
+	}
+	return nextSupervisorStepIndexForLoopSteps(steps, currentStep)
+}
+
+func nextSupervisorStepIndexForLoopSteps(steps []config.LoopStep, currentStep int) (int, bool) {
+	if len(steps) == 0 {
+		return 0, false
+	}
+	if currentStep < -1 {
+		currentStep = -1
+	}
+	if currentStep >= len(steps) {
+		currentStep = len(steps) - 1
+	}
+
+	for i := currentStep + 1; i < len(steps); i++ {
+		if config.PositionCanStopLoop(config.EffectiveStepPosition(steps[i])) {
+			return i, true
+		}
+	}
+	for i := 0; i <= currentStep && i < len(steps); i++ {
+		if config.PositionCanStopLoop(config.EffectiveStepPosition(steps[i])) {
+			return i, true
+		}
+	}
+	return 0, false
 }

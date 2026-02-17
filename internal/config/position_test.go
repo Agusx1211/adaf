@@ -135,3 +135,51 @@ func TestValidateDelegationForPosition(t *testing.T) {
 		}
 	})
 }
+
+func TestPositionLoopControlCapabilities(t *testing.T) {
+	tests := []struct {
+		position          string
+		wantCanStop       bool
+		wantCanMessage    bool
+		wantCanEscalateUp bool
+	}{
+		{
+			position:          PositionSupervisor,
+			wantCanStop:       true,
+			wantCanMessage:    true,
+			wantCanEscalateUp: false,
+		},
+		{
+			position:          PositionManager,
+			wantCanStop:       false,
+			wantCanMessage:    false,
+			wantCanEscalateUp: true,
+		},
+		{
+			position:          PositionLead,
+			wantCanStop:       false,
+			wantCanMessage:    false,
+			wantCanEscalateUp: false,
+		},
+		{
+			position:          PositionWorker,
+			wantCanStop:       false,
+			wantCanMessage:    false,
+			wantCanEscalateUp: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.position, func(t *testing.T) {
+			if got := PositionCanStopLoop(tt.position); got != tt.wantCanStop {
+				t.Fatalf("PositionCanStopLoop(%q) = %v, want %v", tt.position, got, tt.wantCanStop)
+			}
+			if got := PositionCanMessageLoop(tt.position); got != tt.wantCanMessage {
+				t.Fatalf("PositionCanMessageLoop(%q) = %v, want %v", tt.position, got, tt.wantCanMessage)
+			}
+			if got := PositionCanCallSupervisor(tt.position); got != tt.wantCanEscalateUp {
+				t.Fatalf("PositionCanCallSupervisor(%q) = %v, want %v", tt.position, got, tt.wantCanEscalateUp)
+			}
+		})
+	}
+}

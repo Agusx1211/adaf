@@ -31,8 +31,8 @@ type LoopStep struct {
 	Role           string   `json:"role,omitempty"`            // role name from global roles catalog
 	Turns          int      `json:"turns,omitempty"`           // turns per step (0 = 1 turn)
 	Instructions   string   `json:"instructions,omitempty"`    // custom instructions appended to prompt
-	CanStop        bool     `json:"can_stop,omitempty"`        // can this step signal loop stop?
-	CanMessage     bool     `json:"can_message,omitempty"`     // can this step send messages to subsequent steps?
+	CanStop        bool     `json:"can_stop,omitempty"`        // legacy: loop stop capability is now derived from position
+	CanMessage     bool     `json:"can_message,omitempty"`     // legacy: loop message capability is now derived from position
 	CanPushover    bool     `json:"can_pushover,omitempty"`    // can this step send Pushover notifications?
 	Team           string   `json:"team,omitempty"`            // team name reference (resolved to delegation at runtime)
 	StandaloneChat bool     `json:"standalone_chat,omitempty"` // interactive chat mode (minimal prompt)
