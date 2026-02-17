@@ -76,6 +76,62 @@ function isWaitForSpawnsMessage(value) {
   return normalized.indexOf('waiting for spawns') >= 0 && normalized.indexOf('parent turn suspended') >= 0;
 }
 
+function isShellTool(tool) {
+  var lc = String(tool || '').toLowerCase();
+  return lc === 'bash' || lc === 'shell' || lc === 'run_shell_command' || lc === 'run_shell';
+}
+
+function extractShellCommand(tool, input) {
+  if (!isShellTool(tool)) return '';
+  if (typeof input === 'string') return input;
+  if (!input || typeof input !== 'object') return '';
+  if (typeof input.command === 'string') return input.command;
+  if (typeof input.cmd === 'string') return input.cmd;
+  return '';
+}
+
+function trimQuotePair(text) {
+  var out = String(text || '').trim();
+  if (!out) return '';
+  if ((out[0] === '"' && out[out.length - 1] === '"') || (out[0] === '\'' && out[out.length - 1] === '\'')) {
+    return out.slice(1, -1).trim();
+  }
+  return out;
+}
+
+function normalizeLoopControlText(text) {
+  var out = trimQuotePair(text);
+  if (!out) return '';
+  if (out.endsWith('\'') && !out.startsWith('\'')) out = out.slice(0, -1).trim();
+  if (out.endsWith('"') && !out.startsWith('"')) out = out.slice(0, -1).trim();
+  return trimQuotePair(out);
+}
+
+function detectLoopControl(tool, input) {
+  var rawCommand = String(extractShellCommand(tool, input) || '').trim();
+  if (!rawCommand) return null;
+
+  var normalized = rawCommand.toLowerCase();
+  var callIdx = normalized.indexOf('adaf loop call-supervisor');
+  var stopIdx = normalized.indexOf('adaf loop stop');
+  if (callIdx < 0 && stopIdx < 0) return null;
+
+  var kind = '';
+  var idx = 0;
+  if (callIdx >= 0 && (stopIdx < 0 || callIdx <= stopIdx)) {
+    kind = 'call_supervisor';
+    idx = callIdx;
+  } else {
+    kind = 'stop_loop';
+    idx = stopIdx;
+  }
+
+  var command = normalizeLoopControlText(rawCommand.slice(idx));
+  var detail = command.replace(/^adaf\s+loop\s+(?:call-supervisor|stop)\b/i, '').trim();
+  detail = normalizeLoopControlText(detail);
+  return { kind: kind, command: command, detail: detail };
+}
+
 /* ── Components ─────────────────────────────────────────────────── */
 
 export function MarkdownContent({ text, style }) {
@@ -299,6 +355,69 @@ export function WaitForSpawnsBlock({ content }) {
   );
 }
 
+export function LoopControlBlock({ control }) {
+  var c = control && typeof control === 'object' ? control : {};
+  var isStop = c.kind === 'stop_loop';
+  var accent = isStop ? 'rgb(243, 139, 168)' : 'rgb(249, 226, 175)';
+  var title = isStop ? 'STOP LOOP' : 'CALL SUPERVISOR';
+  var subtitle = isStop
+    ? 'Supervisor issued a loop stop signal for this run.'
+    : 'Manager escalated this turn to the supervisor.';
+
+  return (
+    <div style={{
+      margin: '6px 0',
+      padding: '8px 10px',
+      background: accent + '14',
+      borderRadius: 4,
+      borderLeft: '2px solid ' + accent,
+      border: '1px solid ' + accent + '38',
+    }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        fontSize: 10,
+        fontFamily: "'JetBrains Mono', monospace",
+      }}>
+        <span style={{ color: accent }}>{isStop ? '\u25A0' : '\u21A5'}</span>
+        <span style={{ color: accent, fontWeight: 700, letterSpacing: '0.04em' }}>{title}</span>
+      </div>
+      <div style={{
+        marginTop: 4,
+        fontSize: 11,
+        color: 'var(--text-2)',
+        lineHeight: 1.4,
+      }}>
+        {subtitle}
+      </div>
+      {c.detail ? (
+        <div style={{
+          marginTop: 4,
+          fontSize: 10,
+          color: 'var(--text-1)',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}>
+          {c.detail}
+        </div>
+      ) : null}
+      {c.command ? (
+        <div style={{
+          marginTop: 4,
+          fontSize: 10,
+          color: 'var(--text-3)',
+          fontFamily: "'JetBrains Mono', monospace",
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}>
+          {c.command}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /* ── EventBlockList: renders an array of typed events ──────────── */
 
 export function EventBlockList({ events }) {
@@ -330,6 +449,15 @@ export function EventBlockList({ events }) {
       flushFileChanges();
       groups.push({ type: 'wait_for_spawns', content: evt.content || evt.text || WAIT_FOR_SPAWNS_TEXT });
       return;
+    }
+    if (evt.type === 'tool_use') {
+      var loopControl = detectLoopControl(evt.tool, evt.input);
+      if (loopControl) {
+        flushText();
+        flushFileChanges();
+        groups.push({ type: 'loop_control', control: loopControl });
+        return;
+      }
     }
     if (evt.type === 'text') {
       var text = evt.content || evt.text || '';
@@ -371,6 +499,7 @@ export function EventBlockList({ events }) {
         if (g.type === 'tool_result') return <ToolResultBlock key={i} tool={g.tool} result={g.result} isError={g.isError} />;
         if (g.type === 'file_changes') return <FileChangeBadges key={i} changes={g.changes} />;
         if (g.type === 'wait_for_spawns') return <WaitForSpawnsBlock key={i} content={g.content} />;
+        if (g.type === 'loop_control') return <LoopControlBlock key={i} control={g.control} />;
         return null;
       })}
     </div>

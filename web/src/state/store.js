@@ -356,6 +356,14 @@ export function normalizeTurns(rawTurns) {
 }
 
 export function normalizeLoopRun(run) {
+  var stepHexIDs = {};
+  if (run && typeof run.step_hex_ids === 'object') {
+    Object.keys(run.step_hex_ids).forEach(function (cycleStep) {
+      var hex = String(run.step_hex_ids[cycleStep] || '').trim();
+      if (!hex) return;
+      stepHexIDs[String(cycleStep)] = hex;
+    });
+  }
   return {
     id: Number(run && run.id) || 0,
     hex_id: run && run.hex_id ? String(run.hex_id) : '',
@@ -367,6 +375,7 @@ export function normalizeLoopRun(run) {
     stopped_at: run && run.stopped_at ? run.stopped_at : '',
     daemon_session_id: Number(run && run.daemon_session_id) || 0,
     turn_ids: arrayOrEmpty(run && (run.turn_ids || run.session_ids)).map(function (id) { return Number(id) || 0; }),
+    step_hex_ids: stepHexIDs,
     steps: arrayOrEmpty(run && run.steps).map(function (step) {
       return {
         profile: step && step.profile ? String(step.profile) : '',
