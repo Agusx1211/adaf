@@ -147,7 +147,11 @@ func toWSEnvelope(event any) wsEnvelope {
 
 	case events.AgentEventMsg:
 		eventData, _ := json.Marshal(ev.Event)
-		wireEvent := session.WireEvent{Event: json.RawMessage(eventData), SpawnID: ev.SpawnID}
+		wireEvent := session.WireEvent{
+			Event:   json.RawMessage(eventData),
+			SpawnID: ev.SpawnID,
+			TurnID:  ev.TurnID,
+		}
 		if len(ev.Raw) > 0 {
 			wireEvent.Raw = json.RawMessage(ev.Raw)
 		}

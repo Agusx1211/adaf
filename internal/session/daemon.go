@@ -1249,7 +1249,12 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 				if err != nil {
 					continue
 				}
-				b.broadcastTypedWithUpdate(MsgEvent, WireEvent{Event: eventJSON, Raw: ev.Raw, SpawnID: ev.SpawnID}, snapshotUpdate{
+				b.broadcastTypedWithUpdate(MsgEvent, WireEvent{
+					Event:   eventJSON,
+					Raw:     ev.Raw,
+					SpawnID: ev.SpawnID,
+					TurnID:  ev.TurnID,
+				}, snapshotUpdate{
 					model: ev.Event.Model,
 				})
 			case events.SpawnStatusMsg:

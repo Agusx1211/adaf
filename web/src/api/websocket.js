@@ -10,6 +10,7 @@ export function useSessionSocket(sessionID) {
   var wsRef = useRef(null);
   var reconnectRef = useRef(null);
   var contextRef = useRef({ projectID: '', sessions: [] });
+  var activeTurnBySessionRef = useRef({});
 
   useEffect(function () {
     contextRef.current = {
@@ -61,16 +62,24 @@ export function useSessionSocket(sessionID) {
     });
   }, [sessionID]);
 
-  var handleAgentStreamEvent = useCallback(function (scope, rawEvent) {
+  var handleAgentStreamEvent = useCallback(function (scope, rawEvent, meta) {
+    var turnID = Number(meta && meta.turnID || 0);
+    function withTurn(entry) {
+      if (turnID > 0) {
+        return Object.assign({}, entry, { turn_id: turnID });
+      }
+      return entry;
+    }
     var event = asObject(rawEvent);
     if (!event || typeof event !== 'object') {
       var fallbackRaw = safeJSONString(rawEvent);
-      addStreamEvent({ scope: scope, type: 'text', text: fallbackRaw });
+      addStreamEvent(withTurn({ scope: scope, type: 'text', text: fallbackRaw }));
       reportMissing({
         source: 'session_ws_event',
         reason: 'event_not_object',
         scope: scope,
         session_id: sessionID,
+        turn_id: turnID,
         event_type: typeof rawEvent,
         fallback_text: cropText(fallbackRaw, 400),
         payload: rawEvent,
@@ -86,12 +95,13 @@ export function useSessionSocket(sessionID) {
     if (event.type === 'assistant') {
       var blocks = extractContentBlocks(event);
       if (!blocks.length) {
-        addStreamEvent({ scope: scope, type: 'text', text: '[assistant event]' });
+        addStreamEvent(withTurn({ scope: scope, type: 'text', text: '[assistant event]' }));
         reportMissing({
           source: 'session_ws_event',
           reason: 'assistant_without_content_blocks',
           scope: scope,
           session_id: sessionID,
+          turn_id: turnID,
           event_type: event.type || 'assistant',
           fallback_text: '[assistant event]',
           payload: event,
@@ -101,21 +111,22 @@ export function useSessionSocket(sessionID) {
       blocks.forEach(function (block) {
         if (!block || typeof block !== 'object') return;
         if (block.type === 'text' && block.text) {
-          addStreamEvent({ scope: scope, type: 'text', text: String(block.text) });
+          addStreamEvent(withTurn({ scope: scope, type: 'text', text: String(block.text) }));
         } else if (block.type === 'thinking' && block.text) {
-          addStreamEvent({ scope: scope, type: 'thinking', text: String(block.text) });
+          addStreamEvent(withTurn({ scope: scope, type: 'thinking', text: String(block.text) }));
         } else if (block.type === 'tool_use') {
-          addStreamEvent({ scope: scope, type: 'tool_use', tool: block.name || 'tool', input: stringifyToolPayload(block.input || {}) });
+          addStreamEvent(withTurn({ scope: scope, type: 'tool_use', tool: block.name || 'tool', input: stringifyToolPayload(block.input || {}) }));
         } else if (block.type === 'tool_result') {
-          addStreamEvent({ scope: scope, type: 'tool_result', tool: block.name || 'tool_result', result: stringifyToolPayload(block.content || block.output || block.text || '') });
+          addStreamEvent(withTurn({ scope: scope, type: 'tool_result', tool: block.name || 'tool_result', result: stringifyToolPayload(block.content || block.output || block.text || '') }));
         } else {
           var blockFallback = safeJSONString(block);
-          addStreamEvent({ scope: scope, type: 'text', text: blockFallback });
+          addStreamEvent(withTurn({ scope: scope, type: 'text', text: blockFallback }));
           reportMissing({
             source: 'session_ws_event',
             reason: 'unknown_assistant_block',
             scope: scope,
             session_id: sessionID,
+            turn_id: turnID,
             event_type: block.type || 'unknown',
             fallback_text: cropText(blockFallback, 400),
             payload: block,
@@ -129,7 +140,7 @@ export function useSessionSocket(sessionID) {
       var userBlocks = extractContentBlocks(event);
       userBlocks.forEach(function (block) {
         if (block && block.type === 'tool_result') {
-          addStreamEvent({ scope: scope, type: 'tool_result', tool: block.name || 'tool_result', result: stringifyToolPayload(block.content || block.output || block.text || safeJSONString(block)) });
+          addStreamEvent(withTurn({ scope: scope, type: 'tool_result', tool: block.name || 'tool_result', result: stringifyToolPayload(block.content || block.output || block.text || safeJSONString(block)) }));
           return;
         }
         if (!block || typeof block !== 'object') return;
@@ -138,6 +149,7 @@ export function useSessionSocket(sessionID) {
           reason: 'unknown_user_block',
           scope: scope,
           session_id: sessionID,
+          turn_id: turnID,
           event_type: block.type || 'unknown',
           payload: block,
         });
@@ -148,13 +160,14 @@ export function useSessionSocket(sessionID) {
     if (event.type === 'content_block_delta') {
       var delta = event.delta && (event.delta.text || event.delta.partial_json);
       if (delta) {
-        addStreamEvent({ scope: scope, type: 'text', text: String(delta) });
+        addStreamEvent(withTurn({ scope: scope, type: 'text', text: String(delta) }));
       } else {
         reportMissing({
           source: 'session_ws_event',
           reason: 'content_block_delta_without_renderable_text',
           scope: scope,
           session_id: sessionID,
+          turn_id: turnID,
           event_type: event.type,
           payload: event,
         });
@@ -163,17 +176,18 @@ export function useSessionSocket(sessionID) {
     }
 
     if (event.type === 'result') {
-      addStreamEvent({ scope: scope, type: 'tool_result', text: 'Result received.' });
+      addStreamEvent(withTurn({ scope: scope, type: 'tool_result', text: 'Result received.' }));
       return;
     }
 
     var fallback = '[' + (event.type || 'event') + '] ' + safeJSONString(event);
-    addStreamEvent({ scope: scope, type: 'text', text: fallback });
+    addStreamEvent(withTurn({ scope: scope, type: 'text', text: fallback }));
     reportMissing({
       source: 'session_ws_event',
       reason: 'unknown_agent_event_type',
       scope: scope,
       session_id: sessionID,
+      turn_id: turnID,
       event_type: event.type || 'event',
       fallback_text: cropText(fallback, 400),
       payload: event,
@@ -182,6 +196,19 @@ export function useSessionSocket(sessionID) {
 
   var ingestEnvelope = useCallback(function (sid, envelope) {
     if (!envelope || typeof envelope !== 'object') return;
+    function positiveTurnID(value) {
+      var n = Number(value || 0);
+      if (!Number.isFinite(n) || n <= 0) return 0;
+      return n;
+    }
+    function resolveTurnID(candidate) {
+      var resolved = positiveTurnID(candidate);
+      if (resolved > 0) {
+        activeTurnBySessionRef.current[sid] = resolved;
+        return resolved;
+      }
+      return positiveTurnID(activeTurnBySessionRef.current[sid]);
+    }
     var type = envelope.type || 'event';
     var data = envelope.data;
 
@@ -205,23 +232,25 @@ export function useSessionSocket(sessionID) {
       if (data && data.prompt) {
         var promptScope = 'session-' + sid;
         var promptSpawnID = Number(data.spawn_id || data.spawnID || 0);
+        var promptTurnID = Number(data.turn_id || data.turnID || 0);
         if (Number.isFinite(promptSpawnID) && promptSpawnID > 0) {
           promptScope = 'spawn-' + promptSpawnID;
         } else {
           var promptSessionID = Number(data.session_id || data.sessionID || 0);
           if (Number.isFinite(promptSessionID) && promptSessionID < 0) {
             promptScope = 'spawn-' + (-promptSessionID);
-          } else if (Number.isFinite(promptSessionID) && promptSessionID > 0 && promptSessionID === sid) {
-            // Positive session_id can be a turn ID in loop mode.
-            promptScope = 'session-' + promptSessionID;
+          } else if (Number.isFinite(promptSessionID) && promptSessionID > 0) {
+            // In loop mode, prompt.session_id is the store turn ID.
+            if (promptTurnID <= 0) promptTurnID = promptSessionID;
           }
         }
+        promptTurnID = resolveTurnID(promptTurnID);
         addStreamEvent({
           scope: promptScope,
           type: 'initial_prompt',
           text: String(data.prompt),
           turn_hex_id: data.turn_hex_id || data.turnHexID || '',
-          turn_id: Number(data.turn_id || data.turnID || 0) || 0,
+          turn_id: promptTurnID > 0 ? promptTurnID : 0,
           is_resume: !!(data.is_resume || data.isResume),
         });
       }
@@ -232,24 +261,34 @@ export function useSessionSocket(sessionID) {
       var wireEvent = data && data.event ? data.event : data;
       var eventScope = 'session-' + sid;
       var eventSpawnID = Number(data && (data.spawn_id || data.spawnID) || 0);
+      var eventTurnID = Number(data && (data.turn_id || data.turnID) || 0);
       if (Number.isFinite(eventSpawnID) && eventSpawnID > 0) {
         eventScope = 'spawn-' + eventSpawnID;
       } else {
         var eventSessionID = Number(data && (data.session_id || data.sessionID) || 0);
         if (Number.isFinite(eventSessionID) && eventSessionID < 0) {
           eventScope = 'spawn-' + (-eventSessionID);
+        } else if (eventTurnID <= 0 && Number.isFinite(eventSessionID) && eventSessionID > 0) {
+          // In loop-mode wire payloads, positive session_id may be a turn id.
+          eventTurnID = eventSessionID;
         }
       }
-      handleAgentStreamEvent(eventScope, wireEvent);
+      if (eventTurnID <= 0 && wireEvent && typeof wireEvent === 'object') {
+        eventTurnID = Number(wireEvent.turn_id || wireEvent.turnID || 0);
+      }
+      eventTurnID = resolveTurnID(eventTurnID);
+      handleAgentStreamEvent(eventScope, wireEvent, { turnID: eventTurnID });
       return;
     }
 
     if (type === 'finished') {
       if (data && data.wait_for_spawns) {
+        var waitingTurnID = resolveTurnID(data.turn_id || data.turnID || data.session_id || data.sessionID || 0);
         addStreamEvent({
           scope: 'session-' + sid,
           type: 'text',
           text: '[system] waiting for spawns (parent turn suspended)',
+          turn_id: waitingTurnID > 0 ? waitingTurnID : 0,
         });
       }
       return;
@@ -258,12 +297,16 @@ export function useSessionSocket(sessionID) {
     if (type === 'raw') {
       var rawText = typeof data === 'string' ? data : (data && typeof data.data === 'string' ? data.data : safeJSONString(data));
       var rawScope = 'session-' + sid;
+      var rawTurnID = Number(data && (data.turn_id || data.turnID) || 0);
       if (data && data.spawn_id > 0) {
         rawScope = 'spawn-' + data.spawn_id;
       } else if (data && data.session_id < 0) {
         rawScope = 'spawn-' + (-data.session_id);
+      } else if (rawTurnID <= 0 && data && Number(data.session_id) > 0) {
+        rawTurnID = Number(data.session_id);
       }
-      addStreamEvent({ scope: rawScope, type: 'text', text: cropText(rawText) });
+      rawTurnID = resolveTurnID(rawTurnID);
+      addStreamEvent({ scope: rawScope, type: 'text', text: cropText(rawText), turn_id: rawTurnID > 0 ? rawTurnID : 0 });
       return;
     }
 

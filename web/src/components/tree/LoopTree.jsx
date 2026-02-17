@@ -309,7 +309,9 @@ export default function LoopTree() {
                 profile: (turn && turn.profile_name) || step.profile || (daemonSession && daemonSession.profile) || 'unknown',
                 agent: (turn && turn.agent) || (daemonSession && daemonSession.agent) || '',
                 model: (turn && turn.agent_model) || (daemonSession && daemonSession.model) || '',
-                status: turnID === latestTurnID && daemonSession ? daemonSession.status : 'done',
+                status: (turn && turn.build_state)
+                  ? String(turn.build_state)
+                  : (turnID === latestTurnID && daemonSession ? daemonSession.status : 'done'),
                 action: step.role || '',
                 started_at: startedAt,
                 ended_at: endedAt,
@@ -469,6 +471,7 @@ function TurnNode({ session, displayID, scopeMode, scopeID, stopSessionID, sessi
   var selected = selectedAll || selectedMain;
   var status = normalizeStatus(session.status);
   var isRunning = !!STATUS_RUNNING[status];
+  var isWaiting = status === 'waiting' || status === 'waiting_for_spawns';
   var sColor = statusColor(session.status);
   var info = agentInfo(session.agent);
   var hasSpawns = rootSpawns.length > 0;
@@ -524,6 +527,19 @@ function TurnNode({ session, displayID, scopeMode, scopeID, stopSessionID, sessi
             <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)' }}>
               {formatElapsed(session.started_at, session.ended_at)}
             </span>
+            {isWaiting && (
+              <span style={{
+                padding: '1px 5px',
+                borderRadius: 3,
+                border: '1px solid rgba(249, 226, 175, 0.25)',
+                background: 'rgba(249, 226, 175, 0.08)',
+                color: 'rgb(249, 226, 175)',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 8,
+                fontWeight: 700,
+                letterSpacing: '0.05em',
+              }}>WAITING</span>
+            )}
           </div>
           {detailText && (
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)', marginTop: 1 }}>

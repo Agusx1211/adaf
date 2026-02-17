@@ -94,6 +94,11 @@ type Loop struct {
 	// run, used to resume the session on the next turn (e.g. after wait-for-spawns).
 	lastAgentSessionID string
 
+	// InitialResumeSessionID seeds resume-mode for the first turn of this loop
+	// instance. Unlike Config.ResumeSessionID (which passes through to agents
+	// while keeping full prompt mode), this forces resume prompt mode.
+	InitialResumeSessionID string
+
 	// lastWaitResults holds results from a wait cycle, injected into the next prompt.
 	lastWaitResults []WaitResult
 
@@ -139,6 +144,10 @@ func (l *Loop) Run(ctx context.Context) error {
 		"loop_run_hex", l.LoopRunHexID,
 		"step_hex", l.StepHexID,
 	)
+
+	if l.lastAgentSessionID == "" {
+		l.lastAgentSessionID = strings.TrimSpace(l.InitialResumeSessionID)
+	}
 
 	for {
 		// Check if we've hit the turn limit.
@@ -274,7 +283,12 @@ func (l *Loop) Run(ctx context.Context) error {
 			// as a continuation message — NOT the full system prompt.
 			cfg.ResumeSessionID = l.lastAgentSessionID
 			l.lastAgentSessionID = "" // consume after use
-			cfg.Prompt = buildResumePrompt(l.lastWaitResults, l.moreSpawnsPending, l.lastInterruptMsg)
+			cfg.Prompt = buildResumePrompt(
+				l.lastWaitResults,
+				l.moreSpawnsPending,
+				l.lastInterruptMsg,
+				!resumingTurn,
+			)
 			l.lastWaitResults = nil
 			l.moreSpawnsPending = false
 			l.lastInterruptMsg = ""
@@ -723,13 +737,21 @@ func (l *Loop) ensureSeenSpawnIDs(turnID int) map[int]struct{} {
 	return l.seenSpawnIDs
 }
 
+// LastAgentSessionID returns the most recent agent session ID available for
+// resume after the loop run.
+func (l *Loop) LastAgentSessionID() string {
+	return strings.TrimSpace(l.lastAgentSessionID)
+}
+
 // buildResumePrompt constructs a minimal continuation prompt for a resumed
 // agent session. Unlike a fresh turn, the agent already has the full system
 // prompt and conversation history — we only send new information.
-func buildResumePrompt(waitResults []WaitResult, moreSpawnsPending bool, interruptMsg string) string {
+func buildResumePrompt(waitResults []WaitResult, moreSpawnsPending bool, interruptMsg string, includeContinueLead bool) string {
 	var b strings.Builder
 
-	b.WriteString("Continue from where you left off.\n\n")
+	if includeContinueLead {
+		b.WriteString("Continue from where you left off.\n\n")
+	}
 
 	if interruptMsg != "" {
 		b.WriteString("## Interrupt\n\n")

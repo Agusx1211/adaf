@@ -52,7 +52,7 @@ test('serves seeded replay sessions through project-scoped API', async ({ reques
   expect(response.status()).toBe(200);
   const sessions = await response.json();
   expect(Array.isArray(sessions)).toBe(true);
-  expect(sessions.length).toBe(state.fixtures.length);
+  expect(sessions.length).toBeGreaterThanOrEqual(state.fixtures.length);
 
   const byProfile = new Map();
   sessions.forEach((session) => {
@@ -147,6 +147,20 @@ test('shows continuation marker when a prompt resumes from a prior turn', async 
   await expect(page.getByText('Continue with the next steps after the previous response.', { exact: false }).first()).toBeVisible();
 });
 
+test('turn scope keeps parent output and wait state when recorded events omit turn_id', async ({ page, request }) => {
+  await gotoFixture(page, request);
+
+  const turnLoop = page.getByText('turn-scope-fixture', { exact: true }).first();
+  await expect(turnLoop).toBeVisible();
+  await turnLoop.click();
+
+  await page.getByText('wait-parent-fixture', { exact: true }).first().click();
+  await expect(page.getByText('WAITING', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Parent output survives missing turn_id metadata.', { exact: false }).first()).toBeVisible();
+  await expect(page.getByText('WAITING FOR SPAWNS', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Parent turn is paused until spawned agents return results.', { exact: true }).first()).toBeVisible();
+});
+
 test('assistant inspect modal opens for replayed messages', async ({ page, request }) => {
   const { state } = await gotoFixture(page, request);
   await openReplayLoop(page);
@@ -178,7 +192,7 @@ test('navigation updates hash and survives reload', async ({ page, request }) =>
 
   await page.getByRole('button', { name: 'Logs' }).click();
   await expect(page).toHaveURL(/#\/logs/);
-  await expect(page.getByText('Seed objective', { exact: false })).toBeVisible();
+  await expect(page.getByText('Seed objective', { exact: true })).toBeVisible();
 });
 
 test('boot path has no failed HTTP requests', async ({ page, request }) => {

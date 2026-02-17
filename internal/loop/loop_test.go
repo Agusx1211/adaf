@@ -383,6 +383,50 @@ func TestLoopRunAppliesTurnTimeoutSafetyNet(t *testing.T) {
 	}
 }
 
+func TestLoopInitialResumeSessionIDStartsInResumeMode(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "test", RepoPath: dir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
+	}
+
+	a := &stubAgent{}
+	var promptIsResume bool
+
+	l := &Loop{
+		Store: s,
+		Agent: a,
+		Config: agent.Config{
+			Prompt:   "base prompt",
+			MaxTurns: 1,
+		},
+		InitialResumeSessionID: "sess-prev",
+		OnPrompt: func(turnID int, turnHexID, prompt string, isResume bool) {
+			promptIsResume = isResume
+		},
+	}
+
+	if err := l.Run(context.Background()); err != nil {
+		t.Fatalf("Loop.Run() error = %v", err)
+	}
+
+	if len(a.runs) != 1 {
+		t.Fatalf("agent runs = %d, want 1", len(a.runs))
+	}
+	if got := a.runs[0].ResumeSessionID; got != "sess-prev" {
+		t.Fatalf("resume session id = %q, want %q", got, "sess-prev")
+	}
+	if got := a.runs[0].Prompt; !containsAll(got, "Continue from where you left off.") {
+		t.Fatalf("resume prompt missing continuation lead: %q", got)
+	}
+	if !promptIsResume {
+		t.Fatal("OnPrompt isResume = false, want true")
+	}
+}
+
 func TestLoopWaitForSpawnsResumesSameTurn(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.New(dir)
@@ -430,8 +474,11 @@ func TestLoopWaitForSpawnsResumesSameTurn(t *testing.T) {
 	if got := a.runs[1].Prompt; got == "" || got == "base" {
 		t.Fatalf("resume prompt = %q, want continuation prompt", got)
 	}
-	if got := a.runs[1].Prompt; got != "" && !containsAll(got, "Continue from where you left off.", "Spawn #7") {
-		t.Fatalf("resume prompt missing continuation markers: %q", got)
+	if got := a.runs[1].Prompt; got != "" && !containsAll(got, "Spawn #7") {
+		t.Fatalf("resume prompt missing wait results: %q", got)
+	}
+	if got := a.runs[1].Prompt; strings.Contains(got, "Continue from where you left off.") {
+		t.Fatalf("wait resume prompt should not include continuation lead: %q", got)
 	}
 
 	if len(waited) != 1 {
@@ -614,8 +661,11 @@ func TestLoopWaitResumePreservesSessionIDWhenCanceledRunHasNoResult(t *testing.T
 	if got := a.runs[2].ResumeSessionID; got != "sess-keep" {
 		t.Fatalf("third run resume session id = %q, want %q", got, "sess-keep")
 	}
-	if got := a.runs[2].Prompt; !containsAll(got, "Continue from where you left off.", "Spawn #2") {
-		t.Fatalf("third run prompt missing continuation markers: %q", got)
+	if got := a.runs[2].Prompt; !containsAll(got, "Spawn #2") {
+		t.Fatalf("third run prompt missing wait result markers: %q", got)
+	}
+	if got := a.runs[2].Prompt; strings.Contains(got, "Continue from where you left off.") {
+		t.Fatalf("third run wait-resume prompt should not include continuation lead: %q", got)
 	}
 }
 

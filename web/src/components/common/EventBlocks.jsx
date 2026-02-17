@@ -62,6 +62,20 @@ function truncate(str, max) {
   return str.length > max ? str.slice(0, max) + '\u2026' : str;
 }
 
+var WAIT_FOR_SPAWNS_TEXT = '[system] waiting for spawns (parent turn suspended)';
+var WAIT_FOR_SPAWNS_NORMALIZED = WAIT_FOR_SPAWNS_TEXT.toLowerCase().replace(/\s+/g, ' ').trim();
+
+function normalizeWaitForSpawnsText(value) {
+  return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function isWaitForSpawnsMessage(value) {
+  var normalized = normalizeWaitForSpawnsText(value);
+  if (!normalized) return false;
+  if (normalized === WAIT_FOR_SPAWNS_NORMALIZED) return true;
+  return normalized.indexOf('waiting for spawns') >= 0 && normalized.indexOf('parent turn suspended') >= 0;
+}
+
 /* ── Components ─────────────────────────────────────────────────── */
 
 export function MarkdownContent({ text, style }) {
@@ -242,6 +256,49 @@ export function FileChangeBadges({ changes }) {
   );
 }
 
+export function WaitForSpawnsBlock({ content }) {
+  var detail = String(content || WAIT_FOR_SPAWNS_TEXT).trim();
+  return (
+    <div style={{
+      margin: '6px 0',
+      padding: '8px 10px',
+      background: 'rgba(249, 226, 175, 0.08)',
+      borderRadius: 4,
+      borderLeft: '2px solid rgb(249, 226, 175)',
+      border: '1px solid rgba(249, 226, 175, 0.22)',
+    }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        fontSize: 10,
+        fontFamily: "'JetBrains Mono', monospace",
+      }}>
+        <span style={{ color: 'rgb(249, 226, 175)' }}>{'\u29D6'}</span>
+        <span style={{ color: 'rgb(249, 226, 175)', fontWeight: 700, letterSpacing: '0.04em' }}>WAITING FOR SPAWNS</span>
+      </div>
+      <div style={{
+        marginTop: 4,
+        fontSize: 11,
+        color: 'var(--text-2)',
+        lineHeight: 1.4,
+      }}>
+        Parent turn is paused until spawned agents return results.
+      </div>
+      <div style={{
+        marginTop: 4,
+        fontSize: 10,
+        color: 'var(--text-3)',
+        fontFamily: "'JetBrains Mono', monospace",
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+      }}>
+        {detail}
+      </div>
+    </div>
+  );
+}
+
 /* ── EventBlockList: renders an array of typed events ──────────── */
 
 export function EventBlockList({ events }) {
@@ -268,8 +325,21 @@ export function EventBlockList({ events }) {
   }
 
   events.forEach(function (evt) {
+    if (evt.type === 'wait_for_spawns') {
+      flushText();
+      flushFileChanges();
+      groups.push({ type: 'wait_for_spawns', content: evt.content || evt.text || WAIT_FOR_SPAWNS_TEXT });
+      return;
+    }
     if (evt.type === 'text') {
-      var lines = (evt.content || '').split('\n');
+      var text = evt.content || evt.text || '';
+      if (isWaitForSpawnsMessage(text)) {
+        flushText();
+        flushFileChanges();
+        groups.push({ type: 'wait_for_spawns', content: text });
+        return;
+      }
+      var lines = text.split('\n');
       for (var li = 0; li < lines.length; li++) {
         var line = lines[li];
         var m = line.match(/^File changes:\s*(create|update|delete|rename)\s+(.+)/i);
@@ -300,6 +370,7 @@ export function EventBlockList({ events }) {
         if (g.type === 'tool_use') return <ToolCallBlock key={i} tool={g.tool} input={g.input} />;
         if (g.type === 'tool_result') return <ToolResultBlock key={i} tool={g.tool} result={g.result} isError={g.isError} />;
         if (g.type === 'file_changes') return <FileChangeBadges key={i} changes={g.changes} />;
+        if (g.type === 'wait_for_spawns') return <WaitForSpawnsBlock key={i} content={g.content} />;
         return null;
       })}
     </div>
@@ -311,19 +382,21 @@ export function EventBlockList({ events }) {
 export function stateEventsToBlocks(stateEvents) {
   if (!stateEvents || !stateEvents.length) return [];
   return stateEvents.map(function (evt) {
+    var eventTurnID = Number(evt && (evt.turn_id || evt.turnID || evt._turnID) || 0) || 0;
     var meta = {
       _sourceLabel: evt._sourceLabel || '',
       _sourceColor: evt._sourceColor || '',
       _spawnID: evt._spawnID || 0,
       _scope: evt.scope || evt._scope || '',
       _ts: Number(evt && evt.ts) || 0,
+      _turnID: eventTurnID,
     };
     if (evt.type === 'initial_prompt') {
       return Object.assign({
         type: 'initial_prompt',
         content: evt.text || evt.content || '',
         _turnHexID: evt.turn_hex_id || evt.turnHexID || '',
-        _turnID: Number(evt.turn_id || evt.turnID || 0) || 0,
+        _turnID: eventTurnID,
         _isResume: !!(evt.is_resume || evt.isResume),
       }, meta);
     }
@@ -340,7 +413,11 @@ export function stateEventsToBlocks(stateEvents) {
     if (evt.type === 'thinking') {
       return Object.assign({ type: 'thinking', content: evt.text || evt.content || '' }, meta);
     }
-    return Object.assign({ type: evt.type || 'text', content: evt.text || evt.content || '' }, meta);
+    var fallbackContent = evt.text || evt.content || '';
+    if ((evt.type === 'text' || !evt.type) && isWaitForSpawnsMessage(fallbackContent)) {
+      return Object.assign({ type: 'wait_for_spawns', content: fallbackContent }, meta);
+    }
+    return Object.assign({ type: evt.type || 'text', content: fallbackContent }, meta);
   });
 }
 

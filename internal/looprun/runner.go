@@ -55,6 +55,12 @@ type RunConfig struct {
 const spawnCleanupGracePeriod = 12 * time.Second
 const promptEventLimitBytes = 256 * 1024
 
+type roleResumeState struct {
+	Role      string
+	Agent     string
+	SessionID string
+}
+
 func emitLoopEvent(eventCh chan any, eventType string, event any) bool {
 	if eventCh == nil {
 		return false
@@ -123,6 +129,8 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			o.CleanupSpawnWorktrees(run.TurnIDs)
 		}
 	}()
+
+	prevRoleResume := roleResumeState{}
 
 	// Run cycles until stopped/cancelled (or MaxCycles if configured).
 	for cycle := 0; ; cycle++ {
@@ -196,8 +204,18 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				}
 			}
 
+			// Resume only when the immediate previous turn used the same role
+			// and agent provider. Different roles must start fresh chats.
+			stepResumeSessionID := nextStepResumeSessionID(cfg.ResumeSessionID, stepDef, prof, prevRoleResume)
+			stepInitialResumeSessionID := ""
+			if !stepDef.StandaloneChat {
+				stepInitialResumeSessionID = stepResumeSessionID
+			}
+
 			// Build agent config.
-			agentCfg := buildAgentConfig(cfg, prof, run.ID, stepIdx, run.HexID, stepHexID, effectiveDelegation)
+			stepRunCfg := cfg
+			stepRunCfg.ResumeSessionID = stepResumeSessionID
+			agentCfg := buildAgentConfig(stepRunCfg, prof, run.ID, stepIdx, run.HexID, stepHexID, effectiveDelegation)
 
 			// Gather unseen messages for this step.
 			unseenMsgs := gatherUnseenMessages(cfg.Store, run, stepIdx)
@@ -239,7 +257,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			// When resuming a standalone chat, the agent already has full context.
 			// Just send the user message (step instructions) as the prompt.
 			var prompt string
-			if cfg.ResumeSessionID != "" && stepDef.StandaloneChat {
+			if stepResumeSessionID != "" && stepDef.StandaloneChat {
 				prompt = stepDef.Instructions
 			} else {
 				var err error
@@ -269,7 +287,11 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 					if ev.Parsed.Type == "" {
 						continue
 					}
-					emitLoopEvent(eventCh, "agent_event", events.AgentEventMsg{Event: ev.Parsed, Raw: ev.Raw})
+					emitLoopEvent(eventCh, "agent_event", events.AgentEventMsg{
+						Event:  ev.Parsed,
+						Raw:    ev.Raw,
+						TurnID: ev.TurnID,
+					})
 				}
 				close(bridgeDone)
 			}()
@@ -304,14 +326,16 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			basePrompt := agentCfg.Prompt
 			stepTurnStart := len(run.TurnIDs)
 			handoffsReparented := false
+			lastStepAgentSessionID := strings.TrimSpace(stepResumeSessionID)
 
 			l := &loop.Loop{
-				Store:        cfg.Store,
-				Agent:        agentInstance,
-				Config:       agentCfg,
-				PlanID:       cfg.PlanID,
-				LoopRunHexID: run.HexID,
-				StepHexID:    stepHexID,
+				Store:                  cfg.Store,
+				Agent:                  agentInstance,
+				Config:                 agentCfg,
+				PlanID:                 cfg.PlanID,
+				LoopRunHexID:           run.HexID,
+				StepHexID:              stepHexID,
+				InitialResumeSessionID: stepInitialResumeSessionID,
 				PromptFunc: func(turnID int) string {
 					// When resuming a standalone chat, skip prompt building —
 					// the agent already has full context from the previous session.
@@ -364,6 +388,11 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 					// wait-for-spawns, loop.OnWait will block next and we still
 					// need realtime child output/status updates in live consumers.
 					waitingForSpawns := cfg.Store != nil && cfg.Store.IsWaiting(turnID)
+					if result != nil {
+						if sid := strings.TrimSpace(result.AgentSessionID); sid != "" {
+							lastStepAgentSessionID = sid
+						}
+					}
 					emitLoopEvent(eventCh, "agent_finished", events.AgentFinishedMsg{
 						SessionID:     turnID,
 						TurnHexID:     turnHexID,
@@ -410,6 +439,12 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				TotalSteps: len(loopDef.Steps),
 			})
 
+			stepAgentSessionID := strings.TrimSpace(l.LastAgentSessionID())
+			if stepAgentSessionID == "" {
+				stepAgentSessionID = lastStepAgentSessionID
+			}
+			prevRoleResume = nextRoleResumeState(stepDef, prof, stepAgentSessionID)
+
 			if loopErr != nil {
 				if ctx.Err() != nil {
 					run.Status = "cancelled"
@@ -428,6 +463,49 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				return nil
 			}
 		}
+	}
+}
+
+func nextStepResumeSessionID(baseResumeSessionID string, step config.LoopStep, prof *config.Profile, prev roleResumeState) string {
+	if step.StandaloneChat {
+		return strings.TrimSpace(baseResumeSessionID)
+	}
+
+	role := strings.TrimSpace(step.Role)
+	agentName := ""
+	if prof != nil {
+		agentName = strings.TrimSpace(prof.Agent)
+	}
+
+	if role == "" || agentName == "" {
+		return ""
+	}
+	if strings.TrimSpace(prev.SessionID) == "" {
+		return ""
+	}
+	if !strings.EqualFold(role, strings.TrimSpace(prev.Role)) {
+		return ""
+	}
+	if !strings.EqualFold(agentName, strings.TrimSpace(prev.Agent)) {
+		return ""
+	}
+	return strings.TrimSpace(prev.SessionID)
+}
+
+func nextRoleResumeState(step config.LoopStep, prof *config.Profile, sessionID string) roleResumeState {
+	role := strings.TrimSpace(step.Role)
+	agentName := ""
+	if prof != nil {
+		agentName = strings.TrimSpace(prof.Agent)
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if role == "" || agentName == "" || sessionID == "" {
+		return roleResumeState{}
+	}
+	return roleResumeState{
+		Role:      role,
+		Agent:     agentName,
+		SessionID: sessionID,
 	}
 }
 

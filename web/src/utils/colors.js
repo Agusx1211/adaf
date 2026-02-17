@@ -12,6 +12,7 @@ export var STATUSES = {
   completed: '#7B8CFF',
   failed: '#FF4B4B',
   waiting: '#E8A838',
+  waiting_for_spawns: '#E8A838',
   spawning: '#FF6B9D',
 };
 
@@ -31,6 +32,7 @@ export function statusColor(status) {
   var key = String(status || 'unknown').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
   var map = {
     running: '#f9e2af', starting: '#f9e2af',
+    waiting: '#f9e2af', waiting_for_spawns: '#f9e2af',
     awaiting_input: '#89b4fa',
     completed: '#a6e3a1', complete: '#a6e3a1', merged: '#a6e3a1',
     passing: '#a6e3a1', resolved: '#a6e3a1', done: '#a6e3a1',
@@ -49,6 +51,7 @@ export function statusIcon(status) {
   var key = String(status || 'unknown').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
   var map = {
     running: '\u25C9', starting: '\u25C9',
+    waiting: '\u25CE', waiting_for_spawns: '\u25CE',
     awaiting_input: '\u25CE',
     completed: '\u2713', complete: '\u2713', merged: '\u2295',
     passing: '\u2713', failed: '\u2717', failing: '\u2717',

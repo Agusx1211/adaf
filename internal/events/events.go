@@ -12,6 +12,7 @@ type AgentEventMsg struct {
 	Event   stream.ClaudeEvent
 	Raw     []byte
 	SpawnID int // positive = sub-agent spawn, zero = parent session
+	TurnID  int // parent turn ID for session-scoped events
 }
 
 // AgentRawOutputMsg carries raw text for non-Claude agents.

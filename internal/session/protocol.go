@@ -110,6 +110,7 @@ type WireEvent struct {
 	Event   json.RawMessage `json:"event"`
 	Raw     json.RawMessage `json:"raw,omitempty"`
 	SpawnID int             `json:"spawn_id,omitempty"`
+	TurnID  int             `json:"turn_id,omitempty"`
 }
 
 // WireRaw carries raw text output for non-Claude agents.

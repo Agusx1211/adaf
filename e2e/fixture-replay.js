@@ -6,6 +6,18 @@ const FIXTURE_LOOP_NAME = 'fixture-replay';
 const FIXTURE_PROJECT_NAME = 'E2E Replay Fixtures';
 const FIXTURE_PROJECT_MARKER_ID = 'fixture-replay-project-id';
 const FIXTURE_SESSION_BASE_ID = 4200;
+const WAIT_FIXTURE_SESSION_ID = 4301;
+const WAIT_FIXTURE_PROFILE = 'wait-parent-fixture';
+const WAIT_FIXTURE_LOOP_NAME = 'turn-scope-fixture';
+const WAIT_FIXTURE_LOOP_RUN_ID = 7;
+const WAIT_FIXTURE_LOOP_HEX = 'waitloop';
+const WAIT_FIXTURE_STEP_HEX = 'waitstep';
+const WAIT_FIXTURE_PREV_TURN_ID = 900;
+const WAIT_FIXTURE_PREV_TURN_HEX = 'waitturn900';
+const WAIT_FIXTURE_TURN_ID = 901;
+const WAIT_FIXTURE_TURN_HEX = 'waitturn901';
+const WAIT_FIXTURE_PROMPT_TEXT = 'Parent turn prompt without explicit turn_id metadata.';
+const WAIT_FIXTURE_OUTPUT_TEXT = 'Parent output survives missing turn_id metadata.';
 const SEED_PLAN_ID = 'seed-plan';
 const SEED_DOC_ID = 'seed-doc';
 const SEED_ISSUE_ID = 1;
@@ -246,6 +258,8 @@ function writeSeedProjectData(adafDir, nowISO) {
     turnEvents.map(function (event) { return JSON.stringify(event); }).join('\n') + '\n',
     'utf8',
   );
+
+  writeTurnScopeFixtureData(adafDir, nowISO);
 }
 
 function writeFixtureSessions(homeDir, fixtureProjectDir, fixtures) {
@@ -294,6 +308,138 @@ function writeFixtureSessions(homeDir, fixtureProjectDir, fixtures) {
       'utf8',
     );
   });
+
+  writeTurnScopeFixtureSession(sessionsRoot, fixtureProjectDir, now);
+}
+
+function writeTurnScopeFixtureData(adafDir, nowISO) {
+  const prevTurn = {
+    id: WAIT_FIXTURE_PREV_TURN_ID,
+    hex_id: WAIT_FIXTURE_PREV_TURN_HEX,
+    loop_run_hex_id: WAIT_FIXTURE_LOOP_HEX,
+    step_hex_id: WAIT_FIXTURE_STEP_HEX,
+    plan_id: SEED_PLAN_ID,
+    date: nowISO,
+    agent: 'codex',
+    agent_model: 'seed-model',
+    profile_name: WAIT_FIXTURE_PROFILE,
+    objective: 'Turn fixture previous turn',
+    what_was_built: 'Prior turn for turn-scope fixture.',
+    current_state: 'Prior turn complete.',
+    next_steps: 'Start next turn',
+    build_state: 'success',
+    duration_secs: 5,
+  };
+  fs.writeFileSync(
+    path.join(adafDir, 'local', 'turns', String(WAIT_FIXTURE_PREV_TURN_ID) + '.json'),
+    JSON.stringify(prevTurn, null, 2) + '\n',
+    'utf8',
+  );
+
+  const waitTurn = {
+    id: WAIT_FIXTURE_TURN_ID,
+    hex_id: WAIT_FIXTURE_TURN_HEX,
+    loop_run_hex_id: WAIT_FIXTURE_LOOP_HEX,
+    step_hex_id: WAIT_FIXTURE_STEP_HEX,
+    plan_id: SEED_PLAN_ID,
+    date: nowISO,
+    agent: 'codex',
+    agent_model: 'seed-model',
+    profile_name: WAIT_FIXTURE_PROFILE,
+    objective: 'Turn fixture waiting turn',
+    what_was_built: 'Waiting-for-spawns turn.',
+    current_state: 'Waiting for spawned agents.',
+    next_steps: 'Resume when spawns complete',
+    build_state: 'waiting_for_spawns',
+    duration_secs: 12,
+  };
+  fs.writeFileSync(
+    path.join(adafDir, 'local', 'turns', String(WAIT_FIXTURE_TURN_ID) + '.json'),
+    JSON.stringify(waitTurn, null, 2) + '\n',
+    'utf8',
+  );
+
+  const loopRun = {
+    id: WAIT_FIXTURE_LOOP_RUN_ID,
+    hex_id: WAIT_FIXTURE_LOOP_HEX,
+    loop_name: WAIT_FIXTURE_LOOP_NAME,
+    plan_id: SEED_PLAN_ID,
+    steps: [
+      { profile: WAIT_FIXTURE_PROFILE, role: 'manager', turns: 1 },
+    ],
+    status: 'running',
+    cycle: 0,
+    step_index: 0,
+    started_at: nowISO,
+    session_ids: [WAIT_FIXTURE_PREV_TURN_ID, WAIT_FIXTURE_TURN_ID],
+    step_last_seen_msg: { 0: 0 },
+    pending_handoffs: [],
+    step_hex_ids: { '0:0': WAIT_FIXTURE_STEP_HEX },
+    daemon_session_id: WAIT_FIXTURE_SESSION_ID,
+  };
+  fs.writeFileSync(
+    path.join(adafDir, 'local', 'loopruns', String(WAIT_FIXTURE_LOOP_RUN_ID) + '.json'),
+    JSON.stringify(loopRun, null, 2) + '\n',
+    'utf8',
+  );
+}
+
+function writeTurnScopeFixtureSession(sessionsRoot, fixtureProjectDir, now) {
+  const sessionDir = path.join(sessionsRoot, String(WAIT_FIXTURE_SESSION_ID));
+  fs.mkdirSync(sessionDir, { recursive: true });
+
+  const startedAt = new Date(now - 45_000);
+  const endedAt = new Date(startedAt.getTime() + 10_000);
+  const meta = {
+    id: WAIT_FIXTURE_SESSION_ID,
+    profile_name: WAIT_FIXTURE_PROFILE,
+    agent_name: 'codex',
+    loop_name: WAIT_FIXTURE_LOOP_NAME,
+    loop_steps: 1,
+    project_dir: fixtureProjectDir,
+    project_name: FIXTURE_PROJECT_NAME,
+    project_id: '',
+    pid: 0,
+    status: 'done',
+    started_at: startedAt.toISOString(),
+    ended_at: endedAt.toISOString(),
+    error: '',
+  };
+  fs.writeFileSync(
+    path.join(sessionDir, 'meta.json'),
+    JSON.stringify(meta, null, 2) + '\n',
+    'utf8',
+  );
+
+  const events = [
+    {
+      timestamp: startedAt.toISOString(),
+      type: 'prompt',
+      data: JSON.stringify({
+        turn_hex_id: WAIT_FIXTURE_TURN_HEX,
+        prompt: WAIT_FIXTURE_PROMPT_TEXT,
+      }),
+    },
+    {
+      timestamp: new Date(startedAt.getTime() + 1000).toISOString(),
+      type: 'event',
+      data: JSON.stringify({
+        event: assistantTextEvent(WAIT_FIXTURE_OUTPUT_TEXT),
+      }),
+    },
+    {
+      timestamp: new Date(startedAt.getTime() + 2000).toISOString(),
+      type: 'finished',
+      data: JSON.stringify({
+        wait_for_spawns: true,
+      }),
+    },
+  ];
+  fs.writeFileSync(
+    path.join(sessionDir, 'events.jsonl'),
+    events.map(function (event) { return JSON.stringify(event); }).join('\n') + '\n',
+    'utf8',
+  );
 }
 
 function buildReplayEvents(provider, fixture) {

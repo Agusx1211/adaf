@@ -322,6 +322,65 @@ func TestBuildAgentConfig_NoDelegationJSON(t *testing.T) {
 	}
 }
 
+func TestNextStepResumeSessionID_StandaloneUsesBaseResume(t *testing.T) {
+	prof := &config.Profile{Name: "p1", Agent: "codex"}
+	step := config.LoopStep{StandaloneChat: true}
+	prev := roleResumeState{Role: "manager", Agent: "codex", SessionID: "prev-sess"}
+
+	got := nextStepResumeSessionID("standalone-sess", step, prof, prev)
+	if got != "standalone-sess" {
+		t.Fatalf("nextStepResumeSessionID() = %q, want %q", got, "standalone-sess")
+	}
+}
+
+func TestNextStepResumeSessionID_ResumesOnlyWhenRoleAndAgentMatch(t *testing.T) {
+	prof := &config.Profile{Name: "p1", Agent: "codex"}
+	step := config.LoopStep{Role: "manager"}
+	prev := roleResumeState{Role: "manager", Agent: "codex", SessionID: "prev-sess"}
+
+	got := nextStepResumeSessionID("", step, prof, prev)
+	if got != "prev-sess" {
+		t.Fatalf("nextStepResumeSessionID() = %q, want %q", got, "prev-sess")
+	}
+}
+
+func TestNextStepResumeSessionID_DoesNotResumeOnRoleOrAgentMismatch(t *testing.T) {
+	prof := &config.Profile{Name: "p1", Agent: "codex"}
+
+	byRole := nextStepResumeSessionID("", config.LoopStep{Role: "supervisor"}, prof, roleResumeState{
+		Role:      "manager",
+		Agent:     "codex",
+		SessionID: "prev-sess",
+	})
+	if byRole != "" {
+		t.Fatalf("role mismatch resume id = %q, want empty", byRole)
+	}
+
+	byAgent := nextStepResumeSessionID("", config.LoopStep{Role: "manager"}, prof, roleResumeState{
+		Role:      "manager",
+		Agent:     "claude",
+		SessionID: "prev-sess",
+	})
+	if byAgent != "" {
+		t.Fatalf("agent mismatch resume id = %q, want empty", byAgent)
+	}
+}
+
+func TestNextRoleResumeState_RequiresRoleAgentAndSessionID(t *testing.T) {
+	prof := &config.Profile{Name: "p1", Agent: "codex"}
+	step := config.LoopStep{Role: "manager"}
+
+	state := nextRoleResumeState(step, prof, "new-sess")
+	if state.Role != "manager" || state.Agent != "codex" || state.SessionID != "new-sess" {
+		t.Fatalf("nextRoleResumeState() = %+v, want role+agent+session", state)
+	}
+
+	empty := nextRoleResumeState(config.LoopStep{}, prof, "new-sess")
+	if empty != (roleResumeState{}) {
+		t.Fatalf("nextRoleResumeState() without role = %+v, want empty", empty)
+	}
+}
+
 func TestSpawnSnapshotFingerprint_Empty(t *testing.T) {
 	fp := spawnSnapshotFingerprint(nil)
 	if fp != "" {
