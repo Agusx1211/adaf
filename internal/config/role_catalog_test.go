@@ -85,13 +85,15 @@ func TestRemovePromptRuleUnlinksFromRoles(t *testing.T) {
 	}
 }
 
-func TestDefaultRoleDefinitions_DoNotFixUpstreamCommunicationByRole(t *testing.T) {
+func TestDefaultRoleDefinitions_ExcludeLegacyPositionRoles(t *testing.T) {
 	defs := DefaultRoleDefinitions()
+	seen := make(map[string]struct{}, len(defs))
 	for _, def := range defs {
-		for _, rid := range def.RuleIDs {
-			if strings.EqualFold(strings.TrimSpace(rid), RuleCommunicationUpstream) {
-				t.Fatalf("role %q should not include %q; upstream communication is runtime-contextual", def.Name, RuleCommunicationUpstream)
-			}
+		seen[def.Name] = struct{}{}
+	}
+	for _, legacy := range []string{"manager", "supervisor", "lead-developer"} {
+		if _, ok := seen[legacy]; ok {
+			t.Fatalf("default role catalog should not include legacy position-like role %q", legacy)
 		}
 	}
 }
@@ -105,47 +107,36 @@ func TestDefaultRoleDefinitions_IdentityIsTopLevel(t *testing.T) {
 	}
 }
 
-func TestEnsureDefaultRoleCatalog_StripsLegacyUpstreamCommunicationRule(t *testing.T) {
+func TestEnsureDefaultRoleCatalog_StripsReservedPositionRoles(t *testing.T) {
 	cfg := &GlobalConfig{
-		PromptRules: []PromptRule{
-			{ID: RuleCommunicationUpstream, Body: "legacy upstream rule"},
-			{ID: RuleDeveloperIdentity, Body: "dev rule"},
-		},
 		Roles: []RoleDefinition{
-			{
-				Name:         "developer",
-				CanWriteCode: true,
-				RuleIDs:      []string{RuleDeveloperIdentity, RuleCommunicationUpstream},
-			},
+			{Name: "manager", Title: "MANAGER"},
+			{Name: "lead-developer", Title: "LEAD"},
+			{Name: "supervisor", Title: "SUPERVISOR"},
+			{Name: "developer", Title: "DEVELOPER"},
 		},
-		DefaultRole: "developer",
+		DefaultRole: "manager",
 	}
 
 	changed := EnsureDefaultRoleCatalog(cfg)
 	if !changed {
-		t.Fatalf("EnsureDefaultRoleCatalog should report changes when stripping legacy upstream rule")
+		t.Fatalf("EnsureDefaultRoleCatalog() changed = false, want true")
 	}
+	if len(cfg.Roles) != 1 || cfg.Roles[0].Name != "developer" {
+		t.Fatalf("roles after normalization = %#v, want only developer", cfg.Roles)
+	}
+	if cfg.DefaultRole != "developer" {
+		t.Fatalf("default role = %q, want %q", cfg.DefaultRole, "developer")
+	}
+}
 
-	if cfg.FindPromptRule(RuleCommunicationUpstream) != nil {
-		t.Fatalf("legacy upstream prompt rule should be removed from catalog")
-	}
-	if cfg.FindPromptRule(RuleDeveloperIdentity) != nil {
-		t.Fatalf("legacy identity prompt rule should be removed from catalog")
-	}
+func TestAddRoleDefinition_RejectsReservedPositionNames(t *testing.T) {
+	cfg := &GlobalConfig{}
+	EnsureDefaultRoleCatalog(cfg)
 
-	role := cfg.FindRoleDefinition("developer")
-	if role == nil {
-		t.Fatalf("developer role missing after normalization")
-	}
-	for _, rid := range role.RuleIDs {
-		if strings.EqualFold(strings.TrimSpace(rid), RuleCommunicationUpstream) {
-			t.Fatalf("developer role still contains stripped upstream rule: %v", role.RuleIDs)
+	for _, name := range []string{"manager", "supervisor", "lead", "worker", "lead-developer"} {
+		if err := cfg.AddRoleDefinition(RoleDefinition{Name: name}); err == nil {
+			t.Fatalf("AddRoleDefinition(%q) error = nil, want reserved-name error", name)
 		}
-		if strings.EqualFold(strings.TrimSpace(rid), RuleDeveloperIdentity) {
-			t.Fatalf("developer role still contains stripped identity rule: %v", role.RuleIDs)
-		}
-	}
-	if got := strings.TrimSpace(role.Identity); got != "dev rule" {
-		t.Fatalf("developer identity = %q, want %q", got, "dev rule")
 	}
 }

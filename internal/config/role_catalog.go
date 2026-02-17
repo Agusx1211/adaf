@@ -22,35 +22,15 @@ type RoleDefinition struct {
 }
 
 // Built-in prompt rule IDs.
-// Identity IDs are legacy compatibility IDs used for migration from older configs.
 const (
-	RuleManagerIdentity       = "manager_identity"
-	RuleManagerCore           = "manager_core"
-	RuleManagerAnti           = "manager_anti_patterns"
-	RuleLeadDeveloperIdentity = "lead_developer_identity"
-	RuleDeveloperIdentity     = "developer_identity"
-	RuleSupervisorIdentity    = "supervisor_identity"
-
-	RuleUIDesignerIdentity      = "ui_designer_identity"
-	RuleQAIdentity              = "qa_identity"
-	RuleBackendDesignerIdentity = "backend_designer_identity"
-	RuleDocumentatorIdentity    = "documentator_identity"
-	RuleReviewerIdentity        = "reviewer_identity"
-	RuleScoutIdentity           = "scout_identity"
-	RuleResearcherIdentity      = "researcher_identity"
-
-	RuleCommunicationUpstream   = "communication_upstream_only"
+	RuleManagerCore             = "manager_core"
+	RuleManagerAnti             = "manager_anti_patterns"
 	RuleCommunicationDownstream = "communication_downstream_only"
 	RuleSupervisorCmds          = "supervisor_commands"
 )
 
 const (
-	roleIdentityManager = "You are a MANAGER agent. You do NOT write code or run tests directly. " +
-		"Your entire value comes from effective delegation and review."
-	roleIdentityLeadDeveloper = "You are a LEAD DEVELOPER agent. Deliver high-quality code and coordinate implementation when delegation is available.\n\n" +
-		"You are responsible for architecture coherence, technical quality, and delivery pacing."
 	roleIdentityDeveloper  = "You are a DEVELOPER agent. Focus on implementation quality, test coverage, and clean execution of the assigned scope."
-	roleIdentitySupervisor = "You are a SUPERVISOR agent. You review progress and provide guidance via spawn messaging. You do NOT write code."
 	roleIdentityUIDesigner = "You are a UI DESIGNER role. Focus on user experience, interaction flows, visual hierarchy, responsive behavior, and accessibility.\n\n" +
 		"Produce implementation-ready UI direction with explicit component states and edge cases."
 	roleIdentityQA = "You are a QA role. Focus on verification, test design, regressions, failure modes, and release confidence.\n\n" +
@@ -66,35 +46,6 @@ const (
 	roleIdentityResearcher = "You are a RESEARCHER role. Focus on option analysis, tradeoffs, and recommendation quality.\n\n" +
 		"Support conclusions with clear assumptions and constraints."
 )
-
-func legacyIdentityRuleText(ruleID string) (string, bool) {
-	switch normalizeRuleID(ruleID) {
-	case RuleManagerIdentity:
-		return roleIdentityManager, true
-	case RuleLeadDeveloperIdentity:
-		return roleIdentityLeadDeveloper, true
-	case RuleDeveloperIdentity:
-		return roleIdentityDeveloper, true
-	case RuleSupervisorIdentity:
-		return roleIdentitySupervisor, true
-	case RuleUIDesignerIdentity:
-		return roleIdentityUIDesigner, true
-	case RuleQAIdentity:
-		return roleIdentityQA, true
-	case RuleBackendDesignerIdentity:
-		return roleIdentityBackendDesigner, true
-	case RuleDocumentatorIdentity:
-		return roleIdentityDocumentator, true
-	case RuleReviewerIdentity:
-		return roleIdentityReviewer, true
-	case RuleScoutIdentity:
-		return roleIdentityScout, true
-	case RuleResearcherIdentity:
-		return roleIdentityResearcher, true
-	default:
-		return "", false
-	}
-}
 
 var defaultPromptRules = []PromptRule{
 	{
@@ -135,36 +86,12 @@ var defaultPromptRules = []PromptRule{
 
 var defaultRoleDefinitions = []RoleDefinition{
 	{
-		Name:         RoleManager,
-		Title:        "MANAGER",
-		Description:  "Planning/delegation focused; no direct coding.",
-		Identity:     roleIdentityManager,
-		CanWriteCode: false,
-		RuleIDs:      []string{RuleManagerCore, RuleManagerAnti, RuleCommunicationDownstream},
-	},
-	{
-		Name:         RoleLeadDeveloper,
-		Title:        "LEAD DEVELOPER",
-		Description:  "Lead coder; can also orchestrate work.",
-		Identity:     roleIdentityLeadDeveloper,
-		CanWriteCode: true,
-		RuleIDs:      []string{RuleCommunicationDownstream},
-	},
-	{
 		Name:         RoleDeveloper,
 		Title:        "DEVELOPER",
 		Description:  "Execution-focused developer.",
 		Identity:     roleIdentityDeveloper,
 		CanWriteCode: true,
 		RuleIDs:      nil,
-	},
-	{
-		Name:         RoleSupervisor,
-		Title:        "SUPERVISOR",
-		Description:  "Review and guidance role; no direct coding.",
-		Identity:     roleIdentitySupervisor,
-		CanWriteCode: false,
-		RuleIDs:      []string{RuleCommunicationDownstream, RuleSupervisorCmds},
 	},
 	{
 		Name:         RoleUIDesigner,
@@ -305,6 +232,15 @@ func hasRoleName(roles []RoleDefinition, name string) bool {
 	return false
 }
 
+func isReservedPositionRoleName(name string) bool {
+	switch normalizeRoleName(name) {
+	case PositionSupervisor, PositionManager, PositionLead, PositionWorker, "lead-developer":
+		return true
+	default:
+		return false
+	}
+}
+
 // EnsureDefaultRoleCatalog guarantees that role/rule catalogs exist and are valid.
 // Returns true when it mutates cfg.
 func EnsureDefaultRoleCatalog(cfg *GlobalConfig) bool {
@@ -312,14 +248,6 @@ func EnsureDefaultRoleCatalog(cfg *GlobalConfig) bool {
 		return false
 	}
 	changed := false
-	legacyRuleBodies := make(map[string]string, len(cfg.PromptRules))
-	for _, rule := range cfg.PromptRules {
-		id := normalizeRuleID(rule.ID)
-		if id == "" {
-			continue
-		}
-		legacyRuleBodies[id] = strings.TrimSpace(rule.Body)
-	}
 
 	if len(cfg.PromptRules) == 0 {
 		cfg.PromptRules = DefaultPromptRules()
@@ -330,14 +258,6 @@ func EnsureDefaultRoleCatalog(cfg *GlobalConfig) bool {
 		for _, rule := range cfg.PromptRules {
 			id := normalizeRuleID(rule.ID)
 			if id == "" {
-				changed = true
-				continue
-			}
-			if id == RuleCommunicationUpstream {
-				changed = true
-				continue
-			}
-			if _, isIdentity := legacyIdentityRuleText(id); isIdentity {
 				changed = true
 				continue
 			}
@@ -374,6 +294,10 @@ func EnsureDefaultRoleCatalog(cfg *GlobalConfig) bool {
 				changed = true
 				continue
 			}
+			if isReservedPositionRoleName(name) {
+				changed = true
+				continue
+			}
 			if _, ok := seen[name]; ok {
 				changed = true
 				continue
@@ -386,21 +310,6 @@ func EnsureDefaultRoleCatalog(cfg *GlobalConfig) bool {
 				id := normalizeRuleID(ruleID)
 				if id == "" {
 					changed = true
-					continue
-				}
-				if id == RuleCommunicationUpstream {
-					changed = true
-					continue
-				}
-				if fallbackIdentity, isIdentity := legacyIdentityRuleText(id); isIdentity {
-					changed = true
-					if roleIdentity == "" {
-						if body := legacyRuleBodies[id]; body != "" {
-							roleIdentity = body
-						} else {
-							roleIdentity = fallbackIdentity
-						}
-					}
 					continue
 				}
 				if _, ok := seenRules[id]; ok {
@@ -493,6 +402,9 @@ func (c *GlobalConfig) AddRoleDefinition(role RoleDefinition) error {
 	if name == "" {
 		return fmt.Errorf("role name cannot be empty")
 	}
+	if isReservedPositionRoleName(name) {
+		return fmt.Errorf("role name %q is reserved by the position model", name)
+	}
 	if c.FindRoleDefinition(name) != nil {
 		return fmt.Errorf("role already exists: %s", name)
 	}
@@ -505,15 +417,6 @@ func (c *GlobalConfig) AddRoleDefinition(role RoleDefinition) error {
 	for _, rid := range role.RuleIDs {
 		key := normalizeRuleID(rid)
 		if key == "" {
-			continue
-		}
-		if key == RuleCommunicationUpstream {
-			continue
-		}
-		if fallbackIdentity, isIdentity := legacyIdentityRuleText(key); isIdentity {
-			if role.Identity == "" {
-				role.Identity = fallbackIdentity
-			}
 			continue
 		}
 		if _, ok := seen[key]; ok {

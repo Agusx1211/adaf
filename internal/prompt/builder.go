@@ -12,7 +12,12 @@ import (
 const maxRecentTurns = 5
 
 func buildSubAgentPrompt(opts BuildOpts) (string, error) {
-	role := config.EffectiveRole(opts.Role, opts.GlobalCfg)
+	position := normalizePromptPosition(opts.Position, true)
+	workerRole := config.EffectiveWorkerRoleForPosition(position, opts.Role, opts.GlobalCfg)
+	roleLabel := workerRole
+	if strings.TrimSpace(roleLabel) == "" {
+		roleLabel = "worker"
+	}
 
 	var b strings.Builder
 
@@ -21,7 +26,7 @@ func buildSubAgentPrompt(opts BuildOpts) (string, error) {
 	// display it as a visually separate block instead of swallowing the task.
 	b.WriteString("Context:\n```\n")
 
-	fmt.Fprintf(&b, "You are a sub-agent working as a %s.", role)
+	fmt.Fprintf(&b, "You are a sub-agent working as a %s.", roleLabel)
 	b.WriteString(" You were spawned by a parent agent to complete a specific task.\n")
 
 	if opts.ReadOnly {
@@ -31,6 +36,7 @@ func buildSubAgentPrompt(opts BuildOpts) (string, error) {
 	}
 
 	b.WriteString("If you need to communicate with your parent agent use: adaf parent-ask \"question\"\n")
+	b.WriteString("Before finishing your turn, update handoff notes with adaf turn update.\n")
 
 	if opts.Delegation != nil && len(opts.Delegation.Profiles) > 0 {
 		b.WriteString(delegationSection(opts.Delegation, opts.GlobalCfg, nil))
@@ -90,6 +96,10 @@ type BuildOpts struct {
 	// When empty, prompt generation defaults to the configured default role.
 	Role string
 
+	// Position overrides the built-in execution position for this run context.
+	// Valid values: supervisor, manager, lead, worker.
+	Position string
+
 	// GlobalCfg provides access to all profiles (for spawnable info).
 	GlobalCfg *config.GlobalConfig
 
@@ -127,8 +137,7 @@ type BuildOpts struct {
 	StandaloneChat bool
 
 	// Skills lists which skill IDs are active for this prompt.
-	// When nil (not empty slice), Build() falls back to the legacy prompt path.
-	// When non-nil (including empty), Build() uses the skills-driven path.
+	// When nil, Build() uses the full configured skill catalog.
 	Skills []string
 }
 
@@ -144,9 +153,7 @@ type WaitResultInfo struct {
 	Branch   string // worktree branch (empty for read-only)
 }
 
-// Build constructs a prompt from project context and role configuration.
-// When opts.Skills is non-nil, the skills-driven prompt path is used.
-// When opts.Skills is nil, the legacy prompt path is used for backward compatibility.
+// Build constructs a prompt from project context and role/position configuration.
 func Build(opts BuildOpts) (string, error) {
 	if opts.ParentTurnID > 0 {
 		return buildSubAgentPrompt(opts)
@@ -156,11 +163,37 @@ func Build(opts BuildOpts) (string, error) {
 		return buildStandaloneChatContext(opts)
 	}
 
-	if opts.Skills != nil {
-		return buildSkillsPrompt(opts)
+	if opts.Skills == nil {
+		opts.Skills = defaultPromptSkillIDs(opts.GlobalCfg)
 	}
+	return buildSkillsPrompt(opts)
+}
 
-	return buildLegacyPrompt(opts)
+func defaultPromptSkillIDs(globalCfg *config.GlobalConfig) []string {
+	if globalCfg != nil {
+		config.EnsureDefaultSkillCatalog(globalCfg)
+		out := make([]string, 0, len(globalCfg.Skills))
+		for _, sk := range globalCfg.Skills {
+			id := strings.TrimSpace(sk.ID)
+			if id == "" {
+				continue
+			}
+			out = append(out, id)
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	defaults := config.DefaultSkills()
+	out := make([]string, 0, len(defaults))
+	for _, sk := range defaults {
+		id := strings.TrimSpace(sk.ID)
+		if id == "" {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
 }
 
 // hasSkill reports whether the given skill ID is active in the skills list.
@@ -183,23 +216,33 @@ func buildSkillsPrompt(opts BuildOpts) (string, error) {
 		return "Explore the codebase and address any open issues.", nil
 	}
 
-	_, plan := resolvePlan(opts)
+	effectivePlanID, plan := resolvePlan(opts)
 
-	// Role header (slim: title + identity + description only).
+	effectivePosition := normalizePromptPosition(opts.Position, false)
+	workerRole := config.EffectiveWorkerRoleForPosition(effectivePosition, opts.Role, opts.GlobalCfg)
+	hasDelegation := opts.Delegation != nil && len(opts.Delegation.Profiles) > 0
+
+	// Position header and duties.
 	if opts.Profile != nil {
-		roleSection := RolePromptSlim(opts.Profile, opts.Role, opts.GlobalCfg)
+		posSection := PositionPrompt(effectivePosition, workerRole, hasDelegation)
+		if posSection != "" {
+			b.WriteString(posSection)
+			b.WriteString("\n")
+		}
+	}
+
+	// Worker-role header (slim role identity), only for worker contexts.
+	if opts.Profile != nil && workerRole != "" {
+		roleSection := RolePromptSlim(opts.Profile, workerRole, opts.GlobalCfg)
 		if roleSection != "" {
 			b.WriteString(roleSection)
 			b.WriteString("\n")
 		}
 	}
 
-	// Resolve skills for role and read-only mode.
-	effectiveRole := ""
-	if opts.Profile != nil {
-		effectiveRole = config.EffectiveStepRole(opts.Role, opts.GlobalCfg)
-	}
-	resolvedSkills := config.ResolveSkillsForRole(opts.Skills, effectiveRole, opts.ReadOnly, opts.GlobalCfg)
+	// Resolve skills for position/role and read-only mode.
+	resolvedSkills := config.ResolveSkillsForContext(opts.Skills, effectivePosition, workerRole, opts.ReadOnly, opts.GlobalCfg)
+	roleCanWrite := config.CanWriteForPositionAndRole(effectivePosition, workerRole, opts.GlobalCfg)
 
 	// Skills section.
 	if len(resolvedSkills) > 0 && opts.GlobalCfg != nil {
@@ -217,6 +260,14 @@ func buildSkillsPrompt(opts BuildOpts) (string, error) {
 	if opts.ReadOnly && hasSkill(resolvedSkills, config.SkillReadOnly) {
 		b.WriteString(ReadOnlyPrompt())
 		b.WriteString("\n")
+	}
+
+	// Core operating rules.
+	if opts.ParentTurnID == 0 && hasSkill(resolvedSkills, config.SkillAutonomy) {
+		b.WriteString("You are fully autonomous. There is no human in the loop.\n\n")
+	}
+	if opts.ParentTurnID == 0 && !opts.ReadOnly && roleCanWrite && hasSkill(resolvedSkills, config.SkillCommit) {
+		b.WriteString("You own your repository. Commit your work.\n\n")
 	}
 
 	// Dynamic context sections gated by active skills.
@@ -255,120 +306,26 @@ func buildSkillsPrompt(opts BuildOpts) (string, error) {
 	b.WriteString(renderWaitResults(opts.WaitResults))
 	b.WriteString(renderHandoffs(opts.Handoffs))
 
-	// Project context (lightweight — agents discover details via CLI).
-	b.WriteString(renderContextSection(opts, project, plan))
-
-	return b.String(), nil
-}
-
-// buildLegacyPrompt is the original Build() logic, used when opts.Skills is nil.
-func buildLegacyPrompt(opts BuildOpts) (string, error) {
-	var b strings.Builder
-
-	s := opts.Store
-	project := opts.Project
-
-	if project == nil {
-		return "Explore the codebase and address any open issues.", nil
-	}
-
-	effectivePlanID, plan := resolvePlan(opts)
-
-	allTurns, _ := s.ListTurns()
-
-	// Role-specific header.
-	if opts.Profile != nil {
-		roleSection := RolePrompt(opts.Profile, opts.Role, opts.GlobalCfg)
-		if roleSection != "" {
-			b.WriteString(roleSection)
-			b.WriteString("\n")
-		}
-	}
-
-	// Read-only mode.
-	if opts.ReadOnly {
-		b.WriteString(ReadOnlyPrompt())
-		b.WriteString("\n")
-	}
-
-	// Compute effective role for role-conditional prompt sections.
-	effectiveRole := ""
-	if opts.Profile != nil {
-		effectiveRole = config.EffectiveStepRole(opts.Role, opts.GlobalCfg)
-	}
-
-	// Rules.
-	b.WriteString("# Rules\n\n")
-	if opts.ParentTurnID == 0 {
-		b.WriteString("- **You are fully autonomous. There is no human in the loop.** No one will answer questions, grant permissions, or provide clarification. " +
-			"You must make all decisions yourself. Do not ask for confirmation or direction — decide and act. " +
-			"If something is ambiguous, use your best judgment and move forward.\n")
-	}
-	roleCanWrite := config.CanWriteCode(effectiveRole, opts.GlobalCfg)
-	if roleCanWrite {
-		b.WriteString("- Write code, run tests, and ensure everything compiles before finishing.\n")
-	} else {
-		b.WriteString("- Review work, check progress, and provide guidance to running agents. Do NOT write or modify code.\n")
-	}
-	b.WriteString("- Focus on one coherent unit of work. Stop when the current phase (or a meaningful increment of it) is complete.\n")
-	if !opts.ReadOnly && roleCanWrite {
-		b.WriteString("- **You own your repository. Commit your work.** Do not leave changes uncommitted. " +
-			"Every time you finish a coherent piece of work, create a git commit. " +
-			"Uncommitted changes are invisible to scouts, other agents, and future sessions. " +
-			"Commit early and often — your worktree is yours alone.\n")
-	}
-	b.WriteString("- Do NOT read or write files inside the adaf project store directly (for example `~/.adaf/projects/<id>/`). " +
-		"Use `adaf` CLI commands instead (`adaf issues`, `adaf log`, `adaf plan`, etc.). " +
-		"The storage layout may change and direct access will be restricted in the future.\n")
-	b.WriteString("\n")
-
-	// Context.
-	b.WriteString("# Context\n\n")
-
-	// Recent session logs.
-	if len(allTurns) > 0 {
-		b.WriteString(renderSessionLogs(allTurns))
-	}
-
-	// Issues section.
-	b.WriteString(renderIssues(s, effectivePlanID))
-
-	// Loop context.
-	if opts.LoopContext != nil {
-		b.WriteString(renderLoopContext(opts))
-
-		if opts.LoopContext.CanPushover {
-			b.WriteString(renderPushover())
-		}
-
-		if len(opts.LoopContext.Messages) > 0 {
-			b.WriteString(renderLoopMessages(opts.LoopContext.Messages))
-		}
-	}
-
-	// Delegation section.
-	var runningSpawns []store.SpawnRecord
-	if opts.Store != nil && opts.CurrentTurnID > 0 {
-		if records, err := opts.Store.SpawnsByParent(opts.CurrentTurnID); err == nil {
-			for _, rec := range records {
-				if isDelegationActiveSpawnStatus(rec.Status) {
-					runningSpawns = append(runningSpawns, rec)
-				}
+	// Session logs and issues.
+	if opts.ParentTurnID == 0 && opts.Store != nil {
+		if hasSkill(resolvedSkills, config.SkillSessionContext) {
+			if allTurns, err := opts.Store.ListTurns(); err == nil && len(allTurns) > 0 {
+				b.WriteString(renderSessionLogs(allTurns))
 			}
 		}
+		if hasSkill(resolvedSkills, config.SkillIssues) {
+			b.WriteString(renderIssues(opts.Store, effectivePlanID))
+		}
 	}
-	b.WriteString(delegationSection(opts.Delegation, opts.GlobalCfg, runningSpawns))
 
-	// Wait results and handoffs.
-	b.WriteString(renderWaitResults(opts.WaitResults))
-	b.WriteString(renderHandoffs(opts.Handoffs))
+	// Project context (lightweight — agents discover details via CLI).
+	b.WriteString(renderContextSection(opts, project, plan))
+	b.WriteString(renderObjective(opts, project, plan, resolvedSkills))
 
-	// Objective.
-	var legacySkills []string
-	if roleCanWrite {
-		legacySkills = []string{config.SkillCodeWriting}
+	// Turn handoff logging.
+	if hasSkill(resolvedSkills, config.SkillSessionContext) {
+		b.WriteString(renderTurnHandoffInstructions(config.PositionMustWriteTurnLog(effectivePosition)))
 	}
-	b.WriteString(renderObjective(opts, project, plan, legacySkills))
 
 	return b.String(), nil
 }
@@ -636,6 +593,19 @@ func renderContextSection(opts BuildOpts, project *store.ProjectConfig, plan *st
 	return b.String()
 }
 
+func renderTurnHandoffInstructions(required bool) string {
+	var b strings.Builder
+	b.WriteString("## Turn Handoff\n\n")
+	if required {
+		b.WriteString("Before finishing your turn, you MUST update the turn log so the next agent can continue without re-discovery.\n")
+	} else {
+		b.WriteString("Before finishing your turn, update the turn log so the next agent can continue without re-discovery.\n")
+	}
+	b.WriteString("Run `adaf turn update --built \"...\" --decisions \"...\" --state \"...\" --issues \"...\" --next \"...\"`.\n")
+	b.WriteString("If `ADAF_TURN_ID` is set, `adaf turn update` targets the current turn automatically.\n\n")
+	return b.String()
+}
+
 // renderObjective formats the objective section.
 func renderObjective(opts BuildOpts, project *store.ProjectConfig, plan *store.Plan, skills []string) string {
 	roleCanWrite := hasSkill(skills, config.SkillCodeWriting)
@@ -749,26 +719,17 @@ func buildStandaloneChatContext(opts BuildOpts) (string, error) {
 
 	// Role identity (brief).
 	if opts.Profile != nil {
-		role := config.EffectiveStepRole(opts.Role, opts.GlobalCfg)
-		roles := config.DefaultRoleDefinitions()
-		if opts.GlobalCfg != nil {
-			config.EnsureDefaultRoleCatalog(opts.GlobalCfg)
-			roles = opts.GlobalCfg.Roles
+		position := normalizePromptPosition(opts.Position, false)
+		role := config.EffectiveWorkerRoleForPosition(position, opts.Role, opts.GlobalCfg)
+		if role == "" {
+			role = strings.TrimSpace(opts.Role)
 		}
-		roleTitle := strings.ToUpper(role)
-		roleIdentity := ""
-		for _, def := range roles {
-			if strings.EqualFold(def.Name, role) {
-				if strings.TrimSpace(def.Title) != "" {
-					roleTitle = strings.TrimSpace(def.Title)
-				}
-				roleIdentity = strings.TrimSpace(def.Identity)
-				break
-			}
+		if role == "" {
+			role = config.DefaultWorkerRole(opts.GlobalCfg)
 		}
-		fmt.Fprintf(&b, "# %s\n", roleTitle)
-		if roleIdentity != "" {
-			b.WriteString(roleIdentity + "\n")
+		fmt.Fprintf(&b, "# %s\n", strings.ToUpper(role))
+		if role != "" {
+			fmt.Fprintf(&b, "Assigned role: %s\n", role)
 		}
 		b.WriteString("\n")
 	}

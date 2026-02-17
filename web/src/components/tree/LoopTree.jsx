@@ -163,7 +163,7 @@ export default function LoopTree() {
         if (!Number.isFinite(stepIndex) || stepIndex < 0) stepIndex = 0;
         if (stepIndex >= steps.length) stepIndex = stepIndex % steps.length;
         var step = steps[stepIndex] || steps[0] || {};
-        if (step.role) metaByID[daemonSessionID].role = String(step.role);
+        if (step.position) metaByID[daemonSessionID].position = String(step.position);
       }
 
       var turnIDs = Array.isArray(lr && lr.turn_ids) ? lr.turn_ids : [];
@@ -216,7 +216,7 @@ export default function LoopTree() {
         var step = steps[stepIndex] || {};
         byTurn[turnID] = {
           profile: step.profile ? String(step.profile) : '',
-          role: step.role ? String(step.role) : '',
+          position: step.position ? String(step.position) : '',
           step_index: stepIndex,
         };
         stepTurnsRemaining -= 1;
@@ -302,7 +302,7 @@ export default function LoopTree() {
               scopeMode: 'turn',
               scopeID: turnID,
               stopSessionID: daemonSessionID,
-              sessionRole: step.role || '',
+              sessionRole: step.position || '',
               sessionModel: (turn && turn.agent_model) || (daemonSession && daemonSession.model) || '',
               rootSpawns: rootSpawns,
               session: {
@@ -313,7 +313,7 @@ export default function LoopTree() {
                 status: (turn && turn.build_state)
                   ? String(turn.build_state)
                   : (turnID === latestTurnID && daemonSession ? daemonSession.status : 'done'),
-                action: step.role || '',
+                action: step.position || '',
                 started_at: startedAt,
                 ended_at: endedAt,
               },
@@ -328,7 +328,7 @@ export default function LoopTree() {
               scopeMode: 'session',
               scopeID: session.id,
               stopSessionID: session.id,
-              sessionRole: sessionMeta.role || '',
+              sessionRole: sessionMeta.position || '',
               sessionModel: sessionMeta.model || session.model || '',
               rootSpawns: spawnTree.rootsBySession[session.id] || [],
               session: session,
@@ -448,7 +448,7 @@ export default function LoopTree() {
               <TurnNode
                 key={session.id}
                 session={session}
-                sessionRole={sessionMeta.role || ''}
+                sessionRole={sessionMeta.position || ''}
                 sessionModel={sessionMeta.model || session.model || ''}
                 selectedScope={selectedScope}
                 expandedNodes={expandedNodes}

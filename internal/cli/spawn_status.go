@@ -21,7 +21,7 @@ func init() {
 
 func runSpawnStatus(cmd *cobra.Command, args []string) error {
 	spawnID, _ := cmd.Flags().GetInt("spawn-id")
-	parentTurnID, _, err := getTurnContext()
+	parentTurnID, _, _, err := getTurnContext()
 	if err != nil {
 		return err
 	}
@@ -68,7 +68,7 @@ func init() {
 
 func runSpawnWait(cmd *cobra.Command, args []string) error {
 	spawnID, _ := cmd.Flags().GetInt("spawn-id")
-	parentTurnID, _, err := getTurnContext()
+	parentTurnID, _, _, err := getTurnContext()
 	if err != nil {
 		return err
 	}

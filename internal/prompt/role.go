@@ -56,12 +56,8 @@ func RolePrompt(profile *config.Profile, stepRole string, globalCfg *config.Glob
 		b.WriteString(roleDesc + "\n\n")
 	}
 	for _, ruleID := range ruleIDs {
-		// Communication rules are now runtime-contextual: upstream is injected
-		// for spawned sub-agents only, downstream is injected only when the
-		// agent actually has delegation capability (see delegationSection).
-		if strings.EqualFold(strings.TrimSpace(ruleID), config.RuleCommunicationUpstream) {
-			continue
-		}
+		// Downstream communication guidance is injected by delegationSection()
+		// when delegation is actually available.
 		if strings.EqualFold(strings.TrimSpace(ruleID), config.RuleCommunicationDownstream) {
 			continue
 		}
@@ -208,9 +204,6 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 			}
 			if dp.Handoff {
 				line += " [handoff]"
-			}
-			if dp.Delegation != nil {
-				line += fmt.Sprintf(" [child-spawn:%d]", len(dp.Delegation.Profiles))
 			}
 			if p.Description != "" {
 				line += fmt.Sprintf(" — %s", p.Description)

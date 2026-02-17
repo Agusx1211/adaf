@@ -56,6 +56,7 @@ const spawnCleanupGracePeriod = 12 * time.Second
 const promptEventLimitBytes = 256 * 1024
 
 type roleResumeState struct {
+	Position  string
 	Role      string
 	Agent     string
 	SessionID string
@@ -89,6 +90,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 	for i, s := range loopDef.Steps {
 		steps[i] = store.LoopRunStep{
 			Profile:      s.Profile,
+			Position:     s.Position,
 			Role:         s.Role,
 			Turns:        s.Turns,
 			Instructions: s.Instructions,
@@ -155,6 +157,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				"step", stepIdx,
 				"profile", stepDef.Profile,
 				"turns", stepDef.Turns,
+				"position", stepDef.Position,
 				"role", stepDef.Role,
 			)
 
@@ -172,6 +175,11 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			if prof == nil {
 				return fmt.Errorf("profile %q not found for step %d", stepDef.Profile, stepIdx)
 			}
+			if err := config.ValidateLoopStepPosition(stepDef, cfg.GlobalCfg); err != nil {
+				return fmt.Errorf("step %d (%s) position validation failed: %w", stepIdx, stepDef.Profile, err)
+			}
+			stepPosition := config.EffectiveStepPosition(stepDef)
+			stepWorkerRole := config.EffectiveWorkerRoleForPosition(stepPosition, stepDef.Role, cfg.GlobalCfg)
 
 			// Resolve agent.
 			agentInstance, ok := agent.Get(prof.Agent)
@@ -215,7 +223,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			// Build agent config.
 			stepRunCfg := cfg
 			stepRunCfg.ResumeSessionID = stepResumeSessionID
-			agentCfg := buildAgentConfig(stepRunCfg, prof, run.ID, stepIdx, run.HexID, stepHexID, effectiveDelegation)
+			agentCfg := buildAgentConfig(stepRunCfg, prof, stepDef, run.ID, stepIdx, run.HexID, stepHexID, effectiveDelegation)
 
 			// Gather unseen messages for this step.
 			unseenMsgs := gatherUnseenMessages(cfg.Store, run, stepIdx)
@@ -244,7 +252,8 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				Store:          cfg.Store,
 				Project:        cfg.Project,
 				Profile:        prof,
-				Role:           stepDef.Role,
+				Role:           stepWorkerRole,
+				Position:       stepPosition,
 				GlobalCfg:      cfg.GlobalCfg,
 				PlanID:         cfg.PlanID,
 				LoopContext:    loopCtx,
@@ -471,16 +480,20 @@ func nextStepResumeSessionID(baseResumeSessionID string, step config.LoopStep, p
 		return strings.TrimSpace(baseResumeSessionID)
 	}
 
-	role := strings.TrimSpace(step.Role)
+	position := config.EffectiveStepPosition(step)
+	role := config.EffectiveWorkerRoleForPosition(position, step.Role)
 	agentName := ""
 	if prof != nil {
 		agentName = strings.TrimSpace(prof.Agent)
 	}
 
-	if role == "" || agentName == "" {
+	if position == "" || agentName == "" {
 		return ""
 	}
 	if strings.TrimSpace(prev.SessionID) == "" {
+		return ""
+	}
+	if !strings.EqualFold(position, strings.TrimSpace(prev.Position)) {
 		return ""
 	}
 	if !strings.EqualFold(role, strings.TrimSpace(prev.Role)) {
@@ -493,16 +506,18 @@ func nextStepResumeSessionID(baseResumeSessionID string, step config.LoopStep, p
 }
 
 func nextRoleResumeState(step config.LoopStep, prof *config.Profile, sessionID string) roleResumeState {
-	role := strings.TrimSpace(step.Role)
+	position := config.EffectiveStepPosition(step)
+	role := config.EffectiveWorkerRoleForPosition(position, step.Role)
 	agentName := ""
 	if prof != nil {
 		agentName = strings.TrimSpace(prof.Agent)
 	}
 	sessionID = strings.TrimSpace(sessionID)
-	if role == "" || agentName == "" || sessionID == "" {
+	if position == "" || agentName == "" || sessionID == "" {
 		return roleResumeState{}
 	}
 	return roleResumeState{
+		Position:  position,
 		Role:      role,
 		Agent:     agentName,
 		SessionID: sessionID,
@@ -579,12 +594,17 @@ func pollSpawnStatus(ctx context.Context, s *store.Store, parentTurnID int, even
 			if rec.ParentTurnID > 0 {
 				parentSpawnID = turnToSpawn[rec.ParentTurnID]
 			}
+			position := rec.ChildPosition
+			if position == "" {
+				position = config.PositionWorker
+			}
 			info := events.SpawnInfo{
 				ID:            rec.ID,
 				ParentTurnID:  rec.ParentTurnID,
 				ParentSpawnID: parentSpawnID,
 				ChildTurnID:   rec.ChildTurnID,
 				Profile:       rec.ChildProfile,
+				Position:      position,
 				Role:          rec.ChildRole,
 				Status:        rec.Status,
 			}
@@ -742,13 +762,13 @@ func spawnSnapshotFingerprint(spawns []events.SpawnInfo) string {
 	}
 	var b strings.Builder
 	for _, sp := range spawns {
-		b.WriteString(fmt.Sprintf("%d|%d|%d|%d|%s|%s|%s|%s;", sp.ID, sp.ParentTurnID, sp.ParentSpawnID, sp.ChildTurnID, sp.Profile, sp.Role, sp.Status, sp.Question))
+		b.WriteString(fmt.Sprintf("%d|%d|%d|%d|%s|%s|%s|%s|%s;", sp.ID, sp.ParentTurnID, sp.ParentSpawnID, sp.ChildTurnID, sp.Profile, sp.Position, sp.Role, sp.Status, sp.Question))
 	}
 	return b.String()
 }
 
 // buildAgentConfig creates an agent.Config for a profile step.
-func buildAgentConfig(cfg RunConfig, prof *config.Profile, runID, stepIndex int, runHexID, stepHexID string, delegation *config.DelegationConfig) agent.Config {
+func buildAgentConfig(cfg RunConfig, prof *config.Profile, step config.LoopStep, runID, stepIndex int, runHexID, stepHexID string, delegation *config.DelegationConfig) agent.Config {
 	launch := agent.BuildLaunchSpec(prof, cfg.AgentsCfg, "")
 	agentArgs := append([]string(nil), launch.Args...)
 	agentEnv := make(map[string]string)
@@ -764,6 +784,11 @@ func buildAgentConfig(cfg RunConfig, prof *config.Profile, runID, stepIndex int,
 	}
 	if stepHexID != "" {
 		agentEnv["ADAF_LOOP_STEP_HEX_ID"] = stepHexID
+	}
+	stepPosition := config.EffectiveStepPosition(step)
+	agentEnv["ADAF_POSITION"] = stepPosition
+	if workerRole := config.EffectiveWorkerRoleForPosition(stepPosition, step.Role, cfg.GlobalCfg); workerRole != "" {
+		agentEnv["ADAF_ROLE"] = workerRole
 	}
 	if delegation != nil {
 		if delegJSON, err := json.Marshal(delegation); err == nil {

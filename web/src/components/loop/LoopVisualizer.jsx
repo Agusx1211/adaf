@@ -92,9 +92,9 @@ export default function LoopVisualizer() {
                       <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600, color: stepColor }}>
                         {step.profile || 'step-' + (i + 1)}
                       </div>
-                      {step.role && (
+                      {step.position && (
                         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 8, color: 'var(--text-3)' }}>
-                          {step.role}
+                          {step.position}
                         </div>
                       )}
                     </div>

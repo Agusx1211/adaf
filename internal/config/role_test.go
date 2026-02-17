@@ -9,9 +9,9 @@ func TestEffectiveStepRole(t *testing.T) {
 		want     string
 	}{
 		{
-			name:     "uses explicit step role",
-			stepRole: RoleManager,
-			want:     RoleManager,
+			name:     "uses explicit worker role",
+			stepRole: RoleQA,
+			want:     RoleQA,
 		},
 		{
 			name:     "defaults to developer with empty values",

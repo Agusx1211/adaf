@@ -232,6 +232,16 @@ func validateCreateLoop(loop config.LoopDef) string {
 		if strings.TrimSpace(step.Profile) == "" {
 			return "each step must have a profile"
 		}
+		position := config.EffectiveStepPosition(step)
+		if !config.PositionCanOwnTurn(position) {
+			return "worker position is not valid for loop steps"
+		}
+		if config.PositionRequiresTeam(position) && strings.TrimSpace(step.Team) == "" {
+			return "manager position steps require a team"
+		}
+		if !config.PositionAllowsTeam(position) && strings.TrimSpace(step.Team) != "" {
+			return "supervisor steps cannot have teams"
+		}
 	}
 	return ""
 }

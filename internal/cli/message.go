@@ -30,7 +30,7 @@ func runParentAsk(cmd *cobra.Command, args []string) error {
 	question := args[0]
 	timeout, _ := cmd.Flags().GetDuration("timeout")
 
-	spawnID, _, err := getTurnContext()
+	spawnID, _, _, err := getTurnContext()
 	if err != nil {
 		return err
 	}
@@ -173,7 +173,7 @@ func init() {
 }
 
 func runWaitForSpawns(cmd *cobra.Command, args []string) error {
-	turnID, _, err := getTurnContext()
+	turnID, _, _, err := getTurnContext()
 	if err != nil {
 		return err
 	}

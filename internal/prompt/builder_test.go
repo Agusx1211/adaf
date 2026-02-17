@@ -492,9 +492,9 @@ func TestBuild_SkillsRenderedInOrder(t *testing.T) {
 		t.Fatalf("skills not in order: autonomy=%d, code_writing=%d, focus=%d", autonomyIdx, codeIdx, focusIdx)
 	}
 
-	// Should NOT have the legacy "# Rules" section.
+	// The prompt builder no longer emits a "# Rules" section.
 	if strings.Contains(got, "# Rules\n") {
-		t.Fatalf("skills-driven prompt should not have legacy Rules section\nprompt:\n%s", got)
+		t.Fatalf("prompt should not have Rules section\nprompt:\n%s", got)
 	}
 }
 
@@ -520,9 +520,9 @@ func TestBuild_NoSkillsMinimalPrompt(t *testing.T) {
 	if !strings.Contains(got, "# Project") {
 		t.Fatalf("missing Project section\nprompt:\n%s", got)
 	}
-	// Should NOT have the legacy rules section.
+	// The prompt builder no longer emits a "# Rules" section.
 	if strings.Contains(got, "# Rules\n") {
-		t.Fatalf("empty-skills prompt should not have legacy Rules section\nprompt:\n%s", got)
+		t.Fatalf("empty-skills prompt should not have Rules section\nprompt:\n%s", got)
 	}
 }
 
@@ -606,7 +606,7 @@ func TestBuild_SessionContextSkillGatesLogs(t *testing.T) {
 		t.Fatalf("session logs should be gated by session_context skill\nprompt:\n%s", got)
 	}
 
-	// With session_context skill: logs are NOT inlined (agents use `adaf log`).
+	// With session_context skill: logs are inlined for faster handoff continuity.
 	got, err = Build(BuildOpts{
 		Store:     s,
 		Project:   project,
@@ -617,12 +617,18 @@ func TestBuild_SessionContextSkillGatesLogs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if strings.Contains(got, "Recent Session Logs") {
-		t.Fatalf("skills-driven prompt should not inline session logs\nprompt:\n%s", got)
+	if !strings.Contains(got, "Recent Session Logs") {
+		t.Fatalf("session logs should be present with session_context skill\nprompt:\n%s", got)
 	}
 	// The session_context skill short text should still be present.
 	if !strings.Contains(got, "adaf log") {
 		t.Fatalf("session_context skill should reference adaf log\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "adaf turn update") {
+		t.Fatalf("session_context skill should reference adaf turn update\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "## Turn Handoff") {
+		t.Fatalf("session_context skill should render turn handoff section\nprompt:\n%s", got)
 	}
 }
 
@@ -652,25 +658,30 @@ func TestBuild_UnknownSkillIgnored(t *testing.T) {
 	}
 }
 
-func TestBuild_NilSkillsFallsBackToLegacy(t *testing.T) {
+func TestBuild_NilSkillsUsesDefaultSkillSet(t *testing.T) {
 	s, project := initPromptTestStore(t)
+	globalCfg := &config.GlobalConfig{}
+	config.EnsureDefaultSkillCatalog(globalCfg)
 
 	profile := &config.Profile{Name: "dev", Agent: "codex"}
 
-	// nil Skills = legacy path.
+	// nil Skills should activate the default skill set.
 	got, err := Build(BuildOpts{
-		Store:   s,
-		Project: project,
-		Profile: profile,
-		Skills:  nil,
+		Store:     s,
+		Project:   project,
+		Profile:   profile,
+		GlobalCfg: globalCfg,
+		Skills:    nil,
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 
-	// Legacy path has "# Rules" section.
-	if !strings.Contains(got, "# Rules\n") {
-		t.Fatalf("nil Skills should use legacy path with Rules section\nprompt:\n%s", got)
+	if strings.Contains(got, "# Rules\n") {
+		t.Fatalf("nil Skills should not produce a Rules section\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "## Turn Handoff") {
+		t.Fatalf("default skill set should include turn handoff instructions\nprompt:\n%s", got)
 	}
 }
 
@@ -703,21 +714,22 @@ func TestBuild_ProfileDescriptionNotInOwnPrompt(t *testing.T) {
 		t.Fatalf("agent should not see its own description text\nprompt:\n%s", got)
 	}
 
-	// Legacy path.
+	// Nil skills should still use the same prompt path.
 	got, err = Build(BuildOpts{
-		Store:   s,
-		Project: project,
-		Profile: profile,
-		Skills:  nil,
+		Store:     s,
+		Project:   project,
+		Profile:   profile,
+		GlobalCfg: globalCfg,
+		Skills:    nil,
 	})
 	if err != nil {
-		t.Fatalf("Build (legacy): %v", err)
+		t.Fatalf("Build (nil skills): %v", err)
 	}
 	if strings.Contains(got, "Your Description") {
-		t.Fatalf("agent should not see its own description heading (legacy)\nprompt:\n%s", got)
+		t.Fatalf("agent should not see its own description heading (nil skills)\nprompt:\n%s", got)
 	}
 	if strings.Contains(got, "very fast worker") {
-		t.Fatalf("agent should not see its own description text (legacy)\nprompt:\n%s", got)
+		t.Fatalf("agent should not see its own description text (nil skills)\nprompt:\n%s", got)
 	}
 }
 

@@ -110,6 +110,9 @@ func printTreeNode(s *store.Store, r store.SpawnRecord, children map[int][]store
 	elapsed := elapsedStr(r)
 	task := truncate(r.Task, 60)
 	label := r.ChildProfile
+	if r.ChildPosition != "" {
+		label = fmt.Sprintf("%s/%s", label, r.ChildPosition)
+	}
 	if r.ChildRole != "" {
 		label = fmt.Sprintf("%s/%s", label, r.ChildRole)
 	}

@@ -2,10 +2,7 @@ package config
 
 // Role constants.
 const (
-	RoleManager       = "manager"
-	RoleLeadDeveloper = "lead-developer"
-	RoleDeveloper     = "developer"
-	RoleSupervisor    = "supervisor"
+	RoleDeveloper = "developer"
 
 	RoleUIDesigner      = "ui-designer"
 	RoleQA              = "qa"

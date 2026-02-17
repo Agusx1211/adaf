@@ -86,7 +86,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	if childRole != "" && !config.ValidRole(childRole, globalCfg) {
 		return fmt.Errorf("invalid --role %q (valid: %s)", childRole, strings.Join(config.AllRoles(globalCfg), ", "))
 	}
-	parentTurnID, parentProfile, err := getTurnContext()
+	parentTurnID, parentProfile, parentPosition, err := getTurnContext()
 	if err != nil {
 		return err
 	}
@@ -99,15 +99,16 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 
 	if daemonSessionID, ok := currentDaemonSessionID(); ok {
 		resp, err := session.RequestSpawn(daemonSessionID, session.WireControlSpawn{
-			ParentTurnID:  parentTurnID,
-			ParentProfile: parentProfile,
-			ChildProfile:  profileName,
-			ChildRole:     childRole,
-			PlanID:        planID,
-			Task:          task,
-			IssueIDs:      issueIDs,
-			ReadOnly:      readOnly,
-			Delegation:    delegation,
+			ParentTurnID:   parentTurnID,
+			ParentProfile:  parentProfile,
+			ParentPosition: parentPosition,
+			ChildProfile:   profileName,
+			ChildRole:      childRole,
+			PlanID:         planID,
+			Task:           task,
+			IssueIDs:       issueIDs,
+			ReadOnly:       readOnly,
+			Delegation:     delegation,
 		})
 		if err != nil {
 			return fmt.Errorf("spawn failed: %w", err)
@@ -119,11 +120,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("spawn failed: daemon returned an empty response")
 		}
 
-		roleSuffix := ""
-		if childRole != "" {
-			roleSuffix = ", role=" + childRole
-		}
-		fmt.Printf("Spawned sub-agent #%d (profile=%s%s)\n", resp.SpawnID, profileName, roleSuffix)
+		fmt.Printf("Spawned sub-agent #%d (%s)\n", resp.SpawnID, spawnedDescriptor(profileName, childRole))
 		return nil
 	}
 
@@ -133,25 +130,22 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	}
 
 	spawnID, err := o.Spawn(context.Background(), orchestrator.SpawnRequest{
-		ParentTurnID:  parentTurnID,
-		ParentProfile: parentProfile,
-		ChildProfile:  profileName,
-		ChildRole:     childRole,
-		PlanID:        planID,
-		Task:          task,
-		IssueIDs:      issueIDs,
-		ReadOnly:      readOnly,
-		Delegation:    delegation,
+		ParentTurnID:   parentTurnID,
+		ParentProfile:  parentProfile,
+		ParentPosition: parentPosition,
+		ChildProfile:   profileName,
+		ChildRole:      childRole,
+		PlanID:         planID,
+		Task:           task,
+		IssueIDs:       issueIDs,
+		ReadOnly:       readOnly,
+		Delegation:     delegation,
 	})
 	if err != nil {
 		return fmt.Errorf("spawn failed: %w", err)
 	}
 
-	roleSuffix := ""
-	if childRole != "" {
-		roleSuffix = ", role=" + childRole
-	}
-	fmt.Printf("Spawned sub-agent #%d (profile=%s%s)\n", spawnID, profileName, roleSuffix)
+	fmt.Printf("Spawned sub-agent #%d (%s)\n", spawnID, spawnedDescriptor(profileName, childRole))
 	return nil
 }
 
@@ -217,23 +211,33 @@ func resolveCurrentDelegation(parentProfile string) (*config.DelegationConfig, e
 	return team.Delegation.Clone(), nil
 }
 
-func getTurnContext() (int, string, error) {
+func getTurnContext() (int, string, string, error) {
 	turnStr := os.Getenv("ADAF_TURN_ID")
-	if turnStr == "" {
-		turnStr = os.Getenv("ADAF_SESSION_ID")
-	}
 	profile := os.Getenv("ADAF_PROFILE")
+	position := strings.TrimSpace(os.Getenv("ADAF_POSITION"))
+	position = strings.ToLower(strings.TrimSpace(position))
+	if !config.ValidPosition(position) {
+		position = config.PositionLead
+	}
 
 	if turnStr == "" || profile == "" {
-		return 0, "", fmt.Errorf("ADAF_TURN_ID and ADAF_PROFILE environment variables must be set (are you running inside an adaf agent turn?)")
+		return 0, "", "", fmt.Errorf("ADAF_TURN_ID and ADAF_PROFILE environment variables must be set (are you running inside an adaf agent turn?)")
 	}
 
 	turnID, err := strconv.Atoi(turnStr)
 	if err != nil {
-		return 0, "", fmt.Errorf("invalid ADAF_TURN_ID: %w", err)
+		return 0, "", "", fmt.Errorf("invalid ADAF_TURN_ID: %w", err)
 	}
 
-	return turnID, profile, nil
+	return turnID, profile, position, nil
+}
+
+func spawnedDescriptor(profileName, role string) string {
+	parts := []string{"profile=" + profileName}
+	if strings.TrimSpace(role) != "" {
+		parts = append(parts, "role="+strings.TrimSpace(role))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func currentDaemonSessionID() (int, bool) {
@@ -280,6 +284,9 @@ func ensureOrchestrator() (*orchestrator.Orchestrator, error) {
 func printSpawnRecord(r *store.SpawnRecord) {
 	fmt.Printf("Spawn #%d:\n", r.ID)
 	printField("Profile", r.ChildProfile)
+	if strings.TrimSpace(r.ChildPosition) != "" {
+		printField("Position", r.ChildPosition)
+	}
 	if strings.TrimSpace(r.ChildRole) != "" {
 		printField("Role", r.ChildRole)
 	}
@@ -360,7 +367,7 @@ func printSpawnGuide() error {
 	}
 
 	// Running Spawns (best-effort).
-	if parentTurnID, _, err := getTurnContext(); err == nil && parentTurnID > 0 {
+	if parentTurnID, _, _, err := getTurnContext(); err == nil && parentTurnID > 0 {
 		if s, err := openStore(); err == nil && s.Exists() {
 			if records, err := s.SpawnsByParent(parentTurnID); err == nil && len(records) > 0 {
 				fmt.Println("## Running Spawns")

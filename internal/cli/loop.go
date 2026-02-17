@@ -23,7 +23,7 @@ var loopCmd = &cobra.Command{
 for N turns, with support for inter-step messaging and stop signals.
 
 Loops are defined in ~/.adaf/config.json and can chain multiple agent profiles
-together (e.g., a "developer" agent writes code, then a "lead-developer" role reviews).
+together with built-in positions (supervisor, manager, lead).
 Steps can send Pushover notifications, post messages to subsequent steps,
 and signal the loop to stop.
 
@@ -116,7 +116,12 @@ func loopList(cmd *cobra.Command, args []string) error {
 			if turns <= 0 {
 				turns = 1
 			}
-			role := config.EffectiveStepRole(step.Role, globalCfg)
+			position := config.EffectiveStepPosition(step)
+			workerRole := config.EffectiveWorkerRoleForPosition(position, step.Role, globalCfg)
+			positionLabel := position
+			if workerRole != "" {
+				positionLabel = fmt.Sprintf("%s/%s", position, workerRole)
+			}
 			spawnCount := 0
 			if step.Team != "" {
 				if t := globalCfg.FindTeam(step.Team); t != nil && t.Delegation != nil {
@@ -137,7 +142,7 @@ func loopList(cmd *cobra.Command, args []string) error {
 			if spawnCount > 0 {
 				spawnTag = fmt.Sprintf(" [spawn:%d]", spawnCount)
 			}
-			fmt.Printf("    %d. %s (%s) x%d%s%s\n", i+1, step.Profile, role, turns, spawnTag, flags)
+			fmt.Printf("    %d. %s (%s) x%d%s%s\n", i+1, step.Profile, positionLabel, turns, spawnTag, flags)
 			if step.Instructions != "" {
 				instr := step.Instructions
 				if len(instr) > 60 {
@@ -179,6 +184,11 @@ func loopStart(cmd *cobra.Command, args []string) error {
 
 	if len(loopDef.Steps) == 0 {
 		return fmt.Errorf("loop %q has no steps", loopName)
+	}
+	for i, step := range loopDef.Steps {
+		if err := config.ValidateLoopStepPosition(step, globalCfg); err != nil {
+			return fmt.Errorf("loop %q step %d invalid: %w", loopName, i, err)
+		}
 	}
 
 	projCfg, err := s.LoadProject()

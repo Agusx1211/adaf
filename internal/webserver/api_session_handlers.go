@@ -2,6 +2,7 @@ package webserver
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"syscall"
@@ -141,6 +142,12 @@ func handleStartLoopSessionP(s *store.Store, w http.ResponseWriter, r *http.Requ
 	if loopDef == nil {
 		writeError(w, http.StatusBadRequest, "loop not found")
 		return
+	}
+	for i, step := range loopDef.Steps {
+		if err := config.ValidateLoopStepPosition(step, cfg); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("loop step %d invalid: %v", i, err))
+			return
+		}
 	}
 
 	projCfg, err := s.LoadProject()

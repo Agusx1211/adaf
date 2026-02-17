@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDefaultSkills(t *testing.T) {
 	skills := DefaultSkills()
@@ -36,6 +39,26 @@ func TestDefaultSkills(t *testing.T) {
 		if sk.Long == "" {
 			t.Errorf("skill %q has empty Long", sk.ID)
 		}
+	}
+}
+
+func TestSessionContextSkillMentionsTurnUpdate(t *testing.T) {
+	skills := DefaultSkills()
+	var sessionCtx *Skill
+	for i := range skills {
+		if skills[i].ID == SkillSessionContext {
+			sessionCtx = &skills[i]
+			break
+		}
+	}
+	if sessionCtx == nil {
+		t.Fatalf("missing %q skill", SkillSessionContext)
+	}
+	if !containsFold(sessionCtx.Short, "adaf turn update") {
+		t.Fatalf("session_context short text should mention adaf turn update, got: %q", sessionCtx.Short)
+	}
+	if !containsFold(sessionCtx.Long, "adaf turn update") {
+		t.Fatalf("session_context long text should mention adaf turn update")
 	}
 }
 
@@ -166,7 +189,7 @@ func TestRemoveSkill(t *testing.T) {
 	}
 }
 
-func TestResolveSkillsForRole(t *testing.T) {
+func TestResolveSkillsForContext(t *testing.T) {
 	cfg := &GlobalConfig{}
 	EnsureDefaultRoleCatalog(cfg)
 	EnsureDefaultSkillCatalog(cfg)
@@ -179,28 +202,32 @@ func TestResolveSkillsForRole(t *testing.T) {
 	tests := []struct {
 		name     string
 		skills   []string
+		position string
 		role     string
 		readOnly bool
 		wantHas  []string // skills that should be present
 		wantNot  []string // skills that should be absent
 	}{
 		{
-			name:    "writing role keeps code_writing and commit",
-			skills:  allSkills,
-			role:    RoleDeveloper,
-			wantHas: []string{SkillCodeWriting, SkillCommit, SkillAutonomy},
-			wantNot: []string{SkillCodeReview, SkillReadOnly},
+			name:     "writing role keeps code_writing and commit",
+			skills:   allSkills,
+			position: PositionLead,
+			role:     RoleDeveloper,
+			wantHas:  []string{SkillCodeWriting, SkillCommit, SkillAutonomy},
+			wantNot:  []string{SkillCodeReview, SkillReadOnly},
 		},
 		{
-			name:    "non-writing role replaces code_writing with code_review",
-			skills:  allSkills,
-			role:    RoleManager,
-			wantHas: []string{SkillCodeReview, SkillAutonomy},
-			wantNot: []string{SkillCodeWriting, SkillCommit},
+			name:     "non-writing role replaces code_writing with code_review",
+			skills:   allSkills,
+			position: PositionManager,
+			role:     RoleDeveloper,
+			wantHas:  []string{SkillCodeReview, SkillAutonomy},
+			wantNot:  []string{SkillCodeWriting, SkillCommit},
 		},
 		{
 			name:     "read-only mode removes commit and adds read_only",
 			skills:   allSkills,
+			position: PositionLead,
 			role:     RoleDeveloper,
 			readOnly: true,
 			wantHas:  []string{SkillCodeWriting, SkillReadOnly, SkillAutonomy},
@@ -209,7 +236,8 @@ func TestResolveSkillsForRole(t *testing.T) {
 		{
 			name:     "non-writing role + read-only",
 			skills:   allSkills,
-			role:     RoleManager,
+			position: PositionManager,
+			role:     RoleDeveloper,
 			readOnly: true,
 			wantHas:  []string{SkillCodeReview, SkillReadOnly},
 			wantNot:  []string{SkillCodeWriting, SkillCommit},
@@ -217,20 +245,23 @@ func TestResolveSkillsForRole(t *testing.T) {
 		{
 			name:     "read-only does not duplicate read_only if already present",
 			skills:   []string{SkillReadOnly, SkillAutonomy},
+			position: PositionLead,
 			role:     RoleDeveloper,
 			readOnly: true,
 			wantHas:  []string{SkillReadOnly, SkillAutonomy},
 		},
 		{
-			name:    "empty skills returns empty",
-			skills:  []string{},
-			role:    RoleDeveloper,
-			wantHas: []string{},
-			wantNot: []string{SkillCodeWriting, SkillCommit},
+			name:     "empty skills returns empty",
+			skills:   []string{},
+			position: PositionLead,
+			role:     RoleDeveloper,
+			wantHas:  []string{},
+			wantNot:  []string{SkillCodeWriting, SkillCommit},
 		},
 		{
 			name:     "empty skills + read-only adds read_only",
 			skills:   []string{},
+			position: PositionLead,
 			role:     RoleDeveloper,
 			readOnly: true,
 			wantHas:  []string{SkillReadOnly},
@@ -239,7 +270,7 @@ func TestResolveSkillsForRole(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ResolveSkillsForRole(tt.skills, tt.role, tt.readOnly, cfg)
+			result := ResolveSkillsForContext(tt.skills, tt.position, tt.role, tt.readOnly, cfg)
 
 			has := func(id string) bool {
 				for _, s := range result {
@@ -264,7 +295,7 @@ func TestResolveSkillsForRole(t *testing.T) {
 			// Verify input was not mutated.
 			originalCopy := make([]string, len(tt.skills))
 			copy(originalCopy, tt.skills)
-			ResolveSkillsForRole(tt.skills, tt.role, tt.readOnly, cfg)
+			ResolveSkillsForContext(tt.skills, tt.position, tt.role, tt.readOnly, cfg)
 			for i := range tt.skills {
 				if tt.skills[i] != originalCopy[i] {
 					t.Errorf("input slice was mutated at index %d: got %q, want %q", i, tt.skills[i], originalCopy[i])
@@ -272,4 +303,8 @@ func TestResolveSkillsForRole(t *testing.T) {
 			}
 		})
 	}
+}
+
+func containsFold(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }

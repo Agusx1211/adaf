@@ -105,7 +105,7 @@ func DefaultSkills() []Skill {
 		},
 		{
 			ID:    SkillDelegation,
-			Short: "You can spawn sub-agents. Run `adaf spawn info` to see available profiles, roles, and capacity. Run `adaf skill delegation` for full command reference and patterns.",
+			Short: "You can spawn sub-agents. Run `adaf spawn-info` to see available profiles, roles, and capacity. Run `adaf skill delegation` for full command reference and patterns.",
 			Long: "# Delegation\n\n" +
 				"## Spawn Flow\n\n" +
 				"**ALWAYS use this pattern:**\n" +
@@ -186,7 +186,7 @@ func DefaultSkills() []Skill {
 		},
 		{
 			ID:    SkillSessionContext,
-			Short: "Use `adaf log` to review session history before starting. Previous agents left notes about progress, decisions, and next steps.",
+			Short: "Use `adaf log` to review session history before starting. At the end of every turn, run `adaf turn update` to record what you built, decisions, issues, and next steps for handoff.",
 			Long: "# Session Context\n\n" +
 				"Review recent session logs before starting. Previous agents left notes about:\n" +
 				"- What was built\n" +
@@ -196,6 +196,7 @@ func DefaultSkills() []Skill {
 				"- Known issues\n" +
 				"- Suggested next steps\n\n" +
 				"Use `adaf log` to view session history.\n" +
+				"At the end of every turn, record your handoff with `adaf turn update`.\n" +
 				"Build on previous work rather than starting from scratch.\n",
 		},
 		{
@@ -274,12 +275,14 @@ func EnsureDefaultSkillCatalog(cfg *GlobalConfig) bool {
 	return true
 }
 
-// ResolveSkillsForRole returns a copy of skills adjusted for the given role and read-only mode.
-// For non-writing roles: code_writing is replaced with code_review, commit is removed.
+// ResolveSkillsForContext returns a copy of skills adjusted for position/role
+// and read-only mode.
+//
+// For non-writing contexts: code_writing is replaced with code_review, commit is removed.
 // For read-only mode: commit is removed, read_only is ensured present.
 // The input slice is never mutated.
-func ResolveSkillsForRole(skills []string, role string, readOnly bool, cfg *GlobalConfig) []string {
-	canWrite := CanWriteCode(role, cfg)
+func ResolveSkillsForContext(skills []string, position, role string, readOnly bool, cfg *GlobalConfig) []string {
+	canWrite := CanWriteForPositionAndRole(position, role, cfg)
 
 	out := make([]string, 0, len(skills))
 	for _, s := range skills {

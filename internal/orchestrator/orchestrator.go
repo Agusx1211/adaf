@@ -25,16 +25,18 @@ import (
 
 // SpawnRequest describes a request to spawn a sub-agent.
 type SpawnRequest struct {
-	ParentTurnID  int
-	ParentProfile string
-	ChildProfile  string
-	ChildRole     string
-	PlanID        string
-	Task          string
-	IssueIDs      []int
-	ReadOnly      bool
-	Wait          bool                     // if true, Spawn blocks until child completes
-	Delegation    *config.DelegationConfig // parent delegation config (required for strict spawning)
+	ParentTurnID   int
+	ParentProfile  string
+	ParentPosition string
+	ChildProfile   string
+	ChildPosition  string
+	ChildRole      string
+	PlanID         string
+	Task           string
+	IssueIDs       []int
+	ReadOnly       bool
+	Wait           bool                     // if true, Spawn blocks until child completes
+	Delegation     *config.DelegationConfig // parent delegation config (required for strict spawning)
 
 	// Resolved child execution settings populated during Spawn validation.
 	ChildDelegation   *config.DelegationConfig
@@ -297,11 +299,15 @@ func truncatePrompt(prompt string) (string, bool, int) {
 
 // Spawn starts a sub-agent.
 func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error) {
+	req.ParentPosition = strings.ToLower(strings.TrimSpace(req.ParentPosition))
+	req.ChildPosition = strings.ToLower(strings.TrimSpace(req.ChildPosition))
 	req.ChildRole = strings.ToLower(strings.TrimSpace(req.ChildRole))
 	debug.LogKV("orch", "Spawn() called",
 		"parent_turn", req.ParentTurnID,
 		"parent_profile", req.ParentProfile,
+		"parent_position", req.ParentPosition,
 		"child_profile", req.ChildProfile,
+		"child_position", req.ChildPosition,
 		"child_role", req.ChildRole,
 		"read_only", req.ReadOnly,
 		"wait", req.Wait,
@@ -316,6 +322,9 @@ func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error)
 	if strings.TrimSpace(req.Task) == "" {
 		return 0, fmt.Errorf("task is required for spawning a sub-agent")
 	}
+	if req.ParentPosition != "" && !config.PositionCanSpawn(req.ParentPosition) {
+		return 0, fmt.Errorf("position %q cannot spawn sub-agents", req.ParentPosition)
+	}
 
 	deleg := req.Delegation
 	if deleg == nil {
@@ -328,13 +337,20 @@ func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error)
 		return 0, fmt.Errorf("child profile %q not found", req.ChildProfile)
 	}
 
-	resolved, resolvedRole, err := deleg.ResolveProfile(req.ChildProfile, req.ChildRole)
+	resolved, resolvedRole, resolvedPosition, err := deleg.ResolveProfileWithPosition(req.ChildProfile, req.ChildRole, req.ChildPosition)
 	if err != nil {
 		return 0, err
 	}
 	req.ChildRole = resolvedRole
+	req.ChildPosition = resolvedPosition
+	if req.ChildPosition != config.PositionWorker {
+		return 0, fmt.Errorf("invalid child position %q: teams are composed only by workers", req.ChildPosition)
+	}
 	if !config.ValidRole(req.ChildRole, o.globalCfg) {
 		return 0, fmt.Errorf("child role %q is not defined in the roles catalog", req.ChildRole)
+	}
+	if resolved.Delegation != nil && len(resolved.Delegation.Profiles) > 0 {
+		return 0, fmt.Errorf("invalid child delegation for profile %q: workers cannot have teams", req.ChildProfile)
 	}
 	req.ChildHandoff = resolved.Handoff
 	req.ChildSpeed = resolved.Speed
@@ -399,6 +415,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 	debug.LogKV("orch", "startSpawn()",
 		"parent_profile", req.ParentProfile,
 		"child_profile", req.ChildProfile,
+		"child_position", req.ChildPosition,
 		"child_role", req.ChildRole,
 		"child_agent", childProf.Agent,
 		"read_only", req.ReadOnly,
@@ -414,6 +431,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 		ParentTurnID:  req.ParentTurnID,
 		ParentProfile: req.ParentProfile,
 		ChildProfile:  req.ChildProfile,
+		ChildPosition: req.ChildPosition,
 		ChildRole:     req.ChildRole,
 		Task:          req.Task,
 		IssueIDs:      req.IssueIDs,
@@ -498,6 +516,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 		Project:      projCfg,
 		Profile:      childProf,
 		Role:         req.ChildRole,
+		Position:     req.ChildPosition,
 		GlobalCfg:    o.globalCfg,
 		PlanID:       parentPlanID,
 		Task:         req.Task,
@@ -517,6 +536,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 		"ADAF_TURN_ID":     fmt.Sprintf("%d", rec.ID),
 		"ADAF_PROFILE":     childProf.Name,
 		"ADAF_PARENT_TURN": fmt.Sprintf("%d", req.ParentTurnID),
+		"ADAF_POSITION":    req.ChildPosition,
 	}
 	if req.ChildRole != "" {
 		agentEnv["ADAF_ROLE"] = req.ChildRole
@@ -699,6 +719,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 					Project:      projCfg,
 					Profile:      childProf,
 					Role:         req.ChildRole,
+					Position:     req.ChildPosition,
 					GlobalCfg:    o.globalCfg,
 					Task:         req.Task,
 					IssueIDs:     req.IssueIDs,

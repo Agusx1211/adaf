@@ -6,7 +6,8 @@ import { useToast } from '../common/Toast.jsx';
 var AGENTS_FALLBACK = ['claude', 'codex', 'gemini', 'vibe', 'opencode', 'generic'];
 var SPEED_OPTIONS = ['', 'fast', 'medium', 'slow'];
 var STYLE_PRESETS = ['', 'manager', 'parallel', 'scout', 'sequential'];
-var ROLES = ['developer', 'lead-developer', 'manager', 'supervisor', 'ui-designer', 'qa', 'backend-designer'];
+var DEFAULT_ROLE_NAMES = ['developer', 'ui-designer', 'qa', 'backend-designer', 'documentator', 'reviewer', 'scout', 'researcher'];
+var LOOP_STEP_POSITIONS = ['lead', 'manager', 'supervisor'];
 
 var inputStyle = {
   width: '100%', padding: '6px 10px', background: 'var(--bg-2)',
@@ -104,7 +105,7 @@ export default function ConfigDetailPanel() {
       } else if (sel.type === 'loop') {
         var allLoops = (await apiCall('/api/config/loops', 'GET', null, { allow404: true })) || [];
         var loop = allLoops.find(function (l) { return l.name === sel.name; });
-        setData(loop ? deepCopy(loop) : null);
+        setData(loop ? normalizeLoopConfig(loop) : null);
       } else if (sel.type === 'team') {
         var t = teamsList.find(function (t) { return t.name === sel.name; });
         setData(t ? deepCopy(t) : null);
@@ -413,7 +414,11 @@ function LoopEditor({ data, setData, profiles, teams, skills, isNew, onPreview }
     setData(function (prev) {
       var steps = prev.steps.map(function (s, i) {
         if (i !== idx) return s;
-        return { ...s, [key]: val };
+        var next = { ...s, [key]: val };
+        if (key === 'position' && val === 'supervisor') {
+          next.team = '';
+        }
+        return next;
       });
       return { ...prev, steps: steps };
     });
@@ -456,10 +461,9 @@ function LoopEditor({ data, setData, profiles, teams, skills, isNew, onPreview }
               </div>
               <div style={{ display: 'flex', gap: 12 }}>
                 <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>Role (optional)</label>
-                  <select value={step.role || ''} onChange={function (e) { setStep(idx, 'role', e.target.value); }} style={selectStyle}>
-                    <option value="">Default</option>
-                    {ROLES.map(function (r) { return <option key={r} value={r}>{r}</option>; })}
+                  <label style={labelStyle}>Position</label>
+                  <select value={step.position || 'lead'} onChange={function (e) { setStep(idx, 'position', e.target.value); }} style={selectStyle}>
+                    {LOOP_STEP_POSITIONS.map(function (p) { return <option key={p} value={p}>{p}</option>; })}
                   </select>
                 </div>
                 <div style={{ width: 100 }}>
@@ -471,13 +475,28 @@ function LoopEditor({ data, setData, profiles, teams, skills, isNew, onPreview }
               {/* Team dropdown */}
               <div>
                 <label style={labelStyle}>Team (optional)</label>
-                <select value={step.team || ''} onChange={function (e) { setStep(idx, 'team', e.target.value); }} style={selectStyle}>
+                <select
+                  value={step.team || ''}
+                  onChange={function (e) { setStep(idx, 'team', e.target.value); }}
+                  style={selectStyle}
+                  disabled={step.position === 'supervisor'}
+                >
                   <option value="">No team</option>
                   {(teams || []).map(function (t) {
                     var subCount = t.delegation && t.delegation.profiles ? t.delegation.profiles.length : 0;
                     return <option key={t.name} value={t.name}>{t.name} ({subCount} sub-agents)</option>;
                   })}
                 </select>
+                {step.position === 'supervisor' && (
+                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                    Supervisor steps cannot have teams.
+                  </div>
+                )}
+                {step.position === 'manager' && !step.team && (
+                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                    Manager steps require a team.
+                  </div>
+                )}
               </div>
 
               {/* Skills picker */}
@@ -540,22 +559,24 @@ function TeamEditor({ data, set, setData, profiles, skills, roleDefs, isNew, onP
 
 var ROLE_DESCRIPTIONS = {
   'developer': 'Writes code, fixes bugs, implements features',
-  'lead-developer': 'Senior developer who reviews code and makes architectural decisions',
-  'manager': 'Coordinates work across agents, decides task priorities',
-  'supervisor': 'Monitors agent work, provides feedback and course corrections',
   'ui-designer': 'Focuses on UI/UX, frontend components, and visual design',
   'qa': 'Tests code, finds bugs, validates requirements',
   'backend-designer': 'Designs APIs, data models, and backend architecture',
+  'documentator': 'Writes technical docs and handoff notes',
+  'reviewer': 'Reviews changes for correctness and risks',
+  'scout': 'Fast read-only investigation',
+  'researcher': 'Deep option analysis and recommendations',
 };
 
 var ROLE_CHIP_COLORS = {
   'developer': 'var(--accent)',
-  'lead-developer': 'var(--orange)',
-  'manager': 'var(--pink)',
-  'supervisor': 'var(--pink)',
   'ui-designer': '#7B8CFF',
   'qa': 'var(--green)',
   'backend-designer': '#5BCEFC',
+  'documentator': '#F8C471',
+  'reviewer': '#F39C12',
+  'scout': '#7FDBB6',
+  'researcher': '#85C1E9',
 };
 
 function RolePicker({ selected, onChange, roleDefs, onPreview }) {
@@ -565,6 +586,8 @@ function RolePicker({ selected, onChange, roleDefs, onPreview }) {
   // Build a lookup from API role definitions
   var roleDefMap = {};
   (roleDefs || []).forEach(function (rd) { roleDefMap[rd.name] = rd; });
+  var availableRoles = ((roleDefs || []).map(function (rd) { return rd.name; }).filter(function (name) { return !!name; }));
+  if (!availableRoles.length) availableRoles = DEFAULT_ROLE_NAMES;
 
   function toggle(role) {
     if (selectedSet[role]) {
@@ -629,7 +652,7 @@ function RolePicker({ selected, onChange, roleDefs, onPreview }) {
         border: '1px solid var(--border)', borderRadius: 4, background: 'var(--bg-2)',
         padding: 4, overflow: 'auto',
       }}>
-        {ROLES.map(function (role) {
+        {availableRoles.map(function (role) {
           var isChecked = !!selectedSet[role];
           var chipColor = ROLE_CHIP_COLORS[role] || 'var(--text-2)';
           var rd = roleDefMap[role];
@@ -1243,7 +1266,7 @@ function Checkbox({ label, checked, onChange }) {
 // ── Helpers ──
 
 function emptyStep() {
-  return { profile: '', role: '', turns: 1, instructions: '', can_stop: false, can_message: false, can_pushover: false, team: '', skills: [] };
+  return { profile: '', position: 'lead', turns: 1, instructions: '', can_stop: false, can_message: false, can_pushover: false, team: '', skills: [] };
 }
 
 function emptyDelegationProfile() {
@@ -1252,15 +1275,33 @@ function emptyDelegationProfile() {
 
 function cleanStep(s) {
   var out = { profile: s.profile };
-  if (s.role) out.role = s.role;
+  if (s.position) out.position = s.position;
   if (s.turns && s.turns > 0) out.turns = Number(s.turns);
   if (s.instructions) out.instructions = s.instructions;
   if (s.can_stop) out.can_stop = true;
   if (s.can_message) out.can_message = true;
   if (s.can_pushover) out.can_pushover = true;
-  if (s.team) out.team = s.team;
+  if (s.team && s.position !== 'supervisor') out.team = s.team;
   if (s.skills && s.skills.length > 0) out.skills = s.skills;
   return out;
+}
+
+function normalizeLoopConfig(loop) {
+  var copy = deepCopy(loop || {});
+  var steps = Array.isArray(copy.steps) ? copy.steps : [];
+  copy.steps = steps.map(function (step) {
+    var normalized = {
+      ...emptyStep(),
+      ...step,
+      position: step && step.position ? String(step.position) : 'lead',
+    };
+    if (normalized.position === 'supervisor') {
+      normalized.team = '';
+    }
+    return normalized;
+  });
+  if (!copy.steps.length) copy.steps = [emptyStep()];
+  return copy;
 }
 
 function cleanDelegation(d) {

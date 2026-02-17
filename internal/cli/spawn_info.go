@@ -97,9 +97,6 @@ func runSpawnInfo(cmd *cobra.Command, args []string) error {
 		if dp.Handoff {
 			fmt.Printf("    Handoff: yes\n")
 		}
-		if dp.Delegation != nil {
-			fmt.Printf("    Child spawn profiles: %d\n", len(dp.Delegation.Profiles))
-		}
 		if p.Description != "" {
 			fmt.Printf("    Description: %s\n", p.Description)
 		}
@@ -108,7 +105,7 @@ func runSpawnInfo(cmd *cobra.Command, args []string) error {
 
 	// Show running spawns if store is accessible.
 	if s, err := openStore(); err == nil && s.Exists() {
-		parentTurnID, _, turnErr := getTurnContext()
+		parentTurnID, _, _, turnErr := getTurnContext()
 		if turnErr == nil && parentTurnID > 0 {
 			if records, err := s.SpawnsByParent(parentTurnID); err == nil {
 				var running []string

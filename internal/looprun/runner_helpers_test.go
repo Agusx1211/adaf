@@ -226,7 +226,7 @@ func TestBuildAgentConfig_SetsEnvironmentVariables(t *testing.T) {
 		SessionID: 42,
 	}
 
-	ac := buildAgentConfig(cfg, prof, 7, 2, "run-hex", "step-hex", nil)
+	ac := buildAgentConfig(cfg, prof, config.LoopStep{Position: config.PositionLead}, 7, 2, "run-hex", "step-hex", nil)
 
 	if ac.WorkDir != "/tmp/workdir" {
 		t.Fatalf("WorkDir = %q, want %q", ac.WorkDir, "/tmp/workdir")
@@ -246,6 +246,9 @@ func TestBuildAgentConfig_SetsEnvironmentVariables(t *testing.T) {
 	if ac.Env["ADAF_LOOP_STEP_HEX_ID"] != "step-hex" {
 		t.Fatalf("ADAF_LOOP_STEP_HEX_ID = %q, want %q", ac.Env["ADAF_LOOP_STEP_HEX_ID"], "step-hex")
 	}
+	if ac.Env["ADAF_POSITION"] != config.PositionLead {
+		t.Fatalf("ADAF_POSITION = %q, want %q", ac.Env["ADAF_POSITION"], config.PositionLead)
+	}
 	if ac.Name != "generic" {
 		t.Fatalf("Name = %q, want %q", ac.Name, "generic")
 	}
@@ -264,7 +267,7 @@ func TestBuildAgentConfig_OmitsSessionIDWhenZero(t *testing.T) {
 		SessionID: 0,
 	}
 
-	ac := buildAgentConfig(cfg, prof, 1, 0, "", "", nil)
+	ac := buildAgentConfig(cfg, prof, config.LoopStep{Position: config.PositionLead}, 1, 0, "", "", nil)
 	if _, ok := ac.Env["ADAF_SESSION_ID"]; ok {
 		t.Fatalf("ADAF_SESSION_ID should not be set when SessionID is 0")
 	}
@@ -289,7 +292,7 @@ func TestBuildAgentConfig_SetsDelegationJSON(t *testing.T) {
 		MaxParallel: 2,
 	}
 
-	ac := buildAgentConfig(cfg, prof, 1, 0, "", "", deleg)
+	ac := buildAgentConfig(cfg, prof, config.LoopStep{Position: config.PositionLead}, 1, 0, "", "", deleg)
 	val, ok := ac.Env["ADAF_DELEGATION_JSON"]
 	if !ok {
 		t.Fatal("ADAF_DELEGATION_JSON not set when delegation is non-nil")
@@ -316,7 +319,7 @@ func TestBuildAgentConfig_NoDelegationJSON(t *testing.T) {
 		AgentsCfg: agentsCfg,
 	}
 
-	ac := buildAgentConfig(cfg, prof, 1, 0, "", "", nil)
+	ac := buildAgentConfig(cfg, prof, config.LoopStep{Position: config.PositionLead}, 1, 0, "", "", nil)
 	if _, ok := ac.Env["ADAF_DELEGATION_JSON"]; ok {
 		t.Fatal("ADAF_DELEGATION_JSON should not be set when delegation is nil")
 	}
@@ -325,7 +328,7 @@ func TestBuildAgentConfig_NoDelegationJSON(t *testing.T) {
 func TestNextStepResumeSessionID_StandaloneUsesBaseResume(t *testing.T) {
 	prof := &config.Profile{Name: "p1", Agent: "codex"}
 	step := config.LoopStep{StandaloneChat: true}
-	prev := roleResumeState{Role: "manager", Agent: "codex", SessionID: "prev-sess"}
+	prev := roleResumeState{Position: config.PositionManager, Role: "", Agent: "codex", SessionID: "prev-sess"}
 
 	got := nextStepResumeSessionID("standalone-sess", step, prof, prev)
 	if got != "standalone-sess" {
@@ -335,8 +338,8 @@ func TestNextStepResumeSessionID_StandaloneUsesBaseResume(t *testing.T) {
 
 func TestNextStepResumeSessionID_ResumesOnlyWhenRoleAndAgentMatch(t *testing.T) {
 	prof := &config.Profile{Name: "p1", Agent: "codex"}
-	step := config.LoopStep{Role: "manager"}
-	prev := roleResumeState{Role: "manager", Agent: "codex", SessionID: "prev-sess"}
+	step := config.LoopStep{Position: config.PositionManager}
+	prev := roleResumeState{Position: config.PositionManager, Role: "", Agent: "codex", SessionID: "prev-sess"}
 
 	got := nextStepResumeSessionID("", step, prof, prev)
 	if got != "prev-sess" {
@@ -347,8 +350,9 @@ func TestNextStepResumeSessionID_ResumesOnlyWhenRoleAndAgentMatch(t *testing.T) 
 func TestNextStepResumeSessionID_DoesNotResumeOnRoleOrAgentMismatch(t *testing.T) {
 	prof := &config.Profile{Name: "p1", Agent: "codex"}
 
-	byRole := nextStepResumeSessionID("", config.LoopStep{Role: "supervisor"}, prof, roleResumeState{
-		Role:      "manager",
+	byRole := nextStepResumeSessionID("", config.LoopStep{Position: config.PositionSupervisor}, prof, roleResumeState{
+		Position:  config.PositionManager,
+		Role:      "",
 		Agent:     "codex",
 		SessionID: "prev-sess",
 	})
@@ -356,8 +360,9 @@ func TestNextStepResumeSessionID_DoesNotResumeOnRoleOrAgentMismatch(t *testing.T
 		t.Fatalf("role mismatch resume id = %q, want empty", byRole)
 	}
 
-	byAgent := nextStepResumeSessionID("", config.LoopStep{Role: "manager"}, prof, roleResumeState{
-		Role:      "manager",
+	byAgent := nextStepResumeSessionID("", config.LoopStep{Position: config.PositionManager}, prof, roleResumeState{
+		Position:  config.PositionManager,
+		Role:      "",
 		Agent:     "claude",
 		SessionID: "prev-sess",
 	})
@@ -368,16 +373,16 @@ func TestNextStepResumeSessionID_DoesNotResumeOnRoleOrAgentMismatch(t *testing.T
 
 func TestNextRoleResumeState_RequiresRoleAgentAndSessionID(t *testing.T) {
 	prof := &config.Profile{Name: "p1", Agent: "codex"}
-	step := config.LoopStep{Role: "manager"}
+	step := config.LoopStep{Position: config.PositionManager}
 
 	state := nextRoleResumeState(step, prof, "new-sess")
-	if state.Role != "manager" || state.Agent != "codex" || state.SessionID != "new-sess" {
+	if state.Position != config.PositionManager || state.Agent != "codex" || state.SessionID != "new-sess" {
 		t.Fatalf("nextRoleResumeState() = %+v, want role+agent+session", state)
 	}
 
-	empty := nextRoleResumeState(config.LoopStep{}, prof, "new-sess")
+	empty := nextRoleResumeState(config.LoopStep{}, nil, "new-sess")
 	if empty != (roleResumeState{}) {
-		t.Fatalf("nextRoleResumeState() without role = %+v, want empty", empty)
+		t.Fatalf("nextRoleResumeState() without agent = %+v, want empty", empty)
 	}
 }
 

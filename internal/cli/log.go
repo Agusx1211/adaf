@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -23,10 +24,9 @@ Examples:
   adaf turn list                                    # List all turns
   adaf turn latest                                  # Show most recent
   adaf turn show 5                                  # Show turn #5
-  adaf turn create --agent claude --objective "Fix auth" --built "JWT implementation"`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return cmd.Help()
-	},
+  adaf turn create --agent claude --objective "Fix auth" --built "JWT implementation"
+  adaf turn update --built "Added JWT auth" --next "Add refresh tokens"`,
+	RunE: runTurnList,
 }
 
 var turnListCmd = &cobra.Command{
@@ -56,6 +56,14 @@ var turnCreateCmd = &cobra.Command{
 	Aliases: []string{"new", "add"},
 	Short:   "Create a new turn record entry",
 	RunE:    runTurnCreate,
+}
+
+var turnUpdateCmd = &cobra.Command{
+	Use:     "update [id]",
+	Aliases: []string{"edit", "set"},
+	Short:   "Update an existing turn record entry",
+	Args:    cobra.MaximumNArgs(1),
+	RunE:    runTurnUpdate,
 }
 
 var turnSearchCmd = &cobra.Command{
@@ -92,6 +100,16 @@ func init() {
 	_ = turnCreateCmd.MarkFlagRequired("agent")
 	_ = turnCreateCmd.MarkFlagRequired("objective")
 
+	turnUpdateCmd.Flags().String("objective", "", "Turn objective")
+	turnUpdateCmd.Flags().String("built", "", "What was built")
+	turnUpdateCmd.Flags().String("decisions", "", "Key decisions made")
+	turnUpdateCmd.Flags().String("challenges", "", "Challenges encountered")
+	turnUpdateCmd.Flags().String("state", "", "Current state of the project")
+	turnUpdateCmd.Flags().String("issues", "", "Known issues")
+	turnUpdateCmd.Flags().String("next", "", "Next steps")
+	turnUpdateCmd.Flags().String("build-state", "", "Build state (compiles, tests pass, etc.)")
+	turnUpdateCmd.Flags().Int("duration", 0, "Turn duration in seconds")
+
 	turnSearchCmd.Flags().String("query", "", "Search query (required)")
 	turnSearchCmd.Flags().String("plan", "", "Filter by plan ID")
 	turnSearchCmd.Flags().String("agent", "", "Filter by agent name")
@@ -102,6 +120,7 @@ func init() {
 	turnCmd.AddCommand(turnShowCmd)
 	turnCmd.AddCommand(turnLatestCmd)
 	turnCmd.AddCommand(turnCreateCmd)
+	turnCmd.AddCommand(turnUpdateCmd)
 	turnCmd.AddCommand(turnSearchCmd)
 	rootCmd.AddCommand(turnCmd)
 }
@@ -173,30 +192,12 @@ func runTurnShow(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Try integer ID first, fall back to hex ID lookup.
-	id, err := strconv.Atoi(args[0])
-	if err == nil {
-		turn, err := s.GetTurn(id)
-		if err != nil {
-			return fmt.Errorf("getting turn #%d: %w", id, err)
-		}
-		printTurn(turn)
-		return nil
-	}
-
-	// Hex ID lookup.
-	hexID := strings.TrimSpace(args[0])
-	turns, err := s.ListTurns()
+	turn, err := findTurnByIdentifier(s, args[0])
 	if err != nil {
-		return fmt.Errorf("listing turns: %w", err)
+		return err
 	}
-	for i := range turns {
-		if turns[i].HexID == hexID {
-			printTurn(&turns[i])
-			return nil
-		}
-	}
-	return fmt.Errorf("turn not found for ID %q", args[0])
+	printTurn(turn)
+	return nil
 }
 
 func runTurnLatest(cmd *cobra.Command, args []string) error {
@@ -283,6 +284,129 @@ func runTurnCreate(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	return nil
+}
+
+func runTurnUpdate(cmd *cobra.Command, args []string) error {
+	s, err := openStoreRequired()
+	if err != nil {
+		return err
+	}
+
+	turn, err := resolveTurnToUpdate(s, args)
+	if err != nil {
+		return err
+	}
+
+	updated := 0
+	setStringFlag := func(flag string, target *string) error {
+		if !cmd.Flags().Changed(flag) {
+			return nil
+		}
+		value, err := cmd.Flags().GetString(flag)
+		if err != nil {
+			return err
+		}
+		*target = value
+		updated++
+		return nil
+	}
+
+	if err := setStringFlag("objective", &turn.Objective); err != nil {
+		return err
+	}
+	if err := setStringFlag("built", &turn.WhatWasBuilt); err != nil {
+		return err
+	}
+	if err := setStringFlag("decisions", &turn.KeyDecisions); err != nil {
+		return err
+	}
+	if err := setStringFlag("challenges", &turn.Challenges); err != nil {
+		return err
+	}
+	if err := setStringFlag("state", &turn.CurrentState); err != nil {
+		return err
+	}
+	if err := setStringFlag("issues", &turn.KnownIssues); err != nil {
+		return err
+	}
+	if err := setStringFlag("next", &turn.NextSteps); err != nil {
+		return err
+	}
+	if err := setStringFlag("build-state", &turn.BuildState); err != nil {
+		return err
+	}
+	if cmd.Flags().Changed("duration") {
+		duration, err := cmd.Flags().GetInt("duration")
+		if err != nil {
+			return err
+		}
+		if duration < 0 {
+			return fmt.Errorf("--duration must be >= 0")
+		}
+		turn.DurationSecs = duration
+		updated++
+	}
+
+	if updated == 0 {
+		return fmt.Errorf("no fields provided to update")
+	}
+	if err := s.UpdateTurn(turn); err != nil {
+		return fmt.Errorf("updating turn #%d: %w", turn.ID, err)
+	}
+
+	fmt.Println()
+	fmt.Printf("  %sTurn #%d updated.%s\n\n", styleBoldGreen, turn.ID, colorReset)
+	return nil
+}
+
+func resolveTurnToUpdate(s *store.Store, args []string) (*store.Turn, error) {
+	if len(args) > 0 {
+		return findTurnByIdentifier(s, args[0])
+	}
+
+	if turnIDRaw := strings.TrimSpace(os.Getenv("ADAF_TURN_ID")); turnIDRaw != "" {
+		turnID, err := strconv.Atoi(turnIDRaw)
+		if err != nil || turnID <= 0 {
+			return nil, fmt.Errorf("invalid ADAF_TURN_ID %q", turnIDRaw)
+		}
+		turn, err := s.GetTurn(turnID)
+		if err != nil {
+			return nil, fmt.Errorf("getting turn #%d from ADAF_TURN_ID: %w", turnID, err)
+		}
+		return turn, nil
+	}
+
+	latest, err := s.LatestTurn()
+	if err != nil {
+		return nil, fmt.Errorf("getting latest turn: %w", err)
+	}
+	if latest == nil {
+		return nil, fmt.Errorf("no turns found to update")
+	}
+	return latest, nil
+}
+
+func findTurnByIdentifier(s *store.Store, rawID string) (*store.Turn, error) {
+	id, err := strconv.Atoi(rawID)
+	if err == nil {
+		turn, getErr := s.GetTurn(id)
+		if getErr != nil {
+			return nil, fmt.Errorf("getting turn #%d: %w", id, getErr)
+		}
+		return turn, nil
+	}
+
+	hexID := strings.TrimSpace(rawID)
+	turns, listErr := s.ListTurns()
+	if listErr != nil {
+		return nil, fmt.Errorf("listing turns: %w", listErr)
+	}
+	for i := range turns {
+		if turns[i].HexID == hexID {
+			return &turns[i], nil
+		}
+	}
+	return nil, fmt.Errorf("turn not found for ID %q", rawID)
 }
 
 func printTurn(turn *store.Turn) {

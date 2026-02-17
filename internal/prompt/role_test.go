@@ -43,11 +43,9 @@ func TestDelegationSection_IncludesRoleDetails(t *testing.T) {
 	deleg := &config.DelegationConfig{
 		Profiles: []config.DelegationProfile{
 			{
-				Name: "worker",
-				Role: config.RoleLeadDeveloper,
-				Delegation: &config.DelegationConfig{
-					Profiles: []config.DelegationProfile{{Name: "scout", Role: config.RoleDeveloper}},
-				},
+				Name:     "worker",
+				Position: config.PositionWorker,
+				Role:     config.RoleDeveloper,
 			},
 		},
 	}
@@ -58,11 +56,8 @@ func TestDelegationSection_IncludesRoleDetails(t *testing.T) {
 	}
 
 	got := delegationSection(deleg, globalCfg, nil)
-	if !strings.Contains(got, "role=lead-developer") {
+	if !strings.Contains(got, "role=developer") {
 		t.Fatalf("expected role annotation in delegation section\nprompt:\n%s", got)
-	}
-	if !strings.Contains(got, "[child-spawn:1]") {
-		t.Fatalf("expected child-spawn annotation in delegation section\nprompt:\n%s", got)
 	}
 }
 
@@ -107,7 +102,7 @@ func TestRolePrompt_ComposesRulesFromCatalog(t *testing.T) {
 	}
 }
 
-func TestRolePrompt_DoesNotRenderUpstreamCommunicationRule(t *testing.T) {
+func TestRolePrompt_DoesNotRenderDownstreamCommunicationRule(t *testing.T) {
 	globalCfg := &config.GlobalConfig{
 		Roles: []config.RoleDefinition{
 			{
@@ -115,22 +110,22 @@ func TestRolePrompt_DoesNotRenderUpstreamCommunicationRule(t *testing.T) {
 				Title:        "DEVELOPER",
 				Description:  "Executes implementation.",
 				CanWriteCode: true,
-				RuleIDs:      []string{config.RuleDeveloperIdentity, config.RuleCommunicationUpstream},
+				RuleIDs:      []string{"dev_rule", config.RuleCommunicationDownstream},
 			},
 		},
 		PromptRules: []config.PromptRule{
-			{ID: config.RuleDeveloperIdentity, Body: "Developer identity."},
-			{ID: config.RuleCommunicationUpstream, Body: "## Communication Style: Upstream Only\n\n- `adaf parent-ask \"question\"`"},
+			{ID: "dev_rule", Body: "Developer identity."},
+			{ID: config.RuleCommunicationDownstream, Body: "## Communication Style: Downstream Only\n\n- `adaf spawn-message --spawn-id 1 \"fix\"`"},
 		},
 		DefaultRole: "developer",
 	}
 
 	got := RolePrompt(&config.Profile{Name: "p1"}, "developer", globalCfg)
-	if strings.Contains(got, "Communication Style: Upstream Only") {
-		t.Fatalf("upstream communication should not be role-fixed anymore\nprompt:\n%s", got)
+	if strings.Contains(got, "Communication Style: Downstream Only") {
+		t.Fatalf("downstream communication should be emitted only in delegation context\nprompt:\n%s", got)
 	}
-	if strings.Contains(got, "`adaf parent-ask \"question\"`") {
-		t.Fatalf("parent communication commands should come from runtime context, not role prompt\nprompt:\n%s", got)
+	if strings.Contains(got, "adaf spawn-message") {
+		t.Fatalf("spawn communication commands should come from delegation context, not role prompt\nprompt:\n%s", got)
 	}
 }
 

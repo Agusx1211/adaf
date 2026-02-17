@@ -377,7 +377,7 @@ export function normalizeLoopRun(run) {
     steps: arrayOrEmpty(run && run.steps).map(function (step) {
       return {
         profile: step && step.profile ? String(step.profile) : '',
-        role: step && step.role ? String(step.role) : '',
+        position: step && step.position ? String(step.position) : 'lead',
         turns: Number(step && step.turns) || 1,
       };
     }),

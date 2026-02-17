@@ -196,7 +196,7 @@ func buildRunLoopDefinition(agentName, profileName, prompt string, maxTurns int,
 		Steps: []config.LoopStep{
 			{
 				Profile:      profileName,
-				Role:         config.DefaultRole(globalCfg),
+				Position:     config.PositionLead,
 				Turns:        stepTurns,
 				Instructions: prompt,
 				Skills:       skills,

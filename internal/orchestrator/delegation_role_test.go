@@ -27,7 +27,7 @@ func TestSpawn_RequiresRoleWhenDelegationOptionIsAmbiguous(t *testing.T) {
 		Delegation: &config.DelegationConfig{
 			Profiles: []config.DelegationProfile{
 				{Name: "worker", Role: config.RoleDeveloper},
-				{Name: "worker", Role: config.RoleLeadDeveloper},
+				{Name: "worker", Role: config.RoleQA},
 			},
 		},
 	})
@@ -118,7 +118,7 @@ func TestSpawn_UsesResolvedRoleAndDelegationMetadata(t *testing.T) {
 		ParentTurnID:  7,
 		ParentProfile: "parent",
 		ChildProfile:  "worker",
-		ChildRole:     config.RoleLeadDeveloper,
+		ChildRole:     config.RoleQA,
 		Task:          "test",
 		Delegation: &config.DelegationConfig{
 			Profiles: []config.DelegationProfile{
@@ -130,7 +130,7 @@ func TestSpawn_UsesResolvedRoleAndDelegationMetadata(t *testing.T) {
 				},
 				{
 					Name:    "worker",
-					Role:    config.RoleLeadDeveloper,
+					Role:    config.RoleQA,
 					Speed:   "slow",
 					Handoff: true,
 				},
@@ -151,8 +151,8 @@ func TestSpawn_UsesResolvedRoleAndDelegationMetadata(t *testing.T) {
 	if rec == nil {
 		t.Fatalf("GetSpawn(%d) = nil", spawnID)
 	}
-	if rec.ChildRole != config.RoleLeadDeveloper {
-		t.Fatalf("ChildRole = %q, want %q", rec.ChildRole, config.RoleLeadDeveloper)
+	if rec.ChildRole != config.RoleQA {
+		t.Fatalf("ChildRole = %q, want %q", rec.ChildRole, config.RoleQA)
 	}
 	if rec.Speed != "slow" {
 		t.Fatalf("Speed = %q, want %q", rec.Speed, "slow")

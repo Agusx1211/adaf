@@ -27,6 +27,7 @@ type Profile struct {
 // LoopStep defines one step in a loop cycle.
 type LoopStep struct {
 	Profile        string   `json:"profile"`                   // profile name reference
+	Position       string   `json:"position,omitempty"`        // built-in execution level: supervisor|manager|lead|worker
 	Role           string   `json:"role,omitempty"`            // role name from global roles catalog
 	Turns          int      `json:"turns,omitempty"`           // turns per step (0 = 1 turn)
 	Instructions   string   `json:"instructions,omitempty"`    // custom instructions appended to prompt
@@ -80,7 +81,7 @@ type GlobalConfig struct {
 	Loops              []LoopDef                    `json:"loops,omitempty"`
 	Teams              []Team                       `json:"teams,omitempty"`
 	RecentCombinations []RecentCombination          `json:"recent_combinations,omitempty"`
-	RecentProjects     []RecentProject               `json:"recent_projects,omitempty"`
+	RecentProjects     []RecentProject              `json:"recent_projects,omitempty"`
 	Pushover           PushoverConfig               `json:"pushover,omitempty"`
 	PromptRules        []PromptRule                 `json:"prompt_rules,omitempty"`
 	Roles              []RoleDefinition             `json:"roles,omitempty"`

@@ -1134,16 +1134,18 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 			}
 
 			spawnReq := orchestrator.SpawnRequest{
-				ParentTurnID:  req.Spawn.ParentTurnID,
-				ParentProfile: req.Spawn.ParentProfile,
-				ChildProfile:  req.Spawn.ChildProfile,
-				ChildRole:     req.Spawn.ChildRole,
-				PlanID:        req.Spawn.PlanID,
-				Task:          req.Spawn.Task,
-				IssueIDs:      req.Spawn.IssueIDs,
-				ReadOnly:      req.Spawn.ReadOnly,
-				Wait:          req.Spawn.Wait,
-				Delegation:    req.Spawn.Delegation,
+				ParentTurnID:   req.Spawn.ParentTurnID,
+				ParentProfile:  req.Spawn.ParentProfile,
+				ParentPosition: req.Spawn.ParentPosition,
+				ChildProfile:   req.Spawn.ChildProfile,
+				ChildPosition:  req.Spawn.ChildPosition,
+				ChildRole:      req.Spawn.ChildRole,
+				PlanID:         req.Spawn.PlanID,
+				Task:           req.Spawn.Task,
+				IssueIDs:       req.Spawn.IssueIDs,
+				ReadOnly:       req.Spawn.ReadOnly,
+				Wait:           req.Spawn.Wait,
+				Delegation:     req.Spawn.Delegation,
 			}
 
 			spawnID, err := orch.Spawn(ctx, spawnReq)
@@ -1266,6 +1268,7 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 						ParentSpawnID: sp.ParentSpawnID,
 						ChildTurnID:   sp.ChildTurnID,
 						Profile:       sp.Profile,
+						Position:      sp.Position,
 						Role:          sp.Role,
 						Status:        sp.Status,
 						Question:      sp.Question,

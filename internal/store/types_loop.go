@@ -34,6 +34,7 @@ type HandoffInfo struct {
 // LoopRunStep is a snapshot of a loop step definition stored with the run.
 type LoopRunStep struct {
 	Profile      string `json:"profile"`
+	Position     string `json:"position,omitempty"`
 	Role         string `json:"role,omitempty"`
 	Turns        int    `json:"turns,omitempty"`
 	Instructions string `json:"instructions,omitempty"`

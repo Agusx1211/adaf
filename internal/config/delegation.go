@@ -9,6 +9,7 @@ import (
 // DelegationProfile describes one profile available for spawning.
 type DelegationProfile struct {
 	Name         string            `json:"name"`                    // profile name
+	Position     string            `json:"position,omitempty"`      // execution level for this spawned profile
 	Role         string            `json:"role,omitempty"`          // explicit role for this spawn option
 	Roles        []string          `json:"roles,omitempty"`         // allowed roles for this spawn option
 	MaxInstances int               `json:"max_instances,omitempty"` // max concurrent (0 = unlimited)
@@ -129,14 +130,34 @@ func normalizeRole(role string) string {
 	return strings.ToLower(strings.TrimSpace(role))
 }
 
+// EffectivePosition resolves the effective position for this spawn option.
+//
+// Priority:
+//  1. Position (explicit built-in position)
+//  2. worker
+func (p *DelegationProfile) EffectivePosition() string {
+	if p == nil {
+		return PositionWorker
+	}
+	if pos := normalizePositionName(p.Position); ValidPosition(pos) {
+		return pos
+	}
+	return PositionWorker
+}
+
 // EffectiveRoles resolves allowed roles for this spawn option.
 //
 // Priority:
 //  1. Role (single explicit role)
 //  2. Roles (multiple explicit roles)
 //  3. "developer"
+//
+// For non-worker positions, this returns no roles.
 func (p *DelegationProfile) EffectiveRoles() ([]string, error) {
 	if p == nil {
+		return nil, nil
+	}
+	if p.EffectivePosition() != PositionWorker {
 		return nil, nil
 	}
 	if role := normalizeRole(p.Role); role != "" {
@@ -160,12 +181,13 @@ func (p *DelegationProfile) EffectiveRoles() ([]string, error) {
 			return roles, nil
 		}
 	}
-	return []string{RoleDeveloper}, nil
+	return []string{DefaultWorkerRole()}, nil
 }
 
 type resolvedDelegationProfile struct {
-	index int
-	roles []string
+	index    int
+	roles    []string
+	position string
 }
 
 func roleInList(role string, roles []string) bool {
@@ -183,10 +205,10 @@ func sortedRoleKeys(m map[string]struct{}) []string {
 		out = append(out, role)
 	}
 	order := map[string]int{
-		RoleManager:       0,
-		RoleLeadDeveloper: 1,
-		RoleDeveloper:     2,
-		RoleSupervisor:    3,
+		RoleDeveloper:  0,
+		RoleQA:         1,
+		RoleScout:      2,
+		RoleResearcher: 3,
 	}
 	sort.Slice(out, func(i, j int) bool {
 		li, lok := order[out[i]]
@@ -205,14 +227,26 @@ func sortedRoleKeys(m map[string]struct{}) []string {
 	return out
 }
 
-func pickCandidate(candidates []resolvedDelegationProfile, role string) (resolvedDelegationProfile, bool) {
-	// Prefer explicit single-role matches first.
+func pickCandidate(candidates []resolvedDelegationProfile, role string, position string) (resolvedDelegationProfile, bool) {
+	filtered := make([]resolvedDelegationProfile, 0, len(candidates))
 	for _, c := range candidates {
+		if position == "" || c.position == position {
+			filtered = append(filtered, c)
+		}
+	}
+	if len(filtered) == 0 {
+		return resolvedDelegationProfile{}, false
+	}
+	if position != PositionWorker {
+		return filtered[0], true
+	}
+	// Prefer explicit single-role matches first.
+	for _, c := range filtered {
 		if len(c.roles) == 1 && c.roles[0] == role {
 			return c, true
 		}
 	}
-	for _, c := range candidates {
+	for _, c := range filtered {
 		if roleInList(role, c.roles) {
 			return c, true
 		}
@@ -220,70 +254,115 @@ func pickCandidate(candidates []resolvedDelegationProfile, role string) (resolve
 	return resolvedDelegationProfile{}, false
 }
 
-// ResolveProfile selects a single spawn option by child profile and role.
+// ResolveProfileWithPosition selects a single spawn option by child profile,
+// role, and position.
 //
 // requestedRole may be empty. When empty and multiple roles are available for
 // the same profile, an explicit role is required.
-func (d *DelegationConfig) ResolveProfile(name, requestedRole string) (*DelegationProfile, string, error) {
+func (d *DelegationConfig) ResolveProfileWithPosition(name, requestedRole, requestedPosition string) (*DelegationProfile, string, string, error) {
 	if d == nil {
-		return nil, "", fmt.Errorf("delegation config is nil")
+		return nil, "", "", fmt.Errorf("delegation config is nil")
 	}
 	requestedRole = normalizeRole(requestedRole)
+	requestedPosition = normalizePositionName(requestedPosition)
+	if requestedPosition != "" && !ValidPosition(requestedPosition) {
+		return nil, "", "", fmt.Errorf("invalid requested position %q", requestedPosition)
+	}
 
 	candidates := make([]resolvedDelegationProfile, 0, len(d.Profiles))
 	allRoles := make(map[string]struct{})
+	allPositions := make(map[string]struct{})
 	for i := range d.Profiles {
 		p := d.Profiles[i]
 		if !strings.EqualFold(p.Name, name) {
 			continue
 		}
-		roles, err := p.EffectiveRoles()
-		if err != nil {
-			return nil, "", err
-		}
-		if len(roles) == 0 {
+		position := p.EffectivePosition()
+		if requestedPosition != "" && requestedPosition != position {
 			continue
 		}
-		if requestedRole != "" && !roleInList(requestedRole, roles) {
+		roles, err := p.EffectiveRoles()
+		if err != nil {
+			return nil, "", "", err
+		}
+		if position == PositionWorker && len(roles) == 0 {
+			continue
+		}
+		if position == PositionWorker && requestedRole != "" && !roleInList(requestedRole, roles) {
+			continue
+		}
+		if position != PositionWorker && requestedRole != "" {
 			continue
 		}
 		candidates = append(candidates, resolvedDelegationProfile{
-			index: i,
-			roles: roles,
+			index:    i,
+			roles:    roles,
+			position: position,
 		})
-		for _, role := range roles {
-			allRoles[role] = struct{}{}
+		allPositions[position] = struct{}{}
+		if position == PositionWorker {
+			for _, role := range roles {
+				allRoles[role] = struct{}{}
+			}
 		}
 	}
 
 	if len(candidates) == 0 {
 		if requestedRole != "" {
-			return nil, "", fmt.Errorf("profile %q cannot be spawned as role %q", name, requestedRole)
+			return nil, "", "", fmt.Errorf("profile %q cannot be spawned as role %q", name, requestedRole)
 		}
-		return nil, "", fmt.Errorf("profile %q is not in delegation profiles", name)
+		if requestedPosition != "" {
+			return nil, "", "", fmt.Errorf("profile %q cannot be spawned as position %q", name, requestedPosition)
+		}
+		return nil, "", "", fmt.Errorf("profile %q is not in delegation profiles", name)
+	}
+
+	position := requestedPosition
+	if position == "" {
+		if len(allPositions) == 1 {
+			for p := range allPositions {
+				position = p
+			}
+		} else {
+			keys := make([]string, 0, len(allPositions))
+			for p := range allPositions {
+				keys = append(keys, p)
+			}
+			sort.Strings(keys)
+			return nil, "", "", fmt.Errorf("profile %q has invalid delegation with mixed positions (%s); teams must define worker-only spawn entries",
+				name, strings.Join(keys, ", "))
+		}
 	}
 
 	role := requestedRole
-	if role == "" {
-		roleKeys := sortedRoleKeys(allRoles)
-		if len(roleKeys) == 1 {
-			role = roleKeys[0]
-		} else {
-			return nil, "", fmt.Errorf("profile %q can be spawned with multiple roles (%s); specify --role",
-				name, strings.Join(roleKeys, ", "))
+	if position == PositionWorker {
+		if role == "" {
+			roleKeys := sortedRoleKeys(allRoles)
+			if len(roleKeys) == 1 {
+				role = roleKeys[0]
+			} else {
+				return nil, "", "", fmt.Errorf("profile %q can be spawned with multiple roles (%s); specify --role",
+					name, strings.Join(roleKeys, ", "))
+			}
 		}
+	} else {
+		role = ""
 	}
 
-	match, ok := pickCandidate(candidates, role)
+	match, ok := pickCandidate(candidates, role, position)
 	if !ok {
-		return nil, "", fmt.Errorf("profile %q cannot be spawned as role %q", name, role)
+		if position != PositionWorker {
+			return nil, "", "", fmt.Errorf("profile %q cannot be spawned as position %q", name, position)
+		}
+		return nil, "", "", fmt.Errorf("profile %q cannot be spawned as role %q", name, role)
 	}
 
 	resolved := d.Profiles[match.index]
+	resolved.Position = position
 	resolved.Role = role
 	resolved.Roles = nil
 	resolved.Delegation = resolved.Delegation.Clone()
-	return &resolved, role, nil
+	return &resolved, role, position, nil
 }
 
 // CollectDelegationProfileNames returns all unique profile names present in a
