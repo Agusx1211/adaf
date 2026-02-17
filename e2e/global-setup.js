@@ -58,9 +58,18 @@ async function waitForReady(url) {
   throw new Error(`Server did not become ready at ${url}`);
 }
 
-function writeAdafConfig(homeDir, repositoryRoot, fixtureProjectDir) {
+function writeAdafConfig(homeDir, repositoryRoot, fixtureProjectDir, fixtures) {
   const adafConfigDir = path.join(homeDir, '.adaf');
   fs.mkdirSync(adafConfigDir, { recursive: true });
+
+  const costs = ['free', 'cheap', 'normal', 'expensive'];
+  const profiles = Array.isArray(fixtures)
+    ? fixtures.map((fixture, idx) => ({
+      name: fixture.profile,
+      agent: fixture.provider,
+      cost: costs[idx % costs.length],
+    }))
+    : [];
 
   const config = {
     recent_projects: [
@@ -71,6 +80,7 @@ function writeAdafConfig(homeDir, repositoryRoot, fixtureProjectDir) {
         root_dir: repositoryRoot,
       },
     ],
+    profiles,
   };
 
   fs.writeFileSync(
@@ -99,7 +109,7 @@ module.exports = async function globalSetup() {
   fs.mkdirSync(goModCache, { recursive: true });
   fs.mkdirSync(goBuildCache, { recursive: true });
   const fixtures = prepareFixtureReplayData(repositoryRoot, homeDir, fixtureProjectDir);
-  writeAdafConfig(homeDir, repositoryRoot, fixtureProjectDir);
+  writeAdafConfig(homeDir, repositoryRoot, fixtureProjectDir, fixtures);
 
   const env = {
     ...process.env,

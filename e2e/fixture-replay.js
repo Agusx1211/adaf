@@ -33,6 +33,7 @@ function prepareFixtureReplayData(repositoryRoot, homeDir, fixtureProjectDir) {
 
   writeFixtureProject(fixtureProjectDir, repositoryRoot, homeDir);
   writeFixtureSessions(homeDir, fixtureProjectDir, fixtures);
+  writeGlobalPerformanceData(homeDir, fixtures);
 
   return fixtures.map(function (fixture, index) {
     return {
@@ -43,6 +44,52 @@ function prepareFixtureReplayData(repositoryRoot, homeDir, fixtureProjectDir) {
       fixture_file: fixture.filePath,
     };
   });
+}
+
+function writeGlobalPerformanceData(homeDir, fixtures) {
+  const adafDir = path.join(homeDir, '.adaf');
+  fs.mkdirSync(adafDir, { recursive: true });
+
+  const now = new Date();
+  const feedback = [];
+
+  for (let i = 0; i < fixtures.length && i < 3; i++) {
+    const fixture = fixtures[i];
+    feedback.push({
+      id: `seed-feedback-${i + 1}`,
+      created_at: new Date(now.getTime() - (2 - i) * 86_400_000).toISOString(),
+      updated_at: new Date(now.getTime() - (2 - i) * 86_400_000).toISOString(),
+      project_id: FIXTURE_PROJECT_MARKER_ID,
+      project_name: FIXTURE_PROJECT_NAME,
+      spawn_id: 700 + i,
+      parent_turn_id: 90 + i,
+      child_turn_id: 190 + i,
+      parent_profile: 'seed-profile',
+      parent_role: 'lead',
+      parent_position: 'manager',
+      child_profile: fixture.profile,
+      child_role: i % 2 === 0 ? 'scout' : 'developer',
+      child_position: 'worker',
+      child_status: 'completed',
+      exit_code: 0,
+      task: 'Seed profile performance feedback',
+      duration_secs: 45 + i * 10,
+      difficulty: 4 + i,
+      quality: 8 + (i % 2),
+      notes: 'Seeded feedback for profile performance UI coverage.',
+    });
+  }
+
+  const payload = {
+    version: 1,
+    updated_at: now.toISOString(),
+    feedback,
+  };
+  fs.writeFileSync(
+    path.join(adafDir, 'profile-feedback.json'),
+    JSON.stringify(payload, null, 2) + '\n',
+    'utf8',
+  );
 }
 
 function loadFixtures(repositoryRoot) {

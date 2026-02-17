@@ -222,7 +222,23 @@ func validateCreateProfile(prof config.Profile) string {
 	if strings.TrimSpace(prof.Name) == "" || strings.TrimSpace(prof.Agent) == "" {
 		return "name and agent are required"
 	}
+	if prof.Cost != "" && !config.ValidProfileCost(prof.Cost) {
+		return "cost must be one of: free, cheap, normal, expensive"
+	}
 	return ""
+}
+
+func normalizeProfileInput(prof *config.Profile) {
+	if prof == nil {
+		return
+	}
+	prof.Name = strings.TrimSpace(prof.Name)
+	prof.Agent = strings.TrimSpace(prof.Agent)
+	prof.Model = strings.TrimSpace(prof.Model)
+	prof.ReasoningLevel = strings.TrimSpace(prof.ReasoningLevel)
+	prof.Description = strings.TrimSpace(prof.Description)
+	prof.Speed = strings.TrimSpace(prof.Speed)
+	prof.Cost = config.NormalizeProfileCost(prof.Cost)
 }
 
 func validateCreateLoop(loop config.LoopDef) string {
@@ -304,12 +320,64 @@ func (srv *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 	var prof config.Profile
-	createTypedConfigEntry(srv, w, r, &prof, validateCreateProfile, (*config.GlobalConfig).AddProfile)
+	if !decodeJSONBody(w, r, &prof) {
+		return
+	}
+	normalizeProfileInput(&prof)
+	if msg := validateCreateProfile(prof); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	cfg, ok := loadConfigOrError(w)
+	if !ok {
+		return
+	}
+	if err := cfg.AddProfile(prof); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !saveConfigOrError(w, cfg) {
+		return
+	}
+	writeJSON(w, http.StatusCreated, prof)
 }
 
 func (srv *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
-	// Keep URL name authoritative.
-	updateConfigSliceEntry(srv, w, r, "name", "profile not found", nil, selectProfiles, profileMatchesName, setProfileName)
+	name, ok := pathValueRequired(w, r, "name")
+	if !ok {
+		return
+	}
+	var prof config.Profile
+	if !decodeJSONBody(w, r, &prof) {
+		return
+	}
+	normalizeProfileInput(&prof)
+	prof.Name = name // Keep URL name authoritative.
+	if msg := validateCreateProfile(prof); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+
+	cfg, ok := loadConfigOrError(w)
+	if !ok {
+		return
+	}
+	found := false
+	for i := range cfg.Profiles {
+		if profileMatchesName(cfg.Profiles[i], name) {
+			cfg.Profiles[i] = prof
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "profile not found")
+		return
+	}
+	if !saveConfigOrError(w, cfg) {
+		return
+	}
+	writeOK(w)
 }
 
 func (srv *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {

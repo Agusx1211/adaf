@@ -5,6 +5,7 @@ import { useToast } from '../common/Toast.jsx';
 
 var AGENTS_FALLBACK = ['claude', 'codex', 'gemini', 'vibe', 'opencode', 'generic'];
 var SPEED_OPTIONS = ['', 'fast', 'medium', 'slow'];
+var COST_OPTIONS = ['', 'free', 'cheap', 'normal', 'expensive'];
 var STYLE_PRESETS = ['', 'manager', 'parallel', 'scout', 'sequential'];
 var DEFAULT_ROLE_NAMES = ['developer', 'ui-designer', 'qa', 'backend-designer', 'documentator', 'reviewer', 'scout', 'researcher'];
 var LOOP_STEP_POSITIONS = ['lead', 'manager', 'supervisor'];
@@ -89,7 +90,7 @@ export default function ConfigDetailPanel() {
     if (!sel) { setData(null); return; }
 
     if (sel.isNew) {
-      if (sel.type === 'profile') setData({ name: '', agent: 'claude', model: '', reasoning_level: '', description: '', intelligence: 0, max_instances: 0, speed: '' });
+      if (sel.type === 'profile') setData({ name: '', agent: 'claude', model: '', reasoning_level: '', description: '', intelligence: 0, max_instances: 0, speed: '', cost: '' });
       else if (sel.type === 'loop') setData({ name: '', steps: [emptyStep()] });
       else if (sel.type === 'team') setData({ name: '', description: '', delegation: null });
       else if (sel.type === 'skill') setData({ id: '', short: '', long: '' });
@@ -149,6 +150,7 @@ export default function ConfigDetailPanel() {
         if (data.intelligence) pOut.intelligence = Number(data.intelligence);
         if (data.max_instances) pOut.max_instances = Number(data.max_instances);
         if (data.speed) pOut.speed = data.speed;
+        if (data.cost) pOut.cost = data.cost;
         if (sel.isNew) {
           await apiCall('/api/config/profiles', 'POST', pOut);
         } else {
@@ -278,6 +280,7 @@ export default function ConfigDetailPanel() {
 
 function ProfileEditor({ data, set, setData, isNew, agentsMeta, onRefreshAgents, showToast }) {
   var [detecting, setDetecting] = useState(false);
+  var [perf, setPerf] = useState({ loading: false, error: '', summary: null, records: [] });
   var agentNames = agentsMeta ? agentsMeta.map(function (a) { return a.name; }) : AGENTS_FALLBACK;
   var currentAgentMeta = agentsMeta ? agentsMeta.find(function (a) { return a.name === data.agent; }) : null;
   var models = currentAgentMeta ? (currentAgentMeta.supported_models || []) : [];
@@ -302,10 +305,35 @@ function ProfileEditor({ data, set, setData, isNew, agentsMeta, onRefreshAgents,
       .finally(function () { setDetecting(false); });
   }
 
+  useEffect(function () {
+    var profileName = String(data && data.name || '').trim();
+    if (!profileName) {
+      setPerf({ loading: false, error: '', summary: null, records: [] });
+      return;
+    }
+    var cancelled = false;
+    setPerf(function (prev) { return { ...prev, loading: true, error: '' }; });
+    apiCall('/api/performance/profiles/' + encodeURIComponent(profileName), 'GET', null, { allow404: true })
+      .then(function (resp) {
+        if (cancelled) return;
+        setPerf({
+          loading: false,
+          error: '',
+          summary: resp && resp.summary ? resp.summary : null,
+          records: resp && Array.isArray(resp.records) ? resp.records : [],
+        });
+      })
+      .catch(function (err) {
+        if (cancelled || (err && err.authRequired)) return;
+        setPerf({ loading: false, error: err.message || String(err), summary: null, records: [] });
+      });
+    return function () { cancelled = true; };
+  }, [data && data.name]);
+
   var sectionDivider = { borderTop: '1px solid var(--border)', paddingTop: 16 };
 
   return (
-    <div style={{ maxWidth: 600, display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ maxWidth: 740, display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Field label="Name" value={data.name} onChange={function (v) { set('name', v); }} disabled={!isNew} placeholder="my-profile" />
       <div>
         <label style={labelStyle}>Agent</label>
@@ -345,6 +373,13 @@ function ProfileEditor({ data, set, setData, isNew, agentsMeta, onRefreshAgents,
         </div>
       )}
       <div style={sectionDivider}>
+        <label style={labelStyle}>Cost Tier</label>
+        <select value={data.cost || ''} onChange={function (e) { set('cost', e.target.value); }} style={selectStyle}>
+          <option value="">Not set</option>
+          {COST_OPTIONS.filter(Boolean).map(function (c) { return <option key={c} value={c}>{c}</option>; })}
+        </select>
+      </div>
+      <div style={sectionDivider}>
         <label style={labelStyle}>Speed</label>
         <select value={data.speed || ''} onChange={function (e) { set('speed', e.target.value); }} style={selectStyle}>
           <option value="">Not set</option>
@@ -357,8 +392,205 @@ function ProfileEditor({ data, set, setData, isNew, agentsMeta, onRefreshAgents,
         <label style={labelStyle}>Description</label>
         <textarea value={data.description || ''} onChange={function (e) { set('description', e.target.value); }} style={{ ...inputStyle, minHeight: 100, resize: 'vertical' }} placeholder="Strengths, weaknesses, best use cases..." />
       </div>
+      <div style={sectionDivider}>
+        <ProfilePerformancePanel perf={perf} profileName={data.name} />
+      </div>
     </div>
   );
+}
+
+function ProfilePerformancePanel({ perf, profileName }) {
+  var summary = perf && perf.summary ? perf.summary : null;
+  var records = perf && Array.isArray(perf.records) ? perf.records : [];
+  var totalFeedback = Number(summary && summary.total_feedback) || 0;
+  var roleItems = summary && Array.isArray(summary.role_breakdown) ? summary.role_breakdown : [];
+  var parentItems = summary && Array.isArray(summary.parent_breakdown) ? summary.parent_breakdown : [];
+  var trend = summary && Array.isArray(summary.trend) ? summary.trend : [];
+  var signals = summary && Array.isArray(summary.signals) ? summary.signals : [];
+
+  return (
+    <div data-testid="profile-performance-panel" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--text-2)' }}>
+        Cross-project performance telemetry for <span style={{ color: 'var(--text-0)', fontWeight: 700 }}>{profileName || 'this profile'}</span>
+      </div>
+
+      {perf && perf.loading && (
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--text-3)' }}>
+          Loading performance data...
+        </div>
+      )}
+
+      {perf && perf.error && !perf.loading && (
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--orange)' }}>
+          Failed to load performance data: {perf.error}
+        </div>
+      )}
+
+      {!perf.loading && !perf.error && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+            <PerfMetric label="Feedback Count" value={String(totalFeedback)} />
+            <PerfMetric label="Avg Quality" value={formatScore(summary && summary.avg_quality)} />
+            <PerfMetric label="Avg Difficulty" value={formatScore(summary && summary.avg_difficulty)} />
+            <PerfMetric label="Avg Duration" value={formatSeconds(summary && summary.avg_duration_secs)} />
+          </div>
+
+          {signals.length > 0 && (
+            <div style={{ padding: 10, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-2)' }}>
+              <div style={{ ...labelStyle, marginBottom: 6 }}>Observed Signals</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {signals.map(function (signal, idx) {
+                  return (
+                    <span key={idx} style={{
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: 10,
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      background: 'var(--accent)15',
+                      border: '1px solid var(--accent)35',
+                      color: 'var(--accent)',
+                    }}>{signal}</span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {trend.length > 0 && (
+            <ProfileTrendChart trend={trend} />
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
+            <PerfBreakdownTable title="By Role" items={roleItems} />
+            <PerfBreakdownTable title="By Parent Profile" items={parentItems} />
+          </div>
+
+          {totalFeedback === 0 && (
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--text-3)' }}>
+              No feedback recorded yet. After child completion, run `adaf spawn-feedback --spawn-id N --difficulty X --quality Y`.
+            </div>
+          )}
+
+          {records.length > 0 && (
+            <div style={{ border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
+              <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', background: 'var(--bg-2)', fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-2)' }}>
+                Recent Raw Feedback
+              </div>
+              <div style={{ maxHeight: 240, overflow: 'auto' }}>
+                {records.slice(0, 20).map(function (rec) {
+                  return (
+                    <div key={String(rec.id || '') + String(rec.spawn_id || '')} style={{ padding: '8px 10px', borderBottom: '1px solid var(--bg-3)', fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-2)' }}>
+                      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                        <span>spawn #{rec.spawn_id}</span>
+                        <span>quality {formatScore(rec.quality)}</span>
+                        <span>difficulty {formatScore(rec.difficulty)}</span>
+                        <span>duration {formatSeconds(rec.duration_secs)}</span>
+                        <span>role {rec.child_role || '-'}</span>
+                        <span>parent {rec.parent_profile || '-'}</span>
+                      </div>
+                      {rec.notes && <div style={{ marginTop: 4, color: 'var(--text-1)' }}>{rec.notes}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function PerfMetric({ label, value }) {
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 10, background: 'var(--bg-2)' }}>
+      <div style={{ ...labelStyle, marginBottom: 3 }}>{label}</div>
+      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, color: 'var(--text-0)', fontWeight: 700 }}>{value}</div>
+    </div>
+  );
+}
+
+function PerfBreakdownTable({ title, items }) {
+  var list = Array.isArray(items) ? items : [];
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
+      <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', background: 'var(--bg-2)', fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-2)' }}>
+        {title}
+      </div>
+      {list.length === 0 ? (
+        <div style={{ padding: 10, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>No samples yet.</div>
+      ) : (
+        <div>
+          {list.slice(0, 10).map(function (item) {
+            return (
+              <div key={item.name} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 10, padding: '7px 10px', borderBottom: '1px solid var(--bg-3)', fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-2)' }}>
+                <span style={{ color: 'var(--text-0)' }}>{item.name}</span>
+                <span>{formatScore(item.avg_quality)}</span>
+                <span>n={Number(item.count) || 0}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProfileTrendChart({ trend }) {
+  var points = Array.isArray(trend) ? trend : [];
+  if (!points.length) return null;
+
+  var width = 640;
+  var height = 170;
+  var padX = 26;
+  var padY = 18;
+  var chartW = width - padX * 2;
+  var chartH = height - padY * 2;
+  var xDenom = points.length > 1 ? (points.length - 1) : 1;
+
+  function xAt(idx) {
+    return padX + (idx / xDenom) * chartW;
+  }
+  function yAt(value) {
+    var v = Number(value);
+    if (Number.isNaN(v)) v = 0;
+    if (v < 0) v = 0;
+    if (v > 10) v = 10;
+    return padY + (10 - v) * (chartH / 10);
+  }
+  var qPath = points.map(function (p, idx) { return xAt(idx) + ',' + yAt(p.avg_quality); }).join(' ');
+  var dPath = points.map(function (p, idx) { return xAt(idx) + ',' + yAt(p.avg_difficulty); }).join(' ');
+
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 10, background: 'var(--bg-2)' }}>
+      <div style={{ ...labelStyle, marginBottom: 6 }}>Trend Over Time (0-10)</div>
+      <svg width="100%" viewBox={'0 0 ' + width + ' ' + height} preserveAspectRatio="none" style={{ display: 'block', height: 170 }}>
+        <line x1={padX} y1={yAt(0)} x2={padX + chartW} y2={yAt(0)} stroke="var(--border)" strokeWidth="1" />
+        <line x1={padX} y1={yAt(5)} x2={padX + chartW} y2={yAt(5)} stroke="var(--border)" strokeWidth="1" strokeDasharray="2 4" />
+        <line x1={padX} y1={yAt(10)} x2={padX + chartW} y2={yAt(10)} stroke="var(--border)" strokeWidth="1" />
+        <polyline points={qPath} fill="none" stroke="#4AE68A" strokeWidth="2.2" />
+        <polyline points={dPath} fill="none" stroke="#E8A838" strokeWidth="2.2" />
+      </svg>
+      <div style={{ display: 'flex', gap: 10, marginTop: 4, fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>
+        <span style={{ color: '#4AE68A' }}>quality</span>
+        <span style={{ color: '#E8A838' }}>difficulty</span>
+      </div>
+    </div>
+  );
+}
+
+function formatScore(value) {
+  var n = Number(value);
+  if (Number.isNaN(n)) return '0.00';
+  return n.toFixed(2);
+}
+
+function formatSeconds(value) {
+  var n = Number(value);
+  if (Number.isNaN(n) || n <= 0) return 'n/a';
+  if (n < 60) return Math.round(n) + 's';
+  if (n < 3600) return Math.round(n / 60) + 'm';
+  return (n / 3600).toFixed(1) + 'h';
 }
 
 // ── Skill Editor ──

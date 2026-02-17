@@ -48,6 +48,7 @@ func PositionPrompt(position, workerRole string, hasDelegation, canCallSuperviso
 		b.WriteString("- Pause with `adaf wait-for-spawns` after launching independent tasks\n")
 		b.WriteString("- Track and communicate with workers: `adaf spawn-status`, `adaf spawn-watch`, `adaf spawn-message`, `adaf spawn-reply`\n")
 		b.WriteString("- For each writable spawn, review and land work: `adaf spawn-diff --spawn-id N` then `adaf spawn-merge --spawn-id N`\n")
+		b.WriteString("- Rate each completed worker for future routing: `adaf spawn-feedback --spawn-id N --difficulty D --quality Q`\n")
 		if canCallSupervisor {
 			b.WriteString("- If you need supervisor direction or have no actionable manager work left, escalate: `adaf loop call-supervisor \"status + concrete ask\"`\n")
 		}

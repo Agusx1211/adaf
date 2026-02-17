@@ -35,7 +35,7 @@ func DefaultSkills() []Skill {
 	return []Skill{
 		{
 			ID:    SkillDelegation,
-			Short: "You can spawn sub-agents. Run `adaf spawn-info` to see available profiles, roles, and capacity. Run `adaf skill delegation` for full command reference and patterns.",
+			Short: "You can spawn sub-agents. Run `adaf spawn-info` to see available profiles, roles, cost tiers, and performance data. Run `adaf skill delegation` for full command reference and patterns.",
 			Long: "# Delegation\n\n" +
 				"## Spawn Flow\n\n" +
 				"**ALWAYS use this pattern:**\n" +
@@ -68,6 +68,10 @@ func DefaultSkills() []Skill {
 				"- `adaf spawn-diff --spawn-id N` — View diff of spawn's changes\n" +
 				"- `adaf spawn-merge --spawn-id N [--squash]` — Merge spawn's changes into YOUR branch\n" +
 				"- `adaf spawn-reject --spawn-id N` — Reject spawn's changes (destroys branch — see below)\n\n" +
+				"**Feedback scoring (MANDATORY after child completion):**\n" +
+				"- `adaf spawn-feedback --spawn-id N --difficulty <0-10> --quality <0-10> [--notes \"...\"]`\n" +
+				"- Difficulty measures task complexity. Quality measures output correctness.\n" +
+				"- This data is tracked across projects and used for profile selection hints.\n\n" +
 				"**CRITICAL: Writable sub-agents work in isolated worktree branches. Their commits are INVISIBLE to your branch until you explicitly merge them.** A spawn completing with status=completed does NOT mean the work is on your branch. You MUST:\n" +
 				"1. Review the diff: `adaf spawn-diff --spawn-id N`\n" +
 				"2. Merge: `adaf spawn-merge --spawn-id N`\n" +

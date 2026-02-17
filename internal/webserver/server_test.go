@@ -521,7 +521,7 @@ func TestConfigProfileEndpoints(t *testing.T) {
 	}
 
 	// Create profile
-	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/config/profiles", `{"name":"test-prof","agent":"claude","model":"sonnet"}`)
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/config/profiles", `{"name":"test-prof","agent":"claude","model":"sonnet","cost":"cheap"}`)
 	if createRec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
 	}
@@ -533,15 +533,45 @@ func TestConfigProfileEndpoints(t *testing.T) {
 	}
 
 	// Update profile
-	updateRec := performJSONRequest(t, srv, http.MethodPut, "/api/config/profiles/test-prof", `{"name":"test-prof","agent":"claude","model":"opus"}`)
+	updateRec := performJSONRequest(t, srv, http.MethodPut, "/api/config/profiles/test-prof", `{"name":"ignored-by-path","agent":"claude","model":"opus","cost":"expensive"}`)
 	if updateRec.Code != http.StatusOK {
 		t.Fatalf("update status = %d, want %d", updateRec.Code, http.StatusOK)
+	}
+
+	listRec = performRequest(t, srv, http.MethodGet, "/api/config/profiles")
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list after update status = %d, want %d", listRec.Code, http.StatusOK)
+	}
+	profiles := decodeResponse[[]config.Profile](t, listRec)
+	if len(profiles) != 1 {
+		t.Fatalf("profiles len = %d, want 1", len(profiles))
+	}
+	if profiles[0].Name != "test-prof" {
+		t.Fatalf("profile name = %q, want %q", profiles[0].Name, "test-prof")
+	}
+	if profiles[0].Cost != "expensive" {
+		t.Fatalf("profile cost = %q, want %q", profiles[0].Cost, "expensive")
 	}
 
 	// Delete profile
 	deleteRec := performRequest(t, srv, http.MethodDelete, "/api/config/profiles/test-prof")
 	if deleteRec.Code != http.StatusOK {
 		t.Fatalf("delete status = %d, want %d", deleteRec.Code, http.StatusOK)
+	}
+}
+
+func TestConfigProfileRejectsInvalidCost(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/config/profiles", `{"name":"test-prof","agent":"claude","cost":"premium"}`)
+	if createRec.Code != http.StatusBadRequest {
+		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusBadRequest)
+	}
+
+	performJSONRequest(t, srv, http.MethodPost, "/api/config/profiles", `{"name":"test-prof","agent":"claude","cost":"cheap"}`)
+	updateRec := performJSONRequest(t, srv, http.MethodPut, "/api/config/profiles/test-prof", `{"name":"test-prof","agent":"claude","cost":"ultra"}`)
+	if updateRec.Code != http.StatusBadRequest {
+		t.Fatalf("update status = %d, want %d", updateRec.Code, http.StatusBadRequest)
 	}
 }
 
@@ -932,6 +962,94 @@ func TestStatsEndpoints(t *testing.T) {
 	profileRec := performRequest(t, srv, http.MethodGet, "/api/stats/profiles")
 	if profileRec.Code != http.StatusOK {
 		t.Fatalf("profile stats status = %d, want %d", profileRec.Code, http.StatusOK)
+	}
+}
+
+func TestProfilePerformanceEndpoints(t *testing.T) {
+	srv, s := newTestServer(t)
+
+	performJSONRequest(t, srv, http.MethodPost, "/api/config/profiles", `{"name":"spark","agent":"codex","cost":"cheap"}`)
+
+	spawn := &store.SpawnRecord{
+		ParentTurnID:  10,
+		ParentProfile: "manager-a",
+		ChildProfile:  "spark",
+		ChildRole:     "scout",
+		ChildPosition: "worker",
+		Task:          "Inspect failing tests",
+		Status:        store.SpawnStatusRunning,
+	}
+	if err := s.CreateSpawn(spawn); err != nil {
+		t.Fatalf("CreateSpawn: %v", err)
+	}
+	saved, err := s.GetSpawn(spawn.ID)
+	if err != nil {
+		t.Fatalf("GetSpawn: %v", err)
+	}
+	saved.Status = store.SpawnStatusCompleted
+	saved.StartedAt = time.Now().Add(-90 * time.Second).UTC()
+	saved.CompletedAt = time.Now().UTC()
+	if err := s.UpdateSpawn(saved); err != nil {
+		t.Fatalf("UpdateSpawn: %v", err)
+	}
+
+	feedbackRec := performJSONRequest(t, srv, http.MethodPost, "/api/spawns/"+strconv.Itoa(spawn.ID)+"/feedback", `{"difficulty":6.5,"quality":8.5,"notes":"good scouting output","parent_role":"lead","parent_position":"manager"}`)
+	if feedbackRec.Code != http.StatusOK {
+		t.Fatalf("feedback status = %d, want %d", feedbackRec.Code, http.StatusOK)
+	}
+	feedback := decodeResponse[map[string]any](t, feedbackRec)
+	if got := feedback["child_profile"]; got != "spark" {
+		t.Fatalf("child_profile = %v, want spark", got)
+	}
+
+	listRec := performRequest(t, srv, http.MethodGet, "/api/performance/profiles")
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("performance list status = %d, want %d", listRec.Code, http.StatusOK)
+	}
+	report := decodeResponse[map[string]any](t, listRec)
+	profilesAny, ok := report["profiles"].([]any)
+	if !ok || len(profilesAny) == 0 {
+		t.Fatalf("profiles payload missing or empty: %#v", report["profiles"])
+	}
+
+	detailRec := performRequest(t, srv, http.MethodGet, "/api/performance/profiles/spark")
+	if detailRec.Code != http.StatusOK {
+		t.Fatalf("performance detail status = %d, want %d", detailRec.Code, http.StatusOK)
+	}
+	detail := decodeResponse[map[string]any](t, detailRec)
+	summary, ok := detail["summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("summary payload missing: %#v", detail)
+	}
+	if got := summary["profile"]; got != "spark" {
+		t.Fatalf("summary.profile = %v, want spark", got)
+	}
+	if got := summary["cost"]; got != "cheap" {
+		t.Fatalf("summary.cost = %v, want cheap", got)
+	}
+	records, ok := detail["records"].([]any)
+	if !ok || len(records) != 1 {
+		t.Fatalf("records len = %d, want 1", len(records))
+	}
+}
+
+func TestProfilePerformanceFeedbackRequiresTerminalSpawn(t *testing.T) {
+	srv, s := newTestServer(t)
+
+	spawn := &store.SpawnRecord{
+		ParentTurnID:  10,
+		ParentProfile: "manager-a",
+		ChildProfile:  "spark",
+		Status:        store.SpawnStatusRunning,
+		Task:          "Do something",
+	}
+	if err := s.CreateSpawn(spawn); err != nil {
+		t.Fatalf("CreateSpawn: %v", err)
+	}
+
+	rec := performJSONRequest(t, srv, http.MethodPost, "/api/spawns/"+strconv.Itoa(spawn.ID)+"/feedback", `{"difficulty":5,"quality":8}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 }
 
