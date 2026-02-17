@@ -18,6 +18,23 @@ const WAIT_FIXTURE_TURN_ID = 901;
 const WAIT_FIXTURE_TURN_HEX = 'waitturn901';
 const WAIT_FIXTURE_PROMPT_TEXT = 'Parent turn prompt without explicit turn_id metadata.';
 const WAIT_FIXTURE_OUTPUT_TEXT = 'Parent output survives missing turn_id metadata.';
+const ROLE_FIXTURE_SESSION_ID = 4302;
+const ROLE_FIXTURE_LOOP_NAME = 'role-control-fixture';
+const ROLE_FIXTURE_PROFILE = 'role-control-fixture';
+const ROLE_FIXTURE_LOOP_RUN_ID = 8;
+const ROLE_FIXTURE_LOOP_HEX = 'roleloop';
+const ROLE_FIXTURE_MANAGER_STEP_HEX_C0 = 'role-c0-s0';
+const ROLE_FIXTURE_SUPERVISOR_STEP_HEX_C0 = 'role-c0-s1';
+const ROLE_FIXTURE_MANAGER_STEP_HEX_C1 = 'role-c1-s0';
+const ROLE_FIXTURE_SUPERVISOR_STEP_HEX_C1 = 'role-c1-s1';
+const ROLE_FIXTURE_TURN_MANAGER_0_ID = 910;
+const ROLE_FIXTURE_TURN_MANAGER_0_HEX = 'roleturn910';
+const ROLE_FIXTURE_TURN_MANAGER_1_ID = 911;
+const ROLE_FIXTURE_TURN_MANAGER_1_HEX = 'roleturn911';
+const ROLE_FIXTURE_TURN_SUPERVISOR_ID = 912;
+const ROLE_FIXTURE_TURN_SUPERVISOR_HEX = 'roleturn912';
+const ROLE_FIXTURE_CALL_SUPERVISOR_TEXT = 'Need next objective from supervisor.';
+const ROLE_FIXTURE_STOP_TEXT = 'All manager and spawn work is complete.';
 const SEED_PLAN_ID = 'seed-plan';
 const SEED_DOC_ID = 'seed-doc';
 const SEED_ISSUE_ID = 1;
@@ -260,6 +277,7 @@ function writeSeedProjectData(adafDir, nowISO) {
   );
 
   writeTurnScopeFixtureData(adafDir, nowISO);
+  writeRoleControlFixtureData(adafDir, nowISO);
 }
 
 function writeFixtureSessions(homeDir, fixtureProjectDir, fixtures) {
@@ -310,6 +328,7 @@ function writeFixtureSessions(homeDir, fixtureProjectDir, fixtures) {
   });
 
   writeTurnScopeFixtureSession(sessionsRoot, fixtureProjectDir, now);
+  writeRoleControlFixtureSession(sessionsRoot, fixtureProjectDir, now);
 }
 
 function writeTurnScopeFixtureData(adafDir, nowISO) {
@@ -433,6 +452,197 @@ function writeTurnScopeFixtureSession(sessionsRoot, fixtureProjectDir, now) {
       type: 'finished',
       data: JSON.stringify({
         wait_for_spawns: true,
+      }),
+    },
+  ];
+  fs.writeFileSync(
+    path.join(sessionDir, 'events.jsonl'),
+    events.map(function (event) { return JSON.stringify(event); }).join('\n') + '\n',
+    'utf8',
+  );
+}
+
+function writeRoleControlFixtureData(adafDir, nowISO) {
+  const managerTurn0 = {
+    id: ROLE_FIXTURE_TURN_MANAGER_0_ID,
+    hex_id: ROLE_FIXTURE_TURN_MANAGER_0_HEX,
+    loop_run_hex_id: ROLE_FIXTURE_LOOP_HEX,
+    step_hex_id: ROLE_FIXTURE_MANAGER_STEP_HEX_C0,
+    plan_id: SEED_PLAN_ID,
+    date: nowISO,
+    agent: 'codex',
+    agent_model: 'seed-model',
+    profile_name: ROLE_FIXTURE_PROFILE,
+    objective: 'Role fixture manager turn 0',
+    what_was_built: 'Initial manager work in cycle 0.',
+    current_state: 'Manager work complete.',
+    next_steps: 'Continue manager responsibilities',
+    build_state: 'success',
+    duration_secs: 4,
+  };
+  fs.writeFileSync(
+    path.join(adafDir, 'local', 'turns', String(ROLE_FIXTURE_TURN_MANAGER_0_ID) + '.json'),
+    JSON.stringify(managerTurn0, null, 2) + '\n',
+    'utf8',
+  );
+
+  const managerTurn1 = {
+    id: ROLE_FIXTURE_TURN_MANAGER_1_ID,
+    hex_id: ROLE_FIXTURE_TURN_MANAGER_1_HEX,
+    loop_run_hex_id: ROLE_FIXTURE_LOOP_HEX,
+    step_hex_id: ROLE_FIXTURE_MANAGER_STEP_HEX_C1,
+    plan_id: SEED_PLAN_ID,
+    date: nowISO,
+    agent: 'codex',
+    agent_model: 'seed-model',
+    profile_name: ROLE_FIXTURE_PROFILE,
+    objective: 'Role fixture manager turn 1',
+    what_was_built: 'Manager follow-up work in cycle 1.',
+    current_state: 'Manager completed handoff checks.',
+    next_steps: 'Escalate to supervisor for next objective',
+    build_state: 'success',
+    duration_secs: 3,
+  };
+  fs.writeFileSync(
+    path.join(adafDir, 'local', 'turns', String(ROLE_FIXTURE_TURN_MANAGER_1_ID) + '.json'),
+    JSON.stringify(managerTurn1, null, 2) + '\n',
+    'utf8',
+  );
+
+  const supervisorTurn = {
+    id: ROLE_FIXTURE_TURN_SUPERVISOR_ID,
+    hex_id: ROLE_FIXTURE_TURN_SUPERVISOR_HEX,
+    loop_run_hex_id: ROLE_FIXTURE_LOOP_HEX,
+    step_hex_id: ROLE_FIXTURE_SUPERVISOR_STEP_HEX_C1,
+    plan_id: SEED_PLAN_ID,
+    date: nowISO,
+    agent: 'codex',
+    agent_model: 'seed-model',
+    profile_name: ROLE_FIXTURE_PROFILE,
+    objective: 'Role fixture supervisor turn',
+    what_was_built: 'Supervisor processed escalation and stop decision.',
+    current_state: 'Loop stop requested after supervisor review.',
+    next_steps: 'Await operator confirmation',
+    build_state: 'success',
+    duration_secs: 2,
+  };
+  fs.writeFileSync(
+    path.join(adafDir, 'local', 'turns', String(ROLE_FIXTURE_TURN_SUPERVISOR_ID) + '.json'),
+    JSON.stringify(supervisorTurn, null, 2) + '\n',
+    'utf8',
+  );
+
+  const loopRun = {
+    id: ROLE_FIXTURE_LOOP_RUN_ID,
+    hex_id: ROLE_FIXTURE_LOOP_HEX,
+    loop_name: ROLE_FIXTURE_LOOP_NAME,
+    plan_id: SEED_PLAN_ID,
+    steps: [
+      { profile: ROLE_FIXTURE_PROFILE, role: 'manager', position: 'manager', turns: 1 },
+      { profile: ROLE_FIXTURE_PROFILE, role: 'supervisor', position: 'supervisor', turns: 1 },
+    ],
+    status: 'active',
+    cycle: 1,
+    step_index: 1,
+    started_at: nowISO,
+    session_ids: [ROLE_FIXTURE_TURN_MANAGER_0_ID, ROLE_FIXTURE_TURN_MANAGER_1_ID, ROLE_FIXTURE_TURN_SUPERVISOR_ID],
+    step_last_seen_msg: { 0: 0, 1: 0 },
+    pending_handoffs: [],
+    step_hex_ids: {
+      '0:0': ROLE_FIXTURE_MANAGER_STEP_HEX_C0,
+      '0:1': ROLE_FIXTURE_SUPERVISOR_STEP_HEX_C0,
+      '1:0': ROLE_FIXTURE_MANAGER_STEP_HEX_C1,
+      '1:1': ROLE_FIXTURE_SUPERVISOR_STEP_HEX_C1,
+    },
+    daemon_session_id: ROLE_FIXTURE_SESSION_ID,
+  };
+  fs.writeFileSync(
+    path.join(adafDir, 'local', 'loopruns', String(ROLE_FIXTURE_LOOP_RUN_ID) + '.json'),
+    JSON.stringify(loopRun, null, 2) + '\n',
+    'utf8',
+  );
+}
+
+function writeRoleControlFixtureSession(sessionsRoot, fixtureProjectDir, now) {
+  const sessionDir = path.join(sessionsRoot, String(ROLE_FIXTURE_SESSION_ID));
+  fs.mkdirSync(sessionDir, { recursive: true });
+
+  const startedAt = new Date(now - 35_000);
+  const endedAt = new Date(startedAt.getTime() + 9_000);
+  const meta = {
+    id: ROLE_FIXTURE_SESSION_ID,
+    profile_name: ROLE_FIXTURE_PROFILE,
+    agent_name: 'codex',
+    loop_name: ROLE_FIXTURE_LOOP_NAME,
+    loop_steps: 2,
+    project_dir: fixtureProjectDir,
+    project_name: FIXTURE_PROJECT_NAME,
+    project_id: '',
+    pid: 0,
+    status: 'done',
+    started_at: startedAt.toISOString(),
+    ended_at: endedAt.toISOString(),
+    error: '',
+  };
+  fs.writeFileSync(
+    path.join(sessionDir, 'meta.json'),
+    JSON.stringify(meta, null, 2) + '\n',
+    'utf8',
+  );
+
+  const callSupervisorCmd = `/bin/bash -lc 'adaf loop call-supervisor \"${ROLE_FIXTURE_CALL_SUPERVISOR_TEXT}\"'`;
+  const stopCmd = `/bin/bash -lc 'adaf loop stop \"${ROLE_FIXTURE_STOP_TEXT}\"'`;
+
+  const events = [
+    {
+      timestamp: startedAt.toISOString(),
+      type: 'prompt',
+      data: JSON.stringify({
+        turn_hex_id: ROLE_FIXTURE_TURN_SUPERVISOR_HEX,
+        prompt: 'Supervisor resumes after manager escalation.',
+        is_resume: true,
+      }),
+    },
+    {
+      timestamp: new Date(startedAt.getTime() + 1000).toISOString(),
+      type: 'event',
+      data: JSON.stringify({
+        event: assistantTextEvent('Processing escalation and loop shutdown request.'),
+      }),
+    },
+    {
+      timestamp: new Date(startedAt.getTime() + 2000).toISOString(),
+      type: 'event',
+      data: JSON.stringify({
+        event: assistantToolUseEvent('Bash', 'role-call-supervisor', { command: callSupervisorCmd }),
+      }),
+    },
+    {
+      timestamp: new Date(startedAt.getTime() + 3000).toISOString(),
+      type: 'event',
+      data: JSON.stringify({
+        event: userToolResultEvent('role-call-supervisor', 'Bash', 'Supervisor signal queued.', false),
+      }),
+    },
+    {
+      timestamp: new Date(startedAt.getTime() + 4000).toISOString(),
+      type: 'event',
+      data: JSON.stringify({
+        event: assistantToolUseEvent('Bash', 'role-stop-loop', { command: stopCmd }),
+      }),
+    },
+    {
+      timestamp: new Date(startedAt.getTime() + 5000).toISOString(),
+      type: 'event',
+      data: JSON.stringify({
+        event: userToolResultEvent('role-stop-loop', 'Bash', 'Loop stop signal sent.', false),
+      }),
+    },
+    {
+      timestamp: new Date(startedAt.getTime() + 6000).toISOString(),
+      type: 'finished',
+      data: JSON.stringify({
+        turn_hex_id: ROLE_FIXTURE_TURN_SUPERVISOR_HEX,
       }),
     },
   ];

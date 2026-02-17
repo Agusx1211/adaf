@@ -208,17 +208,43 @@ export default function LoopTree() {
       var steps = Array.isArray(lr && lr.steps) ? lr.steps : [];
       if (!steps.length) return;
 
+      var stepByHex = {};
+      var stepHexIDs = lr && typeof lr.step_hex_ids === 'object' ? lr.step_hex_ids : {};
+      Object.keys(stepHexIDs).forEach(function (cycleStep) {
+        var hex = String(stepHexIDs[cycleStep] || '').trim();
+        if (!hex) return;
+        var keyParts = String(cycleStep || '').split(':');
+        if (keyParts.length !== 2) return;
+        var parsedStepIndex = Number(keyParts[1]);
+        if (!Number.isFinite(parsedStepIndex) || parsedStepIndex < 0 || parsedStepIndex >= steps.length) return;
+        var matchedStep = steps[parsedStepIndex] || {};
+        stepByHex[hex] = {
+          profile: matchedStep.profile ? String(matchedStep.profile) : '',
+          position: matchedStep.position ? String(matchedStep.position) : '',
+          step_index: parsedStepIndex,
+        };
+      });
+
       var byTurn = {};
       var stepIndex = 0;
       var stepTurnsRemaining = stepTurns(steps[0]);
 
       turnIDs.forEach(function (turnID) {
-        var step = steps[stepIndex] || {};
-        byTurn[turnID] = {
-          profile: step.profile ? String(step.profile) : '',
-          position: step.position ? String(step.position) : '',
-          step_index: stepIndex,
-        };
+        var mappedStep = null;
+        var turn = turnsByID[turnID] || null;
+        var turnStepHex = String(turn && turn.step_hex_id || '').trim();
+        if (turnStepHex && stepByHex[turnStepHex]) {
+          mappedStep = stepByHex[turnStepHex];
+        }
+        if (!mappedStep) {
+          var fallbackStep = steps[stepIndex] || {};
+          mappedStep = {
+            profile: fallbackStep.profile ? String(fallbackStep.profile) : '',
+            position: fallbackStep.position ? String(fallbackStep.position) : '',
+            step_index: stepIndex,
+          };
+        }
+        byTurn[turnID] = mappedStep;
         stepTurnsRemaining -= 1;
         if (stepTurnsRemaining <= 0) {
           stepIndex = (stepIndex + 1) % steps.length;
@@ -229,7 +255,7 @@ export default function LoopTree() {
       out[runKey] = byTurn;
     });
     return out;
-  }, [loopRuns]);
+  }, [loopRuns, turnsByID]);
 
   function toggleNode(nodeID) {
     dispatch({ type: 'TOGGLE_NODE', payload: nodeID });
@@ -479,15 +505,13 @@ function TurnNode({ session, displayID, scopeMode, scopeID, stopSessionID, sessi
   var isWaiting = status === 'waiting' || status === 'waiting_for_spawns';
   var sColor = statusColor(session.status);
   var info = agentInfo(session.agent);
+  var roleText = String(sessionRole || session.action || '').trim();
+  var role = turnRole(roleText);
   var hasSpawns = rootSpawns.length > 0;
   var turnExpandKey = 'turn-' + effectiveMode + '-' + effectiveDisplayID;
   var expanded = turnExpandKey in expandedNodes ? !!expandedNodes[turnExpandKey] : isRunning;
-  var detailParts = [];
-  if (sessionRole) detailParts.push(sessionRole);
-  else if (session.action) detailParts.push(session.action);
-  if (session.agent) detailParts.push(session.agent);
-  if (sessionModel) detailParts.push(sessionModel);
-  var detailText = detailParts.join(' \u00B7 ');
+  var rowIcon = role.icon || info.icon;
+  var rowIconColor = role.color || info.color;
 
   return (
     <div>
@@ -523,7 +547,7 @@ function TurnNode({ session, displayID, scopeMode, scopeID, stopSessionID, sessi
           animation: isRunning ? 'pulse 2s ease-in-out infinite' : 'none',
         }} />
 
-        <span style={{ color: info.color, fontSize: 10, flexShrink: 0 }}>{info.icon}</span>
+        <span style={{ color: rowIconColor, fontSize: 10, flexShrink: 0 }}>{rowIcon}</span>
 
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -546,9 +570,23 @@ function TurnNode({ session, displayID, scopeMode, scopeID, stopSessionID, sessi
               }}>WAITING</span>
             )}
           </div>
-          {detailText && (
+          {(roleText || session.agent || sessionModel) && (
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)', marginTop: 1 }}>
-              {detailText}
+              {roleText ? (
+                <span style={{ color: role.color || 'var(--text-2)', fontWeight: 600 }}>
+                  {(role.icon ? role.icon + ' ' : '') + roleText}
+                </span>
+              ) : null}
+              {session.agent ? (
+                <span style={{ color: 'var(--text-3)' }}>
+                  {(roleText ? ' \u00B7 ' : '') + session.agent}
+                </span>
+              ) : null}
+              {sessionModel ? (
+                <span style={{ color: 'var(--text-3)' }}>
+                  {((roleText || session.agent) ? ' \u00B7 ' : '') + sessionModel}
+                </span>
+              ) : null}
             </div>
           )}
         </div>
@@ -622,6 +660,15 @@ function TurnNode({ session, displayID, scopeMode, scopeID, stopSessionID, sessi
       })}
     </div>
   );
+}
+
+function turnRole(raw) {
+  var key = String(raw || '').trim().toLowerCase();
+  if (!key) return { icon: '', color: '' };
+  if (key === 'manager') return { icon: '\u25C6', color: 'rgb(74, 230, 138)' };
+  if (key === 'supervisor') return { icon: '\u2B22', color: 'rgb(249, 226, 175)' };
+  if (key === 'lead') return { icon: '\u25B2', color: 'rgb(137, 180, 250)' };
+  return { icon: '\u25CF', color: 'var(--text-2)' };
 }
 
 function stepTurns(step) {
