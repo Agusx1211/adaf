@@ -90,7 +90,7 @@ export default function ConfigDetailPanel() {
     if (!sel) { setData(null); return; }
 
     if (sel.isNew) {
-      if (sel.type === 'profile') setData({ name: '', agent: 'claude', model: '', reasoning_level: '', description: '', intelligence: 0, max_instances: 0, speed: '', cost: '' });
+      if (sel.type === 'profile') setData({ name: '', agent: 'claude', model: '', reasoning_level: '', description: '', cost: '' });
       else if (sel.type === 'loop') setData({ name: '', steps: [emptyStep()] });
       else if (sel.type === 'team') setData({ name: '', description: '', delegation: null });
       else if (sel.type === 'skill') setData({ id: '', short: '', long: '' });
@@ -147,9 +147,6 @@ export default function ConfigDetailPanel() {
         if (data.model) pOut.model = data.model;
         if (data.reasoning_level) pOut.reasoning_level = data.reasoning_level;
         if (data.description) pOut.description = data.description;
-        if (data.intelligence) pOut.intelligence = Number(data.intelligence);
-        if (data.max_instances) pOut.max_instances = Number(data.max_instances);
-        if (data.speed) pOut.speed = data.speed;
         if (data.cost) pOut.cost = data.cost;
         if (sel.isNew) {
           await apiCall('/api/config/profiles', 'POST', pOut);
@@ -379,15 +376,6 @@ function ProfileEditor({ data, set, setData, isNew, agentsMeta, onRefreshAgents,
           {COST_OPTIONS.filter(Boolean).map(function (c) { return <option key={c} value={c}>{c}</option>; })}
         </select>
       </div>
-      <div style={sectionDivider}>
-        <label style={labelStyle}>Speed</label>
-        <select value={data.speed || ''} onChange={function (e) { set('speed', e.target.value); }} style={selectStyle}>
-          <option value="">Not set</option>
-          {SPEED_OPTIONS.filter(Boolean).map(function (s) { return <option key={s} value={s}>{s}</option>; })}
-        </select>
-      </div>
-      <Field label="Intelligence (1-10, 0=unset)" value={data.intelligence || 0} type="number" onChange={function (v) { set('intelligence', Number(v)); }} />
-      <Field label="Max Instances (0=unlimited)" value={data.max_instances || 0} type="number" onChange={function (v) { set('max_instances', Number(v)); }} />
       <div style={sectionDivider}>
         <label style={labelStyle}>Description</label>
         <textarea value={data.description || ''} onChange={function (e) { set('description', e.target.value); }} style={{ ...inputStyle, minHeight: 100, resize: 'vertical' }} placeholder="Strengths, weaknesses, best use cases..." />

@@ -88,6 +88,9 @@ test('profile editor shows cost tier and performance telemetry for seeded profil
 
   const panel = page.getByTestId('profile-performance-panel');
   await expect(panel).toBeVisible();
+  await expect(page.getByText('Speed', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Intelligence (1-10, 0=unset)', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Max Instances (0=unlimited)', { exact: true })).toHaveCount(0);
   await expect(panel.getByText('Feedback Count')).toBeVisible();
   await expect(panel.getByText('Avg Quality')).toBeVisible();
   await expect(panel.getByText('Avg Difficulty')).toBeVisible();
