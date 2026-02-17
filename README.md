@@ -442,6 +442,21 @@ make build
 # Run tests
 make test
 
+# Record Vibe replay fixture (requires vibe + credentials)
+make record-vibe-fixture
+
+# Record Gemini replay fixture (requires gemini + credentials)
+make record-gemini-fixture
+
+# Record OpenCode replay fixture (requires opencode + credentials)
+make record-opencode-fixture
+
+# Record Codex replay fixture (requires codex + credentials)
+make record-codex-fixture
+
+# Record Claude replay fixture (requires claude + credentials)
+make record-claude-fixture
+
 # Format code
 make fmt
 

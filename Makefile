@@ -1,4 +1,4 @@
-.PHONY: build install test race clean lint fmt web web-install web-watch
+.PHONY: build install test race clean lint fmt web web-install web-watch e2e-install e2e e2e-clean record-vibe-fixture record-gemini-fixture record-opencode-fixture record-codex-fixture record-claude-fixture
 
 BINARY=adaf
 BUILD_DIR=bin
@@ -22,6 +22,16 @@ build: web
 install: web
 	go install $(LDFLAGS) ./cmd/adaf
 
+e2e-install:
+	cd e2e && npm install
+
+e2e: e2e-install
+	make web
+	cd e2e && npm run install:browsers && npm test
+
+e2e-clean:
+	cd e2e && rm -rf node_modules test-results playwright-report .state
+
 test:
 	go test ./...
 
@@ -41,3 +51,18 @@ tidy:
 	go mod tidy
 
 all: tidy fmt build test race
+
+record-vibe-fixture:
+	ADAF_RECORD_VIBE_FIXTURE=1 go test -tags=integration ./internal/agent -run TestRecordVibeFixture -v
+
+record-gemini-fixture:
+	ADAF_RECORD_GEMINI_FIXTURE=1 go test -tags=integration ./internal/agent -run TestRecordGeminiFixture -v
+
+record-opencode-fixture:
+	ADAF_RECORD_OPENCODE_FIXTURE=1 go test -tags=integration ./internal/agent -run TestRecordOpencodeFixture -v
+
+record-codex-fixture:
+	ADAF_RECORD_CODEX_FIXTURE=1 go test -tags=integration ./internal/agent -run TestRecordCodexFixture -v
+
+record-claude-fixture:
+	ADAF_RECORD_CLAUDE_FIXTURE=1 go test -tags=integration ./internal/agent -run TestRecordClaudeFixture -v

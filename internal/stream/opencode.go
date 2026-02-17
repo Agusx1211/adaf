@@ -79,7 +79,7 @@ func ParseOpencode(ctx context.Context, r io.Reader) <-chan RawEvent {
 				continue
 			}
 
-			parsed, ok, err := parseOpencodeLine(raw)
+			parsedEvents, ok, err := parseOpencodeLine(raw)
 			if err != nil {
 				offerRawEvent(ctx, ch, RawEvent{Raw: raw, Err: err}, "opencode")
 				continue
@@ -88,7 +88,13 @@ func ParseOpencode(ctx context.Context, r io.Reader) <-chan RawEvent {
 				offerRawEvent(ctx, ch, RawEvent{Raw: raw}, "opencode")
 				continue
 			}
-			offerRawEvent(ctx, ch, RawEvent{Raw: raw, Parsed: parsed}, "opencode")
+			for i, parsed := range parsedEvents {
+				if i == 0 {
+					offerRawEvent(ctx, ch, RawEvent{Raw: raw, Parsed: parsed}, "opencode")
+					continue
+				}
+				offerRawEvent(ctx, ch, RawEvent{Parsed: parsed}, "opencode")
+			}
 		}
 
 		if err := scanner.Err(); err != nil {
@@ -98,32 +104,48 @@ func ParseOpencode(ctx context.Context, r io.Reader) <-chan RawEvent {
 	return ch
 }
 
-func parseOpencodeLine(raw []byte) (ClaudeEvent, bool, error) {
+func parseOpencodeLine(raw []byte) ([]ClaudeEvent, bool, error) {
 	var ev opencodeEvent
 	if err := json.Unmarshal(raw, &ev); err != nil {
-		return ClaudeEvent{}, false, err
+		return nil, false, err
 	}
 
 	switch ev.Type {
 	case "text":
-		return parseOpencodeTextPart(ev, "text")
+		parsed, ok, err := parseOpencodeTextPart(ev, "text")
+		if err != nil || !ok {
+			return nil, ok, err
+		}
+		return []ClaudeEvent{parsed}, true, nil
 	case "reasoning":
-		return parseOpencodeTextPart(ev, "thinking")
+		parsed, ok, err := parseOpencodeTextPart(ev, "thinking")
+		if err != nil || !ok {
+			return nil, ok, err
+		}
+		return []ClaudeEvent{parsed}, true, nil
 	case "tool_use":
 		return parseOpencodeToolUse(ev)
 	case "step_start":
 		// Map to a system init-like event so the session ID is captured.
-		return ClaudeEvent{
+		return []ClaudeEvent{{
 			Type:    "system",
 			Subtype: "init",
 			TurnID:  ev.SessionID,
-		}, true, nil
+		}}, true, nil
 	case "step_finish":
-		return parseOpencodeStepFinish(ev)
+		parsed, ok, err := parseOpencodeStepFinish(ev)
+		if err != nil || !ok {
+			return nil, ok, err
+		}
+		return []ClaudeEvent{parsed}, true, nil
 	case "error":
-		return parseOpencodeError(ev)
+		parsed, ok, err := parseOpencodeError(ev)
+		if err != nil || !ok {
+			return nil, ok, err
+		}
+		return []ClaudeEvent{parsed}, true, nil
 	default:
-		return ClaudeEvent{}, false, nil
+		return nil, false, nil
 	}
 }
 
@@ -147,10 +169,10 @@ func parseOpencodeTextPart(ev opencodeEvent, blockType string) (ClaudeEvent, boo
 	}, true, nil
 }
 
-func parseOpencodeToolUse(ev opencodeEvent) (ClaudeEvent, bool, error) {
+func parseOpencodeToolUse(ev opencodeEvent) ([]ClaudeEvent, bool, error) {
 	var part opencodePart
 	if err := json.Unmarshal(ev.Part, &part); err != nil {
-		return ClaudeEvent{}, false, err
+		return nil, false, err
 	}
 
 	toolName := part.Tool
@@ -177,8 +199,7 @@ func parseOpencodeToolUse(ev opencodeEvent) (ClaudeEvent, bool, error) {
 		isError = part.State.Status == "error"
 	}
 
-	// Emit as assistant with tool_use + user with tool_result.
-	return ClaudeEvent{
+	assistant := ClaudeEvent{
 		Type:   "assistant",
 		TurnID: ev.SessionID,
 		AssistantMessage: &AssistantMessage{
@@ -190,15 +211,26 @@ func parseOpencodeToolUse(ev opencodeEvent) (ClaudeEvent, bool, error) {
 					ID:    id,
 					Input: input,
 				},
+			},
+		},
+	}
+	user := ClaudeEvent{
+		Type:   "user",
+		TurnID: ev.SessionID,
+		AssistantMessage: &AssistantMessage{
+			Role: "user",
+			Content: []ContentBlock{
 				{
 					Type:        "tool_result",
+					Name:        toolName,
 					ToolUseID:   id,
 					ToolContent: marshalString(output),
 					IsError:     isError,
 				},
 			},
 		},
-	}, true, nil
+	}
+	return []ClaudeEvent{assistant, user}, true, nil
 }
 
 func parseOpencodeStepFinish(ev opencodeEvent) (ClaudeEvent, bool, error) {
