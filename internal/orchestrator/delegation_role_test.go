@@ -173,6 +173,7 @@ func TestSpawn_RejectsImmediatelyWhenChildMaxInstancesReached(t *testing.T) {
 	}
 	o := New(s, cfg, repo)
 	o.instances["worker"] = 1
+	o.instancesByOption[limitOptionKey("worker", config.PositionWorker, config.RoleDeveloper)] = 1
 
 	spawnID, err := o.Spawn(context.Background(), SpawnRequest{
 		ParentTurnID:  8,
@@ -188,8 +189,8 @@ func TestSpawn_RejectsImmediatelyWhenChildMaxInstancesReached(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Spawn() error = nil, want max instances error")
 	}
-	if !strings.Contains(err.Error(), "child profile") || !strings.Contains(err.Error(), "max 1") {
-		t.Fatalf("Spawn() error = %q, want child max instances hint", err)
+	if !strings.Contains(err.Error(), "sub-agent option") || !strings.Contains(err.Error(), "max 1") {
+		t.Fatalf("Spawn() error = %q, want per-option max instances hint", err)
 	}
 	if spawnID != 0 {
 		t.Fatalf("spawnID = %d, want 0", spawnID)
@@ -201,6 +202,55 @@ func TestSpawn_RejectsImmediatelyWhenChildMaxInstancesReached(t *testing.T) {
 	}
 	if len(spawns) != 0 {
 		t.Fatalf("expected no spawn records on limit rejection, got %d", len(spawns))
+	}
+}
+
+func TestSpawn_DelegationMaxInstancesArePerRoleBucket(t *testing.T) {
+	repo := initGitRepo(t)
+	s := newTestStore(t, repo)
+	cfg := &config.GlobalConfig{
+		Profiles: []config.Profile{
+			{Name: "parent", Agent: "codex"},
+			{Name: "worker", Agent: "missing-agent"},
+		},
+	}
+	o := New(s, cfg, repo)
+	qaKey := limitOptionKey("worker", config.PositionWorker, config.RoleQA)
+	o.instances["worker"] = 2
+	o.instancesByOption[qaKey] = 2
+
+	spawnID, err := o.Spawn(context.Background(), SpawnRequest{
+		ParentTurnID:  10,
+		ParentProfile: "parent",
+		ChildProfile:  "worker",
+		ChildRole:     config.RoleDeveloper,
+		Task:          "dev task",
+		Delegation: &config.DelegationConfig{
+			Profiles: []config.DelegationProfile{
+				{Name: "worker", Role: config.RoleDeveloper, MaxInstances: 1},
+				{Name: "worker", Role: config.RoleQA, MaxInstances: 2},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatalf("Spawn() error = nil, want missing-agent failure")
+	}
+	if !strings.Contains(err.Error(), "agent \"missing-agent\" not found") {
+		t.Fatalf("Spawn() error = %q, want missing-agent failure", err)
+	}
+	if spawnID == 0 {
+		t.Fatalf("spawnID = 0, want non-zero (limit should allow this role)")
+	}
+
+	if got := o.instances["worker"]; got != 2 {
+		t.Fatalf("instances[worker] = %d, want 2 after cleanup", got)
+	}
+	if got := o.instancesByOption[qaKey]; got != 2 {
+		t.Fatalf("instancesByOption[qa] = %d, want 2", got)
+	}
+	devKey := limitOptionKey("worker", config.PositionWorker, config.RoleDeveloper)
+	if got := o.instancesByOption[devKey]; got != 0 {
+		t.Fatalf("instancesByOption[developer] = %d, want 0 after cleanup", got)
 	}
 }
 

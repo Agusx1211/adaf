@@ -124,8 +124,15 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 
 	var b strings.Builder
 	runningByProfile := make(map[string]int)
+	runningByOption := make(map[string]int)
 	for _, rec := range runningSpawns {
-		runningByProfile[strings.ToLower(strings.TrimSpace(rec.ChildProfile))]++
+		profileKey := strings.ToLower(strings.TrimSpace(rec.ChildProfile))
+		if profileKey != "" {
+			runningByProfile[profileKey]++
+		}
+		if key := delegationLimitOptionKey(rec.ChildProfile, rec.ChildPosition, rec.ChildRole); key != "" {
+			runningByOption[key]++
+		}
 	}
 
 	b.WriteString("# Delegation\n\n")
@@ -193,21 +200,34 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 			if speed != "" {
 				line += fmt.Sprintf(", speed=%s", speed)
 			}
-			maxInstances := p.MaxInstances
-			if dp.MaxInstances > 0 {
-				maxInstances = dp.MaxInstances
+			optionMaxInstances := dp.MaxInstances
+			if optionMaxInstances > 0 {
+				line += fmt.Sprintf(", max_instances=%d", optionMaxInstances)
 			}
-			if maxInstances > 0 {
-				line += fmt.Sprintf(", max_instances=%d", maxInstances)
+			profileMaxInstances := p.MaxInstances
+			if profileMaxInstances > 0 {
+				line += fmt.Sprintf(", profile_max_instances=%d", profileMaxInstances)
 			}
-			running := runningByProfile[strings.ToLower(strings.TrimSpace(p.Name))]
-			if maxInstances > 0 {
-				line += fmt.Sprintf(", running=%d/%d", running, maxInstances)
-				if running >= maxInstances {
+			runningProfile := runningByProfile[strings.ToLower(strings.TrimSpace(p.Name))]
+			if optionMaxInstances > 0 && len(roles) == 1 {
+				runningOption := runningByOption[delegationLimitOptionKey(p.Name, config.PositionWorker, roles[0])]
+				line += fmt.Sprintf(", running=%d/%d", runningOption, optionMaxInstances)
+				if runningOption >= optionMaxInstances {
 					line += " [at-cap]"
 				}
-			} else if running > 0 {
-				line += fmt.Sprintf(", running=%d", running)
+				if profileMaxInstances > 0 {
+					line += fmt.Sprintf(", profile_running=%d/%d", runningProfile, profileMaxInstances)
+					if runningProfile >= profileMaxInstances {
+						line += " [profile-at-cap]"
+					}
+				}
+			} else if profileMaxInstances > 0 {
+				line += fmt.Sprintf(", running=%d/%d", runningProfile, profileMaxInstances)
+				if runningProfile >= profileMaxInstances {
+					line += " [at-cap]"
+				}
+			} else if runningProfile > 0 {
+				line += fmt.Sprintf(", running=%d", runningProfile)
 			}
 			if dp.Handoff {
 				line += " [handoff]"
@@ -302,6 +322,22 @@ func formatDelegationRoleScores(items []profilescore.BreakdownStats, limit int) 
 		parts = append(parts, fmt.Sprintf("%s:%.1f(%d)", sorted[i].Name, sorted[i].Score, sorted[i].Count))
 	}
 	return strings.Join(parts, "|")
+}
+
+func delegationLimitOptionKey(profile, position, role string) string {
+	prof := strings.ToLower(strings.TrimSpace(profile))
+	pos := strings.ToLower(strings.TrimSpace(position))
+	r := strings.ToLower(strings.TrimSpace(role))
+	if prof == "" {
+		return ""
+	}
+	if pos == "" {
+		pos = config.PositionWorker
+	}
+	if r == "" {
+		r = "-"
+	}
+	return prof + "|" + pos + "|" + r
 }
 
 type delegationRoutingRow struct {

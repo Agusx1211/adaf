@@ -47,6 +47,7 @@ type SpawnRequest struct {
 	ChildSpeed        string
 	ChildHandoff      bool
 	ChildSkills       []string
+	childLimitKey     string
 	workspaceBaseRef  string
 }
 
@@ -143,28 +144,30 @@ type Orchestrator struct {
 	worktrees *worktree.Manager
 	repoRoot  string
 
-	mu        sync.Mutex
-	running   map[string]int // parent profile -> count of running spawns
-	instances map[string]int // child profile -> count of running instances
-	spawns    map[int]*activeSpawn
-	waitAny   map[int]chan struct{} // parent turn -> completion notification channel
-	waiters   map[int]int           // parent turn -> active WaitAny waiter count
-	spawnWG   sync.WaitGroup        // tracks running spawn goroutines
-	eventCh   chan any              // optional event channel for real-time sub-agent events
+	mu                sync.Mutex
+	running           map[string]int // parent profile -> count of running spawns
+	instances         map[string]int // child profile -> count of running instances
+	instancesByOption map[string]int // child profile+position+role -> count (delegation-profile max_instances)
+	spawns            map[int]*activeSpawn
+	waitAny           map[int]chan struct{} // parent turn -> completion notification channel
+	waiters           map[int]int           // parent turn -> active WaitAny waiter count
+	spawnWG           sync.WaitGroup        // tracks running spawn goroutines
+	eventCh           chan any              // optional event channel for real-time sub-agent events
 }
 
 // New creates an Orchestrator.
 func New(s *store.Store, globalCfg *config.GlobalConfig, repoRoot string) *Orchestrator {
 	return &Orchestrator{
-		store:     s,
-		globalCfg: globalCfg,
-		worktrees: worktree.NewManager(repoRoot),
-		repoRoot:  repoRoot,
-		running:   make(map[string]int),
-		instances: make(map[string]int),
-		spawns:    make(map[int]*activeSpawn),
-		waitAny:   make(map[int]chan struct{}),
-		waiters:   make(map[int]int),
+		store:             s,
+		globalCfg:         globalCfg,
+		worktrees:         worktree.NewManager(repoRoot),
+		repoRoot:          repoRoot,
+		running:           make(map[string]int),
+		instances:         make(map[string]int),
+		instancesByOption: make(map[string]int),
+		spawns:            make(map[int]*activeSpawn),
+		waitAny:           make(map[int]chan struct{}),
+		waiters:           make(map[int]int),
 	}
 }
 
@@ -213,6 +216,22 @@ func safeOfferAny(ch chan any, msg any) (sent bool, closed bool) {
 	default:
 		return false, false
 	}
+}
+
+func limitOptionKey(profile, position, role string) string {
+	prof := strings.ToLower(strings.TrimSpace(profile))
+	pos := strings.ToLower(strings.TrimSpace(position))
+	r := strings.ToLower(strings.TrimSpace(role))
+	if prof == "" {
+		return ""
+	}
+	if pos == "" {
+		pos = config.PositionWorker
+	}
+	if r == "" {
+		r = "-"
+	}
+	return prof + "|" + pos + "|" + r
 }
 
 func (o *Orchestrator) acquireWaitAny(parentTurnID int) chan struct{} {
@@ -360,6 +379,7 @@ func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error)
 	req.ChildSpeed = resolved.Speed
 	if resolved.MaxInstances > 0 {
 		req.ChildMaxInstances = resolved.MaxInstances
+		req.childLimitKey = limitOptionKey(req.ChildProfile, req.ChildPosition, req.ChildRole)
 	}
 	if len(resolved.Skills) > 0 {
 		req.ChildSkills = append([]string(nil), resolved.Skills...)
@@ -379,18 +399,29 @@ func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error)
 
 	o.mu.Lock()
 
-	// Check child profile instance limit.
-	maxInst := childProf.MaxInstances
-	if req.ChildMaxInstances > 0 {
-		maxInst = req.ChildMaxInstances
-	}
-	if maxInst > 0 {
+	// Check global child profile instance limit.
+	if childProf.MaxInstances > 0 {
 		currentInstances := o.instances[req.ChildProfile]
-		if currentInstances >= maxInst {
+		if currentInstances >= childProf.MaxInstances {
 			o.mu.Unlock()
 			return 0, fmt.Errorf(
 				"spawn limit reached: child profile %q has %d running instance(s) (max %d)",
-				req.ChildProfile, currentInstances, maxInst,
+				req.ChildProfile, currentInstances, childProf.MaxInstances,
+			)
+		}
+	}
+
+	// Check per-delegation-option instance limit (profile+position+role).
+	if req.ChildMaxInstances > 0 && req.childLimitKey != "" {
+		if o.instancesByOption == nil {
+			o.instancesByOption = make(map[string]int)
+		}
+		currentOptionInstances := o.instancesByOption[req.childLimitKey]
+		if currentOptionInstances >= req.ChildMaxInstances {
+			o.mu.Unlock()
+			return 0, fmt.Errorf(
+				"spawn limit reached: sub-agent option profile=%q role=%q has %d running instance(s) (max %d)",
+				req.ChildProfile, req.ChildRole, currentOptionInstances, req.ChildMaxInstances,
 			)
 		}
 	}
@@ -408,15 +439,27 @@ func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error)
 
 	o.running[req.ParentProfile]++
 	o.instances[req.ChildProfile]++
+	if req.childLimitKey != "" {
+		if o.instancesByOption == nil {
+			o.instancesByOption = make(map[string]int)
+		}
+		o.instancesByOption[req.childLimitKey]++
+	}
 	runningCount := o.running[req.ParentProfile]
 	instanceCount := o.instances[req.ChildProfile]
+	optionInstanceCount := 0
+	if req.childLimitKey != "" {
+		optionInstanceCount = o.instancesByOption[req.childLimitKey]
+	}
 	o.mu.Unlock()
 
 	debug.LogKV("orch", "spawn starting immediately",
 		"parent_profile", req.ParentProfile,
 		"child_profile", req.ChildProfile,
+		"child_role", req.ChildRole,
 		"running", runningCount,
 		"instances", instanceCount,
+		"option_instances", optionInstanceCount,
 	)
 	return o.startSpawn(ctx, req, childProf)
 }
@@ -456,7 +499,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 	if !req.ReadOnly {
 		branchName, createdPath, err := o.createWritableWorktree(ctx, req.ParentTurnID, req.ChildProfile, req.workspaceBaseRef)
 		if err != nil {
-			o.releaseSpawnSlot(req.ParentProfile, req.ChildProfile)
+			o.releaseSpawnSlot(req.ParentProfile, req.ChildProfile, req.childLimitKey)
 			return 0, fmt.Errorf("creating worktree: %w", err)
 		}
 		wtPath = createdPath
@@ -486,7 +529,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 					"worktree", wtPath, "branch", rec.Branch, "error", rmErr)
 			}
 		}
-		o.releaseSpawnSlot(req.ParentProfile, req.ChildProfile)
+		o.releaseSpawnSlot(req.ParentProfile, req.ChildProfile, req.childLimitKey)
 		debug.LogKV("orch", "spawn record creation failed", "error", err)
 		return 0, fmt.Errorf("creating spawn record: %w", err)
 	}
@@ -510,7 +553,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 					"worktree", wtPath, "branch", rec.Branch, "error", rmErr)
 			}
 		}
-		o.releaseSpawnSlot(req.ParentProfile, req.ChildProfile)
+		o.releaseSpawnSlot(req.ParentProfile, req.ChildProfile, req.childLimitKey)
 		return rec.ID, fmt.Errorf("agent %q not found", childProf.Agent)
 	}
 
@@ -680,7 +723,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 	go func() {
 		defer o.spawnWG.Done()
 		defer close(done)
-		defer o.onSpawnComplete(rec.ID, req.ParentProfile, req.ChildProfile)
+		defer o.onSpawnComplete(rec.ID, req.ParentProfile, req.ChildProfile, req.childLimitKey)
 
 		debug.LogKV("orch", "spawn goroutine started",
 			"spawn_id", rec.ID,
@@ -1145,7 +1188,7 @@ func (o *Orchestrator) waitForAuxiliary(name string, spawnID int, done <-chan st
 	}
 }
 
-func (o *Orchestrator) onSpawnComplete(spawnID int, parentProfile, childProfile string) {
+func (o *Orchestrator) onSpawnComplete(spawnID int, parentProfile, childProfile, childLimitKey string) {
 	status := ""
 	exitCode := 0
 	if rec, err := o.store.GetSpawn(spawnID); err == nil && rec != nil {
@@ -1167,13 +1210,15 @@ func (o *Orchestrator) onSpawnComplete(spawnID int, parentProfile, childProfile 
 	delete(o.spawns, spawnID)
 	o.decrementRunningLocked(parentProfile)
 	o.decrementInstancesLocked(childProfile)
+	o.decrementOptionInstancesLocked(childLimitKey)
 	o.mu.Unlock()
 }
 
-func (o *Orchestrator) releaseSpawnSlot(parentProfile, childProfile string) {
+func (o *Orchestrator) releaseSpawnSlot(parentProfile, childProfile, childLimitKey string) {
 	o.mu.Lock()
 	o.decrementRunningLocked(parentProfile)
 	o.decrementInstancesLocked(childProfile)
+	o.decrementOptionInstancesLocked(childLimitKey)
 	o.mu.Unlock()
 }
 
@@ -1188,6 +1233,16 @@ func (o *Orchestrator) decrementInstancesLocked(profile string) {
 	o.instances[profile]--
 	if o.instances[profile] <= 0 {
 		delete(o.instances, profile)
+	}
+}
+
+func (o *Orchestrator) decrementOptionInstancesLocked(key string) {
+	if key == "" || o.instancesByOption == nil {
+		return
+	}
+	o.instancesByOption[key]--
+	if o.instancesByOption[key] <= 0 {
+		delete(o.instancesByOption, key)
 	}
 }
 

@@ -92,12 +92,11 @@ func runSpawnInfo(cmd *cobra.Command, args []string) error {
 			fmt.Printf("    Speed: %s\n", speed)
 		}
 
-		maxInstances := p.MaxInstances
 		if dp.MaxInstances > 0 {
-			maxInstances = dp.MaxInstances
+			fmt.Printf("    Max instances (this option): %d\n", dp.MaxInstances)
 		}
-		if maxInstances > 0 {
-			fmt.Printf("    Max instances: %d\n", maxInstances)
+		if p.MaxInstances > 0 {
+			fmt.Printf("    Max instances (profile global): %d\n", p.MaxInstances)
 		}
 
 		if dp.Handoff {
