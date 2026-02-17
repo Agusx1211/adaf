@@ -340,7 +340,6 @@ func (srv *Server) registerProjectRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("GET "+prefix+"/plans/{id}", srv.projectHandler(handlePlanByIDP))
 	mux.HandleFunc("POST "+prefix+"/plans", srv.projectHandler(handleCreatePlanP))
 	mux.HandleFunc("PUT "+prefix+"/plans/{id}", srv.projectHandler(handleUpdatePlanP))
-	mux.HandleFunc("PUT "+prefix+"/plans/{id}/phases/{phaseId}", srv.projectHandler(handleUpdatePlanPhaseP))
 	mux.HandleFunc("POST "+prefix+"/plans/{id}/activate", srv.projectHandler(handleActivatePlanP))
 	mux.HandleFunc("DELETE "+prefix+"/plans/{id}", srv.projectHandler(handleDeletePlanP))
 

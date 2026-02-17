@@ -260,13 +260,10 @@ func TestPlan(t *testing.T) {
 	s.Init(ProjectConfig{Name: "test", RepoPath: "/tmp"})
 
 	p := &Plan{
-		ID:     "plan1",
-		Title:  "Test Plan",
-		Status: "active",
-		Phases: []PlanPhase{
-			{ID: "p1", Title: "Phase 1", Status: "not_started"},
-			{ID: "p2", Title: "Phase 2", Status: "not_started", DependsOn: []string{"p1"}},
-		},
+		ID:          "plan1",
+		Title:       "Test Plan",
+		Description: "High-level rationale and scope",
+		Status:      "active",
 	}
 	if err := s.SavePlan(p); err != nil {
 		t.Fatal(err)
@@ -279,8 +276,8 @@ func TestPlan(t *testing.T) {
 	if loaded.Title != "Test Plan" {
 		t.Errorf("plan title = %q, want %q", loaded.Title, "Test Plan")
 	}
-	if len(loaded.Phases) != 2 {
-		t.Errorf("phases = %d, want 2", len(loaded.Phases))
+	if loaded.Description != "High-level rationale and scope" {
+		t.Errorf("plan description = %q, want %q", loaded.Description, "High-level rationale and scope")
 	}
 }
 
@@ -300,6 +297,40 @@ func TestIssueLifecycle(t *testing.T) {
 	got, _ := s.GetIssue(issue.ID)
 	if got.Status != "resolved" {
 		t.Errorf("status = %q, want %q", got.Status, "resolved")
+	}
+}
+
+func TestValidateIssueDependencies(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := New(dir)
+	s.Init(ProjectConfig{Name: "test", RepoPath: "/tmp"})
+
+	iss1 := &Issue{Title: "Issue 1", Status: "open", Priority: "high"}
+	iss2 := &Issue{Title: "Issue 2", Status: "open", Priority: "medium"}
+	if err := s.CreateIssue(iss1); err != nil {
+		t.Fatalf("CreateIssue(iss1): %v", err)
+	}
+	if err := s.CreateIssue(iss2); err != nil {
+		t.Fatalf("CreateIssue(iss2): %v", err)
+	}
+
+	deps, err := s.ValidateIssueDependencies(iss2.ID, []int{iss1.ID, iss1.ID})
+	if err != nil {
+		t.Fatalf("ValidateIssueDependencies(no cycle): %v", err)
+	}
+	if len(deps) != 1 || deps[0] != iss1.ID {
+		t.Fatalf("normalized deps = %v, want [%d]", deps, iss1.ID)
+	}
+	iss2.DependsOn = deps
+	if err := s.UpdateIssue(iss2); err != nil {
+		t.Fatalf("UpdateIssue(iss2): %v", err)
+	}
+
+	if _, err := s.ValidateIssueDependencies(iss1.ID, []int{iss2.ID}); err == nil {
+		t.Fatalf("expected cycle validation error")
+	}
+	if _, err := s.ValidateIssueDependencies(iss1.ID, []int{999}); err == nil {
+		t.Fatalf("expected unknown dependency validation error")
 	}
 }
 

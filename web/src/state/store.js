@@ -292,9 +292,11 @@ export function normalizeIssues(rawIssues) {
     return {
       id: Number(issue && issue.id) || 0,
       title: issue && issue.title ? String(issue.title) : '',
+      plan_id: issue && issue.plan_id ? String(issue.plan_id) : '',
       priority: issue && issue.priority ? String(issue.priority) : 'medium',
       status: issue && issue.status ? String(issue.status) : 'open',
       labels: arrayOrEmpty(issue && issue.labels),
+      depends_on: arrayOrEmpty(issue && issue.depends_on).map(function (id) { return Number(id) || 0; }).filter(function (id) { return id > 0; }),
       description: issue && issue.description ? String(issue.description) : '',
     };
   }).filter(function (i) { return i.id > 0; }).sort(function (a, b) { return b.id - a.id; });
@@ -317,22 +319,13 @@ export function normalizePlans(rawPlans) {
 
 export function normalizePlan(plan) {
   if (!plan || typeof plan !== 'object') {
-    return { id: '', title: '', status: 'active', description: '', phases: [] };
+    return { id: '', title: '', status: 'active', description: '' };
   }
   return {
     id: plan.id ? String(plan.id) : '',
     title: plan.title ? String(plan.title) : (plan.id ? String(plan.id) : ''),
     status: plan.status ? String(plan.status) : 'active',
     description: plan.description ? String(plan.description) : '',
-    phases: arrayOrEmpty(plan.phases).map(function (phase) {
-      return {
-        id: phase && phase.id ? String(phase.id) : '',
-        title: phase && phase.title ? String(phase.title) : (phase && phase.id ? String(phase.id) : ''),
-        status: phase && phase.status ? String(phase.status) : 'not_started',
-        description: phase && phase.description ? String(phase.description) : '',
-        depends_on: arrayOrEmpty(phase && phase.depends_on),
-      };
-    }),
   };
 }
 

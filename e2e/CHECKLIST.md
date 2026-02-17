@@ -127,9 +127,9 @@ Priority legend:
 - [x] `E2E-088 (P0)` update plan title/description/status.
 - [ ] `E2E-089 (P0)` activate plan and verify `active_plan_id` changes.
 - [ ] `E2E-090 (P0)` delete plan removes it and updates selection safely.
-- [ ] `E2E-091 (P1)` create and edit plan phases.
-- [ ] `E2E-092 (P1)` update individual phase status and details.
-- [ ] `E2E-093 (P1)` phase dependency fields persist and reload.
+- [ ] `E2E-091 (P1)` plan detail edit keeps high-level description/rationale content.
+- [ ] `E2E-092 (P1)` issue dependency fields can be edited from issue detail.
+- [ ] `E2E-093 (P1)` issue dependencies persist and reload correctly.
 - [ ] `E2E-094 (P2)` plan detail view renders after reload with deep link state.
 
 ## J) Docs View and CRUD
@@ -288,4 +288,3 @@ Priority legend:
 - [ ] `E2E-198 (P0)` full core suite passes on clean machine with no external agent CLIs.
 - [ ] `E2E-199 (ENV,P1)` full live-agent suite passes in environment with configured CLIs.
 - [ ] `E2E-200 (P0)` CI artifacts include traces/videos for failing tests only.
-

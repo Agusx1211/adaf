@@ -30,12 +30,6 @@ var (
 		"cancelled": {},
 		"frozen":    {},
 	}
-	planPhaseStatuses = map[string]struct{}{
-		"not_started": {},
-		"in_progress": {},
-		"complete":    {},
-		"blocked":     {},
-	}
 
 	docSlugInvalidChars = regexp.MustCompile(`[^a-z0-9-]+`)
 	docSlugMultiDash    = regexp.MustCompile(`-+`)
@@ -48,22 +42,14 @@ type issueWriteRequest struct {
 	Status      string   `json:"status"`
 	Priority    string   `json:"priority"`
 	Labels      []string `json:"labels"`
+	DependsOn   []int    `json:"depends_on"`
 }
 
 type planWriteRequest struct {
-	ID          string            `json:"id"`
-	Title       string            `json:"title"`
-	Description string            `json:"description"`
-	Status      string            `json:"status"`
-	Phases      []store.PlanPhase `json:"phases"`
-}
-
-type planPhaseWriteRequest struct {
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Status      string   `json:"status"`
-	Priority    *int     `json:"priority"`
-	DependsOn   []string `json:"depends_on"`
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
 }
 
 type docWriteRequest struct {
@@ -122,6 +108,11 @@ func handleCreateIssueP(s *store.Store, w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "invalid issue priority")
 		return
 	}
+	dependsOn, err := s.ValidateIssueDependencies(0, req.DependsOn)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid issue dependencies")
+		return
+	}
 
 	now := time.Now().UTC()
 	issue := store.Issue{
@@ -131,6 +122,7 @@ func handleCreateIssueP(s *store.Store, w http.ResponseWriter, r *http.Request) 
 		Status:      status,
 		Priority:    priority,
 		Labels:      req.Labels,
+		DependsOn:   dependsOn,
 		Created:     now,
 		Updated:     now,
 	}
@@ -176,6 +168,14 @@ func handleUpdateIssueP(s *store.Store, w http.ResponseWriter, r *http.Request) 
 	}
 	if req.Labels != nil {
 		issue.Labels = req.Labels
+	}
+	if req.DependsOn != nil {
+		dependsOn, depErr := s.ValidateIssueDependencies(issue.ID, req.DependsOn)
+		if depErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid issue dependencies")
+			return
+		}
+		issue.DependsOn = dependsOn
 	}
 	if status := normalizeLower(req.Status); status != "" {
 		if !isAllowedValue(status, issueStatuses) {
@@ -240,7 +240,6 @@ func handleCreatePlanP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 		Title:       title,
 		Description: req.Description,
 		Status:      "active",
-		Phases:      req.Phases,
 		Created:     now,
 		Updated:     now,
 	}
@@ -285,81 +284,12 @@ func handleUpdatePlanP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	if req.Description != "" {
 		plan.Description = req.Description
 	}
-	if req.Phases != nil {
-		plan.Phases = req.Phases
-	}
 	if status := normalizeLower(req.Status); status != "" {
 		if !isAllowedValue(status, planStatuses) {
 			writeError(w, http.StatusBadRequest, "invalid plan status")
 			return
 		}
 		plan.Status = status
-	}
-
-	plan.Updated = time.Now().UTC()
-	if err := s.UpdatePlan(plan); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update plan")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, plan)
-}
-
-func handleUpdatePlanPhaseP(s *store.Store, w http.ResponseWriter, r *http.Request) {
-	planID := strings.TrimSpace(r.PathValue("id"))
-	phaseID := strings.TrimSpace(r.PathValue("phaseId"))
-	if planID == "" || phaseID == "" {
-		writeError(w, http.StatusNotFound, "plan phase not found")
-		return
-	}
-
-	plan, err := s.GetPlan(planID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load plan")
-		return
-	}
-	if plan == nil {
-		writeError(w, http.StatusNotFound, "plan not found")
-		return
-	}
-
-	phaseIndex := -1
-	for i := range plan.Phases {
-		if plan.Phases[i].ID == phaseID {
-			phaseIndex = i
-			break
-		}
-	}
-	if phaseIndex < 0 {
-		writeError(w, http.StatusNotFound, "phase not found")
-		return
-	}
-
-	var req planPhaseWriteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	phase := &plan.Phases[phaseIndex]
-	if title := strings.TrimSpace(req.Title); title != "" {
-		phase.Title = title
-	}
-	if req.Description != "" {
-		phase.Description = req.Description
-	}
-	if status := normalizeLower(req.Status); status != "" {
-		if !isAllowedValue(status, planPhaseStatuses) {
-			writeError(w, http.StatusBadRequest, "invalid phase status")
-			return
-		}
-		phase.Status = status
-	}
-	if req.Priority != nil {
-		phase.Priority = *req.Priority
-	}
-	if req.DependsOn != nil {
-		phase.DependsOn = req.DependsOn
 	}
 
 	plan.Updated = time.Now().UTC()

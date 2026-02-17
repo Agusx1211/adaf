@@ -14,24 +14,13 @@ type ProjectConfig struct {
 	ActivePlanID string            `json:"active_plan_id,omitempty"`
 }
 
-type PlanPhase struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Status      string   `json:"status"` // "not_started", "in_progress", "complete", "blocked"
-	Priority    int      `json:"priority"`
-	DependsOn   []string `json:"depends_on,omitempty"`
-}
-
 type Plan struct {
-	ID           string      `json:"id"`
-	Title        string      `json:"title"`
-	Description  string      `json:"description"`
-	Status       string      `json:"status"` // "active", "done", "cancelled", "frozen"
-	Phases       []PlanPhase `json:"phases"`
-	CriticalPath []string    `json:"critical_path,omitempty"`
-	Created      time.Time   `json:"created"`
-	Updated      time.Time   `json:"updated"`
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	Status      string    `json:"status"` // "active", "done", "cancelled", "frozen"
+	Created     time.Time `json:"created"`
+	Updated     time.Time `json:"updated"`
 }
 
 type Issue struct {
@@ -42,6 +31,7 @@ type Issue struct {
 	Status      string    `json:"status"`   // "open", "in_progress", "resolved", "wontfix"
 	Priority    string    `json:"priority"` // "critical", "high", "medium", "low"
 	Labels      []string  `json:"labels,omitempty"`
+	DependsOn   []int     `json:"depends_on,omitempty"`
 	TurnID      int       `json:"session_id,omitempty"` // which turn created it
 	Created     time.Time `json:"created"`
 	Updated     time.Time `json:"updated"`

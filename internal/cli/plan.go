@@ -22,8 +22,7 @@ Examples:
   adaf plan list
   adaf plan create --id auth-system --title "Authentication System"
   adaf plan switch auth-system
-  adaf plan status auth-system frozen
-  adaf plan phase-status p1 complete`,
+  adaf plan status auth-system frozen`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPlanShow(cmd, args)
 	},
@@ -120,20 +119,12 @@ var planNoneCmd = &cobra.Command{
 	RunE:  runPlanNone,
 }
 
-var planPhaseStatusCmd = &cobra.Command{
-	Use:     "phase-status <phase-id> <status>",
-	Aliases: []string{"phase_status", "update-phase", "update_phase"},
-	Short:   "Update a phase status on the active plan",
-	Args:    cobra.ExactArgs(2),
-	RunE:    runPlanPhaseStatus,
-}
-
 func init() {
 	planCreateCmd.Flags().String("id", "", "Plan ID (required)")
 	planCreateCmd.Flags().String("title", "", "Plan title (required unless --file contains title)")
 	planCreateCmd.Flags().String("description", "", "Plan description")
 	planCreateCmd.Flags().String("description-file", "", "Read description from file (use '-' for stdin)")
-	planCreateCmd.Flags().String("file", "", "Load additional plan fields (phases, etc) from JSON file")
+	planCreateCmd.Flags().String("file", "", "Load additional plan fields from JSON file")
 	_ = planCreateCmd.MarkFlagRequired("id")
 
 	planSetCmd.Flags().String("id", "", "Target plan ID override")
@@ -153,7 +144,6 @@ func init() {
 		planCancelCmd,
 		planDeleteCmd,
 		planNoneCmd,
-		planPhaseStatusCmd,
 	)
 	rootCmd.AddCommand(planCmd)
 }
@@ -187,15 +177,9 @@ func runPlanList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	headers := []string{"ID", "STATUS", "PHASES", "TITLE"}
+	headers := []string{"ID", "STATUS", "TITLE"}
 	var rows [][]string
 	for _, p := range plans {
-		complete := 0
-		for _, ph := range p.Phases {
-			if ph.Status == "complete" {
-				complete++
-			}
-		}
 		id := p.ID
 		if p.ID == activeID {
 			id = "* " + id
@@ -203,7 +187,6 @@ func runPlanList(cmd *cobra.Command, args []string) error {
 		rows = append(rows, []string{
 			id,
 			statusBadge(p.Status),
-			fmt.Sprintf("%d/%d", complete, len(p.Phases)),
 			truncate(p.Title, 48),
 		})
 	}
@@ -261,52 +244,6 @@ func runPlanShow(cmd *cobra.Command, args []string) error {
 	}
 	if !plan.Updated.IsZero() {
 		printField("Updated", plan.Updated.Format("2006-01-02 15:04:05"))
-	}
-
-	counts := map[string]int{}
-	for _, p := range plan.Phases {
-		counts[p.Status]++
-	}
-
-	fmt.Println()
-	fmt.Printf("  %sPhase Summary:%s", colorBold, colorReset)
-	if c := counts["complete"]; c > 0 {
-		fmt.Printf("  %s%d complete%s", colorGreen, c, colorReset)
-	}
-	if c := counts["in_progress"]; c > 0 {
-		fmt.Printf("  %s%d in-progress%s", colorYellow, c, colorReset)
-	}
-	if c := counts["blocked"]; c > 0 {
-		fmt.Printf("  %s%d blocked%s", colorRed, c, colorReset)
-	}
-	if c := counts["not_started"]; c > 0 {
-		fmt.Printf("  %s%d not-started%s", colorBlue, c, colorReset)
-	}
-	fmt.Println()
-
-	if len(plan.Phases) > 0 {
-		fmt.Println()
-		headers := []string{"ID", "TITLE", "STATUS", "PRI", "DEPENDS"}
-		var rows [][]string
-		for _, p := range plan.Phases {
-			deps := "-"
-			if len(p.DependsOn) > 0 {
-				deps = fmt.Sprintf("%v", p.DependsOn)
-			}
-			rows = append(rows, []string{
-				p.ID,
-				truncate(p.Title, 40),
-				statusBadge(p.Status),
-				fmt.Sprintf("%d", p.Priority),
-				deps,
-			})
-		}
-		printTable(headers, rows)
-	}
-
-	if len(plan.CriticalPath) > 0 {
-		fmt.Println()
-		fmt.Printf("  %sCritical Path:%s %v\n", colorBold, colorReset, plan.CriticalPath)
 	}
 
 	fmt.Println()

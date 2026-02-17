@@ -38,25 +38,34 @@ export default function PlanView() {
     );
   }
 
-  var phases = activePlan.phases || [];
-  var completeCount = phases.filter(function (p) { return normalizeStatus(p.status) === 'complete'; }).length;
-  var percent = phases.length ? Math.round((completeCount / phases.length) * 100) : 0;
+  var planStatus = normalizeStatus(activePlan.status || 'active');
+  var planColor = statusColor(planStatus);
+  var planIcon = statusIcon(planStatus);
   var activePlanID = activePlan && activePlan.id ? activePlan.id : '';
 
   return (
     <div style={{ overflow: 'auto', flex: 1 }}>
-      {/* Plan overview */}
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)' }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)', marginBottom: 8 }}>{activePlan.title || activePlan.id || 'Plan'}</div>
-        <div style={{ height: 4, background: 'var(--bg-4)', borderRadius: 2, overflow: 'hidden', marginBottom: 4 }}>
-          <div style={{ height: '100%', width: percent + '%', background: 'var(--green)', borderRadius: 2, transition: 'width 0.5s ease' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)' }}>{activePlan.title || activePlan.id || 'Plan'}</span>
+          <span style={{
+            fontFamily: "'JetBrains Mono', monospace", fontSize: 9, padding: '1px 6px',
+            background: withAlpha(planColor, 0.14), border: '1px solid ' + withAlpha(planColor, 0.28),
+            borderRadius: 3, color: planColor,
+          }}>{planIcon} {planStatus}</span>
         </div>
-        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>{percent}% complete</div>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>{activePlan.id}</div>
+        {activePlan.description && (
+          <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>
+            {activePlan.description}
+          </div>
+        )}
       </div>
 
-      {/* Plan selector if multiple */}
       {plans.length > 1 && plans.map(function (plan) {
         var selected = (selectedPlan || activePlanID) === plan.id;
+        var status = normalizeStatus(plan.status || 'active');
+        var color = statusColor(status);
         return (
           <div key={plan.id}
             onClick={function () { dispatch({ type: 'SET_SELECTED_PLAN', payload: plan.id }); }}
@@ -69,37 +78,12 @@ export default function PlanView() {
             onMouseLeave={function (e) { if (!selected) e.currentTarget.style.background = 'transparent'; }}
           >
             <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)' }}>{plan.id}</span>
-            <span style={{ marginLeft: 6, color: 'var(--text-1)' }}>{plan.title || plan.id}</span>
-          </div>
-        );
-      })}
-
-      {/* Phases */}
-      {phases.map(function (phase) {
-        var status = normalizeStatus(phase.status || 'not_started');
-        var color = statusColor(status);
-        var marker = status === 'complete' ? '\u2713' : status === 'in_progress' ? '\u25C9' : status === 'blocked' ? '\u2717' : '\u25CB';
-
-        return (
-          <div key={phase.id} style={{
-            padding: '10px 14px', borderBottom: '1px solid var(--border)',
-            borderLeft: '3px solid ' + color,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: color, fontSize: 12 }}>{marker}</span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)' }}>{phase.title || phase.id || 'Phase'}</span>
-              <span style={{
-                fontFamily: "'JetBrains Mono', monospace", fontSize: 9, padding: '1px 5px',
-                background: withAlpha(color, 0.14), border: '1px solid ' + withAlpha(color, 0.28),
-                borderRadius: 3, color: color,
-              }}>{status}</span>
-            </div>
-            {phase.description && <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 4, lineHeight: 1.4 }}>{phase.description}</div>}
-            {phase.depends_on && phase.depends_on.length > 0 && (
-              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)', marginTop: 4 }}>
-                depends on: {phase.depends_on.join(', ')}
-              </div>
-            )}
+            <span style={{ marginLeft: 6, color: 'var(--text-1)', flex: 1 }}>{plan.title || plan.id}</span>
+            <span style={{
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: color,
+              padding: '1px 5px', borderRadius: 3,
+              background: withAlpha(color, 0.14), border: '1px solid ' + withAlpha(color, 0.28),
+            }}>{status}</span>
           </div>
         );
       })}

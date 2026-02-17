@@ -67,13 +67,7 @@ func runStatusBrief(s *store.Store) error {
 		fmt.Printf("  |  Plans: %d", len(plans))
 	}
 	if activePlan != nil {
-		done := 0
-		for _, p := range activePlan.Phases {
-			if p.Status == "complete" {
-				done++
-			}
-		}
-		fmt.Printf("  |  Active: %s (%d/%d phases)", activePlan.ID, done, len(activePlan.Phases))
+		fmt.Printf("  |  Active: %s", activePlan.ID)
 	} else if strings.TrimSpace(config.ActivePlanID) != "" {
 		fmt.Printf("  |  Active: %s", config.ActivePlanID)
 	} else {
@@ -111,15 +105,9 @@ func runStatusFull(s *store.Store) error {
 	if len(plans) == 0 {
 		fmt.Printf("  %sNo plans.%s\n", colorDim, colorReset)
 	} else {
-		headers := []string{"ID", "STATUS", "PHASES", "TITLE"}
+		headers := []string{"ID", "STATUS", "TITLE"}
 		var rows [][]string
 		for _, p := range plans {
-			complete := 0
-			for _, ph := range p.Phases {
-				if ph.Status == "complete" {
-					complete++
-				}
-			}
 			id := p.ID
 			if p.ID == config.ActivePlanID {
 				id = "● " + id
@@ -127,7 +115,6 @@ func runStatusFull(s *store.Store) error {
 			rows = append(rows, []string{
 				id,
 				statusBadge(p.Status),
-				fmt.Sprintf("%d/%d", complete, len(p.Phases)),
 				truncate(p.Title, 48),
 			})
 		}
@@ -138,41 +125,14 @@ func runStatusFull(s *store.Store) error {
 	if activePlan == nil {
 		fmt.Printf("  %sNo active plan selected.%s\n", colorDim, colorReset)
 	} else {
-		complete := 0
-		inProgress := 0
-		blocked := 0
-		notStarted := 0
-		for _, p := range activePlan.Phases {
-			switch p.Status {
-			case "complete":
-				complete++
-			case "in_progress":
-				inProgress++
-			case "blocked":
-				blocked++
-			default:
-				notStarted++
-			}
-		}
-		total := len(activePlan.Phases)
 		printField("ID", activePlan.ID)
 		if activePlan.Title != "" {
 			printField("Title", activePlan.Title)
 		}
 		printFieldColored("Status", activePlan.Status, statusColor(activePlan.Status))
-		if total > 0 {
-			barWidth := 30
-			filled := barWidth * complete / total
-			fmt.Printf("  Progress:      [%s%s%s%s] %d/%d phases\n",
-				colorGreen, repeatChar('#', filled), colorDim, repeatChar('-', barWidth-filled), complete, total)
-			fmt.Print(colorReset)
+		if strings.TrimSpace(activePlan.Description) != "" {
+			printField("Description", truncate(activePlan.Description, 80))
 		}
-		fmt.Printf("  %s%d complete%s  %s%d in-progress%s  %s%d blocked%s  %s%d not-started%s\n",
-			colorGreen, complete, colorReset,
-			colorYellow, inProgress, colorReset,
-			colorRed, blocked, colorReset,
-			colorBlue, notStarted, colorReset,
-		)
 	}
 
 	printHeader("Issues")
@@ -266,15 +226,4 @@ func printIssueSummary(issues []store.Issue, label string) {
 			fmt.Printf("  %s!%s #%d %s %s\n", colorRed, colorReset, iss.ID, priorityBadge(iss.Priority), iss.Title)
 		}
 	}
-}
-
-func repeatChar(ch byte, count int) string {
-	if count <= 0 {
-		return ""
-	}
-	b := make([]byte, count)
-	for i := range b {
-		b[i] = ch
-	}
-	return string(b)
 }
