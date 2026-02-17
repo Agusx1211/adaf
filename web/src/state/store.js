@@ -516,6 +516,7 @@ function mergeSessionRecords(current, updates) {
   updateList.forEach(function (session) {
     var prev = byID[session.id];
     if (!prev) {
+      if (!hasSessionIdentity(session)) return;
       byID[session.id] = {
         id: session.id,
         profile: session.profile || '',
@@ -545,4 +546,15 @@ function mergeSessionRecords(current, updates) {
   });
 
   return Object.values(byID).sort(function (a, b) { return b.id - a.id; });
+}
+
+function hasSessionIdentity(session) {
+  if (!session || typeof session !== 'object') return false;
+  return !!(
+    session.profile ||
+    session.agent ||
+    session.model ||
+    session.loop_name ||
+    session.started_at
+  );
 }

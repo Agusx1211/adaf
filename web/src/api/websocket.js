@@ -217,7 +217,7 @@ export function useSessionSocket(sessionID) {
     var data = envelope.data;
 
     if (type === 'snapshot') {
-      mergeSessionPatch(normalizeSessionPatch(data && data.session, sid));
+      mergeSessionPatch(normalizeSessionPatch(data && data.session, sid, sid));
       if (data && Array.isArray(data.spawns)) {
         dispatch({ type: 'MERGE_SPAWNS', payload: normalizeSpawns(data.spawns) });
       }
@@ -233,7 +233,7 @@ export function useSessionSocket(sessionID) {
     }
 
     if (type === 'started') {
-      var startedPatch = normalizeSessionPatch(data, sid);
+      var startedPatch = normalizeSessionPatch(data, sid, sid);
       if (startedPatch) {
         startedPatch.status = 'running';
         startedPatch.action = 'responding';
@@ -301,7 +301,7 @@ export function useSessionSocket(sessionID) {
     }
 
     if (type === 'finished') {
-      var finishedPatch = normalizeSessionPatch(data, sid);
+      var finishedPatch = normalizeSessionPatch(data, sid, sid);
       if (finishedPatch) {
         if (data && data.error) {
           finishedPatch.status = 'failed';
@@ -525,13 +525,19 @@ function findSessionByID(sessions, id) {
   return null;
 }
 
-function normalizeSessionPatch(raw, fallbackSessionID) {
+function normalizeSessionPatch(raw, fallbackSessionID, forcedSessionID) {
+  var forcedID = Number(forcedSessionID || 0);
   if (!raw || typeof raw !== 'object') {
+    if (Number.isFinite(forcedID) && forcedID > 0) return { id: forcedID };
     var fallbackID = Number(fallbackSessionID || 0);
     if (!Number.isFinite(fallbackID) || fallbackID <= 0) return null;
     return { id: fallbackID };
   }
-  var id = Number(raw.session_id || raw.sessionID || fallbackSessionID || 0);
+  var id = Number(
+    (Number.isFinite(forcedID) && forcedID > 0)
+      ? forcedID
+      : (raw.session_id || raw.sessionID || fallbackSessionID || 0)
+  );
   if (!Number.isFinite(id) || id <= 0) return null;
   var patch = { id: id };
   if (raw.profile_name || raw.profile) patch.profile = String(raw.profile_name || raw.profile);

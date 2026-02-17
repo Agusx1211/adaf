@@ -175,6 +175,8 @@ export default function AgentOutput({ scope }) {
     var msgs = [];
     var assistantEvents = [];
     var lastPromptTurnID = 0;
+    var seenPromptByTurn = {};
+    var previousNoTurnPromptSig = '';
 
     function latestEventTS(events) {
       var latest = 0;
@@ -187,6 +189,18 @@ export default function AgentOutput({ scope }) {
 
     displayBlocks.forEach(function (block) {
       if (block.type === 'initial_prompt') {
+        var currentPromptTurnID = resolvePromptTurnID(block, turnIDByHex);
+        var promptSig = normalizePromptSignature(block.content);
+        if (currentPromptTurnID > 0) {
+          var dedupeKey = String(currentPromptTurnID) + '|' + promptSig;
+          if (seenPromptByTurn[dedupeKey]) {
+            return;
+          }
+          seenPromptByTurn[dedupeKey] = true;
+        } else if (previousNoTurnPromptSig && previousNoTurnPromptSig === promptSig) {
+          return;
+        }
+
         if (assistantEvents.length > 0) {
           msgs.push({
             id: 'assistant-' + msgs.length,
@@ -204,11 +218,14 @@ export default function AgentOutput({ scope }) {
           created_at: Number(block && block._ts) || null,
           _continuationLabel: continuationLabelForPrompt(block, lastPromptTurnID, turnIDByHex),
         });
-        var currentPromptTurnID = resolvePromptTurnID(block, turnIDByHex);
         if (currentPromptTurnID > 0) {
           lastPromptTurnID = currentPromptTurnID;
+          previousNoTurnPromptSig = '';
+        } else {
+          previousNoTurnPromptSig = promptSig;
         }
       } else {
+        previousNoTurnPromptSig = '';
         assistantEvents.push(block);
       }
     });
@@ -658,6 +675,10 @@ function stableString(value) {
     var text = String(value);
     return text.length > 500 ? text.slice(0, 500) : text;
   }
+}
+
+function normalizePromptSignature(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ');
 }
 
 function normalizeTurnHex(raw) {
