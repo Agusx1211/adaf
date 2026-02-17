@@ -7,7 +7,7 @@ import StatusDot from '../common/StatusDot.jsx';
 import { StopSessionButton, SessionMessageBar } from '../session/SessionControls.jsx';
 import { useUsageLimits } from '../../api/hooks.js';
 import { persistProjectSelection } from '../../utils/projectLink.js';
-import ProjectBrowser from './ProjectBrowser.jsx';
+import ProjectPicker from './ProjectPicker.jsx';
 
 var NAV_ITEMS = [
   { id: 'loops', label: 'Loops' },
@@ -25,7 +25,7 @@ export default function TopBar() {
   var { sessions, spawns, loopRuns, projects, currentProjectID, wsConnected, termWSConnected, usage, loopRun, leftView, usageLimits } = state;
   var [showRunning, setShowRunning] = useState(false);
   var [showUsage, setShowUsage] = useState(false);
-  var [showProjectBrowser, setShowProjectBrowser] = useState(false);
+  var [showProjectPicker, setShowProjectPicker] = useState(false);
   var dropdownRef = useRef(null);
   var usageDropdownRef = useRef(null);
 
@@ -123,7 +123,7 @@ export default function TopBar() {
         }}>ADAF</span>
         <span style={{ width: 1, height: 16, background: 'var(--border)' }} />
         <span
-          onClick={function () { setShowProjectBrowser(true); }}
+          onClick={function () { setShowProjectPicker(true); }}
           style={{
             fontFamily: "'Outfit', sans-serif", fontSize: 12, color: 'var(--text-2)', fontWeight: 400,
             cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
@@ -301,8 +301,17 @@ export default function TopBar() {
           </span>
         </span>
       </div>
-      {showProjectBrowser && (
-        <ProjectBrowser onClose={function () { setShowProjectBrowser(false); }} />
+      {showProjectPicker && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+            zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            animation: 'fadeIn 0.15s ease',
+          }}
+          onClick={function (e) { if (e.target === e.currentTarget) setShowProjectPicker(false); }}
+        >
+          <ProjectPicker inline onClose={function () { setShowProjectPicker(false); }} />
+        </div>
       )}
     </div>
   );

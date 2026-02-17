@@ -216,3 +216,221 @@
 {"timestamp":"2026-02-17T03:34:49.663329377Z","type":"meta","data":"command=/tmp/TestVibeRunBasic1327173886/001/fake-vibe-fail -p fail --output streaming"}
 {"timestamp":"2026-02-17T03:34:49.663335543Z","type":"meta","data":"workdir=/tmp/TestVibeRunBasic1327173886/001"}
 {"timestamp":"2026-02-17T03:34:49.664312876Z","type":"stderr","data":"vibe failed\n"}
+{"timestamp":"2026-02-17T04:04:39.995849813Z","type":"stdin","data":"Say hello"}
+{"timestamp":"2026-02-17T04:04:39.99759727Z","type":"meta","data":"agent=claude"}
+{"timestamp":"2026-02-17T04:04:39.998971893Z","type":"meta","data":"command=/tmp/TestClaudeRunStreamJSON1786354764/001/fake-claude --print --output-format stream-json --verbose"}
+{"timestamp":"2026-02-17T04:04:39.999000976Z","type":"meta","data":"workdir=/tmp/TestClaudeRunStreamJSON1786354764/001"}
+{"timestamp":"2026-02-17T04:04:40.007842548Z","type":"claude_stream","data":"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"test-session\",\"model\":\"claude-sonnet-4-5-20250929\",\"tools\":[\"Bash\",\"Read\"]}"}
+{"timestamp":"2026-02-17T04:04:40.007905715Z","type":"claude_stream","data":"{\"type\":\"assistant\",\"message\":{\"id\":\"msg_01\",\"model\":\"claude-sonnet-4-5-20250929\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Hello from fake claude!\"}],\"usage\":{\"input_tokens\":100,\"output_tokens\":50}}}"}
+{"timestamp":"2026-02-17T04:04:40.007935256Z","type":"claude_stream","data":"{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"total_cost_usd\":0.01,\"duration_ms\":500,\"num_turns\":1,\"result\":\"Hello from fake claude!\",\"usage\":{\"input_tokens\":100,\"output_tokens\":50}}"}
+{"timestamp":"2026-02-17T04:04:40.008776297Z","type":"stdin","data":"fail please"}
+{"timestamp":"2026-02-17T04:04:40.009041005Z","type":"meta","data":"agent=claude"}
+{"timestamp":"2026-02-17T04:04:40.011274752Z","type":"meta","data":"command=/tmp/TestClaudeRunNonZeroExit593541367/001/fake-claude-fail --print --output-format stream-json --verbose"}
+{"timestamp":"2026-02-17T04:04:40.011307794Z","type":"meta","data":"workdir=/tmp/TestClaudeRunNonZeroExit593541367/001"}
+{"timestamp":"2026-02-17T04:04:40.017676161Z","type":"stderr","data":"something went wrong\n"}
+{"timestamp":"2026-02-17T04:04:40.027161815Z","type":"claude_stream","data":"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"fail\",\"model\":\"test\"}"}
+{"timestamp":"2026-02-17T04:04:40.028926313Z","type":"stdin","data":"PROMPT_SENTINEL_123"}
+{"timestamp":"2026-02-17T04:04:40.028989355Z","type":"meta","data":"agent=claude"}
+{"timestamp":"2026-02-17T04:04:40.028999188Z","type":"meta","data":"command=/tmp/TestClaudePromptUsesStdinNotArgv808018399/001/fake-claude-stdin --print --output-format stream-json --verbose"}
+{"timestamp":"2026-02-17T04:04:40.029009646Z","type":"meta","data":"workdir=/tmp/TestClaudePromptUsesStdinNotArgv808018399/001"}
+{"timestamp":"2026-02-17T04:04:40.046684957Z","type":"claude_stream","data":"{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}"}
+{"timestamp":"2026-02-17T04:04:40.047250123Z","type":"claude_stream","data":"{\"type\":\"result\",\"result\":\"ok\"}"}
+{"timestamp":"2026-02-17T04:04:40.062744645Z","type":"stdin","data":"PING"}
+{"timestamp":"2026-02-17T04:04:40.064262851Z","type":"meta","data":"agent=codex"}
+{"timestamp":"2026-02-17T04:04:40.064308185Z","type":"meta","data":"command=/tmp/TestCodexRunUsesNonInteractiveExecMode1200216506/001/fake-codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --json"}
+{"timestamp":"2026-02-17T04:04:40.064318726Z","type":"meta","data":"workdir=/tmp/TestCodexRunUsesNonInteractiveExecMode1200216506/001"}
+{"timestamp":"2026-02-17T04:04:40.071031176Z","type":"claude_stream","data":"args:exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --json"}
+{"timestamp":"2026-02-17T04:04:40.0716428Z","type":"claude_stream","data":"ok"}
+{"timestamp":"2026-02-17T04:04:40.071988133Z","type":"stdin","data":"PING"}
+{"timestamp":"2026-02-17T04:04:40.07203205Z","type":"meta","data":"agent=codex"}
+{"timestamp":"2026-02-17T04:04:40.072041341Z","type":"meta","data":"command=/tmp/TestCodexRunRustLogDefaultAndOverride2200697617/001/fake-codex-env exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --json"}
+{"timestamp":"2026-02-17T04:04:40.072536757Z","type":"meta","data":"workdir=/tmp/TestCodexRunRustLogDefaultAndOverride2200697617/001"}
+{"timestamp":"2026-02-17T04:04:40.076512586Z","type":"claude_stream","data":"{\"type\":\"thread.started\",\"thread_id\":\"test-thread\"}"}
+{"timestamp":"2026-02-17T04:04:40.076930835Z","type":"stderr","data":"RUST_LOG=error,codex_core::rollout::list=off\n"}
+{"timestamp":"2026-02-17T04:04:40.077831167Z","type":"claude_stream","data":"{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}"}
+{"timestamp":"2026-02-17T04:04:40.078879583Z","type":"stdin","data":"PING"}
+{"timestamp":"2026-02-17T04:04:40.07955354Z","type":"meta","data":"agent=codex"}
+{"timestamp":"2026-02-17T04:04:40.07959754Z","type":"meta","data":"command=/tmp/TestCodexRunRustLogDefaultAndOverride2200697617/001/fake-codex-env exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --json"}
+{"timestamp":"2026-02-17T04:04:40.07961354Z","type":"meta","data":"workdir=/tmp/TestCodexRunRustLogDefaultAndOverride2200697617/001"}
+{"timestamp":"2026-02-17T04:04:40.082500203Z","type":"stderr","data":"RUST_LOG=debug\n"}
+{"timestamp":"2026-02-17T04:04:40.082641744Z","type":"claude_stream","data":"{\"type\":\"thread.started\",\"thread_id\":\"test-thread\"}"}
+{"timestamp":"2026-02-17T04:04:40.082677828Z","type":"claude_stream","data":"{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}"}
+{"timestamp":"2026-02-17T04:04:40.083397327Z","type":"stdin","data":"PING"}
+{"timestamp":"2026-02-17T04:04:40.083425702Z","type":"meta","data":"agent=codex"}
+{"timestamp":"2026-02-17T04:04:40.083435118Z","type":"meta","data":"command=/tmp/TestCodexRunCancellationPreservesSessionID3492742838/001/fake-codex-cancel exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --json"}
+{"timestamp":"2026-02-17T04:04:40.083441493Z","type":"meta","data":"workdir=/tmp/TestCodexRunCancellationPreservesSessionID3492742838/001"}
+{"timestamp":"2026-02-17T04:04:40.08646399Z","type":"claude_stream","data":"{\"type\":\"thread.started\",\"thread_id\":\"cancel-thread\"}"}
+{"timestamp":"2026-02-17T04:04:40.285981277Z","type":"stderr","data":"Terminated\n"}
+{"timestamp":"2026-02-17T04:04:40.986001176Z","type":"stdin","data":"Say hello"}
+{"timestamp":"2026-02-17T04:04:40.986229384Z","type":"meta","data":"agent=gemini"}
+{"timestamp":"2026-02-17T04:04:40.986248176Z","type":"meta","data":"command=/tmp/TestGeminiRunStreamJSON2378642514/001/fake-gemini --output-format stream-json -p "}
+{"timestamp":"2026-02-17T04:04:40.986256509Z","type":"meta","data":"workdir=/tmp/TestGeminiRunStreamJSON2378642514/001"}
+{"timestamp":"2026-02-17T04:04:41.00393532Z","type":"claude_stream","data":"{\"type\":\"init\",\"timestamp\":\"2025-01-01T00:00:00.000Z\",\"session_id\":\"gem-test\",\"model\":\"gemini-2.5-pro\"}"}
+{"timestamp":"2026-02-17T04:04:41.004002153Z","type":"claude_stream","data":"{\"type\":\"message\",\"timestamp\":\"2025-01-01T00:00:01.000Z\",\"role\":\"assistant\",\"content\":\"Hello from fake gemini!\",\"delta\":true}"}
+{"timestamp":"2026-02-17T04:04:41.004012737Z","type":"claude_stream","data":"{\"type\":\"result\",\"timestamp\":\"2025-01-01T00:00:02.000Z\",\"status\":\"success\",\"stats\":{\"total_tokens\":200,\"input_tokens\":120,\"output_tokens\":80,\"cached\":0,\"input\":120,\"duration_ms\":1500,\"tool_calls\":0}}"}
+{"timestamp":"2026-02-17T04:04:41.007001733Z","type":"stdin","data":"fail please"}
+{"timestamp":"2026-02-17T04:04:41.007374524Z","type":"meta","data":"agent=gemini"}
+{"timestamp":"2026-02-17T04:04:41.007409191Z","type":"meta","data":"command=/tmp/TestGeminiRunNonZeroExit4190250339/001/fake-gemini-fail --output-format stream-json -p "}
+{"timestamp":"2026-02-17T04:04:41.007419816Z","type":"meta","data":"workdir=/tmp/TestGeminiRunNonZeroExit4190250339/001"}
+{"timestamp":"2026-02-17T04:04:41.012405393Z","type":"stderr","data":"something went wrong\n"}
+{"timestamp":"2026-02-17T04:04:41.016368013Z","type":"claude_stream","data":"{\"type\":\"init\",\"session_id\":\"fail\",\"model\":\"test\"}"}
+{"timestamp":"2026-02-17T04:04:41.017520344Z","type":"stdin","data":"PROMPT_SENTINEL_456"}
+{"timestamp":"2026-02-17T04:04:41.017812636Z","type":"meta","data":"agent=gemini"}
+{"timestamp":"2026-02-17T04:04:41.017837052Z","type":"meta","data":"command=/tmp/TestGeminiPromptUsesStdinNotArgv250183586/001/fake-gemini-stdin --output-format stream-json -p "}
+{"timestamp":"2026-02-17T04:04:41.017848511Z","type":"meta","data":"workdir=/tmp/TestGeminiPromptUsesStdinNotArgv250183586/001"}
+{"timestamp":"2026-02-17T04:04:41.02221763Z","type":"claude_stream","data":"{\"type\":\"message\",\"role\":\"assistant\",\"content\":\"ok\",\"delta\":false}"}
+{"timestamp":"2026-02-17T04:04:41.02228988Z","type":"claude_stream","data":"{\"type\":\"result\",\"status\":\"success\"}"}
+{"timestamp":"2026-02-17T04:04:41.022593671Z","type":"meta","data":"agent=test-agent"}
+{"timestamp":"2026-02-17T04:04:41.02261713Z","type":"meta","data":"command=/tmp/TestGenericRun339829246/001/fake-generic "}
+{"timestamp":"2026-02-17T04:04:41.022623838Z","type":"meta","data":"workdir=/tmp/TestGenericRun339829246/001"}
+{"timestamp":"2026-02-17T04:04:41.028401747Z","type":"stdout","data":"Hello from generic\n"}
+{"timestamp":"2026-02-17T04:04:41.030453078Z","type":"meta","data":"agent=test-agent"}
+{"timestamp":"2026-02-17T04:04:41.03047887Z","type":"meta","data":"command=/tmp/TestGenericRunNonZeroExit2748064356/001/fake-generic-fail "}
+{"timestamp":"2026-02-17T04:04:41.03048687Z","type":"meta","data":"workdir=/tmp/TestGenericRunNonZeroExit2748064356/001"}
+{"timestamp":"2026-02-17T04:04:41.032504575Z","type":"stderr","data":"failed\n"}
+{"timestamp":"2026-02-17T04:04:41.034925697Z","type":"stdin","data":"PROMPT_SENTINEL_123"}
+{"timestamp":"2026-02-17T04:04:41.034947322Z","type":"meta","data":"agent=test-agent"}
+{"timestamp":"2026-02-17T04:04:41.034954364Z","type":"meta","data":"command=/tmp/TestGenericPromptUsesStdinNotArgv3641082805/001/fake-generic-stdin "}
+{"timestamp":"2026-02-17T04:04:41.034966614Z","type":"meta","data":"workdir=/tmp/TestGenericPromptUsesStdinNotArgv3641082805/001"}
+{"timestamp":"2026-02-17T04:04:41.043277353Z","type":"stdout","data":"ok\n"}
+{"timestamp":"2026-02-17T04:04:41.050981302Z","type":"stdin","data":"Say hello"}
+{"timestamp":"2026-02-17T04:04:41.051215218Z","type":"meta","data":"agent=opencode"}
+{"timestamp":"2026-02-17T04:04:41.05122526Z","type":"meta","data":"command=/tmp/TestOpencodeRun265921975/001/fake-opencode run --format json"}
+{"timestamp":"2026-02-17T04:04:41.051233051Z","type":"meta","data":"workdir=/tmp/TestOpencodeRun265921975/001"}
+{"timestamp":"2026-02-17T04:04:41.052713133Z","type":"claude_stream","data":"{\"type\":\"step_start\",\"sessionID\":\"test-sess\"}"}
+{"timestamp":"2026-02-17T04:04:41.052772966Z","type":"claude_stream","data":"{\"type\":\"text\",\"sessionID\":\"test-sess\",\"part\":{\"text\":\"Hello from opencode\"}}"}
+{"timestamp":"2026-02-17T04:04:41.052782758Z","type":"claude_stream","data":"{\"type\":\"step_finish\",\"sessionID\":\"test-sess\",\"part\":{\"tokens\":{\"input\":10,\"output\":5},\"cost\":0.001}}"}
+{"timestamp":"2026-02-17T04:04:41.05349459Z","type":"stdin","data":"fail"}
+{"timestamp":"2026-02-17T04:04:41.053572715Z","type":"meta","data":"agent=opencode"}
+{"timestamp":"2026-02-17T04:04:41.053583548Z","type":"meta","data":"command=/tmp/TestOpencodeRunNonZeroExit1629140462/001/fake-opencode-fail run --format json"}
+{"timestamp":"2026-02-17T04:04:41.053591257Z","type":"meta","data":"workdir=/tmp/TestOpencodeRunNonZeroExit1629140462/001"}
+{"timestamp":"2026-02-17T04:04:41.054748672Z","type":"stderr","data":"error message\n"}
+{"timestamp":"2026-02-17T04:04:41.055738754Z","type":"stdin","data":"PROMPT_SENTINEL_123"}
+{"timestamp":"2026-02-17T04:04:41.055771462Z","type":"meta","data":"agent=opencode"}
+{"timestamp":"2026-02-17T04:04:41.055779546Z","type":"meta","data":"command=/tmp/TestOpencodePromptUsesStdinNotArgv4036869300/001/fake-opencode-stdin run --format json"}
+{"timestamp":"2026-02-17T04:04:41.055790129Z","type":"meta","data":"workdir=/tmp/TestOpencodePromptUsesStdinNotArgv4036869300/001"}
+{"timestamp":"2026-02-17T04:04:41.063000536Z","type":"claude_stream","data":"{\"type\":\"text\",\"sessionID\":\"ok\",\"part\":{\"text\":\"ok\"}}"}
+{"timestamp":"2026-02-17T04:04:44.210306483Z","type":"stdin","data":"PROMPT_SENTINEL_789"}
+{"timestamp":"2026-02-17T04:04:44.212720355Z","type":"meta","data":"agent=vibe"}
+{"timestamp":"2026-02-17T04:04:44.212748772Z","type":"meta","data":"command=/tmp/TestVibePromptUsesStdinNotArgv2202326802/001/fake-vibe -p PROMPT_SENTINEL_789 --output streaming"}
+{"timestamp":"2026-02-17T04:04:44.212761897Z","type":"meta","data":"workdir=/tmp/TestVibePromptUsesStdinNotArgv2202326802/001"}
+{"timestamp":"2026-02-17T04:04:44.220012054Z","type":"claude_stream","data":"{\"role\":\"assistant\",\"content\":\"mode:argv ok\"}"}
+{"timestamp":"2026-02-17T04:04:44.235506201Z","type":"stdin","data":"hello"}
+{"timestamp":"2026-02-17T04:04:44.235675659Z","type":"meta","data":"agent=vibe"}
+{"timestamp":"2026-02-17T04:04:44.235687576Z","type":"meta","data":"command=/tmp/TestVibeRunBasic1310884255/001/fake-vibe -p hello --output streaming"}
+{"timestamp":"2026-02-17T04:04:44.235694867Z","type":"meta","data":"workdir=/tmp/TestVibeRunBasic1310884255/001"}
+{"timestamp":"2026-02-17T04:04:44.238871738Z","type":"claude_stream","data":"{\"role\":\"assistant\",\"content\":\"Hello from vibe\"}"}
+{"timestamp":"2026-02-17T04:04:44.239465154Z","type":"stdin","data":"fail"}
+{"timestamp":"2026-02-17T04:04:44.239592112Z","type":"meta","data":"agent=vibe"}
+{"timestamp":"2026-02-17T04:04:44.239600654Z","type":"meta","data":"command=/tmp/TestVibeRunBasic1310884255/001/fake-vibe-fail -p fail --output streaming"}
+{"timestamp":"2026-02-17T04:04:44.239606404Z","type":"meta","data":"workdir=/tmp/TestVibeRunBasic1310884255/001"}
+{"timestamp":"2026-02-17T04:04:44.240831194Z","type":"stderr","data":"vibe failed\n"}
+{"timestamp":"2026-02-17T04:05:02.311429541Z","type":"stdin","data":"Say hello"}
+{"timestamp":"2026-02-17T04:05:02.311516708Z","type":"meta","data":"agent=claude"}
+{"timestamp":"2026-02-17T04:05:02.311530041Z","type":"meta","data":"command=/tmp/TestClaudeRunStreamJSON726423340/001/fake-claude --print --output-format stream-json --verbose"}
+{"timestamp":"2026-02-17T04:05:02.311539874Z","type":"meta","data":"workdir=/tmp/TestClaudeRunStreamJSON726423340/001"}
+{"timestamp":"2026-02-17T04:05:02.31598891Z","type":"claude_stream","data":"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"test-session\",\"model\":\"claude-sonnet-4-5-20250929\",\"tools\":[\"Bash\",\"Read\"]}"}
+{"timestamp":"2026-02-17T04:05:02.316620826Z","type":"claude_stream","data":"{\"type\":\"assistant\",\"message\":{\"id\":\"msg_01\",\"model\":\"claude-sonnet-4-5-20250929\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Hello from fake claude!\"}],\"usage\":{\"input_tokens\":100,\"output_tokens\":50}}}"}
+{"timestamp":"2026-02-17T04:05:02.31870824Z","type":"claude_stream","data":"{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"total_cost_usd\":0.01,\"duration_ms\":500,\"num_turns\":1,\"result\":\"Hello from fake claude!\",\"usage\":{\"input_tokens\":100,\"output_tokens\":50}}"}
+{"timestamp":"2026-02-17T04:05:02.319179656Z","type":"stdin","data":"fail please"}
+{"timestamp":"2026-02-17T04:05:02.319238115Z","type":"meta","data":"agent=claude"}
+{"timestamp":"2026-02-17T04:05:02.31924724Z","type":"meta","data":"command=/tmp/TestClaudeRunNonZeroExit4201081966/001/fake-claude-fail --print --output-format stream-json --verbose"}
+{"timestamp":"2026-02-17T04:05:02.319254573Z","type":"meta","data":"workdir=/tmp/TestClaudeRunNonZeroExit4201081966/001"}
+{"timestamp":"2026-02-17T04:05:02.322417652Z","type":"stderr","data":"something went wrong\n"}
+{"timestamp":"2026-02-17T04:05:02.345865497Z","type":"claude_stream","data":"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"fail\",\"model\":\"test\"}"}
+{"timestamp":"2026-02-17T04:05:02.348633577Z","type":"stdin","data":"PROMPT_SENTINEL_123"}
+{"timestamp":"2026-02-17T04:05:02.34868566Z","type":"meta","data":"agent=claude"}
+{"timestamp":"2026-02-17T04:05:02.348695869Z","type":"meta","data":"command=/tmp/TestClaudePromptUsesStdinNotArgv2532576125/001/fake-claude-stdin --print --output-format stream-json --verbose"}
+{"timestamp":"2026-02-17T04:05:02.348706369Z","type":"meta","data":"workdir=/tmp/TestClaudePromptUsesStdinNotArgv2532576125/001"}
+{"timestamp":"2026-02-17T04:05:02.360236521Z","type":"claude_stream","data":"{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}"}
+{"timestamp":"2026-02-17T04:05:02.360383687Z","type":"claude_stream","data":"{\"type\":\"result\",\"result\":\"ok\"}"}
+{"timestamp":"2026-02-17T04:05:02.361435894Z","type":"stdin","data":"PING"}
+{"timestamp":"2026-02-17T04:05:02.361565436Z","type":"meta","data":"agent=codex"}
+{"timestamp":"2026-02-17T04:05:02.361609061Z","type":"meta","data":"command=/tmp/TestCodexRunUsesNonInteractiveExecMode3567757225/001/fake-codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --json"}
+{"timestamp":"2026-02-17T04:05:02.361619561Z","type":"meta","data":"workdir=/tmp/TestCodexRunUsesNonInteractiveExecMode3567757225/001"}
+{"timestamp":"2026-02-17T04:05:02.363696183Z","type":"claude_stream","data":"args:exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --json"}
+{"timestamp":"2026-02-17T04:05:02.363751683Z","type":"claude_stream","data":"ok"}
+{"timestamp":"2026-02-17T04:05:02.364427307Z","type":"stdin","data":"PING"}
+{"timestamp":"2026-02-17T04:05:02.364493849Z","type":"meta","data":"agent=codex"}
+{"timestamp":"2026-02-17T04:05:02.36450464Z","type":"meta","data":"command=/tmp/TestCodexRunRustLogDefaultAndOverride1564860053/001/fake-codex-env exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --json"}
+{"timestamp":"2026-02-17T04:05:02.364519849Z","type":"meta","data":"workdir=/tmp/TestCodexRunRustLogDefaultAndOverride1564860053/001"}
+{"timestamp":"2026-02-17T04:05:02.365750805Z","type":"stderr","data":"RUST_LOG=error,codex_core::rollout::list=off\n"}
+{"timestamp":"2026-02-17T04:05:02.36579568Z","type":"claude_stream","data":"{\"type\":\"thread.started\",\"thread_id\":\"test-thread\"}"}
+{"timestamp":"2026-02-17T04:05:02.365822347Z","type":"claude_stream","data":"{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}"}
+{"timestamp":"2026-02-17T04:05:02.366035763Z","type":"stdin","data":"PING"}
+{"timestamp":"2026-02-17T04:05:02.366180055Z","type":"meta","data":"agent=codex"}
+{"timestamp":"2026-02-17T04:05:02.366190763Z","type":"meta","data":"command=/tmp/TestCodexRunRustLogDefaultAndOverride1564860053/001/fake-codex-env exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --json"}
+{"timestamp":"2026-02-17T04:05:02.366197305Z","type":"meta","data":"workdir=/tmp/TestCodexRunRustLogDefaultAndOverride1564860053/001"}
+{"timestamp":"2026-02-17T04:05:02.367822511Z","type":"claude_stream","data":"{\"type\":\"thread.started\",\"thread_id\":\"test-thread\"}"}
+{"timestamp":"2026-02-17T04:05:02.368141136Z","type":"stderr","data":"RUST_LOG=debug\n"}
+{"timestamp":"2026-02-17T04:05:02.368252594Z","type":"claude_stream","data":"{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}"}
+{"timestamp":"2026-02-17T04:05:02.36858801Z","type":"stdin","data":"PING"}
+{"timestamp":"2026-02-17T04:05:02.368621718Z","type":"meta","data":"agent=codex"}
+{"timestamp":"2026-02-17T04:05:02.368631052Z","type":"meta","data":"command=/tmp/TestCodexRunCancellationPreservesSessionID939601819/001/fake-codex-cancel exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --json"}
+{"timestamp":"2026-02-17T04:05:02.368638843Z","type":"meta","data":"workdir=/tmp/TestCodexRunCancellationPreservesSessionID939601819/001"}
+{"timestamp":"2026-02-17T04:05:02.370750132Z","type":"claude_stream","data":"{\"type\":\"thread.started\",\"thread_id\":\"cancel-thread\"}"}
+{"timestamp":"2026-02-17T04:05:02.570010003Z","type":"stderr","data":"Terminated\n"}
+{"timestamp":"2026-02-17T04:05:03.194889124Z","type":"stdin","data":"Say hello"}
+{"timestamp":"2026-02-17T04:05:03.194963666Z","type":"meta","data":"agent=gemini"}
+{"timestamp":"2026-02-17T04:05:03.194973582Z","type":"meta","data":"command=/tmp/TestGeminiRunStreamJSON3364526260/001/fake-gemini --output-format stream-json -p "}
+{"timestamp":"2026-02-17T04:05:03.194979999Z","type":"meta","data":"workdir=/tmp/TestGeminiRunStreamJSON3364526260/001"}
+{"timestamp":"2026-02-17T04:05:03.196094581Z","type":"claude_stream","data":"{\"type\":\"init\",\"timestamp\":\"2025-01-01T00:00:00.000Z\",\"session_id\":\"gem-test\",\"model\":\"gemini-2.5-pro\"}"}
+{"timestamp":"2026-02-17T04:05:03.196166914Z","type":"claude_stream","data":"{\"type\":\"message\",\"timestamp\":\"2025-01-01T00:00:01.000Z\",\"role\":\"assistant\",\"content\":\"Hello from fake gemini!\",\"delta\":true}"}
+{"timestamp":"2026-02-17T04:05:03.196184081Z","type":"claude_stream","data":"{\"type\":\"result\",\"timestamp\":\"2025-01-01T00:00:02.000Z\",\"status\":\"success\",\"stats\":{\"total_tokens\":200,\"input_tokens\":120,\"output_tokens\":80,\"cached\":0,\"input\":120,\"duration_ms\":1500,\"tool_calls\":0}}"}
+{"timestamp":"2026-02-17T04:05:03.196691997Z","type":"stdin","data":"fail please"}
+{"timestamp":"2026-02-17T04:05:03.196758622Z","type":"meta","data":"agent=gemini"}
+{"timestamp":"2026-02-17T04:05:03.19677133Z","type":"meta","data":"command=/tmp/TestGeminiRunNonZeroExit1876098874/001/fake-gemini-fail --output-format stream-json -p "}
+{"timestamp":"2026-02-17T04:05:03.196780663Z","type":"meta","data":"workdir=/tmp/TestGeminiRunNonZeroExit1876098874/001"}
+{"timestamp":"2026-02-17T04:05:03.197835162Z","type":"stderr","data":"something went wrong\n"}
+{"timestamp":"2026-02-17T04:05:03.197910245Z","type":"claude_stream","data":"{\"type\":\"init\",\"session_id\":\"fail\",\"model\":\"test\"}"}
+{"timestamp":"2026-02-17T04:05:03.199046577Z","type":"stdin","data":"PROMPT_SENTINEL_456"}
+{"timestamp":"2026-02-17T04:05:03.199718368Z","type":"meta","data":"agent=gemini"}
+{"timestamp":"2026-02-17T04:05:03.199731659Z","type":"meta","data":"command=/tmp/TestGeminiPromptUsesStdinNotArgv608585357/001/fake-gemini-stdin --output-format stream-json -p "}
+{"timestamp":"2026-02-17T04:05:03.199739659Z","type":"meta","data":"workdir=/tmp/TestGeminiPromptUsesStdinNotArgv608585357/001"}
+{"timestamp":"2026-02-17T04:05:03.201593824Z","type":"claude_stream","data":"{\"type\":\"message\",\"role\":\"assistant\",\"content\":\"ok\",\"delta\":false}"}
+{"timestamp":"2026-02-17T04:05:03.20167924Z","type":"claude_stream","data":"{\"type\":\"result\",\"status\":\"success\"}"}
+{"timestamp":"2026-02-17T04:05:03.202817947Z","type":"meta","data":"agent=test-agent"}
+{"timestamp":"2026-02-17T04:05:03.202849197Z","type":"meta","data":"command=/tmp/TestGenericRun661596179/001/fake-generic "}
+{"timestamp":"2026-02-17T04:05:03.202857072Z","type":"meta","data":"workdir=/tmp/TestGenericRun661596179/001"}
+{"timestamp":"2026-02-17T04:05:03.205652319Z","type":"stdout","data":"Hello from generic\n"}
+{"timestamp":"2026-02-17T04:05:03.205893443Z","type":"meta","data":"agent=test-agent"}
+{"timestamp":"2026-02-17T04:05:03.205906777Z","type":"meta","data":"command=/tmp/TestGenericRunNonZeroExit575632850/001/fake-generic-fail "}
+{"timestamp":"2026-02-17T04:05:03.205913818Z","type":"meta","data":"workdir=/tmp/TestGenericRunNonZeroExit575632850/001"}
+{"timestamp":"2026-02-17T04:05:03.20742515Z","type":"stderr","data":"failed\n"}
+{"timestamp":"2026-02-17T04:05:03.207807941Z","type":"stdin","data":"PROMPT_SENTINEL_123"}
+{"timestamp":"2026-02-17T04:05:03.207824607Z","type":"meta","data":"agent=test-agent"}
+{"timestamp":"2026-02-17T04:05:03.207831024Z","type":"meta","data":"command=/tmp/TestGenericPromptUsesStdinNotArgv2875003668/001/fake-generic-stdin "}
+{"timestamp":"2026-02-17T04:05:03.207837607Z","type":"meta","data":"workdir=/tmp/TestGenericPromptUsesStdinNotArgv2875003668/001"}
+{"timestamp":"2026-02-17T04:05:03.210866895Z","type":"stdout","data":"ok\n"}
+{"timestamp":"2026-02-17T04:05:03.214797265Z","type":"stdin","data":"Say hello"}
+{"timestamp":"2026-02-17T04:05:03.215540139Z","type":"meta","data":"agent=opencode"}
+{"timestamp":"2026-02-17T04:05:03.215603806Z","type":"meta","data":"command=/tmp/TestOpencodeRun1643429818/001/fake-opencode run --format json"}
+{"timestamp":"2026-02-17T04:05:03.215616848Z","type":"meta","data":"workdir=/tmp/TestOpencodeRun1643429818/001"}
+{"timestamp":"2026-02-17T04:05:03.218158886Z","type":"claude_stream","data":"{\"type\":\"step_start\",\"sessionID\":\"test-sess\"}"}
+{"timestamp":"2026-02-17T04:05:03.218236386Z","type":"claude_stream","data":"{\"type\":\"text\",\"sessionID\":\"test-sess\",\"part\":{\"text\":\"Hello from opencode\"}}"}
+{"timestamp":"2026-02-17T04:05:03.218258969Z","type":"claude_stream","data":"{\"type\":\"step_finish\",\"sessionID\":\"test-sess\",\"part\":{\"tokens\":{\"input\":10,\"output\":5},\"cost\":0.001}}"}
+{"timestamp":"2026-02-17T04:05:03.218455761Z","type":"stdin","data":"fail"}
+{"timestamp":"2026-02-17T04:05:03.218516302Z","type":"meta","data":"agent=opencode"}
+{"timestamp":"2026-02-17T04:05:03.218523469Z","type":"meta","data":"command=/tmp/TestOpencodeRunNonZeroExit2968913410/001/fake-opencode-fail run --format json"}
+{"timestamp":"2026-02-17T04:05:03.218529552Z","type":"meta","data":"workdir=/tmp/TestOpencodeRunNonZeroExit2968913410/001"}
+{"timestamp":"2026-02-17T04:05:03.219995134Z","type":"stderr","data":"error message\n"}
+{"timestamp":"2026-02-17T04:05:03.220924507Z","type":"stdin","data":"PROMPT_SENTINEL_123"}
+{"timestamp":"2026-02-17T04:05:03.221273507Z","type":"meta","data":"agent=opencode"}
+{"timestamp":"2026-02-17T04:05:03.22128359Z","type":"meta","data":"command=/tmp/TestOpencodePromptUsesStdinNotArgv3295725481/001/fake-opencode-stdin run --format json"}
+{"timestamp":"2026-02-17T04:05:03.22129334Z","type":"meta","data":"workdir=/tmp/TestOpencodePromptUsesStdinNotArgv3295725481/001"}
+{"timestamp":"2026-02-17T04:05:03.224003087Z","type":"claude_stream","data":"{\"type\":\"text\",\"sessionID\":\"ok\",\"part\":{\"text\":\"ok\"}}"}
+{"timestamp":"2026-02-17T04:05:06.378393985Z","type":"stdin","data":"PROMPT_SENTINEL_789"}
+{"timestamp":"2026-02-17T04:05:06.378537651Z","type":"meta","data":"agent=vibe"}
+{"timestamp":"2026-02-17T04:05:06.378547526Z","type":"meta","data":"command=/tmp/TestVibePromptUsesStdinNotArgv1302944160/001/fake-vibe -p PROMPT_SENTINEL_789 --output streaming"}
+{"timestamp":"2026-02-17T04:05:06.37855611Z","type":"meta","data":"workdir=/tmp/TestVibePromptUsesStdinNotArgv1302944160/001"}
+{"timestamp":"2026-02-17T04:05:06.380766399Z","type":"claude_stream","data":"{\"role\":\"assistant\",\"content\":\"mode:argv ok\"}"}
+{"timestamp":"2026-02-17T04:05:06.382721188Z","type":"stdin","data":"hello"}
+{"timestamp":"2026-02-17T04:05:06.382823188Z","type":"meta","data":"agent=vibe"}
+{"timestamp":"2026-02-17T04:05:06.382832438Z","type":"meta","data":"command=/tmp/TestVibeRunBasic3558644580/001/fake-vibe -p hello --output streaming"}
+{"timestamp":"2026-02-17T04:05:06.382839146Z","type":"meta","data":"workdir=/tmp/TestVibeRunBasic3558644580/001"}
+{"timestamp":"2026-02-17T04:05:06.384523769Z","type":"claude_stream","data":"{\"role\":\"assistant\",\"content\":\"Hello from vibe\"}"}
+{"timestamp":"2026-02-17T04:05:06.386202433Z","type":"stdin","data":"fail"}
+{"timestamp":"2026-02-17T04:05:06.386359016Z","type":"meta","data":"agent=vibe"}
+{"timestamp":"2026-02-17T04:05:06.386370183Z","type":"meta","data":"command=/tmp/TestVibeRunBasic3558644580/001/fake-vibe-fail -p fail --output streaming"}
+{"timestamp":"2026-02-17T04:05:06.386378058Z","type":"meta","data":"workdir=/tmp/TestVibeRunBasic3558644580/001"}
+{"timestamp":"2026-02-17T04:05:06.388937096Z","type":"stderr","data":"vibe failed\n"}

@@ -42,6 +42,7 @@ type fsBrowseEntry struct {
 	Name      string `json:"name"`
 	IsDir     bool   `json:"is_dir"`
 	IsProject bool   `json:"is_project"`
+	FullPath  string `json:"full_path,omitempty"`
 }
 
 type fsBrowseResponse struct {
@@ -216,6 +217,124 @@ func (srv *Server) handleProjectInit(w http.ResponseWriter, r *http.Request) {
 		"name":   name,
 		"status": "initialized",
 	})
+}
+
+func (srv *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]fsBrowseEntry{})
+		return
+	}
+
+	// If query looks like an absolute path, try to browse it directly
+	if filepath.IsAbs(query) {
+		absPath, err := srv.resolveBrowsePath(query)
+		if err == nil {
+			info, err := os.Stat(absPath)
+			if err == nil && info.IsDir() {
+				// Return the directory itself plus its entries
+				dirEntries, _ := os.ReadDir(absPath)
+				result := make([]fsBrowseEntry, 0, len(dirEntries)+1)
+				// Add the path itself
+				projectFile := store.ProjectMarkerPath(absPath)
+				isProj := false
+				if _, serr := os.Stat(projectFile); serr == nil {
+					isProj = true
+				}
+				result = append(result, fsBrowseEntry{
+					Name:      filepath.Base(absPath),
+					IsDir:     true,
+					IsProject: isProj,
+					FullPath:  absPath,
+				})
+				// Add child directories
+				for _, entry := range dirEntries {
+					if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+						continue
+					}
+					entryPath := filepath.Join(absPath, entry.Name())
+					fe := fsBrowseEntry{
+						Name:     entry.Name(),
+						IsDir:    true,
+						FullPath: entryPath,
+					}
+					pf := store.ProjectMarkerPath(entryPath)
+					if _, serr := os.Stat(pf); serr == nil {
+						fe.IsProject = true
+					}
+					result = append(result, fe)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(result)
+				return
+			}
+		}
+	}
+
+	// Search through recent projects + scan allowed root for matching directories
+	queryLower := strings.ToLower(query)
+
+	// Collect results from recent projects
+	cfg, _ := config.Load()
+	var results []fsBrowseEntry
+	seen := map[string]bool{}
+
+	if cfg != nil {
+		for _, rp := range cfg.RecentProjects {
+			nameLower := strings.ToLower(rp.Name)
+			pathLower := strings.ToLower(rp.Path)
+			if strings.Contains(nameLower, queryLower) || strings.Contains(pathLower, queryLower) {
+				if !seen[rp.Path] {
+					seen[rp.Path] = true
+					results = append(results, fsBrowseEntry{
+						Name:      rp.Name,
+						IsDir:     true,
+						IsProject: true,
+						FullPath:  rp.Path,
+					})
+				}
+			}
+		}
+	}
+
+	// Scan first level of allowed root for matching directories
+	if srv.allowedRoot != "" {
+		dirEntries, err := os.ReadDir(srv.allowedRoot)
+		if err == nil {
+			for _, entry := range dirEntries {
+				if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+					continue
+				}
+				if !strings.Contains(strings.ToLower(entry.Name()), queryLower) {
+					continue
+				}
+				entryPath := filepath.Join(srv.allowedRoot, entry.Name())
+				if seen[entryPath] {
+					continue
+				}
+				seen[entryPath] = true
+				fe := fsBrowseEntry{
+					Name:     entry.Name(),
+					IsDir:    true,
+					FullPath: entryPath,
+				}
+				pf := store.ProjectMarkerPath(entryPath)
+				if _, serr := os.Stat(pf); serr == nil {
+					fe.IsProject = true
+				}
+				results = append(results, fe)
+			}
+		}
+	}
+
+	// Cap results
+	if len(results) > 25 {
+		results = results[:25]
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
 }
 
 func (srv *Server) handleRecentProjects(w http.ResponseWriter, r *http.Request) {

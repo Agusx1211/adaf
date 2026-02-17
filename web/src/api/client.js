@@ -94,6 +94,10 @@ export function apiFSBrowse(path) {
   return apiCall('/api/fs/browse' + query);
 }
 
+export function apiFSSearch(query) {
+  return apiCall('/api/fs/search?q=' + encodeURIComponent(query));
+}
+
 export function apiFSMkdir(path) {
   return apiCall('/api/fs/mkdir', 'POST', { path: path });
 }

@@ -246,6 +246,7 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 
 	// Filesystem browsing endpoints
 	mux.HandleFunc("GET /api/fs/browse", srv.handleFSBrowse)
+	mux.HandleFunc("GET /api/fs/search", srv.handleFSSearch)
 	mux.HandleFunc("POST /api/fs/mkdir", srv.handleFSMkdir)
 	mux.HandleFunc("POST /api/projects/init", srv.handleProjectInit)
 	mux.HandleFunc("POST /api/projects/open", srv.handleProjectOpen)
