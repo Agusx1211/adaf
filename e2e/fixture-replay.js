@@ -36,7 +36,7 @@ const ROLE_FIXTURE_TURN_SUPERVISOR_HEX = 'roleturn912';
 const ROLE_FIXTURE_CALL_SUPERVISOR_TEXT = 'Need next objective from supervisor.';
 const ROLE_FIXTURE_STOP_TEXT = 'All manager and spawn work is complete.';
 const SEED_PLAN_ID = 'seed-plan';
-const SEED_DOC_ID = 'seed-doc';
+const SEED_WIKI_ID = 'seed-wiki';
 const SEED_ISSUE_ID = 1;
 const SEED_TURN_ID = 1;
 const SEED_TURN_HEX = 'seedturn';
@@ -123,7 +123,7 @@ function writeFixtureProject(fixtureProjectDir, repositoryRoot, homeDir) {
 function writeSeedProjectData(adafDir, nowISO) {
   [
     'plans',
-    'docs',
+    'wiki',
     'issues',
     'local/turns',
     'local/records',
@@ -152,17 +152,26 @@ function writeSeedProjectData(adafDir, nowISO) {
     'utf8',
   );
 
-  const doc = {
-    id: SEED_DOC_ID,
+  const wiki = {
+    id: SEED_WIKI_ID,
     plan_id: SEED_PLAN_ID,
-    title: 'Seed Doc',
-    content: '# Seed Doc\n\nThis markdown document is seeded for real e2e edit flows.',
+    title: 'Seed Wiki',
+    content: '# Seed Wiki\n\nThis markdown wiki entry is seeded for real e2e edit flows.',
     created: nowISO,
     updated: nowISO,
+    created_by: 'fixture-seed',
+    updated_by: 'fixture-seed',
+    version: 1,
+    history: [{
+      version: 1,
+      action: 'create',
+      by: 'fixture-seed',
+      at: nowISO,
+    }],
   };
   fs.writeFileSync(
-    path.join(adafDir, 'docs', SEED_DOC_ID + '.json'),
-    JSON.stringify(doc, null, 2) + '\n',
+    path.join(adafDir, 'wiki', SEED_WIKI_ID + '.json'),
+    JSON.stringify(wiki, null, 2) + '\n',
     'utf8',
   );
 

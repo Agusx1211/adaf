@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,8 +32,8 @@ var (
 		"frozen":    {},
 	}
 
-	docSlugInvalidChars = regexp.MustCompile(`[^a-z0-9-]+`)
-	docSlugMultiDash    = regexp.MustCompile(`-+`)
+	wikiSlugInvalidChars = regexp.MustCompile(`[^a-z0-9-]+`)
+	wikiSlugMultiDash    = regexp.MustCompile(`-+`)
 )
 
 type issueWriteRequest struct {
@@ -52,11 +53,19 @@ type planWriteRequest struct {
 	Status      string `json:"status"`
 }
 
-type docWriteRequest struct {
-	ID      string `json:"id"`
-	PlanID  string `json:"plan_id"`
-	Title   string `json:"title"`
-	Content string `json:"content"`
+type wikiWriteRequest struct {
+	ID        string `json:"id"`
+	PlanID    string `json:"plan_id"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+	UpdatedBy string `json:"updated_by"`
+}
+
+type wikiUpdateRequest struct {
+	PlanID    *string `json:"plan_id"`
+	Title     *string `json:"title"`
+	Content   *string `json:"content"`
+	UpdatedBy *string `json:"updated_by"`
 }
 
 type turnWriteRequest struct {
@@ -354,51 +363,98 @@ func handleDeletePlanP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func handleDocsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+func handleWikiP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	planID := strings.TrimSpace(r.URL.Query().Get("plan"))
 
 	var (
-		docs []store.Doc
+		wiki []store.WikiEntry
 		err  error
 	)
 	if planID == "" {
-		docs, err = s.ListDocs()
+		wiki, err = s.ListWiki()
 	} else {
-		docs, err = s.ListDocsForPlan(planID)
+		wiki, err = s.ListWikiForPlan(planID)
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list docs")
+		writeError(w, http.StatusInternalServerError, "failed to list wiki")
 		return
 	}
-	if docs == nil {
-		docs = []store.Doc{}
+	if wiki == nil {
+		wiki = []store.WikiEntry{}
 	}
 
-	writeJSON(w, http.StatusOK, docs)
+	writeJSON(w, http.StatusOK, wiki)
 }
 
-func handleDocByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) {
-	docID := strings.TrimSpace(r.PathValue("id"))
-	if docID == "" {
-		writeError(w, http.StatusNotFound, "doc not found")
+func handleWikiSearchP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		writeError(w, http.StatusBadRequest, "query is required")
 		return
 	}
 
-	doc, err := s.GetDoc(docID)
-	if err != nil {
-		if isNotFoundErr(err) {
-			writeError(w, http.StatusNotFound, "doc not found")
+	limit := 20
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		parsedLimit, err := strconv.Atoi(rawLimit)
+		if err != nil || parsedLimit <= 0 {
+			writeError(w, http.StatusBadRequest, "limit must be a positive integer")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load doc")
+		if parsedLimit > 100 {
+			parsedLimit = 100
+		}
+		limit = parsedLimit
+	}
+
+	planID := strings.TrimSpace(r.URL.Query().Get("plan"))
+	sharedRaw := normalizeLower(r.URL.Query().Get("shared"))
+	sharedOnly := sharedRaw == "1" || sharedRaw == "true" || sharedRaw == "yes"
+
+	results, err := s.SearchWiki(query, limit*4)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to search wiki")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, doc)
+	filtered := make([]store.WikiEntry, 0, len(results))
+	for _, entry := range results {
+		if sharedOnly && entry.PlanID != "" {
+			continue
+		}
+		if !sharedOnly && planID != "" && entry.PlanID != "" && entry.PlanID != planID {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+
+	if len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	writeJSON(w, http.StatusOK, filtered)
 }
 
-func handleCreateDocP(s *store.Store, w http.ResponseWriter, r *http.Request) {
-	var req docWriteRequest
+func handleWikiByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	wikiID := strings.TrimSpace(r.PathValue("id"))
+	if wikiID == "" {
+		writeError(w, http.StatusNotFound, "wiki entry not found")
+		return
+	}
+
+	entry, err := s.GetWikiEntry(wikiID)
+	if err != nil {
+		if isNotFoundErr(err) {
+			writeError(w, http.StatusNotFound, "wiki entry not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to load wiki entry")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, entry)
+}
+
+func handleCreateWikiP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	var req wikiWriteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -410,87 +466,103 @@ func handleCreateDocP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	docID := strings.TrimSpace(req.ID)
-	if docID == "" {
-		docID = slugifyDocID(title)
+	wikiID := strings.TrimSpace(req.ID)
+	if wikiID == "" {
+		wikiID = slugifyWikiID(title)
 	}
-	if docID == "" {
-		writeError(w, http.StatusBadRequest, "unable to derive document id")
+	if wikiID == "" {
+		writeError(w, http.StatusBadRequest, "unable to derive wiki id")
 		return
 	}
 
 	now := time.Now().UTC()
-	doc := store.Doc{
-		ID:      docID,
-		PlanID:  strings.TrimSpace(req.PlanID),
-		Title:   title,
-		Content: req.Content,
-		Created: now,
-		Updated: now,
+	actor := strings.TrimSpace(req.UpdatedBy)
+	if actor == "" {
+		actor = "web-ui"
 	}
-	if err := s.CreateDoc(&doc); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create doc")
+	entry := store.WikiEntry{
+		ID:        wikiID,
+		PlanID:    strings.TrimSpace(req.PlanID),
+		Title:     title,
+		Content:   req.Content,
+		Created:   now,
+		Updated:   now,
+		CreatedBy: actor,
+		UpdatedBy: actor,
+	}
+	if err := s.CreateWikiEntry(&entry); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create wiki entry")
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, doc)
+	writeJSON(w, http.StatusCreated, entry)
 }
 
-func handleUpdateDocP(s *store.Store, w http.ResponseWriter, r *http.Request) {
-	docID := strings.TrimSpace(r.PathValue("id"))
-	if docID == "" {
-		writeError(w, http.StatusNotFound, "doc not found")
+func handleUpdateWikiP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	wikiID := strings.TrimSpace(r.PathValue("id"))
+	if wikiID == "" {
+		writeError(w, http.StatusNotFound, "wiki entry not found")
 		return
 	}
 
-	doc, err := s.GetDoc(docID)
+	entry, err := s.GetWikiEntry(wikiID)
 	if err != nil {
 		if isNotFoundErr(err) {
-			writeError(w, http.StatusNotFound, "doc not found")
+			writeError(w, http.StatusNotFound, "wiki entry not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load doc")
+		writeError(w, http.StatusInternalServerError, "failed to load wiki entry")
 		return
 	}
 
-	var req docWriteRequest
+	var req wikiUpdateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	if planID := strings.TrimSpace(req.PlanID); planID != "" {
-		doc.PlanID = planID
+	if req.PlanID != nil {
+		entry.PlanID = strings.TrimSpace(*req.PlanID)
 	}
-	if title := strings.TrimSpace(req.Title); title != "" {
-		doc.Title = title
+	if req.Title != nil {
+		if title := strings.TrimSpace(*req.Title); title != "" {
+			entry.Title = title
+		}
 	}
-	if req.Content != "" {
-		doc.Content = req.Content
+	if req.Content != nil {
+		entry.Content = *req.Content
 	}
+	actor := ""
+	if req.UpdatedBy != nil {
+		actor = strings.TrimSpace(*req.UpdatedBy)
+	}
+	if actor == "" {
+		actor = "web-ui"
+	}
+	entry.UpdatedBy = actor
 
-	doc.Updated = time.Now().UTC()
-	if err := s.UpdateDoc(doc); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update doc")
+	entry.Updated = time.Now().UTC()
+	if err := s.UpdateWikiEntry(entry); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update wiki entry")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, doc)
+	writeJSON(w, http.StatusOK, entry)
 }
 
-func handleDeleteDocP(s *store.Store, w http.ResponseWriter, r *http.Request) {
-	docID := strings.TrimSpace(r.PathValue("id"))
-	if docID == "" {
-		writeError(w, http.StatusNotFound, "doc not found")
+func handleDeleteWikiP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	wikiID := strings.TrimSpace(r.PathValue("id"))
+	if wikiID == "" {
+		writeError(w, http.StatusNotFound, "wiki entry not found")
 		return
 	}
 
-	if err := s.DeleteDoc(docID); err != nil {
+	if err := s.DeleteWikiEntry(wikiID); err != nil {
 		if isNotFoundErr(err) {
-			writeError(w, http.StatusNotFound, "doc not found")
+			writeError(w, http.StatusNotFound, "wiki entry not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to delete doc")
+		writeError(w, http.StatusInternalServerError, "failed to delete wiki entry")
 		return
 	}
 
@@ -558,10 +630,10 @@ func isAllowedValue(value string, allowed map[string]struct{}) bool {
 	return ok
 }
 
-func slugifyDocID(title string) string {
+func slugifyWikiID(title string) string {
 	slug := normalizeLower(title)
 	slug = strings.Join(strings.Fields(slug), "-")
-	slug = docSlugInvalidChars.ReplaceAllString(slug, "")
-	slug = docSlugMultiDash.ReplaceAllString(slug, "-")
+	slug = wikiSlugInvalidChars.ReplaceAllString(slug, "")
+	slug = wikiSlugMultiDash.ReplaceAllString(slug, "-")
 	return strings.Trim(slug, "-")
 }

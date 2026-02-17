@@ -209,13 +209,13 @@ test('assistant inspect modal opens for replayed messages', async ({ page, reque
 test('navigation updates hash and survives reload', async ({ page, request }) => {
   await gotoFixture(page, request);
 
-  await page.getByRole('button', { name: 'Docs' }).click();
-  await expect(page).toHaveURL(/#\/docs/);
-  await expect(page.getByText('Seed Doc', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Wiki' }).click();
+  await expect(page).toHaveURL(/#\/wiki/);
+  await expect(page.getByText('Seed Wiki', { exact: true })).toBeVisible();
 
   await page.reload();
-  await expect(page).toHaveURL(/#\/docs/);
-  await expect(page.getByText('Seed Doc', { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/#\/wiki/);
+  await expect(page.getByText('Seed Wiki', { exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'Logs' }).click();
   await expect(page).toHaveURL(/#\/logs/);
@@ -241,7 +241,7 @@ test('boot and initial interactions have no uncaught browser exceptions', async 
   });
 
   await gotoFixture(page, request);
-  await page.getByRole('button', { name: 'Docs' }).click();
+  await page.getByRole('button', { name: 'Wiki' }).click();
   await page.getByRole('button', { name: 'Plan' }).click();
   await page.getByRole('button', { name: 'Loops' }).click();
   await page.waitForTimeout(300);

@@ -18,7 +18,7 @@ var initialState = {
   issues: [],
   plans: [],
   activePlan: null,
-  docs: [],
+  wiki: [],
   turns: [],
   loopRun: null,
   usage: null,
@@ -28,7 +28,7 @@ var initialState = {
   selectedScope: null,
   selectedIssue: null,
   selectedPlan: null,
-  selectedDoc: null,
+  selectedWiki: null,
   selectedTurn: null,
   expandedNodes: {},
   leftView: 'loops',
@@ -41,7 +41,7 @@ var initialState = {
 
   sessionMessageDraft: '',
   activeLoopIDForMessages: 0,
-  viewLoaded: { issues: false, docs: false, plan: false, logs: false },
+  viewLoaded: { issues: false, wiki: false, plan: false, logs: false },
 
   configSelection: null, // { type: 'profile'|'loop'|'team'|'skill'|'role', name: string } or null
   standaloneChatID: '', // active chat instance ID
@@ -83,8 +83,8 @@ function reducer(state, action) {
     case 'SET_SELECTED_PLAN':
       return { ...state, selectedPlan: action.payload };
 
-    case 'SET_SELECTED_DOC':
-      return { ...state, selectedDoc: action.payload };
+    case 'SET_SELECTED_WIKI':
+      return { ...state, selectedWiki: action.payload };
 
     case 'SET_SELECTED_TURN':
       return { ...state, selectedTurn: action.payload };
@@ -171,11 +171,11 @@ function reducer(state, action) {
       return {
         ...state,
         sessions: [], spawns: [], messages: [], streamEvents: [], activity: [], activityLast: null,
-        issues: [], plans: [], activePlan: null, docs: [], turns: [], loopRun: null, loopRuns: [], usage: null,
-        selectedIssue: null, selectedPlan: null, selectedDoc: null, selectedTurn: null, selectedScope: null,
+        issues: [], plans: [], activePlan: null, wiki: [], turns: [], loopRun: null, loopRuns: [], usage: null,
+        selectedIssue: null, selectedPlan: null, selectedWiki: null, selectedTurn: null, selectedScope: null,
         expandedNodes: {}, projectMeta: null, activeLoopIDForMessages: 0, standaloneChatStatuses: {},
         historicalEvents: {},
-        viewLoaded: { issues: false, docs: false, plan: false, logs: false },
+        viewLoaded: { issues: false, wiki: false, plan: false, logs: false },
         needsProjectPicker: false, unresolvedProjectID: '',
       };
 
@@ -302,13 +302,26 @@ export function normalizeIssues(rawIssues) {
   }).filter(function (i) { return i.id > 0; }).sort(function (a, b) { return b.id - a.id; });
 }
 
-export function normalizeDocs(rawDocs) {
-  return arrayOrEmpty(rawDocs).map(function (doc) {
+export function normalizeWiki(rawWiki) {
+  return arrayOrEmpty(rawWiki).map(function (entry) {
     return {
-      id: doc && doc.id ? String(doc.id) : '',
-      title: doc && doc.title ? String(doc.title) : '',
-      content: doc && doc.content ? String(doc.content) : '',
-      plan_id: doc && doc.plan_id ? String(doc.plan_id) : '',
+      id: entry && entry.id ? String(entry.id) : '',
+      title: entry && entry.title ? String(entry.title) : '',
+      content: entry && entry.content ? String(entry.content) : '',
+      plan_id: entry && entry.plan_id ? String(entry.plan_id) : '',
+      created: entry && entry.created ? entry.created : '',
+      updated: entry && entry.updated ? entry.updated : '',
+      created_by: entry && entry.created_by ? String(entry.created_by) : '',
+      updated_by: entry && entry.updated_by ? String(entry.updated_by) : '',
+      version: Number(entry && entry.version) || 0,
+      history: arrayOrEmpty(entry && entry.history).map(function (change) {
+        return {
+          version: Number(change && change.version) || 0,
+          action: change && change.action ? String(change.action) : '',
+          by: change && change.by ? String(change.by) : '',
+          at: change && change.at ? change.at : '',
+        };
+      }),
     };
   }).filter(function (d) { return !!d.id; });
 }

@@ -49,7 +49,7 @@ var requiredProjectSubdirs = []string{
 	"local/turns",
 	"local/records",
 	"plans",
-	"docs",
+	"wiki",
 	"issues",
 	"local/spawns",
 	"local/messages",

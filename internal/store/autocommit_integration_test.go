@@ -106,7 +106,7 @@ func TestAutoCommitIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("doc creation triggers auto-commit", func(t *testing.T) {
+	t.Run("wiki creation triggers auto-commit", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		dir := t.TempDir()
 
@@ -121,15 +121,17 @@ func TestAutoCommitIntegration(t *testing.T) {
 			t.Fatal("failed to init project:", err)
 		}
 
-		// Create a doc
-		doc := &Doc{
-			ID:      "test-doc",
-			Title:   "Test Document",
+		// Create a wiki entry
+		entry := &WikiEntry{
+			ID:      "test-wiki",
+			Title:   "Test Wiki",
 			Content: "This is test content",
 		}
+		entry.CreatedBy = "test-agent"
+		entry.UpdatedBy = "test-agent"
 
-		if err := s.CreateDoc(doc); err != nil {
-			t.Fatal("failed to create doc:", err)
+		if err := s.CreateWikiEntry(entry); err != nil {
+			t.Fatal("failed to create wiki entry:", err)
 		}
 
 		// Check that a commit was created
@@ -143,7 +145,7 @@ func TestAutoCommitIntegration(t *testing.T) {
 		}
 
 		// Check commit message
-		expectedMsg := "adaf: create doc test-doc"
+		expectedMsg := "adaf: create wiki test-wiki"
 		if !strings.Contains(string(output), expectedMsg) {
 			t.Errorf("commit message = %q, want to contain %q", string(output), expectedMsg)
 		}

@@ -258,43 +258,70 @@ func TestPlanWriteEndpoints(t *testing.T) {
 	}
 }
 
-func TestDocEndpoints(t *testing.T) {
+func TestWikiEndpoints(t *testing.T) {
 	srv, _ := newTestServer(t)
 
-	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/docs", `{"plan_id":"web-ui","title":"Architecture Draft","content":"v1"}`)
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/wiki", `{"plan_id":"web-ui","title":"Architecture Draft","content":"v1","updated_by":"lead-agent"}`)
 	if createRec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
 	}
 
-	created := decodeResponse[store.Doc](t, createRec)
+	created := decodeResponse[store.WikiEntry](t, createRec)
 	if created.ID != "architecture-draft" {
 		t.Fatalf("created id = %q, want %q", created.ID, "architecture-draft")
 	}
 	if created.PlanID != "web-ui" {
 		t.Fatalf("created plan_id = %q, want %q", created.PlanID, "web-ui")
 	}
+	if created.CreatedBy != "lead-agent" {
+		t.Fatalf("created_by = %q, want %q", created.CreatedBy, "lead-agent")
+	}
+	if created.UpdatedBy != "lead-agent" {
+		t.Fatalf("updated_by = %q, want %q", created.UpdatedBy, "lead-agent")
+	}
+	if created.Version != 1 {
+		t.Fatalf("version = %d, want 1", created.Version)
+	}
 
-	listRec := performRequest(t, srv, http.MethodGet, "/api/docs?plan=web-ui")
+	listRec := performRequest(t, srv, http.MethodGet, "/api/wiki?plan=web-ui")
 	if listRec.Code != http.StatusOK {
 		t.Fatalf("list status = %d, want %d", listRec.Code, http.StatusOK)
 	}
-	listed := decodeResponse[[]store.Doc](t, listRec)
+	listed := decodeResponse[[]store.WikiEntry](t, listRec)
 	if len(listed) != 1 {
-		t.Fatalf("docs length = %d, want 1", len(listed))
+		t.Fatalf("wiki length = %d, want 1", len(listed))
 	}
 
-	getRec := performRequest(t, srv, http.MethodGet, "/api/docs/architecture-draft")
+	getRec := performRequest(t, srv, http.MethodGet, "/api/wiki/architecture-draft")
 	if getRec.Code != http.StatusOK {
 		t.Fatalf("get status = %d, want %d", getRec.Code, http.StatusOK)
 	}
 
-	updateRec := performJSONRequest(t, srv, http.MethodPut, "/api/docs/architecture-draft", `{"content":"v2"}`)
+	updateRec := performJSONRequest(t, srv, http.MethodPut, "/api/wiki/architecture-draft", `{"content":"v2","updated_by":"worker-agent"}`)
 	if updateRec.Code != http.StatusOK {
 		t.Fatalf("update status = %d, want %d", updateRec.Code, http.StatusOK)
 	}
-	updated := decodeResponse[store.Doc](t, updateRec)
+	updated := decodeResponse[store.WikiEntry](t, updateRec)
 	if updated.Content != "v2" {
 		t.Fatalf("updated content = %q, want %q", updated.Content, "v2")
+	}
+	if updated.UpdatedBy != "worker-agent" {
+		t.Fatalf("updated_by = %q, want %q", updated.UpdatedBy, "worker-agent")
+	}
+	if updated.Version != 2 {
+		t.Fatalf("version = %d, want 2", updated.Version)
+	}
+
+	searchRec := performRequest(t, srv, http.MethodGet, "/api/wiki/search?q=arch")
+	if searchRec.Code != http.StatusOK {
+		t.Fatalf("search status = %d, want %d", searchRec.Code, http.StatusOK)
+	}
+	searchResults := decodeResponse[[]store.WikiEntry](t, searchRec)
+	if len(searchResults) != 1 {
+		t.Fatalf("search length = %d, want 1", len(searchResults))
+	}
+	if searchResults[0].ID != "architecture-draft" {
+		t.Fatalf("top search result = %q, want %q", searchResults[0].ID, "architecture-draft")
 	}
 }
 
@@ -466,30 +493,30 @@ func TestDeleteIssueEndpoint(t *testing.T) {
 	}
 }
 
-func TestDeleteDocEndpoint(t *testing.T) {
+func TestDeleteWikiEntryEndpoint(t *testing.T) {
 	srv, _ := newTestServer(t)
 
-	// Create doc first
-	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/docs", `{"title":"Temp Doc","content":"delete me"}`)
+	// Create wiki entry first
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/wiki", `{"title":"Temp Wiki","content":"delete me"}`)
 	if createRec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
 	}
-	created := decodeResponse[store.Doc](t, createRec)
+	created := decodeResponse[store.WikiEntry](t, createRec)
 
 	// Delete it
-	deleteRec := performRequest(t, srv, http.MethodDelete, "/api/docs/"+created.ID)
+	deleteRec := performRequest(t, srv, http.MethodDelete, "/api/wiki/"+created.ID)
 	if deleteRec.Code != http.StatusOK {
 		t.Fatalf("delete status = %d, want %d", deleteRec.Code, http.StatusOK)
 	}
 
 	// Verify it's gone
-	getRec := performRequest(t, srv, http.MethodGet, "/api/docs/"+created.ID)
+	getRec := performRequest(t, srv, http.MethodGet, "/api/wiki/"+created.ID)
 	if getRec.Code != http.StatusNotFound {
 		t.Fatalf("get after delete status = %d, want %d", getRec.Code, http.StatusNotFound)
 	}
 
 	// Delete non-existent
-	notFoundRec := performRequest(t, srv, http.MethodDelete, "/api/docs/no-such-doc")
+	notFoundRec := performRequest(t, srv, http.MethodDelete, "/api/wiki/no-such-wiki")
 	if notFoundRec.Code != http.StatusNotFound {
 		t.Fatalf("delete non-existent status = %d, want %d", notFoundRec.Code, http.StatusNotFound)
 	}
@@ -971,11 +998,11 @@ func TestPlanValidation(t *testing.T) {
 
 }
 
-func TestDocValidation(t *testing.T) {
+func TestWikiValidation(t *testing.T) {
 	srv, _ := newTestServer(t)
 
 	// Missing title
-	rec := performJSONRequest(t, srv, http.MethodPost, "/api/docs", `{"content":"no title"}`)
+	rec := performJSONRequest(t, srv, http.MethodPost, "/api/wiki", `{"content":"no title"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("no title status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}

@@ -13,7 +13,7 @@ var statusCmd = &cobra.Command{
 	Aliases: []string{"info", "state", "st"},
 	Short:   "Show comprehensive project status",
 	Long: `Display a comprehensive summary of the project including plans, issues,
-turn history, and documents.`,
+turn history, and wiki.`,
 	RunE: runStatus,
 }
 
@@ -176,19 +176,35 @@ func runStatusFull(s *store.Store) error {
 		}
 	}
 
-	printHeader("Documents")
-	sharedDocs, _ := s.ListSharedDocs()
+	printHeader("Wiki")
+	sharedWiki, _ := s.ListSharedWiki()
 	if activePlan == nil {
-		fmt.Printf("  %d shared document(s)\n", len(sharedDocs))
+		fmt.Printf("  %d shared wiki entr", len(sharedWiki))
+		if len(sharedWiki) == 1 {
+			fmt.Printf("y\n")
+		} else {
+			fmt.Printf("ies\n")
+		}
 	} else {
-		visibleDocs, _ := s.ListDocsForPlan(activePlan.ID)
+		visibleWiki, _ := s.ListWikiForPlan(activePlan.ID)
 		planScoped := 0
-		for _, d := range visibleDocs {
-			if d.PlanID == activePlan.ID {
+		for _, entry := range visibleWiki {
+			if entry.PlanID == activePlan.ID {
 				planScoped++
 			}
 		}
-		fmt.Printf("  %d shared doc(s), %d plan-scoped doc(s)\n", len(sharedDocs), planScoped)
+		fmt.Printf("  %d shared wiki entr", len(sharedWiki))
+		if len(sharedWiki) == 1 {
+			fmt.Printf("y")
+		} else {
+			fmt.Printf("ies")
+		}
+		fmt.Printf(", %d plan-scoped wiki entr", planScoped)
+		if planScoped == 1 {
+			fmt.Printf("y\n")
+		} else {
+			fmt.Printf("ies\n")
+		}
 	}
 
 	fmt.Println()

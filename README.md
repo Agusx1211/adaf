@@ -24,7 +24,7 @@
 
 ---
 
-**adaf** is a meta-orchestrator for AI coding agents. It manages plans, issues, docs, session logs, and deep session recordings **outside** the target repository, so multiple AI agents can collaborate on a codebase via structured relay handoffs.
+**adaf** is a meta-orchestrator for AI coding agents. It manages plans, issues, wiki, session logs, and deep session recordings **outside** the target repository, so multiple AI agents can collaborate on a codebase via structured relay handoffs.
 
 Think of it as project management infrastructure purpose-built for AI agents -- plans as high-level design docs, an issue tracker with dependencies, session logs for handoffs, sub-agent spawning with worktree isolation, looping workflows, detachable sessions, and full I/O recording. All stored in `.adaf/`, never cluttering your repo.
 
@@ -32,7 +32,7 @@ Think of it as project management infrastructure purpose-built for AI agents -- 
 
 When you run AI coding agents (Claude, Codex, Gemini, etc.) on a project, each session starts from scratch. There's no shared memory of what was tried, what decisions were made, or what the current plan is. **adaf solves this:**
 
-- **Shared project state** -- Plans, issues, docs, and session logs persist across agent sessions
+- **Shared project state** -- Plans, issues, wiki, and session logs persist across agent sessions
 - **Relay handoffs** -- Each agent logs what it did, so the next agent picks up where it left off
 - **Multi-agent orchestration** -- Loops chain agent profiles together; spawns delegate subtasks to child agents in isolated worktrees
 - **Full recording** -- Every agent interaction (stdin/stdout/stderr) is captured for analysis
@@ -118,9 +118,9 @@ adaf
 | `adaf log list` | `ls` | List session logs |
 | `adaf log latest` | `last` | Show the most recent session log |
 | `adaf log create` | `new` | Create a session log entry |
-| `adaf doc list` | `ls` | List project documents |
-| `adaf doc create` | `new` | Create a document (from file or inline) |
-| `adaf doc show <id>` | `get` | Display a document |
+| `adaf wiki list` | `ls` | List wiki entries |
+| `adaf wiki create` | `new` | Create a wiki entry (from file or inline) |
+| `adaf wiki show <id>` | `get` | Display a wiki entry |
 
 ### Configuration
 
@@ -191,7 +191,7 @@ adaf stores all orchestration state in a `.adaf/` directory at the root of your 
   plans/              # Plans (one JSON file per plan)
   issues/             # Issue tracker (one JSON file per issue)
   turns/              # Session logs (one JSON per turn)
-  docs/               # Project documents
+  wiki/               # Shared wiki entries
   records/            # Deep session recordings (stdin/stdout/stderr)
   stats/              # Profile and loop statistics
   spawns/             # Sub-agent orchestration state

@@ -6,7 +6,7 @@ import AgentOutput from '../detail/AgentOutput.jsx';
 import LoopVisualizer from '../loop/LoopVisualizer.jsx';
 import StandaloneChatView from '../views/StandaloneChatView.jsx';
 import IssueDetailPanel from '../detail/IssueDetailPanel.jsx';
-import DocsDetailPanel from '../detail/DocsDetailPanel.jsx';
+import WikiDetailPanel from '../detail/WikiDetailPanel.jsx';
 import PlanDetailPanel from '../detail/PlanDetailPanel.jsx';
 import LogDetailPanel from '../detail/LogDetailPanel.jsx';
 import ConfigDetailPanel from '../detail/ConfigDetailPanel.jsx';
@@ -58,7 +58,7 @@ export default function CenterPanel() {
 
       {/* Detail panels for other views */}
       {leftView === 'issues' && <IssueDetailPanel />}
-      {leftView === 'docs' && <DocsDetailPanel />}
+      {leftView === 'wiki' && <WikiDetailPanel />}
       {leftView === 'plan' && <PlanDetailPanel />}
       {leftView === 'logs' && <LogDetailPanel />}
       {leftView === 'config' && <ConfigDetailPanel />}

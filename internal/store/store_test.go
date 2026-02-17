@@ -140,27 +140,112 @@ func TestIssues(t *testing.T) {
 	}
 }
 
-func TestDocs(t *testing.T) {
+func TestWiki(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := New(dir)
 	s.Init(ProjectConfig{Name: "test", RepoPath: "/tmp"})
 
-	doc := &Doc{ID: "arch", Title: "Architecture", Content: "# Arch\nStuff here."}
-	if err := s.CreateDoc(doc); err != nil {
+	entry := &WikiEntry{
+		ID:        "arch",
+		Title:     "Architecture",
+		Content:   "# Arch\nStuff here.",
+		CreatedBy: "lead-agent",
+		UpdatedBy: "lead-agent",
+	}
+	if err := s.CreateWikiEntry(entry); err != nil {
 		t.Fatal(err)
 	}
 
-	docs, _ := s.ListDocs()
-	if len(docs) != 1 {
-		t.Errorf("expected 1 doc, got %d", len(docs))
+	wiki, _ := s.ListWiki()
+	if len(wiki) != 1 {
+		t.Errorf("expected 1 wiki entry, got %d", len(wiki))
 	}
 
-	got, err := s.GetDoc("arch")
+	got, err := s.GetWikiEntry("arch")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Title != "Architecture" {
 		t.Errorf("title = %q, want %q", got.Title, "Architecture")
+	}
+	if got.CreatedBy != "lead-agent" {
+		t.Errorf("created_by = %q, want %q", got.CreatedBy, "lead-agent")
+	}
+	if got.UpdatedBy != "lead-agent" {
+		t.Errorf("updated_by = %q, want %q", got.UpdatedBy, "lead-agent")
+	}
+	if got.Version != 1 {
+		t.Errorf("version = %d, want 1", got.Version)
+	}
+	if len(got.History) != 1 {
+		t.Errorf("history length = %d, want 1", len(got.History))
+	}
+
+	got.Content = "# Arch\nUpdated."
+	got.UpdatedBy = "worker-agent"
+	if err := s.UpdateWikiEntry(got); err != nil {
+		t.Fatalf("UpdateWikiEntry: %v", err)
+	}
+
+	updated, err := s.GetWikiEntry("arch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Version != 2 {
+		t.Errorf("updated version = %d, want 2", updated.Version)
+	}
+	if updated.UpdatedBy != "worker-agent" {
+		t.Errorf("updated_by = %q, want %q", updated.UpdatedBy, "worker-agent")
+	}
+	if len(updated.History) != 2 {
+		t.Errorf("history length = %d, want 2", len(updated.History))
+	}
+	if updated.History[1].Action != "update" {
+		t.Errorf("history action = %q, want %q", updated.History[1].Action, "update")
+	}
+	if updated.History[1].By != "worker-agent" {
+		t.Errorf("history by = %q, want %q", updated.History[1].By, "worker-agent")
+	}
+}
+
+func TestSearchWiki(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := New(dir)
+	s.Init(ProjectConfig{Name: "test", RepoPath: "/tmp"})
+
+	entries := []*WikiEntry{
+		{ID: "release-runbook", Title: "Release Runbook", Content: "Deploy process and rollback guidance."},
+		{ID: "agent-handoff", Title: "Agent Handoff", Content: "How workers should pass context."},
+		{ID: "database-notes", Title: "Database Notes", Content: "Schema and indexes."},
+	}
+	for _, entry := range entries {
+		entry.CreatedBy = "seed"
+		entry.UpdatedBy = "seed"
+		if err := s.CreateWikiEntry(entry); err != nil {
+			t.Fatalf("CreateWikiEntry(%s): %v", entry.ID, err)
+		}
+	}
+
+	results, err := s.SearchWiki("release", 5)
+	if err != nil {
+		t.Fatalf("SearchWiki: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected non-empty search results")
+	}
+	if results[0].ID != "release-runbook" {
+		t.Fatalf("top result = %q, want %q", results[0].ID, "release-runbook")
+	}
+
+	fuzzyResults, err := s.SearchWiki("rlsrbk", 5)
+	if err != nil {
+		t.Fatalf("SearchWiki fuzzy: %v", err)
+	}
+	if len(fuzzyResults) == 0 {
+		t.Fatal("expected fuzzy search results")
+	}
+	if fuzzyResults[0].ID != "release-runbook" {
+		t.Fatalf("top fuzzy result = %q, want %q", fuzzyResults[0].ID, "release-runbook")
 	}
 }
 

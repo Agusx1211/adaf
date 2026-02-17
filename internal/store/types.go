@@ -37,13 +37,24 @@ type Issue struct {
 	Updated     time.Time `json:"updated"`
 }
 
-type Doc struct {
-	ID      string    `json:"id"`
-	PlanID  string    `json:"plan_id,omitempty"`
-	Title   string    `json:"title"`
-	Content string    `json:"content"`
-	Created time.Time `json:"created"`
-	Updated time.Time `json:"updated"`
+type WikiChange struct {
+	Version int       `json:"version"`
+	Action  string    `json:"action"`
+	By      string    `json:"by,omitempty"`
+	At      time.Time `json:"at"`
+}
+
+type WikiEntry struct {
+	ID        string       `json:"id"`
+	PlanID    string       `json:"plan_id,omitempty"`
+	Title     string       `json:"title"`
+	Content   string       `json:"content"`
+	Created   time.Time    `json:"created"`
+	Updated   time.Time    `json:"updated"`
+	CreatedBy string       `json:"created_by,omitempty"`
+	UpdatedBy string       `json:"updated_by,omitempty"`
+	Version   int          `json:"version"`
+	History   []WikiChange `json:"history,omitempty"`
 }
 
 // Turn records what an agent accomplished in a single invocation (one turn of a loop).

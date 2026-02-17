@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { apiCall, apiBase } from './client.js';
-import { useAppState, useDispatch, normalizeSessions, normalizeSpawns, normalizeIssues, normalizeDocs, normalizePlans, normalizePlan, normalizeTurns, normalizeLoopMessages, pickActiveLoopRun, normalizeAllLoopRuns, aggregateUsageFromProfileStats } from '../state/store.js';
+import { useAppState, useDispatch, normalizeSessions, normalizeSpawns, normalizeIssues, normalizeWiki, normalizePlans, normalizePlan, normalizeTurns, normalizeLoopMessages, pickActiveLoopRun, normalizeAllLoopRuns, aggregateUsageFromProfileStats } from '../state/store.js';
 import { arrayOrEmpty, normalizeStatus, parseTimestamp } from '../utils/format.js';
 import { readProjectIDFromURL, persistProjectSelection } from '../utils/projectLink.js';
 
@@ -84,9 +84,9 @@ export function useViewData(view, projectID) {
       if (viewName === 'issues') {
         var issues = normalizeIssues(await apiCall(base + '/issues', 'GET', null, { allow404: true }));
         dispatch({ type: 'SET', payload: { issues } });
-      } else if (viewName === 'docs') {
-        var docs = normalizeDocs(await apiCall(base + '/docs', 'GET', null, { allow404: true }));
-        dispatch({ type: 'SET', payload: { docs } });
+      } else if (viewName === 'wiki') {
+        var wiki = normalizeWiki(await apiCall(base + '/wiki', 'GET', null, { allow404: true }));
+        dispatch({ type: 'SET', payload: { wiki } });
       } else if (viewName === 'plan') {
         var plans = normalizePlans(await apiCall(base + '/plans', 'GET', null, { allow404: true }));
         dispatch({ type: 'SET', payload: { plans } });

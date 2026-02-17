@@ -4,7 +4,7 @@ import { apiBase } from '../../api/client.js';
 import ProjectStatus from '../project/ProjectStatus.jsx';
 import LoopTree from '../tree/LoopTree.jsx';
 import IssuesView from '../views/IssuesView.jsx';
-import DocsView from '../views/DocsView.jsx';
+import WikiView from '../views/WikiView.jsx';
 import PlanView from '../views/PlanView.jsx';
 import LogsView from '../views/LogsView.jsx';
 import ConfigView from '../views/ConfigView.jsx';
@@ -27,7 +27,7 @@ export default function LeftPanel() {
     if (leftView === 'loops') return <LoopTree />;
     if (leftView === 'standalone') return <StandaloneConversationList />;
     if (leftView === 'issues') return <IssuesView />;
-    if (leftView === 'docs') return <DocsView />;
+    if (leftView === 'wiki') return <WikiView />;
     if (leftView === 'plan') return <PlanView />;
     if (leftView === 'logs') return <LogsView />;
     if (leftView === 'config') return <ConfigView />;

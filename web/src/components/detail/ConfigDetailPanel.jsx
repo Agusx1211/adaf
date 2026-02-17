@@ -1194,7 +1194,7 @@ var ROLE_DESCRIPTIONS = {
   'ui-designer': 'Focuses on UI/UX, frontend components, and visual design',
   'qa': 'Tests code, finds bugs, validates requirements',
   'backend-designer': 'Designs APIs, data models, and backend architecture',
-  'documentator': 'Writes technical docs and handoff notes',
+  'documentator': 'Writes technical wiki and handoff notes',
   'reviewer': 'Reviews changes for correctness and risks',
   'scout': 'Fast read-only investigation',
   'researcher': 'Deep option analysis and recommendations',
