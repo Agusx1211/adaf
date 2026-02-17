@@ -21,6 +21,7 @@ func TestBuild_TopLevelIncludesAutonomyRule(t *testing.T) {
 		Store:   s,
 		Project: project,
 		Profile: profile,
+		Skills:  []string{config.SkillAutonomy},
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -69,6 +70,7 @@ func TestBuild_IncludesCommitOwnershipRule(t *testing.T) {
 		Store:   s,
 		Project: project,
 		Profile: profile,
+		Skills:  []string{config.SkillCodeWriting, config.SkillCommit},
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -178,6 +180,7 @@ func TestBuild_RecentTurnsInjection(t *testing.T) {
 		Store:   s,
 		Project: project,
 		Profile: profile,
+		Skills:  []string{config.SkillSessionContext},
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -268,6 +271,7 @@ func TestBuild_FewTurns(t *testing.T) {
 		Store:   s,
 		Project: project,
 		Profile: profile,
+		Skills:  []string{config.SkillSessionContext},
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -459,6 +463,15 @@ func TestBuild_SkillsRenderedInOrder(t *testing.T) {
 	s, project := initPromptTestStore(t)
 	globalCfg := &config.GlobalConfig{}
 	config.EnsureDefaultSkillCatalog(globalCfg)
+	for _, sk := range []config.Skill{
+		{ID: config.SkillAutonomy, Short: "Autonomy short"},
+		{ID: config.SkillCodeWriting, Short: "Code writing short"},
+		{ID: config.SkillFocus, Short: "Focus short"},
+	} {
+		if err := globalCfg.AddSkill(sk); err != nil {
+			t.Fatalf("AddSkill(%s): %v", sk.ID, err)
+		}
+	}
 
 	profile := &config.Profile{Name: "dev", Agent: "codex"}
 
@@ -580,6 +593,12 @@ func TestBuild_SessionContextSkillGatesLogs(t *testing.T) {
 	s, project := initPromptTestStore(t)
 	globalCfg := &config.GlobalConfig{}
 	config.EnsureDefaultSkillCatalog(globalCfg)
+	if err := globalCfg.AddSkill(config.Skill{
+		ID:    config.SkillSessionContext,
+		Short: "Use `adaf log` before work and `adaf turn update` at the end of the turn.",
+	}); err != nil {
+		t.Fatalf("AddSkill(session_context): %v", err)
+	}
 
 	// Create a turn so there's session data to show.
 	if err := s.CreateTurn(&store.Turn{
@@ -636,6 +655,12 @@ func TestBuild_UnknownSkillIgnored(t *testing.T) {
 	s, project := initPromptTestStore(t)
 	globalCfg := &config.GlobalConfig{}
 	config.EnsureDefaultSkillCatalog(globalCfg)
+	if err := globalCfg.AddSkill(config.Skill{
+		ID:    config.SkillAutonomy,
+		Short: "You are fully autonomous. There is no human in the loop.",
+	}); err != nil {
+		t.Fatalf("AddSkill(autonomy): %v", err)
+	}
 
 	profile := &config.Profile{Name: "dev", Agent: "claude"}
 
@@ -662,6 +687,12 @@ func TestBuild_NilSkillsUsesDefaultSkillSet(t *testing.T) {
 	s, project := initPromptTestStore(t)
 	globalCfg := &config.GlobalConfig{}
 	config.EnsureDefaultSkillCatalog(globalCfg)
+	if err := globalCfg.AddSkill(config.Skill{
+		ID:    config.SkillAutonomy,
+		Short: "You are fully autonomous. There is no human in the loop.",
+	}); err != nil {
+		t.Fatalf("AddSkill(autonomy): %v", err)
+	}
 
 	profile := &config.Profile{Name: "dev", Agent: "codex"}
 
@@ -680,8 +711,100 @@ func TestBuild_NilSkillsUsesDefaultSkillSet(t *testing.T) {
 	if strings.Contains(got, "# Rules\n") {
 		t.Fatalf("nil Skills should not produce a Rules section\nprompt:\n%s", got)
 	}
-	if !strings.Contains(got, "## Turn Handoff") {
-		t.Fatalf("default skill set should include turn handoff instructions\nprompt:\n%s", got)
+	if !strings.Contains(got, "## delegation") {
+		t.Fatalf("default skill set should include delegation skill\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "## pushover") {
+		t.Fatalf("default skill set should include pushover skill\nprompt:\n%s", got)
+	}
+	if strings.Contains(got, "## autonomy") {
+		t.Fatalf("default skill set should not include autonomy skill\nprompt:\n%s", got)
+	}
+}
+
+func TestBuild_ManagerAndSupervisorUsePlanDiscoveryObjective(t *testing.T) {
+	s, project := initPromptTestStore(t)
+	if err := s.CreatePlan(&store.Plan{
+		ID:     "main",
+		Title:  "Main Plan",
+		Status: "active",
+		Phases: []store.PlanPhase{
+			{
+				ID:          "core-engine",
+				Title:       "Core Engine",
+				Description: "Build the foundational game engine that manages all game state and logic.",
+				Status:      "not_started",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+	if err := s.SetActivePlan("main"); err != nil {
+		t.Fatalf("SetActivePlan: %v", err)
+	}
+	project, err := s.LoadProject()
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+
+	profile := &config.Profile{Name: "managerish", Agent: "codex"}
+	tests := []struct {
+		name     string
+		position string
+	}{
+		{name: "manager", position: config.PositionManager},
+		{name: "supervisor", position: config.PositionSupervisor},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Build(BuildOpts{
+				Store:    s,
+				Project:  project,
+				Profile:  profile,
+				Position: tt.position,
+				Skills:   []string{},
+			})
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			if !strings.Contains(got, "You are working on plan: **main** — Main Plan") {
+				t.Fatalf("prompt should include active plan context\nprompt:\n%s", got)
+			}
+			if !strings.Contains(got, "adaf plan show main") {
+				t.Fatalf("prompt should direct plan inspection via CLI\nprompt:\n%s", got)
+			}
+			if strings.Contains(got, "Build the foundational game engine that manages all game state and logic.") {
+				t.Fatalf("manager/supervisor prompt should not inline phase description\nprompt:\n%s", got)
+			}
+			if strings.Contains(got, "## Neighboring Phases") {
+				t.Fatalf("manager/supervisor prompt should not include neighboring phases dump\nprompt:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestBuild_LoopContextAlwaysIncludesNoHumanLine(t *testing.T) {
+	s, project := initPromptTestStore(t)
+	profile := &config.Profile{Name: "loop-step", Agent: "codex"}
+
+	got, err := Build(BuildOpts{
+		Store:   s,
+		Project: project,
+		Profile: profile,
+		Skills:  []string{},
+		LoopContext: &LoopPromptContext{
+			LoopName:   "test-loop",
+			Cycle:      0,
+			StepIndex:  0,
+			TotalSteps: 1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if !strings.Contains(got, "There is no human in the loop.") {
+		t.Fatalf("loop prompts must always include no-human note\nprompt:\n%s", got)
 	}
 }
 

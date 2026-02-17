@@ -300,8 +300,8 @@ func TestBuildStepPrompt_ExplicitEmptySkillsDisableDefaults(t *testing.T) {
 	if strings.Contains(prompt, "# Skills") {
 		t.Fatalf("prompt should not include default skills when skills_explicit=true and no skills selected:\n%s", prompt)
 	}
-	if strings.Contains(prompt, "You are fully autonomous. There is no human in the loop.") {
-		t.Fatalf("autonomy rule should be absent when no skills are active:\n%s", prompt)
+	if !strings.Contains(prompt, "There is no human in the loop.") {
+		t.Fatalf("loop prompt should always state there is no human in the loop:\n%s", prompt)
 	}
 }
 

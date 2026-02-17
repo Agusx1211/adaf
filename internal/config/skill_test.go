@@ -7,15 +7,13 @@ import (
 
 func TestDefaultSkills(t *testing.T) {
 	skills := DefaultSkills()
-	if len(skills) != 13 {
-		t.Fatalf("DefaultSkills() returned %d skills, want 13", len(skills))
+	if len(skills) != 2 {
+		t.Fatalf("DefaultSkills() returned %d skills, want 2", len(skills))
 	}
 
-	// Verify all built-in skill IDs are present.
+	// Verify only delegation + pushover are built in.
 	wantIDs := []string{
-		SkillAutonomy, SkillCodeWriting, SkillCodeReview, SkillCommit, SkillFocus,
-		SkillAdafTools, SkillDelegation, SkillIssues, SkillPlan,
-		SkillSessionContext, SkillLoopControl, SkillReadOnly, SkillPushover,
+		SkillDelegation, SkillPushover,
 	}
 	seen := make(map[string]struct{}, len(skills))
 	for _, sk := range skills {
@@ -42,23 +40,23 @@ func TestDefaultSkills(t *testing.T) {
 	}
 }
 
-func TestSessionContextSkillMentionsTurnUpdate(t *testing.T) {
+func TestDelegationSkillMentionsSpawnInfo(t *testing.T) {
 	skills := DefaultSkills()
-	var sessionCtx *Skill
+	var deleg *Skill
 	for i := range skills {
-		if skills[i].ID == SkillSessionContext {
-			sessionCtx = &skills[i]
+		if skills[i].ID == SkillDelegation {
+			deleg = &skills[i]
 			break
 		}
 	}
-	if sessionCtx == nil {
-		t.Fatalf("missing %q skill", SkillSessionContext)
+	if deleg == nil {
+		t.Fatalf("missing %q skill", SkillDelegation)
 	}
-	if !containsFold(sessionCtx.Short, "adaf turn update") {
-		t.Fatalf("session_context short text should mention adaf turn update, got: %q", sessionCtx.Short)
+	if !containsFold(deleg.Short, "adaf spawn-info") {
+		t.Fatalf("delegation short text should mention adaf spawn-info, got: %q", deleg.Short)
 	}
-	if !containsFold(sessionCtx.Long, "adaf turn update") {
-		t.Fatalf("session_context long text should mention adaf turn update")
+	if !containsFold(deleg.Long, "adaf wait-for-spawns") {
+		t.Fatalf("delegation long text should mention adaf wait-for-spawns")
 	}
 }
 
@@ -68,8 +66,8 @@ func TestEnsureDefaultSkillCatalog_Seeds(t *testing.T) {
 	if !changed {
 		t.Fatal("EnsureDefaultSkillCatalog should return true when seeding defaults")
 	}
-	if len(cfg.Skills) != 13 {
-		t.Fatalf("seeded %d skills, want 13", len(cfg.Skills))
+	if len(cfg.Skills) != 2 {
+		t.Fatalf("seeded %d skills, want 2", len(cfg.Skills))
 	}
 }
 
@@ -120,17 +118,17 @@ func TestFindSkill(t *testing.T) {
 	cfg := &GlobalConfig{}
 	EnsureDefaultSkillCatalog(cfg)
 
-	sk := cfg.FindSkill("autonomy")
+	sk := cfg.FindSkill("delegation")
 	if sk == nil {
-		t.Fatal("FindSkill(autonomy) = nil")
+		t.Fatal("FindSkill(delegation) = nil")
 	}
-	if sk.ID != SkillAutonomy {
-		t.Fatalf("FindSkill(autonomy).ID = %q, want %q", sk.ID, SkillAutonomy)
+	if sk.ID != SkillDelegation {
+		t.Fatalf("FindSkill(delegation).ID = %q, want %q", sk.ID, SkillDelegation)
 	}
 
-	sk = cfg.FindSkill("AUTONOMY")
+	sk = cfg.FindSkill("DELEGATION")
 	if sk == nil {
-		t.Fatal("FindSkill(AUTONOMY) = nil, case-insensitive lookup failed")
+		t.Fatal("FindSkill(DELEGATION) = nil, case-insensitive lookup failed")
 	}
 
 	sk = cfg.FindSkill("nonexistent")

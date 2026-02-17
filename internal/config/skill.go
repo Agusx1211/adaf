@@ -30,79 +30,9 @@ func normalizeSkillID(id string) string {
 	return strings.ToLower(strings.TrimSpace(id))
 }
 
-// DefaultSkills returns the 13 built-in skills.
+// DefaultSkills returns the built-in skills shipped by default.
 func DefaultSkills() []Skill {
 	return []Skill{
-		{
-			ID:    SkillAutonomy,
-			Short: "You are fully autonomous. There is no human in the loop. Make all decisions yourself. Do not ask for confirmation or direction — decide and act. If something is ambiguous, use your best judgment and move forward.",
-			Long: "# Autonomy\n\n" +
-				"You are fully autonomous. There is no human in the loop. No one will answer questions, grant permissions, or provide clarification.\n\n" +
-				"You must make all decisions yourself. Do not ask for confirmation or direction — decide and act.\n" +
-				"If something is ambiguous, use your best judgment and move forward.\n\n" +
-				"This means:\n" +
-				"- Do not pause for approval\n" +
-				"- Do not ask clarifying questions\n" +
-				"- Choose the most reasonable interpretation and proceed\n" +
-				"- Log your decisions so the next agent (or human) can review them\n",
-		},
-		{
-			ID:    SkillCodeWriting,
-			Short: "Write code, run tests, and ensure everything compiles before finishing.",
-			Long: "# Code Writing\n\n" +
-				"Write code, run tests, and ensure everything compiles before finishing.\n\n" +
-				"Guidelines:\n" +
-				"- Follow existing code conventions and patterns in the repository\n" +
-				"- Run the test suite after making changes\n" +
-				"- Fix any compilation errors or test failures you introduce\n" +
-				"- Keep changes focused and minimal\n",
-		},
-		{
-			ID:    SkillCodeReview,
-			Short: "Review work, check progress, and provide guidance to running agents. Do NOT write or modify code.",
-			Long: "# Code Review\n\n" +
-				"Review work, check progress, and provide guidance to running agents. Do NOT write or modify code.\n\n" +
-				"Guidelines:\n" +
-				"- Review diffs and changes made by other agents\n" +
-				"- Verify that code follows project conventions and patterns\n" +
-				"- Check that tests pass and builds succeed\n" +
-				"- Provide constructive feedback and flag issues\n" +
-				"- Guide agents toward the correct approach without writing code yourself\n",
-		},
-		{
-			ID:    SkillCommit,
-			Short: "You own your repository. Commit your work. Every time you finish a coherent piece of work, create a git commit. Uncommitted changes are invisible to scouts, other agents, and future sessions. Commit early and often.",
-			Long: "# Commit Discipline\n\n" +
-				"You own your repository. Commit your work. Do not leave changes uncommitted.\n\n" +
-				"Every time you finish a coherent piece of work, create a git commit.\n" +
-				"Uncommitted changes are invisible to scouts, other agents, and future sessions.\n" +
-				"Commit early and often — your worktree is yours alone.\n\n" +
-				"Best practices:\n" +
-				"- Commit after each logical unit of work\n" +
-				"- Use clear, descriptive commit messages\n" +
-				"- Do not batch unrelated changes into a single commit\n",
-		},
-		{
-			ID:    SkillFocus,
-			Short: "Focus on one coherent unit of work. Stop when the current phase (or a meaningful increment of it) is complete.",
-			Long: "# Focus\n\n" +
-				"Focus on one coherent unit of work. Stop when the current phase (or a meaningful increment of it) is complete.\n\n" +
-				"Avoid scope creep — stay within the bounds of your assigned task.\n" +
-				"If you discover related work that needs doing, log it as an issue rather than doing it now.\n",
-		},
-		{
-			ID:    SkillAdafTools,
-			Short: "Do NOT read or write files inside the adaf project store directly (for example `~/.adaf/projects/<id>/`). Use `adaf` CLI commands instead (`adaf issues`, `adaf log`, `adaf plan`, etc.). The storage layout may change.",
-			Long: "# ADAF Tools\n\n" +
-				"Do NOT read or write files inside the adaf project store directly (for example `~/.adaf/projects/<id>/`).\n" +
-				"Use `adaf` CLI commands instead:\n\n" +
-				"- `adaf issues` — List and manage issues\n" +
-				"- `adaf log` — View session logs\n" +
-				"- `adaf plan` — View and manage plans\n" +
-				"- `adaf status` — View project status\n" +
-				"- `adaf --help` — Full command reference\n\n" +
-				"The storage layout may change and direct access will be restricted in the future.\n",
-		},
 		{
 			ID:    SkillDelegation,
 			Short: "You can spawn sub-agents. Run `adaf spawn-info` to see available profiles, roles, and capacity. Run `adaf skill delegation` for full command reference and patterns.",
@@ -161,64 +91,6 @@ func DefaultSkills() []Skill {
 				"```\n\n" +
 				"When spawning, write a thorough task description — sub-agents only see what you give them. Include relevant context, goals, constraints, and what \"done\" looks like. Use `--task-file` for anything non-trivial.\n\n" +
 				"If the same profile is allowed with multiple roles, you MUST pass `--role <role>` in the spawn command.\n",
-		},
-		{
-			ID:    SkillIssues,
-			Short: "Use `adaf issues` to check open work items before starting. Log new issues you discover with `adaf issue create`.",
-			Long: "# Issues\n\n" +
-				"Track work items via `adaf issues`. Review open issues before starting.\n" +
-				"Log new issues you discover during work rather than addressing them immediately.\n\n" +
-				"Commands:\n" +
-				"- `adaf issues` — List open issues\n" +
-				"- `adaf issue create --title \"...\" --priority high` — Create an issue\n" +
-				"- `adaf issue close <id>` — Close a resolved issue\n",
-		},
-		{
-			ID:    SkillPlan,
-			Short: "Use `adaf plan` to view the active plan, phases, and status. Work on the current phase. Mark phases complete as you finish them.",
-			Long: "# Plan\n\n" +
-				"Follow the active plan. Work on the current phase.\n\n" +
-				"Commands:\n" +
-				"- `adaf plan` — View current plan and phases\n" +
-				"- `adaf plan phase complete <id>` — Mark a phase complete\n\n" +
-				"When your phase is done, mark it complete and move to the next.\n" +
-				"If all phases are complete, look for remaining open issues or improvements.\n",
-		},
-		{
-			ID:    SkillSessionContext,
-			Short: "Use `adaf log` to review session history before starting. At the end of every turn, run `adaf turn update` to record what you built, decisions, issues, and next steps for handoff.",
-			Long: "# Session Context\n\n" +
-				"Review recent session logs before starting. Previous agents left notes about:\n" +
-				"- What was built\n" +
-				"- Key decisions made\n" +
-				"- Challenges encountered\n" +
-				"- Current state of the project\n" +
-				"- Known issues\n" +
-				"- Suggested next steps\n\n" +
-				"Use `adaf log` to view session history.\n" +
-				"At the end of every turn, record your handoff with `adaf turn update`.\n" +
-				"Build on previous work rather than starting from scratch.\n",
-		},
-		{
-			ID:    SkillLoopControl,
-			Short: "You are running in a loop. Check your loop position and follow step instructions. Use `adaf loop stop` when objectives are met (if allowed). Use `adaf loop message` to communicate with subsequent steps.",
-			Long: "# Loop Control\n\n" +
-				"You are running in a multi-step loop cycle.\n\n" +
-				"Commands:\n" +
-				"- `adaf loop stop` — Stop the loop when objectives are met (only available on steps with can_stop)\n" +
-				"- `adaf loop message \"text\"` — Send a message to subsequent steps (only available on steps with can_message)\n\n" +
-				"Pay attention to:\n" +
-				"- Your loop position (cycle, step index)\n" +
-				"- Step-specific instructions\n" +
-				"- Messages from previous steps\n",
-		},
-		{
-			ID:    SkillReadOnly,
-			Short: "You are in READ-ONLY mode. Do NOT create, modify, or delete any files. Only read and analyze. Return your report in your final assistant message, not in repository files.",
-			Long: "# Read-Only Mode\n\n" +
-				"You are in READ-ONLY mode. Do NOT create, modify, or delete any files. Only read and analyze.\n\n" +
-				"Do NOT write reports into repository files (for example `*.md`, `*.txt`, or TODO files).\n" +
-				"Return your report in your final assistant message.\n",
 		},
 		{
 			ID:    SkillPushover,

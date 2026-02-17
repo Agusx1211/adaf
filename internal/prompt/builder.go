@@ -170,20 +170,7 @@ func Build(opts BuildOpts) (string, error) {
 }
 
 func defaultPromptSkillIDs(globalCfg *config.GlobalConfig) []string {
-	if globalCfg != nil {
-		config.EnsureDefaultSkillCatalog(globalCfg)
-		out := make([]string, 0, len(globalCfg.Skills))
-		for _, sk := range globalCfg.Skills {
-			id := strings.TrimSpace(sk.ID)
-			if id == "" {
-				continue
-			}
-			out = append(out, id)
-		}
-		if len(out) > 0 {
-			return out
-		}
-	}
+	_ = globalCfg
 	defaults := config.DefaultSkills()
 	out := make([]string, 0, len(defaults))
 	for _, sk := range defaults {
@@ -263,7 +250,7 @@ func buildSkillsPrompt(opts BuildOpts) (string, error) {
 	}
 
 	// Core operating rules.
-	if opts.ParentTurnID == 0 && hasSkill(resolvedSkills, config.SkillAutonomy) {
+	if opts.ParentTurnID == 0 && (opts.LoopContext != nil || hasSkill(resolvedSkills, config.SkillAutonomy)) {
 		b.WriteString("You are fully autonomous. There is no human in the loop.\n\n")
 	}
 	if opts.ParentTurnID == 0 && !opts.ReadOnly && roleCanWrite && hasSkill(resolvedSkills, config.SkillCommit) {
@@ -272,8 +259,8 @@ func buildSkillsPrompt(opts BuildOpts) (string, error) {
 
 	// Dynamic context sections gated by active skills.
 
-	// Loop control.
-	if hasSkill(resolvedSkills, config.SkillLoopControl) && opts.LoopContext != nil {
+	// Loop context.
+	if opts.LoopContext != nil {
 		b.WriteString(renderLoopContext(opts))
 	}
 
@@ -320,7 +307,7 @@ func buildSkillsPrompt(opts BuildOpts) (string, error) {
 
 	// Project context (lightweight — agents discover details via CLI).
 	b.WriteString(renderContextSection(opts, project, plan))
-	b.WriteString(renderObjective(opts, project, plan, resolvedSkills))
+	b.WriteString(renderObjective(opts, project, plan, effectivePosition))
 
 	// Turn handoff logging.
 	if hasSkill(resolvedSkills, config.SkillSessionContext) {
@@ -607,8 +594,9 @@ func renderTurnHandoffInstructions(required bool) string {
 }
 
 // renderObjective formats the objective section.
-func renderObjective(opts BuildOpts, project *store.ProjectConfig, plan *store.Plan, skills []string) string {
-	roleCanWrite := hasSkill(skills, config.SkillCodeWriting)
+func renderObjective(opts BuildOpts, project *store.ProjectConfig, plan *store.Plan, position string) string {
+	roleCanWrite := config.CanWriteForPositionAndRole(position, opts.Role, opts.GlobalCfg)
+	effectivePosition := normalizePromptPosition(position, false)
 	var b strings.Builder
 	b.WriteString("# Objective\n\n")
 	b.WriteString("Project: " + project.Name + "\n\n")
@@ -623,6 +611,16 @@ func renderObjective(opts BuildOpts, project *store.ProjectConfig, plan *store.P
 	if opts.Task != "" {
 		b.WriteString(opts.Task + "\n\n")
 	} else {
+		if effectivePosition == config.PositionManager || effectivePosition == config.PositionSupervisor {
+			if plan != nil && strings.TrimSpace(plan.ID) != "" {
+				fmt.Fprintf(&b, "Use `adaf plan show %s` to inspect the active plan details, phase status, and next dependencies.\n", plan.ID)
+			} else {
+				b.WriteString("Use `adaf plan` to inspect active plan details, phase status, and dependencies.\n")
+			}
+			b.WriteString("Use `adaf issues` and `adaf log` to validate progress and then publish concrete guidance for the next step.\n\n")
+			return b.String()
+		}
+
 		var currentPhase *store.PlanPhase
 		if plan != nil && len(plan.Phases) > 0 {
 			for i := range plan.Phases {
