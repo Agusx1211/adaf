@@ -35,6 +35,11 @@ export default function IssuesView() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <StatusBadge status={issue.priority} />
               <StatusBadge status={issue.status} />
+              {(issue.depends_on || []).length > 0 && (
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-2)', padding: '1px 5px', background: 'var(--bg-4)', borderRadius: 3 }}>
+                  deps: {(issue.depends_on || []).join(',')}
+                </span>
+              )}
               {(issue.labels || []).map(function (label) {
                 return <span key={label} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-2)', padding: '1px 5px', background: 'var(--bg-4)', borderRadius: 3 }}>{label}</span>;
               })}

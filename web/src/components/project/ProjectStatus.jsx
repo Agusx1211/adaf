@@ -1,5 +1,6 @@
 import { useAppState } from '../../state/store.js';
 import { normalizeStatus } from '../../utils/format.js';
+import { statusColor } from '../../utils/colors.js';
 
 export default function ProjectStatus() {
   var state = useAppState();
@@ -11,7 +12,8 @@ export default function ProjectStatus() {
     return status === 'running' || status === 'starting' || status === 'in_progress';
   }).length;
 
-  var phases = activePlan && activePlan.phases ? activePlan.phases : [];
+  var planStatus = normalizeStatus(activePlan && activePlan.status ? activePlan.status : '');
+  var planStatusColor = statusColor(planStatus || 'active');
 
   return (
     <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)' }}>
@@ -24,34 +26,23 @@ export default function ProjectStatus() {
         </span>
       </div>
 
-      {/* Phase progress bars */}
-      {phases.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {phases.map(function (phase) {
-            var status = normalizeStatus(phase.status || 'not_started');
-            var progress = status === 'complete' ? 100 : status === 'in_progress' ? 50 : 0;
-            return (
-              <div key={phase.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{
-                  fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-                  color: progress > 0 ? 'var(--text-1)' : 'var(--text-3)',
-                  width: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {phase.title || phase.id}
-                </span>
-                <div style={{ flex: 1, height: 3, background: 'var(--bg-4)', borderRadius: 2, overflow: 'hidden' }}>
-                  <div style={{
-                    height: '100%', width: progress + '%',
-                    background: progress > 50 ? 'var(--green)' : progress > 0 ? 'var(--accent)' : 'transparent',
-                    borderRadius: 2, transition: 'width 0.5s ease',
-                  }} />
-                </div>
-                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)', minWidth: 24, textAlign: 'right' }}>
-                  {progress}%
-                </span>
-              </div>
-            );
-          })}
+      {activePlan && (
+        <div style={{
+          marginTop: 2,
+          marginBottom: 8,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '2px 8px',
+          borderRadius: 4,
+          background: 'var(--bg-3)',
+          border: '1px solid var(--border)',
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: 10,
+        }}>
+          <span style={{ color: 'var(--text-3)' }}>plan:</span>
+          <span style={{ color: 'var(--text-1)' }}>{activePlan.id || '-'}</span>
+          <span style={{ color: planStatusColor }}>{planStatus || 'active'}</span>
         </div>
       )}
 

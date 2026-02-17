@@ -731,17 +731,10 @@ func TestBuild_NilSkillsUsesDefaultSkillSet(t *testing.T) {
 func TestBuild_ManagerAndSupervisorUsePlanDiscoveryObjective(t *testing.T) {
 	s, project := initPromptTestStore(t)
 	if err := s.CreatePlan(&store.Plan{
-		ID:     "main",
-		Title:  "Main Plan",
-		Status: "active",
-		Phases: []store.PlanPhase{
-			{
-				ID:          "core-engine",
-				Title:       "Core Engine",
-				Description: "Build the foundational game engine that manages all game state and logic.",
-				Status:      "not_started",
-			},
-		},
+		ID:          "main",
+		Title:       "Main Plan",
+		Description: "Build the foundational game engine that manages all game state and logic.",
+		Status:      "active",
 	}); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
@@ -780,11 +773,8 @@ func TestBuild_ManagerAndSupervisorUsePlanDiscoveryObjective(t *testing.T) {
 			if !strings.Contains(got, "adaf plan show main") {
 				t.Fatalf("prompt should direct plan inspection via CLI\nprompt:\n%s", got)
 			}
-			if strings.Contains(got, "Build the foundational game engine that manages all game state and logic.") {
-				t.Fatalf("manager/supervisor prompt should not inline phase description\nprompt:\n%s", got)
-			}
-			if strings.Contains(got, "## Neighboring Phases") {
-				t.Fatalf("manager/supervisor prompt should not include neighboring phases dump\nprompt:\n%s", got)
+			if strings.Contains(got, "phase status") {
+				t.Fatalf("manager/supervisor prompt should not mention phase status\nprompt:\n%s", got)
 			}
 		})
 	}
@@ -811,6 +801,58 @@ func TestBuild_LoopContextAlwaysIncludesNoHumanLine(t *testing.T) {
 	}
 	if !strings.Contains(got, "There is no human in the loop.") {
 		t.Fatalf("loop prompts must always include no-human note\nprompt:\n%s", got)
+	}
+}
+
+func TestBuild_WorkerObjectiveUsesReadyIssues(t *testing.T) {
+	s, project := initPromptTestStore(t)
+	if err := s.CreatePlan(&store.Plan{
+		ID:     "main",
+		Title:  "Main Plan",
+		Status: "active",
+	}); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+	if err := s.SetActivePlan("main"); err != nil {
+		t.Fatalf("SetActivePlan: %v", err)
+	}
+
+	issue1 := &store.Issue{
+		PlanID:    "main",
+		Title:     "Foundational fix",
+		Status:    "open",
+		Priority:  "high",
+		DependsOn: nil,
+	}
+	if err := s.CreateIssue(issue1); err != nil {
+		t.Fatalf("CreateIssue(issue1): %v", err)
+	}
+	issue2 := &store.Issue{
+		PlanID:    "main",
+		Title:     "Follow-up cleanup",
+		Status:    "open",
+		Priority:  "medium",
+		DependsOn: []int{issue1.ID},
+	}
+	if err := s.CreateIssue(issue2); err != nil {
+		t.Fatalf("CreateIssue(issue2): %v", err)
+	}
+
+	got, err := Build(BuildOpts{
+		Store:   s,
+		Project: project,
+		Profile: &config.Profile{Name: "dev", Agent: "codex"},
+		Skills:  []string{},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if !strings.Contains(got, "work on issue **#"+fmt.Sprintf("%d", issue1.ID)) {
+		t.Fatalf("prompt should focus on first ready issue\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "## Blocked Issues") {
+		t.Fatalf("prompt should include blocked issues section\nprompt:\n%s", got)
 	}
 }
 

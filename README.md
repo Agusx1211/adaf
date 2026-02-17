@@ -26,7 +26,7 @@
 
 **adaf** is a meta-orchestrator for AI coding agents. It manages plans, issues, docs, session logs, and deep session recordings **outside** the target repository, so multiple AI agents can collaborate on a codebase via structured relay handoffs.
 
-Think of it as project management infrastructure purpose-built for AI agents -- plans with phases, an issue tracker, session logs for handoffs, sub-agent spawning with worktree isolation, looping workflows, detachable sessions, and full I/O recording. All stored in `.adaf/`, never cluttering your repo.
+Think of it as project management infrastructure purpose-built for AI agents -- plans as high-level design docs, an issue tracker with dependencies, session logs for handoffs, sub-agent spawning with worktree isolation, looping workflows, detachable sessions, and full I/O recording. All stored in `.adaf/`, never cluttering your repo.
 
 ## Why adaf?
 
@@ -109,9 +109,8 @@ adaf
 
 | Command | Aliases | Description |
 |---------|---------|-------------|
-| `adaf plan [show]` | `plans` | Display the current plan with phases |
+| `adaf plan [show]` | `plans` | Display the current plan |
 | `adaf plan set [file]` | `load`, `import` | Set plan from JSON file or stdin |
-| `adaf plan phase-status <id> <status>` | | Update a phase's status |
 | `adaf issue list` | `ls` | List issues (with `--status` filter) |
 | `adaf issue create` | `new`, `add` | Create a new issue |
 | `adaf issue show <id>` | `get`, `view` | Show issue details |
@@ -205,7 +204,7 @@ This keeps orchestration state **separate from your codebase**. The `.adaf/.giti
 ### Agent Prompt Building
 
 When you run `adaf run`, adaf automatically builds a context-rich prompt from the project state:
-- Current plan with phase statuses
+- Current plan details
 - Open issues
 - Latest session log (what the previous agent did)
 - Available agent tools and commands

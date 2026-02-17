@@ -38,7 +38,6 @@ function NewSessionModal({ onClose }) {
   var [plans, setPlans] = useState(null);
   var [selectedPlanID, setSelectedPlanID] = useState('');
   var [planSearch, setPlanSearch] = useState('');
-  var [expandedPlan, setExpandedPlan] = useState(null);
 
   // Load loops on mount
   useState(function () {
@@ -53,7 +52,6 @@ function NewSessionModal({ onClose }) {
   useEffect(function () {
     setPlans(null);
     setSelectedPlanID('');
-    setExpandedPlan(null);
     var base = apiBase(selectedProject);
     apiCall(base + '/plans', 'GET', null, { allow404: true })
       .then(function (result) {
@@ -145,8 +143,6 @@ function NewSessionModal({ onClose }) {
               onSelect={function (id) { setSelectedPlanID(id); }}
               search={planSearch}
               onSearchChange={setPlanSearch}
-              expandedPlan={expandedPlan}
-              onToggleExpand={function (id) { setExpandedPlan(expandedPlan === id ? null : id); }}
               inputStyle={inputStyle}
             />
           </div>
@@ -180,7 +176,7 @@ function NewSessionModal({ onClose }) {
   );
 }
 
-function PlanPicker({ plans, selectedPlanID, onSelect, search, onSearchChange, expandedPlan, onToggleExpand, inputStyle }) {
+function PlanPicker({ plans, selectedPlanID, onSelect, search, onSearchChange, inputStyle }) {
   var listRef = useRef(null);
 
   if (plans === null) {
@@ -205,14 +201,6 @@ function PlanPicker({ plans, selectedPlanID, onSelect, search, onSearchChange, e
     if (s === 'done' || s === 'complete' || s === 'completed') return '\u2713';
     if (s === 'cancelled' || s === 'canceled') return '\u2717';
     if (s === 'frozen') return '\u2744';
-    return '\u25CB';
-  }
-
-  function phaseStatusMarker(status) {
-    var s = normalizeStatus(status);
-    if (s === 'complete' || s === 'completed') return '\u2713';
-    if (s === 'in_progress') return '\u25C9';
-    if (s === 'blocked') return '\u2717';
     return '\u25CB';
   }
 
@@ -249,12 +237,8 @@ function PlanPicker({ plans, selectedPlanID, onSelect, search, onSearchChange, e
         )}
         {filtered.map(function (plan) {
           var isSelected = plan.id === selectedPlanID;
-          var isExpanded = expandedPlan === plan.id;
           var pStatus = normalizeStatus(plan.status);
           var pColor = statusColor(pStatus);
-          var phases = arrayOrEmpty(plan.phases);
-          var completeCount = phases.filter(function (ph) { return normalizeStatus(ph.status) === 'complete'; }).length;
-          var pctText = phases.length ? Math.round((completeCount / phases.length) * 100) + '%' : '';
 
           return (
             <div key={plan.id} style={{ borderBottom: '1px solid var(--bg-3)' }}>
@@ -276,33 +260,10 @@ function PlanPicker({ plans, selectedPlanID, onSelect, search, onSearchChange, e
                   background: withAlpha(pColor, 0.14), border: '1px solid ' + withAlpha(pColor, 0.28),
                   borderRadius: 3, color: pColor, flexShrink: 0,
                 }}>{pStatus}</span>
-                {pctText && <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)', flexShrink: 0 }}>{pctText}</span>}
-                {phases.length > 0 && (
-                  <button type="button" onClick={function (e) { e.stopPropagation(); onToggleExpand(plan.id); }} style={{
-                    background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer',
-                    fontFamily: "'JetBrains Mono', monospace", fontSize: 9, padding: '0 2px', flexShrink: 0,
-                  }}>{isExpanded ? '\u25B4' : '\u25BE'} {phases.length}ph</button>
-                )}
               </div>
-              {isExpanded && phases.length > 0 && (
-                <div style={{ padding: '0 10px 6px 26px' }}>
-                  {plan.description && (
-                    <div style={{ fontSize: 10, color: 'var(--text-2)', marginBottom: 4, lineHeight: 1.3 }}>{plan.description}</div>
-                  )}
-                  {phases.map(function (phase) {
-                    var phStatus = normalizeStatus(phase.status || 'not_started');
-                    var phColor = statusColor(phStatus);
-                    return (
-                      <div key={phase.id} style={{ display: 'flex', alignItems: 'baseline', gap: 5, padding: '1px 0' }}>
-                        <span style={{ color: phColor, fontSize: 10 }}>{phaseStatusMarker(phStatus)}</span>
-                        <span style={{ fontSize: 10, color: 'var(--text-1)' }}>{phase.title || phase.id}</span>
-                        <span style={{
-                          fontFamily: "'JetBrains Mono', monospace", fontSize: 8, padding: '0 3px',
-                          background: withAlpha(phColor, 0.1), borderRadius: 2, color: phColor,
-                        }}>{phStatus}</span>
-                      </div>
-                    );
-                  })}
+              {plan.description && (
+                <div style={{ padding: '0 10px 6px 26px', fontSize: 10, color: 'var(--text-2)', lineHeight: 1.3 }}>
+                  {plan.description}
                 </div>
               )}
             </div>

@@ -16,7 +16,8 @@ var issueCmd = &cobra.Command{
 	Long: `Create, list, show, and update project issues tracked by adaf.
 
 Issues have a title, description, status (open, in_progress, resolved, wontfix),
-priority (critical, high, medium, low), and optional labels. Issues are stored
+priority (critical, high, medium, low), optional labels, and dependency links
+to other issues. Issues are stored
 as individual JSON files in the adaf project store.
 
 Examples:
@@ -70,6 +71,7 @@ func init() {
 	issueCreateCmd.Flags().String("description-file", "", "Read description from file (use '-' for stdin)")
 	issueCreateCmd.Flags().String("priority", "medium", "Priority (critical, high, medium, low)")
 	issueCreateCmd.Flags().StringSlice("labels", nil, "Labels (comma-separated)")
+	issueCreateCmd.Flags().IntSlice("depends-on", nil, "Issue IDs this issue depends on (comma-separated)")
 	issueCreateCmd.Flags().String("plan", "", "Plan scope for this issue (empty = shared)")
 	issueCreateCmd.Flags().Int("session", 0, "Associated turn ID (optional; defaults to current agent turn)")
 	_ = issueCreateCmd.MarkFlagRequired("title")
@@ -78,6 +80,7 @@ func init() {
 	issueUpdateCmd.Flags().String("title", "", "New title")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().StringSlice("labels", nil, "Replace labels")
+	issueUpdateCmd.Flags().IntSlice("depends-on", nil, "Replace dependency issue IDs (comma-separated)")
 	issueUpdateCmd.Flags().String("plan", "", "Move issue to a plan scope (empty = shared)")
 
 	issueCmd.AddCommand(issueListCmd)
@@ -149,7 +152,7 @@ func runIssueList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	headers := []string{"ID", "STATUS", "PRI", "PLAN", "TITLE", "CREATED"}
+	headers := []string{"ID", "STATUS", "PRI", "PLAN", "DEPS", "TITLE", "CREATED"}
 	var rows [][]string
 	for _, iss := range issues {
 		scope := "shared"
@@ -161,6 +164,7 @@ func runIssueList(cmd *cobra.Command, args []string) error {
 			statusBadge(iss.Status),
 			priorityBadge(iss.Priority),
 			scope,
+			formatIssueDependencyIDs(iss.DependsOn),
 			truncate(iss.Title, 50),
 			iss.Created.Format("2006-01-02"),
 		})
@@ -182,6 +186,7 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 	descriptionFile, _ := cmd.Flags().GetString("description-file")
 	priority, _ := cmd.Flags().GetString("priority")
 	labels, _ := cmd.Flags().GetStringSlice("labels")
+	dependsOn, _ := cmd.Flags().GetIntSlice("depends-on")
 	planID, _ := cmd.Flags().GetString("plan")
 	descriptionFile = strings.TrimSpace(descriptionFile)
 	if description == "-" && descriptionFile == "" {
@@ -221,6 +226,11 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid priority %q (valid: critical, high, medium, low)", priority)
 	}
 
+	normalizedDependsOn, err := s.ValidateIssueDependencies(0, dependsOn)
+	if err != nil {
+		return fmt.Errorf("validating dependencies: %w", err)
+	}
+
 	if client := TryConnect(); client != nil {
 		projectID := projectIDFromPath(s.ProjectDir())
 		request := map[string]interface{}{
@@ -230,6 +240,7 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 			"plan_id":     planID,
 			"status":      "open",
 			"labels":      labels,
+			"depends_on":  normalizedDependsOn,
 		}
 		if turnID > 0 {
 			request["turn_id"] = turnID
@@ -251,6 +262,9 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 			if len(labels) > 0 {
 				printField("Labels", strings.Join(labels, ", "))
 			}
+			if len(normalizedDependsOn) > 0 {
+				printField("Depends On", formatIssueDependencyIDs(normalizedDependsOn))
+			}
 			fmt.Println()
 			return nil
 		}
@@ -261,6 +275,7 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 		Description: description,
 		Priority:    priority,
 		Labels:      labels,
+		DependsOn:   normalizedDependsOn,
 		PlanID:      planID,
 		TurnID:      turnID,
 	}
@@ -284,6 +299,9 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 	}
 	if len(issue.Labels) > 0 {
 		printField("Labels", strings.Join(issue.Labels, ", "))
+	}
+	if len(issue.DependsOn) > 0 {
+		printField("Depends On", formatIssueDependencyIDs(issue.DependsOn))
 	}
 	fmt.Println()
 
@@ -320,6 +338,9 @@ func runIssueShow(cmd *cobra.Command, args []string) error {
 
 	if len(issue.Labels) > 0 {
 		printField("Labels", strings.Join(issue.Labels, ", "))
+	}
+	if len(issue.DependsOn) > 0 {
+		printField("Depends On", formatIssueDependencyIDs(issue.DependsOn))
 	}
 	if issue.TurnID > 0 {
 		printField("Turn", fmt.Sprintf("#%d", issue.TurnID))
@@ -397,6 +418,16 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		changed = true
 	}
 
+	if cmd.Flags().Changed("depends-on") {
+		dependsOn, _ := cmd.Flags().GetIntSlice("depends-on")
+		normalizedDependsOn, depErr := s.ValidateIssueDependencies(issue.ID, dependsOn)
+		if depErr != nil {
+			return fmt.Errorf("validating dependencies: %w", depErr)
+		}
+		issue.DependsOn = normalizedDependsOn
+		changed = true
+	}
+
 	if cmd.Flags().Changed("plan") {
 		planID, _ := cmd.Flags().GetString("plan")
 		planID = strings.TrimSpace(planID)
@@ -417,7 +448,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if !changed {
-		return fmt.Errorf("no fields to update (use --status, --title, --priority, --labels, or --plan)")
+		return fmt.Errorf("no fields to update (use --status, --title, --priority, --labels, --depends-on, or --plan)")
 	}
 
 	if err := s.UpdateIssue(issue); err != nil {
@@ -434,7 +465,28 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	} else {
 		printField("Plan", "shared")
 	}
+	if len(issue.DependsOn) > 0 {
+		printField("Depends On", formatIssueDependencyIDs(issue.DependsOn))
+	}
 	fmt.Println()
 
 	return nil
+}
+
+func formatIssueDependencyIDs(dependsOn []int) string {
+	if len(dependsOn) == 0 {
+		return "-"
+	}
+
+	parts := make([]string, 0, len(dependsOn))
+	for _, id := range dependsOn {
+		if id <= 0 {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("#%d", id))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, ",")
 }

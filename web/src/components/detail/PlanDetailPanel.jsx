@@ -52,24 +52,11 @@ export default function PlanDetailPanel() {
   }
 
   function buildMarkdown(data) {
-    var phaseText = '';
-    if (data.phases && data.phases.length) {
-      phaseText += '\n## Phases\n';
-      data.phases.forEach(function (phase, index) {
-        phaseText += (
-          '\n### ' + ((index + 1) + '. ' + (phase.title || 'Phase ' + (index + 1))) + '\n\n' +
-          '**Status:** ' + (phase.status || 'not_started') + '\n' +
-          (phase.description ? ('\n' + phase.description + '\n') : '') +
-          (phase.depends_on && phase.depends_on.length ? ('\n**Depends on:** ' + phase.depends_on.join(', ') + '\n') : '')
-        );
-      });
-    }
-
     return (
       '# ' + (data.title || data.id || 'Plan') + '\n\n' +
       '**Plan ID:** ' + data.id + '  \n' +
       '**Status:** ' + data.status + '  \n\n' +
-      (data.description || '_No description yet._') + phaseText
+      (data.description || '_No description yet._')
     );
   }
 
@@ -114,7 +101,6 @@ export default function PlanDetailPanel() {
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', animation: 'fadeIn 0.2s ease' }}>
       <SectionHeader
-        count={plan.phases ? plan.phases.length : 0}
         action={(
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             {isEditing ? (

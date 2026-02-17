@@ -82,7 +82,6 @@ func runPlanCreate(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  %sPlan %s created.%s\n", styleBoldGreen, plan.ID, colorReset)
 	printField("Title", plan.Title)
 	printField("Status", plan.Status)
-	printField("Phases", fmt.Sprintf("%d", len(plan.Phases)))
 	fmt.Println()
 	return nil
 }
@@ -167,7 +166,7 @@ func runPlanSet(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Printf("  %sPlan %s saved.%s\n", styleBoldGreen, targetID, colorReset)
 	printField("Title", plan.Title)
-	printField("Phases", fmt.Sprintf("%d", len(plan.Phases)))
+	printField("Status", plan.Status)
 	fmt.Println()
 	return nil
 }

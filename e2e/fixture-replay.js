@@ -126,24 +126,6 @@ function writeSeedProjectData(adafDir, nowISO) {
     title: 'Seed Delivery Plan',
     description: 'Initial plan data seeded for Playwright e2e coverage.',
     status: 'active',
-    phases: [
-      {
-        id: 'phase-1',
-        title: 'Validate Fixtures',
-        description: 'Confirm replay fixtures render across providers.',
-        status: 'in_progress',
-        priority: 1,
-        depends_on: [],
-      },
-      {
-        id: 'phase-2',
-        title: 'Ship E2E',
-        description: 'Add real browser tests for core workflows.',
-        status: 'not_started',
-        priority: 2,
-        depends_on: ['phase-1'],
-      },
-    ],
     created: nowISO,
     updated: nowISO,
   };

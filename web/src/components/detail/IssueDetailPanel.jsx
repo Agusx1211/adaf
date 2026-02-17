@@ -23,6 +23,7 @@ export default function IssueDetailPanel() {
   var [editStatus, setEditStatus] = useState('open');
   var [editPriority, setEditPriority] = useState('medium');
   var [editLabels, setEditLabels] = useState('');
+  var [editDependsOn, setEditDependsOn] = useState('');
   var [editDescription, setEditDescription] = useState('');
 
   useEffect(function () { injectEventBlockStyles(); }, []);
@@ -35,6 +36,7 @@ export default function IssueDetailPanel() {
       setEditStatus('open');
       setEditPriority('medium');
       setEditLabels('');
+      setEditDependsOn('');
       setEditDescription('');
       return;
     }
@@ -45,6 +47,7 @@ export default function IssueDetailPanel() {
       setEditStatus(normalizeStatus(issue.status || 'open') || 'open');
       setEditPriority(normalizeStatus(issue.priority || 'medium') || 'medium');
       setEditLabels((issue.labels || []).join(', '));
+      setEditDependsOn((issue.depends_on || []).join(', '));
       setEditDescription(issue.description || '');
     }
   }, [issue && issue.id]);
@@ -55,12 +58,14 @@ export default function IssueDetailPanel() {
 
   function buildMarkdown(data) {
     var labels = data.labels ? data.labels.join(', ') : '';
+    var dependsOn = data.depends_on ? data.depends_on.join(', ') : '';
     return (
       '# Issue #' + (issue.id || '') + '\n\n' +
       '**Plan:** ' + (data.plan_id || 'shared') + '  \n' +
       '**Status:** ' + (data.status || 'open') + '  \n' +
       '**Priority:** ' + (data.priority || 'medium') + '  \n' +
-      (labels ? ('**Labels:** ' + labels + '  \n\n') : '\n') +
+      (labels ? ('**Labels:** ' + labels + '  \n') : '') +
+      (dependsOn ? ('**Depends on:** ' + dependsOn + '  \n\n') : '\n') +
       '## Details\n\n' +
       (data.title ? ('# ' + data.title + '\n\n') : '') +
       (data.description || '_No description yet._')
@@ -74,6 +79,7 @@ export default function IssueDetailPanel() {
     setEditStatus(normalizeStatus(issue.status || 'open') || 'open');
     setEditPriority(normalizeStatus(issue.priority || 'medium') || 'medium');
     setEditLabels((issue.labels || []).join(', '));
+    setEditDependsOn((issue.depends_on || []).join(', '));
     setEditDescription(issue.description || '');
     setIsEditing(true);
   }
@@ -85,6 +91,7 @@ export default function IssueDetailPanel() {
     setEditStatus(normalizeStatus(issue.status || 'open') || 'open');
     setEditPriority(normalizeStatus(issue.priority || 'medium') || 'medium');
     setEditLabels((issue.labels || []).join(', '));
+    setEditDependsOn((issue.depends_on || []).join(', '));
     setEditDescription(issue.description || '');
     setIsEditing(false);
   }
@@ -103,6 +110,10 @@ export default function IssueDetailPanel() {
         .split(',')
         .map(function (item) { return item.trim(); })
         .filter(function (item) { return item.length > 0; }),
+      depends_on: editDependsOn
+        .split(',')
+        .map(function (item) { return Number(item.trim()); })
+        .filter(function (id) { return Number.isFinite(id) && id > 0; }),
     };
 
     try {
@@ -213,6 +224,14 @@ export default function IssueDetailPanel() {
                 placeholder="comma separated"
               />
 
+              <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-2)' }}>Depends On (Issue IDs)</label>
+              <input
+                value={editDependsOn}
+                onChange={function (event) { setEditDependsOn(event.target.value); }}
+                style={inputStyle}
+                placeholder="e.g. 12, 18"
+              />
+
               <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-2)' }}>Description (Markdown)</label>
               <textarea
                 value={editDescription}
@@ -229,6 +248,7 @@ export default function IssueDetailPanel() {
                 status: issue.status || 'open',
                 priority: issue.priority || 'medium',
                 labels: issue.labels || [],
+                depends_on: issue.depends_on || [],
                 description: issue.description || '',
               })}
               style={markdownContentStyle}

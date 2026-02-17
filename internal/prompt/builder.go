@@ -3,6 +3,7 @@ package prompt
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/agusx1211/adaf/internal/config"
@@ -312,7 +313,7 @@ func buildSkillsPrompt(opts BuildOpts) (string, error) {
 
 	// Project context (lightweight — agents discover details via CLI).
 	b.WriteString(renderContextSection(opts, project, plan))
-	b.WriteString(renderObjective(opts, project, plan, effectivePosition))
+	b.WriteString(renderObjective(opts, project, plan, effectivePlanID, effectivePosition))
 
 	// Turn handoff logging.
 	if hasSkill(resolvedSkills, config.SkillSessionContext) {
@@ -603,7 +604,7 @@ func renderTurnHandoffInstructions(required bool) string {
 }
 
 // renderObjective formats the objective section.
-func renderObjective(opts BuildOpts, project *store.ProjectConfig, plan *store.Plan, position string) string {
+func renderObjective(opts BuildOpts, project *store.ProjectConfig, plan *store.Plan, effectivePlanID, position string) string {
 	roleCanWrite := config.CanWriteForPositionAndRole(position, opts.Role, opts.GlobalCfg)
 	effectivePosition := normalizePromptPosition(position, false)
 	var b strings.Builder
@@ -622,60 +623,161 @@ func renderObjective(opts BuildOpts, project *store.ProjectConfig, plan *store.P
 	} else {
 		if effectivePosition == config.PositionManager || effectivePosition == config.PositionSupervisor {
 			if plan != nil && strings.TrimSpace(plan.ID) != "" {
-				fmt.Fprintf(&b, "Use `adaf plan show %s` to inspect the active plan details, phase status, and next dependencies.\n", plan.ID)
+				fmt.Fprintf(&b, "Use `adaf plan show %s` to inspect the active plan goals, rationale, and scope.\n", plan.ID)
 			} else {
-				b.WriteString("Use `adaf plan` to inspect active plan details, phase status, and dependencies.\n")
+				b.WriteString("Use `adaf plan` to inspect active plan goals, rationale, and scope.\n")
 			}
 			b.WriteString("Use `adaf issues` and `adaf log` to validate progress and then publish concrete guidance for the next step.\n\n")
 			return b.String()
 		}
 
-		var currentPhase *store.PlanPhase
-		if plan != nil && len(plan.Phases) > 0 {
-			for i := range plan.Phases {
-				p := &plan.Phases[i]
-				if p.Status == "not_started" || p.Status == "in_progress" {
-					currentPhase = p
-					break
-				}
+		var issues []store.Issue
+		if opts.Store != nil {
+			if effectivePlanID != "" {
+				issues, _ = opts.Store.ListIssuesForPlan(effectivePlanID)
+			} else {
+				issues, _ = opts.Store.ListSharedIssues()
 			}
 		}
+		openIssues := make([]store.Issue, 0, len(issues))
+		issuesByID := make(map[int]store.Issue, len(issues))
+		for _, iss := range issues {
+			issuesByID[iss.ID] = iss
+			if store.IsOpenIssueStatus(iss.Status) {
+				openIssues = append(openIssues, iss)
+			}
+		}
+		sortIssueQueue(openIssues)
 
-		if currentPhase != nil {
+		type blockedIssue struct {
+			issue   store.Issue
+			waiting []int
+		}
+		ready := make([]store.Issue, 0, len(openIssues))
+		blocked := make([]blockedIssue, 0, len(openIssues))
+		for _, iss := range openIssues {
+			waiting := unresolvedIssueDependencies(iss, issuesByID)
+			if len(waiting) == 0 {
+				ready = append(ready, iss)
+				continue
+			}
+			blocked = append(blocked, blockedIssue{issue: iss, waiting: waiting})
+		}
+
+		if len(ready) > 0 {
+			currentIssue := ready[0]
 			if roleCanWrite {
-				fmt.Fprintf(&b, "Your task is to work on phase **%s: %s**.\n\n", currentPhase.ID, currentPhase.Title)
+				fmt.Fprintf(&b, "Your task is to work on issue **#%d: %s**.\n\n", currentIssue.ID, currentIssue.Title)
 			} else {
-				fmt.Fprintf(&b, "Review progress on phase **%s: %s**. Check if agents completed the work correctly. Verify the build passes. Provide guidance or flag issues.\n\n", currentPhase.ID, currentPhase.Title)
+				fmt.Fprintf(&b, "Review progress on issue **#%d: %s**. Check if the implementation is correct, verify tests/build, and provide guidance.\n\n", currentIssue.ID, currentIssue.Title)
 			}
-			if currentPhase.Description != "" {
-				b.WriteString(currentPhase.Description + "\n\n")
+			if strings.TrimSpace(currentIssue.Description) != "" {
+				b.WriteString(currentIssue.Description + "\n\n")
 			}
+
+			b.WriteString("## Ready Issues\n")
+			limit := 3
+			if len(ready) < limit {
+				limit = len(ready)
+			}
+			for i := 0; i < limit; i++ {
+				iss := ready[i]
+				fmt.Fprintf(&b, "- #%d [%s] %s\n", iss.ID, iss.Priority, iss.Title)
+			}
+			b.WriteString("\n")
+
+			if len(blocked) > 0 {
+				b.WriteString("## Blocked Issues\n")
+				limitBlocked := 3
+				if len(blocked) < limitBlocked {
+					limitBlocked = len(blocked)
+				}
+				for i := 0; i < limitBlocked; i++ {
+					bi := blocked[i]
+					fmt.Fprintf(&b, "- #%d waits on %s\n", bi.issue.ID, formatIssueDependencyIDs(bi.waiting))
+				}
+				b.WriteString("\n")
+			}
+		} else if len(blocked) > 0 {
+			b.WriteString("All open issues are currently blocked by dependencies. Focus on resolving blockers first.\n\n")
+			b.WriteString("## Blocked Issues\n")
+			limitBlocked := 5
+			if len(blocked) < limitBlocked {
+				limitBlocked = len(blocked)
+			}
+			for i := 0; i < limitBlocked; i++ {
+				bi := blocked[i]
+				fmt.Fprintf(&b, "- #%d waits on %s\n", bi.issue.ID, formatIssueDependencyIDs(bi.waiting))
+			}
+			b.WriteString("\n")
 		} else if plan != nil && plan.Title != "" {
-			b.WriteString("All planned phases are complete. Look for remaining open issues or improvements.\n\n")
+			b.WriteString("No open issues are tracked for this plan. Look for gaps, file issues, or refine the plan details.\n\n")
 		} else {
 			b.WriteString("No plan is set. Explore the codebase and address any open issues.\n\n")
 		}
-
-		if currentPhase != nil && plan != nil && len(plan.Phases) > 1 {
-			b.WriteString("## Neighboring Phases\n")
-			for i, p := range plan.Phases {
-				if p.ID == currentPhase.ID {
-					if i > 0 {
-						prev := plan.Phases[i-1]
-						fmt.Fprintf(&b, "- Previous: [%s] %s: %s\n", prev.Status, prev.ID, prev.Title)
-					}
-					fmt.Fprintf(&b, "- **Current: [%s] %s: %s**\n", p.Status, p.ID, p.Title)
-					if i < len(plan.Phases)-1 {
-						next := plan.Phases[i+1]
-						fmt.Fprintf(&b, "- Next: [%s] %s: %s\n", next.Status, next.ID, next.Title)
-					}
-					break
-				}
-			}
-			b.WriteString("\n")
-		}
 	}
 	return b.String()
+}
+
+func unresolvedIssueDependencies(issue store.Issue, byID map[int]store.Issue) []int {
+	if len(issue.DependsOn) == 0 {
+		return nil
+	}
+
+	waiting := make([]int, 0, len(issue.DependsOn))
+	for _, depID := range store.NormalizeIssueDependencyIDs(issue.DependsOn) {
+		dep, ok := byID[depID]
+		if !ok || !store.IsTerminalIssueStatus(dep.Status) {
+			waiting = append(waiting, depID)
+		}
+	}
+	if len(waiting) == 0 {
+		return nil
+	}
+	return waiting
+}
+
+func sortIssueQueue(issues []store.Issue) {
+	sort.Slice(issues, func(i, j int) bool {
+		pi := issuePriorityRank(issues[i].Priority)
+		pj := issuePriorityRank(issues[j].Priority)
+		if pi != pj {
+			return pi < pj
+		}
+		return issues[i].ID < issues[j].ID
+	})
+}
+
+func issuePriorityRank(priority string) int {
+	switch strings.TrimSpace(strings.ToLower(priority)) {
+	case "critical":
+		return 0
+	case "high":
+		return 1
+	case "medium":
+		return 2
+	case "low":
+		return 3
+	default:
+		return 4
+	}
+}
+
+func formatIssueDependencyIDs(dependsOn []int) string {
+	if len(dependsOn) == 0 {
+		return "-"
+	}
+	parts := make([]string, 0, len(dependsOn))
+	for _, depID := range dependsOn {
+		if depID <= 0 {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("#%d", depID))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, ", ")
 }
 
 // formatWaitResultInfo formats a single WaitResultInfo for the prompt.

@@ -201,7 +201,7 @@ func TestCreateAndUpdateIssueEndpoints(t *testing.T) {
 func TestPlanWriteEndpoints(t *testing.T) {
 	srv, _ := newTestServer(t)
 
-	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/plans", `{"id":"web-ui","title":"Web UI","description":"overhaul","phases":[{"id":"phase-1","title":"MVP","status":"not_started","priority":1}]}`)
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/plans", `{"id":"web-ui","title":"Web UI","description":"overhaul"}`)
 	if createRec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
 	}
@@ -209,9 +209,6 @@ func TestPlanWriteEndpoints(t *testing.T) {
 	created := decodeResponse[store.Plan](t, createRec)
 	if created.Status != "active" {
 		t.Fatalf("created status = %q, want %q", created.Status, "active")
-	}
-	if len(created.Phases) != 1 {
-		t.Fatalf("created phase count = %d, want 1", len(created.Phases))
 	}
 
 	updateRec := performJSONRequest(t, srv, http.MethodPut, "/api/plans/web-ui", `{"title":"Web UI v2","status":"frozen"}`)
@@ -225,19 +222,6 @@ func TestPlanWriteEndpoints(t *testing.T) {
 	}
 	if updated.Status != "frozen" {
 		t.Fatalf("updated status = %q, want %q", updated.Status, "frozen")
-	}
-
-	phaseRec := performJSONRequest(t, srv, http.MethodPut, "/api/plans/web-ui/phases/phase-1", `{"status":"in_progress","priority":3,"depends_on":["phase-0"]}`)
-	if phaseRec.Code != http.StatusOK {
-		t.Fatalf("phase update status = %d, want %d", phaseRec.Code, http.StatusOK)
-	}
-
-	phaseUpdated := decodeResponse[store.Plan](t, phaseRec)
-	if phaseUpdated.Phases[0].Status != "in_progress" {
-		t.Fatalf("phase status = %q, want %q", phaseUpdated.Phases[0].Status, "in_progress")
-	}
-	if phaseUpdated.Phases[0].Priority != 3 {
-		t.Fatalf("phase priority = %d, want %d", phaseUpdated.Phases[0].Priority, 3)
 	}
 
 	activateRec := performRequest(t, srv, http.MethodPost, "/api/plans/web-ui/activate")
@@ -955,6 +939,12 @@ func TestIssueValidation(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid priority = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
+
+	// Unknown dependency issue ID
+	rec = performJSONRequest(t, srv, http.MethodPost, "/api/issues", `{"title":"Bad deps","depends_on":[999]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid dependencies = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
 }
 
 func TestPlanValidation(t *testing.T) {
@@ -979,12 +969,6 @@ func TestPlanValidation(t *testing.T) {
 		t.Fatalf("invalid plan status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 
-	// Invalid phase status
-	performJSONRequest(t, srv, http.MethodPost, "/api/plans", `{"id":"phase-test","title":"Phase Test","phases":[{"id":"p1","title":"P1","status":"not_started"}]}`)
-	rec = performJSONRequest(t, srv, http.MethodPut, "/api/plans/phase-test/phases/p1", `{"status":"wrong"}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("invalid phase status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
 }
 
 func TestDocValidation(t *testing.T) {
