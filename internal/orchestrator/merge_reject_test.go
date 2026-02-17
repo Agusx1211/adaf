@@ -82,11 +82,19 @@ func TestMerge_Success(t *testing.T) {
 		t.Fatalf("merge commit parents = %d, want 2 for non-squash", len(parents))
 	}
 
+	if _, err := os.Stat(rec.WorktreePath); err != nil {
+		t.Fatalf("worktree %q should still exist until turn cleanup, stat err=%v", rec.WorktreePath, err)
+	}
+	if !branchExists(repo, rec.Branch) {
+		t.Fatalf("branch %q should still exist until turn cleanup", rec.Branch)
+	}
+
+	o.CleanupReviewedSpawnWorktrees([]int{rec.ParentTurnID})
 	if _, err := os.Stat(rec.WorktreePath); !os.IsNotExist(err) {
-		t.Fatalf("worktree %q should be removed, stat err=%v", rec.WorktreePath, err)
+		t.Fatalf("worktree %q should be removed after reviewed cleanup, stat err=%v", rec.WorktreePath, err)
 	}
 	if branchExists(repo, rec.Branch) {
-		t.Fatalf("branch %q should be removed after merge", rec.Branch)
+		t.Fatalf("branch %q should be removed after reviewed cleanup", rec.Branch)
 	}
 }
 
@@ -117,11 +125,19 @@ func TestMerge_Squash(t *testing.T) {
 		t.Fatalf("squash commit parents = %d, want 1", len(parents))
 	}
 
+	if _, err := os.Stat(rec.WorktreePath); err != nil {
+		t.Fatalf("worktree %q should still exist until turn cleanup, stat err=%v", rec.WorktreePath, err)
+	}
+	if !branchExists(repo, rec.Branch) {
+		t.Fatalf("branch %q should still exist until turn cleanup", rec.Branch)
+	}
+
+	o.CleanupReviewedSpawnWorktrees([]int{rec.ParentTurnID})
 	if _, err := os.Stat(rec.WorktreePath); !os.IsNotExist(err) {
-		t.Fatalf("worktree %q should be removed, stat err=%v", rec.WorktreePath, err)
+		t.Fatalf("worktree %q should be removed after reviewed cleanup, stat err=%v", rec.WorktreePath, err)
 	}
 	if branchExists(repo, rec.Branch) {
-		t.Fatalf("branch %q should be removed after merge", rec.Branch)
+		t.Fatalf("branch %q should be removed after reviewed cleanup", rec.Branch)
 	}
 }
 
@@ -192,11 +208,19 @@ func TestReject_CompletedSpawn(t *testing.T) {
 	if got.Status != "rejected" {
 		t.Fatalf("status = %q, want rejected", got.Status)
 	}
+	if _, err := os.Stat(rec.WorktreePath); err != nil {
+		t.Fatalf("worktree %q should still exist until turn cleanup, stat err=%v", rec.WorktreePath, err)
+	}
+	if !branchExists(repo, rec.Branch) {
+		t.Fatalf("branch %q should still exist until turn cleanup", rec.Branch)
+	}
+
+	o.CleanupReviewedSpawnWorktrees([]int{rec.ParentTurnID})
 	if _, err := os.Stat(rec.WorktreePath); !os.IsNotExist(err) {
-		t.Fatalf("worktree %q should be removed, stat err=%v", rec.WorktreePath, err)
+		t.Fatalf("worktree %q should be removed after reviewed cleanup, stat err=%v", rec.WorktreePath, err)
 	}
 	if branchExists(repo, rec.Branch) {
-		t.Fatalf("branch %q should be removed after reject", rec.Branch)
+		t.Fatalf("branch %q should be removed after reviewed cleanup", rec.Branch)
 	}
 }
 
@@ -228,11 +252,19 @@ func TestReject_RunningSpawn(t *testing.T) {
 	if got.Status != "rejected" {
 		t.Fatalf("status = %q, want rejected", got.Status)
 	}
+	if _, err := os.Stat(rec.WorktreePath); err != nil {
+		t.Fatalf("worktree %q should still exist until turn cleanup, stat err=%v", rec.WorktreePath, err)
+	}
+	if !branchExists(repo, rec.Branch) {
+		t.Fatalf("branch %q should still exist until turn cleanup", rec.Branch)
+	}
+
+	o.CleanupReviewedSpawnWorktrees([]int{rec.ParentTurnID})
 	if _, err := os.Stat(rec.WorktreePath); !os.IsNotExist(err) {
-		t.Fatalf("worktree %q should be removed, stat err=%v", rec.WorktreePath, err)
+		t.Fatalf("worktree %q should be removed after reviewed cleanup, stat err=%v", rec.WorktreePath, err)
 	}
 	if branchExists(repo, rec.Branch) {
-		t.Fatalf("branch %q should be removed after reject", rec.Branch)
+		t.Fatalf("branch %q should be removed after reviewed cleanup", rec.Branch)
 	}
 }
 

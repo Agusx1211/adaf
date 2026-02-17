@@ -194,18 +194,19 @@ type WireControl struct {
 
 // WireControlSpawn carries a spawn request executed by the daemon.
 type WireControlSpawn struct {
-	ParentTurnID   int                      `json:"parent_turn_id"`
-	ParentProfile  string                   `json:"parent_profile"`
-	ParentPosition string                   `json:"parent_position,omitempty"`
-	ChildProfile   string                   `json:"child_profile"`
-	ChildPosition  string                   `json:"child_position,omitempty"`
-	ChildRole      string                   `json:"child_role,omitempty"`
-	PlanID         string                   `json:"plan_id,omitempty"`
-	Task           string                   `json:"task"`
-	IssueIDs       []int                    `json:"issue_ids,omitempty"`
-	ReadOnly       bool                     `json:"read_only,omitempty"`
-	Wait           bool                     `json:"wait,omitempty"`
-	Delegation     *config.DelegationConfig `json:"delegation,omitempty"`
+	ParentTurnID         int                      `json:"parent_turn_id"`
+	ParentProfile        string                   `json:"parent_profile"`
+	ParentPosition       string                   `json:"parent_position,omitempty"`
+	ChildProfile         string                   `json:"child_profile"`
+	ChildPosition        string                   `json:"child_position,omitempty"`
+	ChildRole            string                   `json:"child_role,omitempty"`
+	PlanID               string                   `json:"plan_id,omitempty"`
+	Task                 string                   `json:"task"`
+	IssueIDs             []int                    `json:"issue_ids,omitempty"`
+	WorkspaceFromSpawnID int                      `json:"workspace_from_spawn_id,omitempty"`
+	ReadOnly             bool                     `json:"read_only,omitempty"`
+	Wait                 bool                     `json:"wait,omitempty"`
+	Delegation           *config.DelegationConfig `json:"delegation,omitempty"`
 }
 
 // WireControlWait carries a wait-for-spawns signal request.

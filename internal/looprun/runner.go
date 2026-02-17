@@ -130,6 +130,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 		// merged or rejected. Without this, completed-but-unmerged
 		// spawn worktrees leak on disk indefinitely.
 		if o := orchestrator.Get(); o != nil && len(run.TurnIDs) > 0 {
+			o.CleanupReviewedSpawnWorktrees(run.TurnIDs)
 			o.CleanupSpawnWorktrees(run.TurnIDs)
 		}
 	}()
@@ -478,6 +479,10 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 						WaitForSpawns: waitingForSpawns,
 						Result:        result,
 					})
+
+					if o := orchestrator.Get(); o != nil && turnID > 0 {
+						o.CleanupReviewedSpawnWorktrees([]int{turnID})
+					}
 				},
 				OnWait: func(ctx context.Context, turnID int, alreadySeen map[int]struct{}) ([]loop.WaitResult, bool) {
 					return waitForAnySessionSpawns(ctx, cfg.Store, turnID, alreadySeen)

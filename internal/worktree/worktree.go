@@ -74,6 +74,16 @@ func (m *Manager) CreateDetached(ctx context.Context, name string) (string, erro
 // Create creates a new worktree for the given branch.
 // It returns the worktree path on disk.
 func (m *Manager) Create(ctx context.Context, branchName string) (string, error) {
+	return m.CreateFromRef(ctx, branchName, "HEAD")
+}
+
+// CreateFromRef creates a new worktree for the given branch, using startRef
+// as the branch base (e.g. "HEAD" or another local branch).
+func (m *Manager) CreateFromRef(ctx context.Context, branchName, startRef string) (string, error) {
+	if strings.TrimSpace(startRef) == "" {
+		startRef = "HEAD"
+	}
+
 	debug.LogKV("worktree", "Create()", "branch", branchName, "repo_root", m.repoRoot)
 	base := m.worktreeRoot()
 	if err := os.MkdirAll(base, 0755); err != nil {
@@ -82,10 +92,10 @@ func (m *Manager) Create(ctx context.Context, branchName string) (string, error)
 
 	wtPath := filepath.Join(base, sanitize(branchName))
 
-	// Get HEAD commit.
-	head, err := m.git(ctx, "rev-parse", "HEAD")
+	// Resolve the start commit.
+	head, err := m.git(ctx, "rev-parse", startRef)
 	if err != nil {
-		return "", fmt.Errorf("rev-parse HEAD: %w", err)
+		return "", fmt.Errorf("rev-parse %s: %w", startRef, err)
 	}
 	head = strings.TrimSpace(head)
 
@@ -104,7 +114,7 @@ func (m *Manager) Create(ctx context.Context, branchName string) (string, error)
 	// Ensure project marker is visible in worktrees for project resolution.
 	m.ensureProjectMarker(wtPath)
 
-	debug.LogKV("worktree", "created", "branch", branchName, "path", wtPath, "head", strings.TrimSpace(head))
+	debug.LogKV("worktree", "created", "branch", branchName, "path", wtPath, "head", strings.TrimSpace(head), "start_ref", startRef)
 	return wtPath, nil
 }
 

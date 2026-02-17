@@ -111,6 +111,48 @@ func TestCreateUsesProjectScopedTempRoot(t *testing.T) {
 	}
 }
 
+func TestCreateFromRef_UsesSourceBranchTip(t *testing.T) {
+	repo := initGitRepo(t)
+	mgr := NewManager(repo)
+	ctx := context.Background()
+
+	sourceBranch := "adaf/test/source/20260212T000200"
+	sourceWtPath, err := mgr.Create(ctx, sourceBranch)
+	if err != nil {
+		t.Fatalf("Create(source): %v", err)
+	}
+	defer mgr.RemoveWithBranch(ctx, sourceWtPath, sourceBranch)
+
+	sourceOnlyFile := filepath.Join(sourceWtPath, "source-only.txt")
+	if err := os.WriteFile(sourceOnlyFile, []byte("from-source\n"), 0644); err != nil {
+		t.Fatalf("WriteFile(source-only): %v", err)
+	}
+	runGit(t, sourceWtPath, "add", "source-only.txt")
+	runGitWithConfig(t, sourceWtPath, []string{"user.name=Test", "user.email=test@example.com"}, "commit", "-m", "source branch commit")
+
+	sourceHead := strings.TrimSpace(gitOutput(t, repo, "rev-parse", sourceBranch))
+	mainHead := strings.TrimSpace(gitOutput(t, repo, "rev-parse", "main"))
+	if sourceHead == mainHead {
+		t.Fatalf("source branch head must differ from main head")
+	}
+
+	targetBranch := "adaf/test/worker/20260212T000201"
+	targetWtPath, err := mgr.CreateFromRef(ctx, targetBranch, sourceBranch)
+	if err != nil {
+		t.Fatalf("CreateFromRef(target): %v", err)
+	}
+	defer mgr.RemoveWithBranch(ctx, targetWtPath, targetBranch)
+
+	if _, err := os.Stat(filepath.Join(targetWtPath, "source-only.txt")); err != nil {
+		t.Fatalf("target worktree missing source-only.txt from source branch: %v", err)
+	}
+
+	targetHead := strings.TrimSpace(gitOutput(t, repo, "rev-parse", targetBranch))
+	if targetHead != sourceHead {
+		t.Fatalf("target head = %s, want source head = %s", targetHead, sourceHead)
+	}
+}
+
 func initGitRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()

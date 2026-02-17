@@ -35,8 +35,11 @@ type SpawnRequest struct {
 	Task           string
 	IssueIDs       []int
 	ReadOnly       bool
-	Wait           bool                     // if true, Spawn blocks until child completes
-	Delegation     *config.DelegationConfig // parent delegation config (required for strict spawning)
+	// WorkspaceFromSpawnID, when set, creates the child writable workspace from
+	// another spawn's branch tip (for manager review / QA passes before merge).
+	WorkspaceFromSpawnID int
+	Wait                 bool                     // if true, Spawn blocks until child completes
+	Delegation           *config.DelegationConfig // parent delegation config (required for strict spawning)
 
 	// Resolved child execution settings populated during Spawn validation.
 	ChildDelegation   *config.DelegationConfig
@@ -44,6 +47,7 @@ type SpawnRequest struct {
 	ChildSpeed        string
 	ChildHandoff      bool
 	ChildSkills       []string
+	workspaceBaseRef  string
 }
 
 // SpawnResult is the outcome of a completed spawn.
@@ -367,6 +371,12 @@ func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error)
 		req.ChildDelegation = &config.DelegationConfig{}
 	}
 
+	workspaceBaseRef, err := o.resolveWorkspaceBaseRef(req)
+	if err != nil {
+		return 0, err
+	}
+	req.workspaceBaseRef = workspaceBaseRef
+
 	o.mu.Lock()
 
 	// Check child profile instance limit.
@@ -428,22 +438,23 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 
 	// Create spawn record.
 	rec := &store.SpawnRecord{
-		ParentTurnID:  req.ParentTurnID,
-		ParentProfile: req.ParentProfile,
-		ChildProfile:  req.ChildProfile,
-		ChildPosition: req.ChildPosition,
-		ChildRole:     req.ChildRole,
-		Task:          req.Task,
-		IssueIDs:      req.IssueIDs,
-		ReadOnly:      req.ReadOnly,
-		Status:        "running",
-		Handoff:       handoff,
-		Speed:         speed,
+		ParentTurnID:         req.ParentTurnID,
+		ParentProfile:        req.ParentProfile,
+		ChildProfile:         req.ChildProfile,
+		ChildPosition:        req.ChildPosition,
+		ChildRole:            req.ChildRole,
+		Task:                 req.Task,
+		IssueIDs:             req.IssueIDs,
+		ReadOnly:             req.ReadOnly,
+		WorkspaceFromSpawnID: req.WorkspaceFromSpawnID,
+		Status:               "running",
+		Handoff:              handoff,
+		Speed:                speed,
 	}
 
 	var wtPath string
 	if !req.ReadOnly {
-		branchName, createdPath, err := o.createWritableWorktree(ctx, req.ParentTurnID, req.ChildProfile)
+		branchName, createdPath, err := o.createWritableWorktree(ctx, req.ParentTurnID, req.ChildProfile, req.workspaceBaseRef)
 		if err != nil {
 			o.releaseSpawnSlot(req.ParentProfile, req.ChildProfile)
 			return 0, fmt.Errorf("creating worktree: %w", err)
@@ -845,11 +856,43 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 
 const worktreeCreateRetries = 4
 
-func (o *Orchestrator) createWritableWorktree(ctx context.Context, parentTurnID int, childProfile string) (branchName, wtPath string, _ error) {
+func (o *Orchestrator) resolveWorkspaceBaseRef(req SpawnRequest) (string, error) {
+	if req.WorkspaceFromSpawnID <= 0 {
+		return "", nil
+	}
+	if req.ReadOnly {
+		return "", fmt.Errorf("spawn cannot combine --read-only with workspace source spawn %d", req.WorkspaceFromSpawnID)
+	}
+
+	source, err := o.store.GetSpawn(req.WorkspaceFromSpawnID)
+	if err != nil {
+		return "", fmt.Errorf("workspace source spawn %d not found: %w", req.WorkspaceFromSpawnID, err)
+	}
+	if strings.TrimSpace(source.Branch) == "" {
+		return "", fmt.Errorf("workspace source spawn %d has no branch", req.WorkspaceFromSpawnID)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(source.Status)) {
+	case store.SpawnStatusCompleted, store.SpawnStatusFailed, store.SpawnStatusCanceled, store.SpawnStatusCancelled:
+		return source.Branch, nil
+	default:
+		return "", fmt.Errorf(
+			"workspace source spawn %d is %q; only completed/failed/canceled spawns can be reused",
+			req.WorkspaceFromSpawnID,
+			source.Status,
+		)
+	}
+}
+
+func (o *Orchestrator) createWritableWorktree(ctx context.Context, parentTurnID int, childProfile, baseRef string) (branchName, wtPath string, _ error) {
 	var lastErr error
 	for attempt := 1; attempt <= worktreeCreateRetries; attempt++ {
 		branchName = worktree.BranchName(parentTurnID, childProfile)
-		wtPath, lastErr = o.worktrees.Create(ctx, branchName)
+		if strings.TrimSpace(baseRef) != "" {
+			wtPath, lastErr = o.worktrees.CreateFromRef(ctx, branchName, baseRef)
+		} else {
+			wtPath, lastErr = o.worktrees.Create(ctx, branchName)
+		}
 		if lastErr == nil {
 			return branchName, wtPath, nil
 		}
@@ -1464,14 +1507,6 @@ func (o *Orchestrator) Merge(ctx context.Context, spawnID int, squash bool) (str
 		return "", err
 	}
 
-	// Clean up worktree.
-	if rec.WorktreePath != "" {
-		if rmErr := o.worktrees.RemoveWithBranch(ctx, rec.WorktreePath, rec.Branch); rmErr != nil {
-			debug.LogKV("orch", "worktree cleanup failed after merge",
-				"spawn_id", spawnID, "worktree", rec.WorktreePath, "error", rmErr)
-		}
-	}
-
 	rec.Status = "merged"
 	rec.MergeCommit = hash
 	o.store.UpdateSpawn(rec)
@@ -1493,14 +1528,6 @@ func (o *Orchestrator) Reject(ctx context.Context, spawnID int) error {
 		as.cancel()
 	}
 	o.mu.Unlock()
-
-	// Clean up worktree.
-	if rec.WorktreePath != "" {
-		if rmErr := o.worktrees.RemoveWithBranch(ctx, rec.WorktreePath, rec.Branch); rmErr != nil {
-			debug.LogKV("orch", "worktree cleanup failed after reject",
-				"spawn_id", spawnID, "worktree", rec.WorktreePath, "error", rmErr)
-		}
-	}
 
 	rec.Status = "rejected"
 	return o.store.UpdateSpawn(rec)
@@ -1598,8 +1625,8 @@ func (o *Orchestrator) CleanupSpawnWorktrees(turnIDs []int) {
 			if rec.WorktreePath == "" || rec.ReadOnly {
 				continue
 			}
-			// Only clean up terminal spawns that were NOT already merged/rejected
-			// (those are already cleaned up by Merge/Reject).
+			// Only clean up terminal spawns that were NOT explicitly reviewed.
+			// Merged/rejected spawns are cleaned by CleanupReviewedSpawnWorktrees.
 			switch rec.Status {
 			case "completed", "failed", "canceled", "cancelled":
 				// These are orphaned worktrees — the parent never merged them.
@@ -1626,6 +1653,59 @@ func (o *Orchestrator) CleanupSpawnWorktrees(turnIDs []int) {
 	}
 	if removed > 0 {
 		debug.LogKV("orch", "cleaned up orphaned spawn worktrees",
+			"turn_ids", fmt.Sprintf("%v", turnIDs),
+			"removed", removed,
+		)
+	}
+}
+
+// CleanupReviewedSpawnWorktrees removes worktrees for merged/rejected spawns
+// belonging to any of the given parent turn IDs. This is intended to run at
+// turn boundaries so post-merge review commands can still inspect branch state
+// during the turn that performed the merge/reject.
+func (o *Orchestrator) CleanupReviewedSpawnWorktrees(turnIDs []int) {
+	if len(turnIDs) == 0 {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	removed := 0
+	for _, turnID := range turnIDs {
+		records, err := o.store.SpawnsByParent(turnID)
+		if err != nil {
+			continue
+		}
+		for _, rec := range records {
+			if rec.WorktreePath == "" || rec.ReadOnly {
+				continue
+			}
+			switch rec.Status {
+			case "merged", "rejected":
+			default:
+				continue
+			}
+
+			debug.LogKV("orch", "cleaning up reviewed spawn worktree",
+				"spawn_id", rec.ID,
+				"status", rec.Status,
+				"branch", rec.Branch,
+				"worktree", rec.WorktreePath,
+			)
+			if rmErr := o.worktrees.RemoveWithBranch(ctx, rec.WorktreePath, rec.Branch); rmErr != nil {
+				debug.LogKV("orch", "reviewed worktree cleanup failed",
+					"spawn_id", rec.ID,
+					"worktree", rec.WorktreePath,
+					"error", rmErr,
+				)
+				continue
+			}
+			removed++
+		}
+	}
+	if removed > 0 {
+		debug.LogKV("orch", "cleaned up reviewed spawn worktrees",
 			"turn_ids", fmt.Sprintf("%v", turnIDs),
 			"removed", removed,
 		)

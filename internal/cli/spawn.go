@@ -31,6 +31,7 @@ Examples:
   adaf spawn --profile developer --task "Write unit tests for auth.go"
   adaf spawn --profile developer --task-file task.md
   adaf spawn --profile lead-dev --task "Review PR #42" --read-only
+  adaf spawn --profile qa --from-spawn 3 --task "QA pass before merge"
   adaf spawn-status                       # Check all spawns
   adaf spawn-diff --spawn-id 3            # View changes
   adaf spawn-merge --spawn-id 3           # Merge changes`,
@@ -43,6 +44,7 @@ func init() {
 	spawnCmd.Flags().String("task", "", "Task description for the sub-agent")
 	spawnCmd.Flags().String("task-file", "", "Path to file containing task description (mutually exclusive with --task)")
 	spawnCmd.Flags().IntSlice("issue", nil, "Issue ID(s) to assign to the sub-agent (can be repeated)")
+	spawnCmd.Flags().Int("from-spawn", 0, "Create the child workspace from an existing spawn branch tip")
 	spawnCmd.Flags().Bool("read-only", false, "Run sub-agent in read-only mode (no worktree)")
 	rootCmd.AddCommand(spawnCmd)
 }
@@ -53,6 +55,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	task, _ := cmd.Flags().GetString("task")
 	taskFile, _ := cmd.Flags().GetString("task-file")
 	issueIDs, _ := cmd.Flags().GetIntSlice("issue")
+	fromSpawnID, _ := cmd.Flags().GetInt("from-spawn")
 	readOnly, _ := cmd.Flags().GetBool("read-only")
 	childRole = strings.ToLower(strings.TrimSpace(childRole))
 
@@ -68,6 +71,12 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	}
 	if task == "" && taskFile == "" {
 		return fmt.Errorf("--task or --task-file is required")
+	}
+	if fromSpawnID < 0 {
+		return fmt.Errorf("--from-spawn must be > 0")
+	}
+	if fromSpawnID > 0 && readOnly {
+		return fmt.Errorf("--from-spawn cannot be combined with --read-only")
 	}
 	if taskFile != "" {
 		data, err := os.ReadFile(taskFile)
@@ -99,16 +108,17 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 
 	if daemonSessionID, ok := currentDaemonSessionID(); ok {
 		resp, err := session.RequestSpawn(daemonSessionID, session.WireControlSpawn{
-			ParentTurnID:   parentTurnID,
-			ParentProfile:  parentProfile,
-			ParentPosition: parentPosition,
-			ChildProfile:   profileName,
-			ChildRole:      childRole,
-			PlanID:         planID,
-			Task:           task,
-			IssueIDs:       issueIDs,
-			ReadOnly:       readOnly,
-			Delegation:     delegation,
+			ParentTurnID:         parentTurnID,
+			ParentProfile:        parentProfile,
+			ParentPosition:       parentPosition,
+			ChildProfile:         profileName,
+			ChildRole:            childRole,
+			PlanID:               planID,
+			Task:                 task,
+			IssueIDs:             issueIDs,
+			WorkspaceFromSpawnID: fromSpawnID,
+			ReadOnly:             readOnly,
+			Delegation:           delegation,
 		})
 		if err != nil {
 			return fmt.Errorf("spawn failed: %w", err)
@@ -130,16 +140,17 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	}
 
 	spawnID, err := o.Spawn(context.Background(), orchestrator.SpawnRequest{
-		ParentTurnID:   parentTurnID,
-		ParentProfile:  parentProfile,
-		ParentPosition: parentPosition,
-		ChildProfile:   profileName,
-		ChildRole:      childRole,
-		PlanID:         planID,
-		Task:           task,
-		IssueIDs:       issueIDs,
-		ReadOnly:       readOnly,
-		Delegation:     delegation,
+		ParentTurnID:         parentTurnID,
+		ParentProfile:        parentProfile,
+		ParentPosition:       parentPosition,
+		ChildProfile:         profileName,
+		ChildRole:            childRole,
+		PlanID:               planID,
+		Task:                 task,
+		IssueIDs:             issueIDs,
+		WorkspaceFromSpawnID: fromSpawnID,
+		ReadOnly:             readOnly,
+		Delegation:           delegation,
 	})
 	if err != nil {
 		return fmt.Errorf("spawn failed: %w", err)
@@ -294,6 +305,9 @@ func printSpawnRecord(r *store.SpawnRecord) {
 	printField("Task", truncate(r.Task, 80))
 	if r.Branch != "" {
 		printField("Branch", r.Branch)
+	}
+	if r.WorkspaceFromSpawnID > 0 {
+		printField("Workspace From Spawn", fmt.Sprintf("%d", r.WorkspaceFromSpawnID))
 	}
 	if r.ReadOnly {
 		printField("Mode", "read-only")
