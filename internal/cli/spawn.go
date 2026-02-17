@@ -408,6 +408,7 @@ func printSpawnGuide() error {
 	fmt.Println("  adaf spawn-diff --spawn-id N   # View a spawn's code changes")
 	fmt.Println("  adaf spawn-merge --spawn-id N  # Merge a completed spawn")
 	fmt.Println("  adaf spawn-reject --spawn-id N # Cancel/reject a spawn")
+	fmt.Println("  adaf spawn-feedback --spawn-id N --difficulty D --quality Q # Record worker performance")
 	fmt.Println("  adaf spawn-inspect --spawn-id N # See a spawn's recent activity")
 
 	return nil

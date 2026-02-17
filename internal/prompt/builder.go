@@ -803,6 +803,7 @@ func formatWaitResultInfo(wr WaitResultInfo) string {
 	if !wr.ReadOnly && wr.Branch != "" && (wr.Status == "completed" || wr.Status == "canceled") {
 		fmt.Fprintf(&b, "**Action required:** Review and merge this spawn's work: `adaf spawn-diff --spawn-id %d` then `adaf spawn-merge --spawn-id %d`\n\n", wr.SpawnID, wr.SpawnID)
 	}
+	fmt.Fprintf(&b, "After review, record worker feedback for future routing: `adaf spawn-feedback --spawn-id %d --difficulty <0-10> --quality <0-10>`\n\n", wr.SpawnID)
 
 	body := wr.Summary
 	if body == "" {

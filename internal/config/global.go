@@ -22,6 +22,7 @@ type Profile struct {
 	Intelligence int    `json:"intelligence,omitempty"`  // 1-10 capability rating
 	MaxInstances int    `json:"max_instances,omitempty"` // max concurrent instances of this profile (0 = unlimited)
 	Speed        string `json:"speed,omitempty"`         // "fast", "medium", "slow" — informational speed rating
+	Cost         string `json:"cost,omitempty"`          // "free", "cheap", "normal", "expensive" — manual operator input
 }
 
 // LoopStep defines one step in a loop cycle.

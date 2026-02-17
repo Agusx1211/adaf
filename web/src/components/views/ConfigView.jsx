@@ -103,7 +103,9 @@ export default function ConfigView() {
               onMouseLeave={function (e) { if (!sel) e.currentTarget.style.background = 'transparent'; }}
             >
               <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: 'var(--text-0)', flex: 1 }}>{p.name}</span>
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>{p.agent}{p.model ? '/' + p.model : ''}</span>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>
+                {p.agent}{p.model ? '/' + p.model : ''}{p.cost ? ' · ' + p.cost : ''}
+              </span>
             </div>
           );
         })}

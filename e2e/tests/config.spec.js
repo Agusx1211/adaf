@@ -72,6 +72,35 @@ test('config profile CRUD persists through API', async ({ page, request }) => {
   expect(remainingProfiles.find((profile) => String(profile.name || '') === profileName)).toBeFalsy();
 });
 
+test('profile editor shows cost tier and performance telemetry for seeded profiles', async ({ page, request }) => {
+  const { state } = await gotoConfig(page, request);
+  const fixtures = Array.isArray(state.fixtures) ? state.fixtures : [];
+  expect(fixtures.length).toBeGreaterThan(0);
+
+  const target = fixtures[0];
+  const profileName = String(target.profile || '');
+  expect(profileName.length).toBeGreaterThan(0);
+
+  await page.getByText(profileName, { exact: true }).first().click();
+
+  const costSelect = page.locator('label', { hasText: 'Cost Tier' }).first().locator('xpath=following-sibling::select[1]');
+  await expect(costSelect).toHaveValue('free');
+
+  const panel = page.getByTestId('profile-performance-panel');
+  await expect(panel).toBeVisible();
+  await expect(panel.getByText('Feedback Count')).toBeVisible();
+  await expect(panel.getByText('Avg Quality')).toBeVisible();
+  await expect(panel.getByText('Avg Difficulty')).toBeVisible();
+  await expect(panel.getByText('Avg Duration')).toBeVisible();
+  await expect(panel.getByText('Trend Over Time (0-10)')).toBeVisible();
+  await expect(panel.getByText('Recent Raw Feedback')).toBeVisible();
+  await expect(panel.getByText('spawn #700')).toBeVisible();
+  await expect(panel.getByText('quality 8.00')).toBeVisible();
+  await expect(panel.getByText('difficulty 4.00')).toBeVisible();
+  await expect(panel.getByText('role scout')).toBeVisible();
+  await expect(panel.getByText('parent seed-profile')).toBeVisible();
+});
+
 test('config skill appears in standalone new chat modal and supports delete', async ({ page, request }) => {
   const { state } = await gotoConfig(page, request);
   const skillID = uniqueName('skill').replace(/-/g, '_');
@@ -183,12 +212,12 @@ test('loop editor renders runtime prompt preview scenarios', async ({ page, requ
   await expect(previewBody).toContainText('Continue from where you left off.');
 
   await page.getByText('Edit skills…', { exact: true }).first().click();
-  const loopSkillOption = page.getByTestId('skills-option-autonomy').first();
+  const loopSkillOption = page.getByTestId('skills-option-delegation').first();
   await expect(loopSkillOption).toBeVisible();
   await loopSkillOption.hover();
   const loopHoverPreview = page.getByTestId('loop-hover-preview-card');
   await expect(loopHoverPreview).toBeVisible();
-  await expect(loopHoverPreview).toContainText('autonomy');
+  await expect(loopHoverPreview).toContainText('delegation');
   const loopHoverBox = await loopHoverPreview.boundingBox();
   const loopPromptPanelBox = await previewPanel.boundingBox();
   expect(loopHoverBox && loopPromptPanelBox && loopHoverBox.y < loopPromptPanelBox.y).toBeTruthy();
@@ -280,7 +309,7 @@ test('loop editor explicit empty skills does not fall back to defaults', async (
 
   const previewBody = page.getByTestId('loop-prompt-preview-body');
   await expect(previewBody).not.toContainText('# Skills');
-  await expect(previewBody).not.toContainText('You are fully autonomous. There is no human in the loop.');
+  await expect(previewBody).not.toContainText('## delegation');
 
   await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(profileName)}`);
 });

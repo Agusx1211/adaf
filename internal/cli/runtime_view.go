@@ -61,6 +61,7 @@ var commandAudienceByPath = map[string]commandAudience{
 	"spawn-reject":         commandAudienceAgentOnly,
 	"spawn-watch":          commandAudienceAgentOnly,
 	"spawn-inspect":        commandAudienceAgentOnly,
+	"spawn-feedback":       commandAudienceAgentOnly,
 	"spawn-reply":          commandAudienceAgentOnly,
 	"parent-ask":           commandAudienceAgentOnly,
 	"wait-for-spawns":      commandAudienceAgentOnly,

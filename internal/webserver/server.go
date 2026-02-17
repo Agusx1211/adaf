@@ -285,6 +285,8 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/config/skills/{id}", srv.handleDeleteSkill)
 	mux.HandleFunc("GET /api/config/agents", srv.handleListAgents)
 	mux.HandleFunc("POST /api/config/agents/detect", srv.handleDetectAgents)
+	mux.HandleFunc("GET /api/performance/profiles", srv.handleListProfilePerformance)
+	mux.HandleFunc("GET /api/performance/profiles/{name}", srv.handleProfilePerformanceByName)
 
 	// Usage endpoints (global, not project-scoped)
 	mux.HandleFunc("GET /api/usage", srv.handleUsage)
@@ -362,6 +364,7 @@ func (srv *Server) registerProjectRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("GET "+prefix+"/turns/{id}/events", srv.projectHandler(handleTurnRecordingEventsP))
 	mux.HandleFunc("GET "+prefix+"/spawns", srv.projectHandler(handleSpawnsP))
 	mux.HandleFunc("GET "+prefix+"/spawns/{id}", srv.projectHandler(handleSpawnByIDP))
+	mux.HandleFunc("POST "+prefix+"/spawns/{id}/feedback", srv.projectHandler(handleCreateSpawnFeedbackP))
 
 	// Session control (project-scoped for create, since the store determines context)
 	mux.HandleFunc("POST "+prefix+"/sessions/ask", srv.projectHandler(handleStartAskSessionP))

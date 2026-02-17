@@ -3,8 +3,10 @@ package prompt
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/agusx1211/adaf/internal/config"
+	"github.com/agusx1211/adaf/internal/profilescore"
 	"github.com/agusx1211/adaf/internal/store"
 )
 
@@ -141,6 +143,7 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 
 	// Command reference pointer — full command reference available via `adaf skill delegation`.
 	b.WriteString("Run `adaf skill delegation` for command reference and spawn patterns.\n\n")
+	perfByProfile := loadDelegationPerformance(globalCfg)
 
 	if len(runningSpawns) > 0 {
 		b.WriteString("## Currently Running Spawns\n\n")
@@ -179,6 +182,9 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 			if p.Intelligence > 0 {
 				line += fmt.Sprintf(", intelligence=%d/10", p.Intelligence)
 			}
+			if cost := config.NormalizeProfileCost(p.Cost); cost != "" {
+				line += fmt.Sprintf(", cost=%s", cost)
+			}
 			speed := dp.Speed
 			if speed == "" {
 				speed = p.Speed
@@ -205,6 +211,15 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 			if dp.Handoff {
 				line += " [handoff]"
 			}
+			if perf, ok := perfByProfile[strings.ToLower(strings.TrimSpace(p.Name))]; ok && perf.TotalFeedback > 0 {
+				line += fmt.Sprintf(", feedback=%d, q=%.2f/10, diff=%.2f/10", perf.TotalFeedback, perf.AvgQuality, perf.AvgDifficulty)
+				if perf.AvgDurationSecs > 0 {
+					line += fmt.Sprintf(", avg_dur=%s", formatDelegationDuration(perf.AvgDurationSecs))
+				}
+				if topRoles := formatDelegationRoleQuality(perf.RoleBreakdown, 2); topRoles != "" {
+					line += fmt.Sprintf(", role_quality=%s", topRoles)
+				}
+			}
 			if p.Description != "" {
 				line += fmt.Sprintf(" — %s", p.Description)
 			}
@@ -217,4 +232,52 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 	fmt.Fprintf(&b, "Maximum concurrent sub-agents: %d\n\n", maxPar)
 
 	return b.String()
+}
+
+func loadDelegationPerformance(globalCfg *config.GlobalConfig) map[string]profilescore.ProfileSummary {
+	out := make(map[string]profilescore.ProfileSummary)
+	if globalCfg == nil {
+		return out
+	}
+	records, err := profilescore.Default().ListFeedback()
+	if err != nil {
+		return out
+	}
+	catalog := make([]profilescore.ProfileCatalogEntry, 0, len(globalCfg.Profiles))
+	for _, prof := range globalCfg.Profiles {
+		catalog = append(catalog, profilescore.ProfileCatalogEntry{
+			Name: prof.Name,
+			Cost: config.NormalizeProfileCost(prof.Cost),
+		})
+	}
+	report := profilescore.BuildDashboard(catalog, records)
+	for _, s := range report.Profiles {
+		out[strings.ToLower(strings.TrimSpace(s.Profile))] = s
+	}
+	return out
+}
+
+func formatDelegationDuration(avgDurationSecs float64) string {
+	if avgDurationSecs <= 0 {
+		return "n/a"
+	}
+	d := time.Duration(avgDurationSecs * float64(time.Second))
+	if d < time.Minute {
+		return fmt.Sprintf("%.0fs", avgDurationSecs)
+	}
+	return d.Round(time.Second).String()
+}
+
+func formatDelegationRoleQuality(items []profilescore.BreakdownStats, limit int) string {
+	if len(items) == 0 || limit <= 0 {
+		return ""
+	}
+	if limit > len(items) {
+		limit = len(items)
+	}
+	parts := make([]string, 0, limit)
+	for i := 0; i < limit; i++ {
+		parts = append(parts, fmt.Sprintf("%s:%.2f(%d)", items[i].Name, items[i].AvgQuality, items[i].Count))
+	}
+	return strings.Join(parts, "|")
 }
