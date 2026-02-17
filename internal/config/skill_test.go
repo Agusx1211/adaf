@@ -305,6 +305,63 @@ func TestResolveSkillsForContext(t *testing.T) {
 	}
 }
 
+func TestEffectiveStepSkills(t *testing.T) {
+	tests := []struct {
+		name string
+		step LoopStep
+		want []string
+	}{
+		{
+			name: "default nil skills",
+			step: LoopStep{},
+			want: nil,
+		},
+		{
+			name: "legacy explicit list",
+			step: LoopStep{Skills: []string{SkillAutonomy, SkillFocus}},
+			want: []string{SkillAutonomy, SkillFocus},
+		},
+		{
+			name: "explicit empty skills disables defaults",
+			step: LoopStep{SkillsExplicit: true},
+			want: []string{},
+		},
+		{
+			name: "explicit empty non-nil skills disables defaults",
+			step: LoopStep{SkillsExplicit: true, Skills: []string{}},
+			want: []string{},
+		},
+		{
+			name: "explicit custom skills",
+			step: LoopStep{SkillsExplicit: true, Skills: []string{SkillPlan}},
+			want: []string{SkillPlan},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := EffectiveStepSkills(tt.step)
+			if tt.want == nil {
+				if got != nil {
+					t.Fatalf("EffectiveStepSkills() = %v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("EffectiveStepSkills() = nil, want %v", tt.want)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("EffectiveStepSkills() len = %d, want %d (%v)", len(got), len(tt.want), got)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Fatalf("EffectiveStepSkills()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func containsFold(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }

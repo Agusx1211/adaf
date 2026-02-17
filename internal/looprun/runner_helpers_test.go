@@ -267,6 +267,44 @@ func TestBuildStepPrompt_StandaloneResumeReturnsInstructionsOnly(t *testing.T) {
 	}
 }
 
+func TestBuildStepPrompt_ExplicitEmptySkillsDisableDefaults(t *testing.T) {
+	s := newLooprunTestStore(t)
+	project, err := s.LoadProject()
+	if err != nil {
+		t.Fatalf("LoadProject() error = %v", err)
+	}
+
+	globalCfg := &config.GlobalConfig{}
+	config.EnsureDefaultRoleCatalog(globalCfg)
+	config.EnsureDefaultSkillCatalog(globalCfg)
+
+	prof := &config.Profile{Name: "p", Agent: "generic"}
+	step := config.LoopStep{
+		Profile:        "p",
+		Position:       config.PositionLead,
+		SkillsExplicit: true,
+	}
+
+	prompt, err := BuildStepPrompt(StepPromptInput{
+		Store:      s,
+		Project:    project,
+		GlobalCfg:  globalCfg,
+		LoopName:   "skills-none",
+		Step:       step,
+		Profile:    prof,
+		TotalSteps: 1,
+	})
+	if err != nil {
+		t.Fatalf("BuildStepPrompt() error = %v", err)
+	}
+	if strings.Contains(prompt, "# Skills") {
+		t.Fatalf("prompt should not include default skills when skills_explicit=true and no skills selected:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "You are fully autonomous. There is no human in the loop.") {
+		t.Fatalf("autonomy rule should be absent when no skills are active:\n%s", prompt)
+	}
+}
+
 func TestBuildAgentConfig_SetsEnvironmentVariables(t *testing.T) {
 	prof := &config.Profile{
 		Name:  "test-profile",

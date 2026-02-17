@@ -185,6 +185,41 @@ test('loop editor renders runtime prompt preview scenarios', async ({ page, requ
   await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(profileName)}`);
 });
 
+test('loop editor explicit empty skills does not fall back to defaults', async ({ page, request }) => {
+  const { state } = await gotoConfig(page, request);
+  const profileName = uniqueName('noskills-profile');
+  const loopName = uniqueName('noskills-loop');
+
+  const profileCreate = await request.post(`${state.baseURL}/api/config/profiles`, {
+    data: { name: profileName, agent: 'generic' },
+  });
+  expect(profileCreate.status()).toBe(201);
+
+  await clickSectionNew(page, /Loops \(\d+\)/);
+  await page.getByPlaceholder('my-loop').fill(loopName);
+  const profileSelect = page.locator('label', { hasText: 'Profile' }).first().locator('xpath=following-sibling::select[1]');
+  await profileSelect.selectOption(profileName);
+
+  await page.getByText('Edit skills…', { exact: true }).first().click();
+  await page.getByRole('button', { name: 'Select All' }).first().click();
+  await page.getByRole('button', { name: 'Clear' }).first().click();
+
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved').first()).toBeVisible();
+
+  const loops = await readConfigList(request, state, '/api/config/loops');
+  const persisted = loops.find((loop) => String(loop.name || '') === loopName);
+  expect(persisted).toBeTruthy();
+  const persistedStep = persisted.steps && persisted.steps[0] ? persisted.steps[0] : null;
+  expect(Boolean(persistedStep && persistedStep.skills_explicit)).toBe(true);
+
+  const previewBody = page.getByTestId('loop-prompt-preview-body');
+  await expect(previewBody).not.toContainText('# Skills');
+  await expect(previewBody).not.toContainText('You are fully autonomous. There is no human in the loop.');
+
+  await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(profileName)}`);
+});
+
 test('config team and role CRUD persists', async ({ page, request }) => {
   const { state } = await gotoConfig(page, request);
   const teamName = uniqueName('team');

@@ -312,3 +312,20 @@ func ResolveSkillsForContext(skills []string, position, role string, readOnly bo
 
 	return out
 }
+
+// EffectiveStepSkills resolves how loop-step skills should be interpreted:
+// - SkillsExplicit=true: use step.Skills exactly (empty means no skills).
+// - SkillsExplicit=false with non-empty Skills: preserve existing explicit skills.
+// - SkillsExplicit=false with empty Skills: nil => prompt defaults.
+func EffectiveStepSkills(step LoopStep) []string {
+	if step.SkillsExplicit {
+		if len(step.Skills) == 0 {
+			return []string{}
+		}
+		return append([]string(nil), step.Skills...)
+	}
+	if len(step.Skills) > 0 {
+		return append([]string(nil), step.Skills...)
+	}
+	return nil
+}

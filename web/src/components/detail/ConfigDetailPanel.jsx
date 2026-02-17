@@ -572,7 +572,15 @@ function LoopEditor({ data, setData, profiles, teams, skills, isNew, projectID }
                 <SkillsPicker
                   selected={step.skills || []}
                   available={skills}
-                  onChange={function (v) { setStep(idx, 'skills', v); }}
+                  onChange={function (v) {
+                    setData(function (prev) {
+                      var steps = (prev.steps || []).map(function (s, i) {
+                        if (i !== idx) return s;
+                        return { ...s, skills: v, skills_explicit: true };
+                      });
+                      return { ...prev, steps: steps };
+                    });
+                  }}
                 />
 
                 <div>
@@ -1481,7 +1489,7 @@ function Checkbox({ label, checked, onChange }) {
 // ── Helpers ──
 
 function emptyStep() {
-  return { profile: '', position: 'lead', turns: 1, instructions: '', can_stop: false, can_message: false, can_pushover: false, team: '', skills: [] };
+  return { profile: '', position: 'lead', turns: 1, instructions: '', can_stop: false, can_message: false, can_pushover: false, team: '', skills: [], skills_explicit: false };
 }
 
 function emptyDelegationProfile() {
@@ -1497,7 +1505,9 @@ function cleanStep(s) {
   if (s.can_message) out.can_message = true;
   if (s.can_pushover) out.can_pushover = true;
   if (s.team && s.position !== 'supervisor') out.team = s.team;
+  if (s.skills_explicit) out.skills_explicit = true;
   if (s.skills && s.skills.length > 0) out.skills = s.skills;
+  if (s.skills_explicit && (!s.skills || s.skills.length === 0)) out.skills = [];
   return out;
 }
 
@@ -1509,6 +1519,7 @@ function normalizeLoopConfig(loop) {
       ...emptyStep(),
       ...step,
       position: step && step.position ? String(step.position) : 'lead',
+      skills_explicit: !!(step && (step.skills_explicit || (Array.isArray(step.skills) && step.skills.length > 0))),
     };
     if (normalized.position === 'supervisor') {
       normalized.team = '';

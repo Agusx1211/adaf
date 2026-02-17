@@ -82,7 +82,7 @@ func BuildStepPrompt(input StepPromptInput) (string, error) {
 		Delegation:     input.Delegation,
 		Handoffs:       input.Handoffs,
 		StandaloneChat: input.Step.StandaloneChat,
-		Skills:         input.Step.Skills,
+		Skills:         config.EffectiveStepSkills(input.Step),
 	}
 	return promptpkg.Build(opts)
 }

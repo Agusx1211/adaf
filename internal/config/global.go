@@ -37,6 +37,7 @@ type LoopStep struct {
 	Team           string   `json:"team,omitempty"`            // team name reference (resolved to delegation at runtime)
 	StandaloneChat bool     `json:"standalone_chat,omitempty"` // interactive chat mode (minimal prompt)
 	Skills         []string `json:"skills,omitempty"`          // skill IDs to activate for this step
+	SkillsExplicit bool     `json:"skills_explicit,omitempty"` // when true, use Skills exactly; empty means no skills
 }
 
 // LoopDef defines a loop as a cyclic template of profile steps.

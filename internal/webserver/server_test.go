@@ -617,6 +617,40 @@ func TestConfigLoopDefUpdateClearsOptionalStepFields(t *testing.T) {
 	}
 }
 
+func TestConfigLoopDefPersistsExplicitNoSkills(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	performJSONRequest(t, srv, http.MethodPost, "/api/config/profiles", `{"name":"loop-prof","agent":"claude"}`)
+
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/config/loops", `{
+		"name":"skills-loop",
+		"steps":[{"profile":"loop-prof","skills":[],"skills_explicit":true}]
+	}`)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
+	}
+
+	listRec := performRequest(t, srv, http.MethodGet, "/api/config/loops")
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d", listRec.Code, http.StatusOK)
+	}
+
+	loops := decodeResponse[[]config.LoopDef](t, listRec)
+	if len(loops) != 1 {
+		t.Fatalf("loops length = %d, want 1", len(loops))
+	}
+	if len(loops[0].Steps) != 1 {
+		t.Fatalf("steps length = %d, want 1", len(loops[0].Steps))
+	}
+	step := loops[0].Steps[0]
+	if !step.SkillsExplicit {
+		t.Fatal("step skills_explicit = false, want true")
+	}
+	if len(step.Skills) != 0 {
+		t.Fatalf("step skills length = %d, want 0", len(step.Skills))
+	}
+}
+
 func TestLoopPromptPreviewEndpoint(t *testing.T) {
 	srv, _ := newTestServer(t)
 
