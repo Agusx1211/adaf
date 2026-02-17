@@ -273,6 +273,7 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/config/rules/{id}", srv.handleDeleteRule)
 	mux.HandleFunc("GET /api/config/teams", srv.handleListTeams)
 	mux.HandleFunc("POST /api/config/teams", srv.handleCreateTeam)
+	mux.HandleFunc("POST /api/config/teams/prompt-preview", srv.handleTeamPromptPreview)
 	mux.HandleFunc("PUT /api/config/teams/{name}", srv.handleUpdateTeam)
 	mux.HandleFunc("DELETE /api/config/teams/{name}", srv.handleDeleteTeam)
 	mux.HandleFunc("GET /api/config/recent-combinations", srv.handleListRecentCombinations)

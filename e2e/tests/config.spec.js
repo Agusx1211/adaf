@@ -165,6 +165,9 @@ test('loop editor renders runtime prompt preview scenarios', async ({ page, requ
 
   const previewPanel = page.getByTestId('loop-prompt-preview-panel');
   await expect(previewPanel).toBeVisible();
+  const previewRail = page.getByTestId('loop-preview-rail');
+  const previewRailPosition = await previewRail.evaluate((el) => getComputedStyle(el).position);
+  expect(previewRailPosition).toBe('sticky');
   const stepLabelText = await page.getByLabel('Prompt preview step').evaluate((el) =>
     Array.from(el.options).map((opt) => String(opt.textContent || '')).join(' || ')
   );
@@ -179,10 +182,72 @@ test('loop editor renders runtime prompt preview scenarios', async ({ page, requ
   await page.getByRole('button', { name: /Turn 2\+ \(resume continuation\)/ }).click();
   await expect(previewBody).toContainText('Continue from where you left off.');
 
+  await page.getByText('Edit skills…', { exact: true }).first().click();
+  const loopSkillOption = page.getByTestId('skills-option-autonomy').first();
+  await expect(loopSkillOption).toBeVisible();
+  await loopSkillOption.hover();
+  const loopHoverPreview = page.getByTestId('loop-hover-preview-card');
+  await expect(loopHoverPreview).toBeVisible();
+  await expect(loopHoverPreview).toContainText('autonomy');
+  const loopHoverBox = await loopHoverPreview.boundingBox();
+  const loopPromptPanelBox = await previewPanel.boundingBox();
+  expect(loopHoverBox && loopPromptPanelBox && loopHoverBox.y < loopPromptPanelBox.y).toBeTruthy();
+
   const hasHorizontalOverflow = await previewBody.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
   expect(hasHorizontalOverflow).toBe(false);
 
   await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(profileName)}`);
+});
+
+test('team editor shows runtime prompt preview and keeps skill preview alongside', async ({ page, request }) => {
+  const { state } = await gotoConfig(page, request);
+  const workerProfile = uniqueName('team-worker-profile');
+  const teamName = uniqueName('team-preview');
+  const skillID = uniqueName('team_skill').replace(/-/g, '_');
+
+  const workerProfileCreate = await request.post(`${state.baseURL}/api/config/profiles`, {
+    data: { name: workerProfile, agent: 'generic' },
+  });
+  expect(workerProfileCreate.status()).toBe(201);
+  const skillCreate = await request.post(`${state.baseURL}/api/config/skills`, {
+    data: { id: skillID, short: 'Skill used by team preview e2e.' },
+  });
+  expect(skillCreate.status()).toBe(201);
+
+  await clickSectionNew(page, /Teams \(\d+\)/);
+  await page.getByPlaceholder('my-team').fill(teamName);
+  await page.getByPlaceholder('What this team is good at...').fill('Team prompt preview coverage.');
+  await page.getByRole('button', { name: 'Enable' }).click();
+
+  const firstProfileSelect = page.locator('label', { hasText: 'Profile' }).first().locator('xpath=following-sibling::select[1]');
+  await firstProfileSelect.selectOption(workerProfile);
+
+  const promptPreviewPanel = page.getByTestId('team-prompt-preview-panel');
+  await expect(promptPreviewPanel).toBeVisible();
+  await page.getByLabel('Team sub-agent preview profile').selectOption(workerProfile);
+
+  const promptPreviewBody = page.getByTestId('team-prompt-preview-body');
+  await expect.poll(async () => {
+    const text = await promptPreviewBody.textContent();
+    return String(text || '');
+  }).toContain('You are a sub-agent working as a');
+  await expect(promptPreviewBody).toContainText('adaf parent-ask');
+
+  await page.getByText('Edit skills…', { exact: true }).first().click();
+  const skillOption = page.locator('label', { hasText: skillID }).first();
+  await expect(skillOption).toBeVisible();
+  await skillOption.hover();
+
+  const hoverPreviewCard = page.getByTestId('team-hover-preview-card');
+  await expect(hoverPreviewCard).toBeVisible();
+  await expect(hoverPreviewCard).toContainText(skillID);
+  await expect(promptPreviewBody).toBeVisible();
+  const hoverBox = await hoverPreviewCard.boundingBox();
+  const promptBox = await promptPreviewPanel.boundingBox();
+  expect(hoverBox && promptBox && hoverBox.y < promptBox.y).toBeTruthy();
+
+  await request.delete(`${state.baseURL}/api/config/skills/${encodeURIComponent(skillID)}`);
+  await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(workerProfile)}`);
 });
 
 test('loop editor explicit empty skills does not fall back to defaults', async ({ page, request }) => {

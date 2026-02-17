@@ -11,6 +11,7 @@ import (
 	"github.com/agusx1211/adaf/internal/config"
 	loopctrl "github.com/agusx1211/adaf/internal/loop"
 	"github.com/agusx1211/adaf/internal/looprun"
+	promptpkg "github.com/agusx1211/adaf/internal/prompt"
 	"github.com/agusx1211/adaf/internal/store"
 )
 
@@ -357,6 +358,29 @@ type loopPromptPreviewResponse struct {
 	Scenarios   []loopPromptPreviewScenario `json:"scenarios"`
 }
 
+type teamPromptPreviewRequest struct {
+	ProjectID     string      `json:"project_id,omitempty"`
+	Team          config.Team `json:"team"`
+	ChildProfile  string      `json:"child_profile,omitempty"`
+	ChildRole     string      `json:"child_role,omitempty"`
+	Task          string      `json:"task,omitempty"`
+	ReadOnly      bool        `json:"read_only,omitempty"`
+	Profile       string      `json:"profile,omitempty"`  // legacy alias for child_profile
+	Position      string      `json:"position,omitempty"` // legacy, ignored (workers only)
+	Cycle         int         `json:"cycle,omitempty"`
+	PlanID        string      `json:"plan_id,omitempty"`
+	InitialPrompt string      `json:"initial_prompt,omitempty"`
+}
+
+type teamPromptPreviewResponse struct {
+	RuntimePath string                      `json:"runtime_path"`
+	TeamName    string                      `json:"team_name"`
+	Profile     string                      `json:"profile"`
+	Position    string                      `json:"position"`
+	Role        string                      `json:"role,omitempty"`
+	Scenarios   []loopPromptPreviewScenario `json:"scenarios"`
+}
+
 func (srv *Server) handleLoopPromptPreview(w http.ResponseWriter, r *http.Request) {
 	var req loopPromptPreviewRequest
 	if !decodeJSONBody(w, r, &req) {
@@ -487,6 +511,146 @@ func (srv *Server) handleLoopPromptPreview(w http.ResponseWriter, r *http.Reques
 		},
 	}
 
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (srv *Server) handleTeamPromptPreview(w http.ResponseWriter, r *http.Request) {
+	var req teamPromptPreviewRequest
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+
+	cfg, ok := loadConfigOrError(w)
+	if !ok {
+		return
+	}
+	config.EnsureDefaultRoleCatalog(cfg)
+	config.EnsureDefaultSkillCatalog(cfg)
+
+	teamName := strings.TrimSpace(req.Team.Name)
+	if teamName == "" {
+		teamName = "preview-team"
+	}
+	teamDelegation := req.Team.Delegation
+	if teamDelegation == nil || len(teamDelegation.Profiles) == 0 {
+		writeError(w, http.StatusBadRequest, "team must include at least one delegation profile")
+		return
+	}
+
+	childProfileName := strings.TrimSpace(req.ChildProfile)
+	if childProfileName == "" {
+		// Backward compatibility for older clients.
+		childProfileName = strings.TrimSpace(req.Profile)
+	}
+	if childProfileName == "" {
+		writeError(w, http.StatusBadRequest, "child_profile is required")
+		return
+	}
+
+	childProf := cfg.FindProfile(childProfileName)
+	if childProf == nil {
+		writeError(w, http.StatusBadRequest, "profile not found: "+childProfileName)
+		return
+	}
+
+	resolved, resolvedRole, resolvedPosition, err := teamDelegation.ResolveProfileWithPosition(
+		childProfileName,
+		strings.TrimSpace(req.ChildRole),
+		config.PositionWorker,
+	)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if resolvedPosition != config.PositionWorker {
+		writeError(w, http.StatusBadRequest, "invalid child position: teams are composed only by workers")
+		return
+	}
+	if !config.ValidRole(resolvedRole, cfg) {
+		writeError(w, http.StatusBadRequest, "child role is not defined in the roles catalog: "+resolvedRole)
+		return
+	}
+	if resolved.Delegation != nil && len(resolved.Delegation.Profiles) > 0 {
+		writeError(w, http.StatusBadRequest, "invalid child delegation: workers cannot have teams")
+		return
+	}
+	childDelegation := &config.DelegationConfig{}
+	if resolved.Delegation != nil {
+		childDelegation = resolved.Delegation.Clone()
+	}
+	childSkills := append([]string(nil), resolved.Skills...)
+
+	var projectStore *store.Store
+	projectID := strings.TrimSpace(req.ProjectID)
+	if projectID == "" {
+		projectStore = srv.defaultStore()
+	} else {
+		var found bool
+		projectStore, found = srv.registry.Get(projectID)
+		if !found {
+			writeError(w, http.StatusNotFound, "project not found: "+projectID)
+			return
+		}
+	}
+
+	var projectCfg *store.ProjectConfig
+	if projectStore != nil {
+		var err error
+		projectCfg, err = projectStore.LoadProject()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load project config")
+			return
+		}
+	}
+
+	task := strings.TrimSpace(req.Task)
+	if task == "" {
+		task = "Preview task: implement the delegated sub-task and report clear results back to the parent agent."
+	}
+
+	freshPrompt, err := promptpkg.Build(promptpkg.BuildOpts{
+		Store:        projectStore,
+		Project:      projectCfg,
+		PlanID:       strings.TrimSpace(req.PlanID),
+		Profile:      childProf,
+		Role:         resolvedRole,
+		Position:     resolvedPosition,
+		GlobalCfg:    cfg,
+		Task:         task,
+		ReadOnly:     req.ReadOnly,
+		ParentTurnID: 1, // any positive value forces sub-agent prompt path
+		Delegation:   childDelegation,
+		Skills:       childSkills,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build team prompt preview: "+err.Error())
+		return
+	}
+	resumePrompt := loopctrl.BuildResumePrompt(nil, false, "", true)
+
+	resp := teamPromptPreviewResponse{
+		RuntimePath: "prompt.Build (sub-agent) + loop.BuildResumePrompt",
+		TeamName:    teamName,
+		Profile:     childProf.Name,
+		Position:    resolvedPosition,
+		Role:        resolvedRole,
+		Scenarios: []loopPromptPreviewScenario{
+			{
+				ID:          "fresh_turn",
+				Title:       "Turn 1 (fresh prompt)",
+				Description: "Exact worker sub-agent prompt template. The task text is injected when spawning.",
+				Prompt:      freshPrompt,
+				Exact:       true,
+			},
+			{
+				ID:          "resume_turn",
+				Title:       "Turn 2+ (resume continuation)",
+				Description: "Exact continuation prompt when the same agent session is resumed with no wait results or interrupts.",
+				Prompt:      resumePrompt,
+				Exact:       true,
+			},
+		},
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 

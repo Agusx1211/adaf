@@ -8,6 +8,7 @@ var SPEED_OPTIONS = ['', 'fast', 'medium', 'slow'];
 var STYLE_PRESETS = ['', 'manager', 'parallel', 'scout', 'sequential'];
 var DEFAULT_ROLE_NAMES = ['developer', 'ui-designer', 'qa', 'backend-designer', 'documentator', 'reviewer', 'scout', 'researcher'];
 var LOOP_STEP_POSITIONS = ['lead', 'manager', 'supervisor'];
+var TEAM_SUBAGENT_PREVIEW_TASK = 'Preview task: implement the delegated sub-task and report clear results back to the parent agent.';
 
 var inputStyle = {
   width: '100%', padding: '6px 10px', background: 'var(--bg-2)',
@@ -58,7 +59,6 @@ export default function ConfigDetailPanel() {
   var [roleDefs, setRoleDefs] = useState([]);
   var [agentsMeta, setAgentsMeta] = useState(null);
   var [saving, setSaving] = useState(false);
-  var [previewItem, setPreviewItem] = useState(null);
 
   // Fetch agents metadata once on mount.
   var fetchAgentsMeta = useCallback(function () {
@@ -122,9 +122,6 @@ export default function ConfigDetailPanel() {
   }, [sel && sel.type, sel && sel.name, sel && sel.isNew]);
 
   useEffect(function () { loadItem(); }, [loadItem]);
-
-  // Clear preview panel when selection changes
-  useEffect(function () { setPreviewItem(null); }, [sel && sel.type, sel && sel.name, sel && sel.isNew]);
 
   if (!sel) {
     return (
@@ -268,11 +265,10 @@ export default function ConfigDetailPanel() {
         <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column' }}>
           {sel.type === 'profile' && <ProfileEditor data={data} set={set} setData={setData} isNew={sel.isNew} agentsMeta={agentsMeta} onRefreshAgents={fetchAgentsMeta} showToast={showToast} />}
           {sel.type === 'loop' && <LoopEditor data={data} setData={setData} profiles={profiles} teams={teams} skills={skills} isNew={sel.isNew} projectID={state.currentProjectID} />}
-          {sel.type === 'team' && <TeamEditor data={data} set={set} setData={setData} profiles={profiles} skills={skills} roleDefs={roleDefs} isNew={sel.isNew} onPreview={setPreviewItem} />}
+          {sel.type === 'team' && <TeamEditor data={data} set={set} setData={setData} profiles={profiles} skills={skills} roleDefs={roleDefs} isNew={sel.isNew} projectID={state.currentProjectID} />}
           {sel.type === 'skill' && <SkillEditor data={data} set={set} isNew={sel.isNew} />}
           {sel.type === 'role' && <RoleEditor data={data} set={set} isNew={sel.isNew} />}
         </div>
-        {sel.type !== 'loop' && previewItem && <PreviewPanel item={previewItem} onClose={function () { setPreviewItem(null); }} />}
       </div>
     </div>
   );
@@ -409,6 +405,7 @@ function LoopEditor({ data, setData, profiles, teams, skills, isNew, projectID }
   var [previewStepIndex, setPreviewStepIndex] = useState(0);
   var [previewScenarioID, setPreviewScenarioID] = useState('fresh_turn');
   var [promptPreview, setPromptPreview] = useState({ loading: false, error: '', data: null });
+  var [previewItem, setPreviewItem] = useState(null);
 
   useEffect(function () {
     var stepCount = (data.steps || []).length;
@@ -581,6 +578,7 @@ function LoopEditor({ data, setData, profiles, teams, skills, isNew, projectID }
                       return { ...prev, steps: steps };
                     });
                   }}
+                  onPreview={setPreviewItem}
                 />
 
                 <div>
@@ -600,15 +598,33 @@ function LoopEditor({ data, setData, profiles, teams, skills, isNew, projectID }
         <button onClick={addStep} style={{ ...btnStyle, alignSelf: 'flex-start' }}>+ Add Step</button>
       </div>
 
-      <LoopPromptPreviewPanel
-        loopName={data.name}
-        steps={data.steps || []}
-        previewStepIndex={previewStepIndex}
-        setPreviewStepIndex={setPreviewStepIndex}
-        previewScenarioID={previewScenarioID}
-        setPreviewScenarioID={setPreviewScenarioID}
-        promptPreview={promptPreview}
-      />
+      <div
+        data-testid="loop-preview-rail"
+        style={{
+          flex: '1 1 360px',
+          minWidth: 300,
+          maxWidth: 520,
+          position: 'sticky',
+          top: 0,
+          alignSelf: 'flex-start',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          maxHeight: 'calc(100vh - 210px)',
+          overflow: 'hidden',
+        }}
+      >
+        <HoverPreviewCard item={previewItem} testID="loop-hover-preview-card" maxHeight={200} />
+        <LoopPromptPreviewPanel
+          loopName={data.name}
+          steps={data.steps || []}
+          previewStepIndex={previewStepIndex}
+          setPreviewStepIndex={setPreviewStepIndex}
+          previewScenarioID={previewScenarioID}
+          setPreviewScenarioID={setPreviewScenarioID}
+          promptPreview={promptPreview}
+        />
+      </div>
     </div>
   );
 }
@@ -632,17 +648,14 @@ function LoopPromptPreviewPanel({
 
   return (
     <div data-testid="loop-prompt-preview-panel" style={{
-      flex: '1 1 360px',
-      minWidth: 300,
-      maxWidth: 520,
+      flex: 1,
+      minHeight: 0,
       border: '1px solid var(--border)',
       borderRadius: 6,
       background: 'var(--bg-1)',
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      minHeight: 0,
-      maxHeight: 'calc(100vh - 210px)',
     }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 600, color: 'var(--text-0)' }}>
@@ -751,29 +764,422 @@ function LoopPromptPreviewPanel({
 
 // ── Team Editor ──
 
-function TeamEditor({ data, set, setData, profiles, skills, roleDefs, isNew, onPreview }) {
+function TeamEditor({ data, set, setData, profiles, skills, roleDefs, isNew, projectID }) {
+  var [previewItem, setPreviewItem] = useState(null);
+  var [previewChildProfile, setPreviewChildProfile] = useState('');
+  var [previewChildRole, setPreviewChildRole] = useState('');
+  var [previewScenarioID, setPreviewScenarioID] = useState('fresh_turn');
+  var [promptPreview, setPromptPreview] = useState({ loading: false, error: '', data: null });
+
+  var delegationProfiles = (data.delegation && Array.isArray(data.delegation.profiles)) ? data.delegation.profiles : [];
+
+  useEffect(function () {
+    if (!delegationProfiles.length) {
+      if (previewChildProfile) setPreviewChildProfile('');
+      return;
+    }
+    var names = delegationProfiles.map(function (dp) { return String(dp.name || '').trim(); }).filter(Boolean);
+    if (!names.length) {
+      if (previewChildProfile) setPreviewChildProfile('');
+      return;
+    }
+    if (previewChildProfile && names.indexOf(previewChildProfile) >= 0) return;
+    setPreviewChildProfile(names[0]);
+  }, [delegationProfiles, previewChildProfile]);
+
+  useEffect(function () {
+    var selected = delegationProfiles.find(function (dp) { return String(dp.name || '').trim() === String(previewChildProfile || '').trim(); });
+    var roleOptions = previewRoleOptionsForDelegationProfile(selected);
+    if (previewChildRole && roleOptions.indexOf(previewChildRole) >= 0) return;
+    setPreviewChildRole(roleOptions[0] || '');
+  }, [delegationProfiles, previewChildProfile, previewChildRole]);
+
+  useEffect(function () {
+    if (!profiles || !profiles.length) {
+      setPromptPreview({ loading: false, error: 'Create at least one profile to preview worker prompts.', data: null });
+      return;
+    }
+    if (!delegationProfiles.length) {
+      setPromptPreview({ loading: false, error: 'Enable delegation and add sub-agent profiles to preview worker prompts.', data: null });
+      return;
+    }
+    if (!String(previewChildProfile || '').trim()) {
+      setPromptPreview({ loading: false, error: 'Select a sub-agent profile to preview.', data: null });
+      return;
+    }
+
+    var cancelled = false;
+    setPromptPreview(function (prev) { return { ...prev, loading: true, error: '' }; });
+
+    var timer = setTimeout(function () {
+      var teamPayload = { name: data.name || '' };
+      if (data.description) teamPayload.description = data.description;
+      if (data.delegation) teamPayload.delegation = cleanDelegation(data.delegation);
+
+      apiCall('/api/config/teams/prompt-preview', 'POST', {
+        project_id: projectID || '',
+        team: teamPayload,
+        child_profile: previewChildProfile,
+        child_role: previewChildRole || '',
+        task: TEAM_SUBAGENT_PREVIEW_TASK,
+      })
+        .then(function (resp) {
+          if (cancelled) return;
+          setPromptPreview({ loading: false, error: '', data: resp || null });
+          var scenarios = resp && Array.isArray(resp.scenarios) ? resp.scenarios : [];
+          setPreviewScenarioID(function (prev) {
+            if (!scenarios.length) return '';
+            return scenarios.some(function (s) { return s.id === prev; }) ? prev : scenarios[0].id;
+          });
+        })
+        .catch(function (err) {
+          if (cancelled || (err && err.authRequired)) return;
+          setPromptPreview({ loading: false, error: err.message || String(err), data: null });
+        });
+    }, 180);
+
+    return function () {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [data, delegationProfiles, previewChildProfile, previewChildRole, projectID, profiles]);
+
   function setDelegation(deleg) {
     setData(function (prev) { return { ...prev, delegation: deleg }; });
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <Field label="Name" value={data.name} onChange={function (v) { set('name', v); }} disabled={!isNew} placeholder="my-team" />
-      <div>
-        <label style={labelStyle}>Description</label>
-        <textarea value={data.description || ''} onChange={function (e) { set('description', e.target.value); }} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} placeholder="What this team is good at..." />
+    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+      <div style={{ flex: '999 1 560px', minWidth: 300, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <Field label="Name" value={data.name} onChange={function (v) { set('name', v); }} disabled={!isNew} placeholder="my-team" />
+        <div>
+          <label style={labelStyle}>Description</label>
+          <textarea value={data.description || ''} onChange={function (e) { set('description', e.target.value); }} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} placeholder="What this team is good at..." />
+        </div>
+
+        {/* Delegation */}
+        <DelegationEditor
+          delegation={data.delegation}
+          onChange={setDelegation}
+          profiles={profiles}
+          skills={skills}
+          roleDefs={roleDefs}
+          label="Team Sub-Agent Delegation"
+          onPreview={setPreviewItem}
+        />
+      </div>
+      <div style={{
+        flex: '1 1 360px',
+        minWidth: 300,
+        maxWidth: 520,
+        position: 'sticky',
+        top: 0,
+        alignSelf: 'flex-start',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+        maxHeight: 'calc(100vh - 210px)',
+        overflow: 'hidden',
+      }}>
+        <HoverPreviewCard item={previewItem} testID="team-hover-preview-card" maxHeight={200} />
+        <TeamPromptPreviewPanel
+          teamName={data.name}
+          previewChildProfile={previewChildProfile}
+          setPreviewChildProfile={setPreviewChildProfile}
+          previewChildRole={previewChildRole}
+          setPreviewChildRole={setPreviewChildRole}
+          delegationProfiles={delegationProfiles}
+          profiles={profiles}
+          previewScenarioID={previewScenarioID}
+          setPreviewScenarioID={setPreviewScenarioID}
+          promptPreview={promptPreview}
+        />
+      </div>
+    </div>
+  );
+}
+
+function TeamPromptPreviewPanel({
+  teamName,
+  previewChildProfile,
+  setPreviewChildProfile,
+  previewChildRole,
+  setPreviewChildRole,
+  delegationProfiles,
+  profiles,
+  previewScenarioID,
+  setPreviewScenarioID,
+  promptPreview,
+}) {
+  var scenarios = promptPreview && promptPreview.data && Array.isArray(promptPreview.data.scenarios)
+    ? promptPreview.data.scenarios
+    : [];
+  var activeScenario = scenarios.find(function (s) { return s.id === previewScenarioID; }) || (scenarios[0] || null);
+  var runtimePath = promptPreview && promptPreview.data && promptPreview.data.runtime_path
+    ? String(promptPreview.data.runtime_path)
+    : '';
+  var selectedDelegationProfile = (delegationProfiles || []).find(function (dp) { return String(dp.name || '').trim() === String(previewChildProfile || '').trim(); }) || null;
+  var roleOptions = previewRoleOptionsForDelegationProfile(selectedDelegationProfile);
+
+  return (
+    <div data-testid="team-prompt-preview-panel" style={{
+      flex: 1,
+      minHeight: 0,
+      border: '1px solid var(--border)',
+      borderRadius: 6,
+      background: 'var(--bg-1)',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+    }}>
+      <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 600, color: 'var(--text-0)' }}>
+          Prompt Preview
+        </div>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>
+          Exact worker sub-agent prompt preview generated from runtime builders.
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <label style={{ ...labelStyle, marginBottom: 0 }}>Sub-Agent</label>
+          <select
+            aria-label="Team sub-agent preview profile"
+            value={previewChildProfile}
+            onChange={function (e) { setPreviewChildProfile(e.target.value); }}
+            style={{ ...selectStyle, flex: 1, width: 'auto', minWidth: 0, padding: '4px 8px', fontSize: 11 }}
+          >
+            {(delegationProfiles || []).map(function (dp, idx) {
+              var name = String(dp.name || '').trim() || ('sub-agent-' + (idx + 1));
+              var profileMeta = (profiles || []).find(function (p) { return p.name === name; }) || null;
+              return <option key={name + '-' + idx} value={name}>{name}{profileMeta ? ' (' + profileMeta.agent + ')' : ''}</option>;
+            })}
+          </select>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <label style={{ ...labelStyle, marginBottom: 0 }}>Role</label>
+          <select
+            aria-label="Team sub-agent preview role"
+            value={previewChildRole}
+            onChange={function (e) { setPreviewChildRole(e.target.value); }}
+            style={{ ...selectStyle, flex: 1, width: 'auto', minWidth: 0, padding: '4px 8px', fontSize: 11 }}
+          >
+            {roleOptions.map(function (role) {
+              return <option key={role || 'auto'} value={role}>{role || 'auto (default worker role)'}</option>;
+            })}
+          </select>
+        </div>
+        {!!teamName && (
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-2)' }}>
+            Team: {teamName}
+          </div>
+        )}
+        {!!previewChildProfile && (
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-2)' }}>
+            Position: worker (sub-agents are always workers)
+          </div>
+        )}
+        {!!runtimePath && (
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--text-3)' }}>
+            Runtime path: {runtimePath}
+          </div>
+        )}
       </div>
 
-      {/* Delegation */}
-      <DelegationEditor
-        delegation={data.delegation}
-        onChange={setDelegation}
-        profiles={profiles}
-        skills={skills}
-        roleDefs={roleDefs}
-        label="Team Sub-Agent Delegation"
-        onPreview={onPreview}
-      />
+      <div style={{ padding: 12, overflow: 'auto', minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {promptPreview.loading && (
+          <div data-testid="team-prompt-preview-loading" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--text-3)' }}>
+            Building prompt preview...
+          </div>
+        )}
+
+        {!promptPreview.loading && promptPreview.error && (
+          <div data-testid="team-prompt-preview-error" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--orange)', whiteSpace: 'pre-wrap' }}>
+            {promptPreview.error}
+          </div>
+        )}
+
+        {!promptPreview.loading && !promptPreview.error && scenarios.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {scenarios.map(function (scenario) {
+              var selected = scenario.id === (activeScenario && activeScenario.id);
+              return (
+                <button
+                  key={scenario.id}
+                  type="button"
+                  onClick={function () { setPreviewScenarioID(scenario.id); }}
+                  style={{
+                    ...btnStyle,
+                    fontSize: 10,
+                    padding: '3px 8px',
+                    border: selected ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    color: selected ? '#000' : 'var(--text-1)',
+                    background: selected ? 'var(--accent)' : 'var(--bg-2)',
+                  }}
+                >
+                  {scenario.title}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {!promptPreview.loading && !promptPreview.error && activeScenario && (
+          <>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>
+              {activeScenario.description}
+            </div>
+            <pre data-testid="team-prompt-preview-body" style={{
+              margin: 0,
+              padding: '12px 14px',
+              background: 'var(--bg-2)',
+              border: '1px solid var(--border)',
+              borderRadius: 4,
+              color: 'var(--text-1)',
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: 10,
+              lineHeight: 1.5,
+              whiteSpace: 'pre-wrap',
+              overflowWrap: 'anywhere',
+              wordBreak: 'break-word',
+              overflow: 'auto',
+              maxWidth: '100%',
+              minHeight: 180,
+            }}>
+              {activeScenario.prompt || '(empty prompt)'}
+            </pre>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function previewRoleOptionsForDelegationProfile(dp) {
+  if (!dp) return [''];
+  var single = String(dp.role || '').trim();
+  if (single) return [single];
+  if (Array.isArray(dp.roles) && dp.roles.length > 0) {
+    var seen = {};
+    var out = [];
+    dp.roles.forEach(function (rawRole) {
+      var role = String(rawRole || '').trim();
+      var key = role.toLowerCase();
+      if (!role || seen[key]) return;
+      seen[key] = true;
+      out.push(role);
+    });
+    if (out.length > 0) return out;
+  }
+  return [''];
+}
+
+function HoverPreviewCard({ item, testID, maxHeight }) {
+  var emptyTestID = (testID || 'hover-preview-card') + '-empty';
+  var cardTestID = testID || 'hover-preview-card';
+  if (!item) {
+    return (
+      <div data-testid={emptyTestID} style={{
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        background: 'var(--bg-1)',
+        padding: 12,
+        flexShrink: 0,
+      }}>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--text-3)' }}>
+          Hover a role or skill to preview it here while keeping prompt preview visible.
+        </div>
+      </div>
+    );
+  }
+
+  var isRole = item.type === 'role';
+  var badgeColor = isRole ? (ROLE_CHIP_COLORS[item.id] || 'var(--orange)') : 'var(--pink)';
+  var badgeLabel = isRole ? 'ROLE' : 'SKILL';
+
+  return (
+    <div data-testid={cardTestID} style={{
+      border: '1px solid var(--border)',
+      borderRadius: 6,
+      background: 'var(--bg-1)',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+      maxHeight: maxHeight || 260,
+      flexShrink: 0,
+    }}>
+      <div style={{
+        padding: '10px 12px',
+        borderBottom: '1px solid var(--border)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+      }}>
+        <span style={{
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 9, padding: '2px 6px',
+          borderRadius: 3, background: badgeColor + '15', color: badgeColor,
+          textTransform: 'uppercase', fontWeight: 600, flexShrink: 0,
+        }}>{badgeLabel}</span>
+        <span style={{
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600,
+          color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{item.title || item.id}</span>
+      </div>
+      <div style={{ padding: 12, overflow: 'auto' }}>
+        {isRole && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-1)', lineHeight: 1.5 }}>
+              {item.description || 'No description available.'}
+            </div>
+            {item.identity && (
+              <pre style={{
+                margin: 0,
+                padding: '8px 10px',
+                background: 'var(--bg-2)',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                color: 'var(--text-2)',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 9,
+                lineHeight: 1.5,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}>
+                {item.identity}
+              </pre>
+            )}
+          </div>
+        )}
+        {!isRole && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {item.short && (
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-1)', lineHeight: 1.5 }}>
+                {item.short}
+              </div>
+            )}
+            {item.long && (
+              <pre style={{
+                margin: 0,
+                padding: '8px 10px',
+                background: 'var(--bg-2)',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                color: 'var(--text-2)',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 9,
+                lineHeight: 1.5,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}>
+                {item.long}
+              </pre>
+            )}
+            {!item.short && !item.long && (
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>
+                No description available.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1199,6 +1605,8 @@ function SkillsPicker({ selected, available, onChange, onPreview }) {
   }
 
   var count = (selected || []).length;
+  var skillMap = {};
+  (available || []).forEach(function (sk) { if (sk && sk.id) skillMap[sk.id] = sk; });
   var filtered = (available || []).filter(function (sk) {
     if (!filter) return true;
     var q = filter.toLowerCase();
@@ -1220,6 +1628,7 @@ function SkillsPicker({ selected, available, onChange, onPreview }) {
       {count > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
           {(selected || []).map(function (id) {
+            var selectedSkill = skillMap[id] || null;
             return (
               <span key={id} style={{
                 display: 'inline-flex', alignItems: 'center', gap: 3,
@@ -1227,7 +1636,12 @@ function SkillsPicker({ selected, available, onChange, onPreview }) {
                 fontFamily: "'JetBrains Mono', monospace",
                 background: 'var(--pink)15', color: 'var(--pink)',
                 border: '1px solid var(--pink)30',
-              }}>
+              }}
+                onMouseEnter={function () {
+                  if (!onPreview || !selectedSkill) return;
+                  onPreview({ type: 'skill', id: selectedSkill.id, short: selectedSkill.short, long: selectedSkill.long });
+                }}
+              >
                 {id}
                 <span
                   onClick={function () { toggle(id); }}
@@ -1278,7 +1692,7 @@ function SkillsPicker({ selected, available, onChange, onPreview }) {
             var shortText = sk.short || '';
             if (shortText.length > 80) shortText = shortText.slice(0, 80) + '\u2026';
             return (
-              <label key={sk.id} style={{
+              <label key={sk.id} data-testid={'skills-option-' + sk.id} style={{
                 display: 'flex', alignItems: 'flex-start', gap: 6, padding: '6px 4px',
                 cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
                 color: isChecked ? 'var(--text-0)' : 'var(--text-2)',
@@ -1313,142 +1727,6 @@ function SkillsPicker({ selected, available, onChange, onPreview }) {
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-// ── Preview Panel ──
-
-function PreviewPanel({ item, onClose }) {
-  if (!item) return null;
-
-  var isRole = item.type === 'role';
-  var badgeColor = isRole ? (ROLE_CHIP_COLORS[item.id] || 'var(--orange)') : 'var(--pink)';
-  var badgeLabel = isRole ? 'ROLE' : 'SKILL';
-
-  return (
-    <div style={{
-      width: 300, flexShrink: 0, borderLeft: '1px solid var(--border)',
-      background: 'var(--bg-1)', display: 'flex', flexDirection: 'column',
-      overflow: 'hidden',
-    }}>
-      {/* Header */}
-      <div style={{
-        padding: '12px 16px', borderBottom: '1px solid var(--border)',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        flexShrink: 0,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-          <span style={{
-            fontFamily: "'JetBrains Mono', monospace", fontSize: 9, padding: '2px 6px',
-            borderRadius: 3, background: badgeColor + '15', color: badgeColor,
-            textTransform: 'uppercase', fontWeight: 600, flexShrink: 0,
-          }}>{badgeLabel}</span>
-          <span style={{
-            fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 600,
-            color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>{item.title || item.id}</span>
-        </div>
-        <span
-          onClick={onClose}
-          style={{
-            cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace",
-            fontSize: 16, lineHeight: 1, color: 'var(--text-3)',
-            flexShrink: 0, marginLeft: 8,
-          }}
-          onMouseEnter={function (e) { e.currentTarget.style.color = 'var(--text-0)'; }}
-          onMouseLeave={function (e) { e.currentTarget.style.color = 'var(--text-3)'; }}
-        >{'\u00D7'}</span>
-      </div>
-
-      {/* Body */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
-        {isRole && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {/* Description */}
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--text-1)', lineHeight: 1.6 }}>
-              {item.description}
-            </div>
-
-            {/* Capabilities badge */}
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              <span style={{
-                fontFamily: "'JetBrains Mono', monospace", fontSize: 9, padding: '2px 8px',
-                borderRadius: 10, fontWeight: 500,
-                background: item.can_write_code ? 'var(--green)15' : 'var(--red)15',
-                color: item.can_write_code ? 'var(--green)' : 'var(--red)',
-                border: '1px solid ' + (item.can_write_code ? 'var(--green)30' : 'var(--red)30'),
-              }}>
-                {item.can_write_code ? 'Can write code' : 'Read-only (no code writes)'}
-              </span>
-            </div>
-
-            {/* Identity / system prompt */}
-            {item.identity && (
-              <div>
-                <div style={{ ...labelStyle, marginBottom: 6 }}>Identity Prompt</div>
-                <pre style={{
-                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-2)',
-                  lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0,
-                  padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 4,
-                  border: '1px solid var(--border)',
-                }}>
-                  {item.identity}
-                </pre>
-              </div>
-            )}
-
-            {/* Rule IDs */}
-            {item.rule_ids && item.rule_ids.length > 0 && (
-              <div>
-                <div style={{ ...labelStyle, marginBottom: 6 }}>Attached Rules</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                  {item.rule_ids.map(function (rid) {
-                    return (
-                      <span key={rid} style={{
-                        fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-                        padding: '2px 8px', borderRadius: 10,
-                        background: 'var(--accent)12', color: 'var(--accent)',
-                        border: '1px solid var(--accent)25',
-                      }}>{rid}</span>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-        {!isRole && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {item.short && (
-              <div>
-                <div style={{ ...labelStyle, marginBottom: 6 }}>Summary</div>
-                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--text-1)', lineHeight: 1.6 }}>
-                  {item.short}
-                </div>
-              </div>
-            )}
-            {item.long && (
-              <div>
-                <div style={{ ...labelStyle, marginBottom: 6 }}>Documentation</div>
-                <pre style={{
-                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-2)',
-                  lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0,
-                  padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 4,
-                  border: '1px solid var(--border)',
-                }}>
-                  {item.long}
-                </pre>
-              </div>
-            )}
-            {!item.short && !item.long && (
-              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--text-3)' }}>
-                No description available.
-              </div>
-            )}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

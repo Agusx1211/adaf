@@ -725,6 +725,90 @@ func TestLoopPromptPreviewEndpoint(t *testing.T) {
 	}
 }
 
+func TestTeamPromptPreviewEndpoint(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	performJSONRequest(t, srv, http.MethodPost, "/api/config/profiles", `{"name":"worker-prof","agent":"generic"}`)
+
+	rec := performJSONRequest(t, srv, http.MethodPost, "/api/config/teams/prompt-preview", `{
+		"child_profile":"worker-prof",
+		"child_role":"developer",
+		"team":{
+			"name":"preview-team",
+			"delegation":{
+				"profiles":[
+					{"name":"worker-prof","roles":["developer"]}
+				]
+			}
+		}
+	}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var out struct {
+		RuntimePath string `json:"runtime_path"`
+		TeamName    string `json:"team_name"`
+		Profile     string `json:"profile"`
+		Position    string `json:"position"`
+		Role        string `json:"role"`
+		Scenarios   []struct {
+			ID     string `json:"id"`
+			Prompt string `json:"prompt"`
+			Exact  bool   `json:"exact"`
+		} `json:"scenarios"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if out.RuntimePath != "prompt.Build (sub-agent) + loop.BuildResumePrompt" {
+		t.Fatalf("runtime_path = %q, want %q", out.RuntimePath, "prompt.Build (sub-agent) + loop.BuildResumePrompt")
+	}
+	if out.TeamName != "preview-team" {
+		t.Fatalf("team_name = %q, want %q", out.TeamName, "preview-team")
+	}
+	if out.Profile != "worker-prof" {
+		t.Fatalf("profile = %q, want %q", out.Profile, "worker-prof")
+	}
+	if out.Position != config.PositionWorker {
+		t.Fatalf("position = %q, want %q", out.Position, config.PositionWorker)
+	}
+	if out.Role != config.RoleDeveloper {
+		t.Fatalf("role = %q, want %q", out.Role, config.RoleDeveloper)
+	}
+	if len(out.Scenarios) != 2 {
+		t.Fatalf("scenario count = %d, want 2", len(out.Scenarios))
+	}
+
+	var freshPrompt, resumePrompt string
+	for _, sc := range out.Scenarios {
+		if !sc.Exact {
+			t.Fatalf("scenario %q exact = false, want true", sc.ID)
+		}
+		switch sc.ID {
+		case "fresh_turn":
+			freshPrompt = sc.Prompt
+		case "resume_turn":
+			resumePrompt = sc.Prompt
+		}
+	}
+	if freshPrompt == "" {
+		t.Fatal("fresh_turn prompt missing")
+	}
+	if !strings.Contains(freshPrompt, "You are a sub-agent working as a developer.") {
+		t.Fatalf("fresh prompt missing sub-agent intro:\n%s", freshPrompt)
+	}
+	if !strings.Contains(freshPrompt, "adaf parent-ask") {
+		t.Fatalf("fresh prompt missing parent communication guidance:\n%s", freshPrompt)
+	}
+	if !strings.Contains(freshPrompt, "Preview task: implement the delegated sub-task") {
+		t.Fatalf("fresh prompt missing preview task text:\n%s", freshPrompt)
+	}
+	if !strings.Contains(resumePrompt, "Continue from where you left off.") {
+		t.Fatalf("resume prompt = %q, want continuation lead", resumePrompt)
+	}
+}
+
 func TestConfigTeamUpdateClearsDelegation(t *testing.T) {
 	srv, _ := newTestServer(t)
 
