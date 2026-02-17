@@ -164,7 +164,15 @@ function reducer(state, action) {
     }
 
     case 'MERGE_SPAWNS': {
-      return { ...state, spawns: action.payload };
+      var mergedSpawns = mergeSpawnRecords(state.spawns, action.payload);
+      if (mergedSpawns === state.spawns) return state;
+      return { ...state, spawns: mergedSpawns };
+    }
+
+    case 'MERGE_SESSIONS': {
+      var mergedSessions = mergeSessionRecords(state.sessions, action.payload);
+      if (mergedSessions === state.sessions) return state;
+      return { ...state, sessions: mergedSessions };
     }
 
     case 'RESET_PROJECT_STATE':
@@ -440,4 +448,101 @@ export function aggregateUsageFromProfileStats(stats) {
     usage.num_turns += Number(item && item.total_turns) || 0;
   });
   return usage;
+}
+
+function mergeSpawnRecords(current, updates) {
+  var updateList = arrayOrEmpty(updates).filter(function (spawn) { return spawn && spawn.id > 0; });
+  if (!updateList.length) return current;
+
+  var byID = {};
+  arrayOrEmpty(current).forEach(function (spawn) {
+    if (!spawn || spawn.id <= 0) return;
+    byID[spawn.id] = spawn;
+  });
+
+  updateList.forEach(function (spawn) {
+    var prev = byID[spawn.id];
+    if (!prev) {
+      byID[spawn.id] = spawn;
+      return;
+    }
+    var nextStatusKey = normalizeStatus(spawn.status);
+    var nextStatus = (nextStatusKey && nextStatusKey !== 'unknown') ? spawn.status : prev.status;
+    var question = '';
+    if (nextStatusKey === 'awaiting_input') {
+      question = spawn.question || prev.question || '';
+    } else if (Object.prototype.hasOwnProperty.call(spawn, 'question') && spawn.question) {
+      question = spawn.question;
+    }
+    byID[spawn.id] = {
+      ...prev,
+      parent_turn_id: spawn.parent_turn_id || prev.parent_turn_id,
+      parent_session_id: spawn.parent_session_id || prev.parent_session_id,
+      parent_daemon_session_id: spawn.parent_daemon_session_id || prev.parent_daemon_session_id,
+      parent_spawn_id: spawn.parent_spawn_id || prev.parent_spawn_id,
+      child_turn_id: spawn.child_turn_id || prev.child_turn_id,
+      child_session_id: spawn.child_session_id || prev.child_session_id,
+      child_daemon_session_id: spawn.child_daemon_session_id || prev.child_daemon_session_id,
+      profile: spawn.profile || prev.profile,
+      role: spawn.role || prev.role,
+      parent_profile: spawn.parent_profile || prev.parent_profile,
+      status: nextStatus,
+      question: question,
+      started_at: spawn.started_at || prev.started_at,
+      completed_at: spawn.completed_at || prev.completed_at,
+      task: spawn.task || prev.task,
+      branch: spawn.branch || prev.branch,
+      summary: spawn.summary || prev.summary,
+    };
+  });
+
+  return Object.values(byID).sort(function (a, b) {
+    var diff = parseTimestamp(b.started_at) - parseTimestamp(a.started_at);
+    if (diff !== 0) return diff;
+    return b.id - a.id;
+  });
+}
+
+function mergeSessionRecords(current, updates) {
+  var updateList = arrayOrEmpty(updates).filter(function (session) { return session && session.id > 0; });
+  if (!updateList.length) return current;
+
+  var byID = {};
+  arrayOrEmpty(current).forEach(function (session) {
+    if (!session || session.id <= 0) return;
+    byID[session.id] = session;
+  });
+
+  updateList.forEach(function (session) {
+    var prev = byID[session.id];
+    if (!prev) {
+      byID[session.id] = {
+        id: session.id,
+        profile: session.profile || '',
+        agent: session.agent || '',
+        model: session.model || '',
+        status: session.status || 'unknown',
+        action: session.action || '',
+        started_at: session.started_at || '',
+        ended_at: Object.prototype.hasOwnProperty.call(session, 'ended_at') ? String(session.ended_at || '') : '',
+        loop_name: session.loop_name || '',
+      };
+      return;
+    }
+
+    var next = { ...prev };
+    if (session.profile) next.profile = session.profile;
+    if (session.agent) next.agent = session.agent;
+    if (session.model) next.model = session.model;
+    if (session.loop_name) next.loop_name = session.loop_name;
+    if (session.status) next.status = session.status;
+    if (session.action) next.action = session.action;
+    if (session.started_at) next.started_at = session.started_at;
+    if (Object.prototype.hasOwnProperty.call(session, 'ended_at')) {
+      next.ended_at = String(session.ended_at || '');
+    }
+    byID[session.id] = next;
+  });
+
+  return Object.values(byID).sort(function (a, b) { return b.id - a.id; });
 }

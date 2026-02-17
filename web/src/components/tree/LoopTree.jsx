@@ -308,14 +308,33 @@ export default function LoopTree() {
           runTurnIDs.forEach(function (turnID) {
             var turn = turnsByID[turnID] || null;
             var step = stepByTurn[turnID] || {};
+            var daemonStatus = normalizeStatus(daemonSession && daemonSession.status);
+            var latestTurn = turnID === latestTurnID;
+            var latestDaemonLive = latestTurn && daemonSession && (
+              STATUS_RUNNING[daemonStatus] ||
+              daemonStatus === 'waiting' ||
+              daemonStatus === 'waiting_for_spawns'
+            );
+            var latestDaemonRunning = latestTurn && daemonSession && STATUS_RUNNING[daemonStatus];
             var startedAt = (turn && turn.date) || (daemonSession && daemonSession.started_at) || lr.started_at || '';
             var endedAt = '';
-            if (turn && turn.duration_secs > 0) {
+            if (!latestDaemonRunning && turn && turn.duration_secs > 0) {
               endedAt = addSecondsISO(startedAt, turn.duration_secs);
             }
-            if (!endedAt && turnID !== latestTurnID && daemonSession && !STATUS_RUNNING[normalizeStatus(daemonSession.status)]) {
+            if (!endedAt && !latestTurn && daemonSession && !STATUS_RUNNING[normalizeStatus(daemonSession.status)]) {
               endedAt = daemonSession.ended_at || '';
             }
+            var displayStatus = '';
+            if (latestDaemonLive) {
+              displayStatus = daemonSession.status || '';
+            }
+            if (!displayStatus && turn && turn.build_state) {
+              displayStatus = String(turn.build_state);
+            }
+            if (!displayStatus && latestTurn && daemonSession) {
+              displayStatus = daemonSession.status || 'done';
+            }
+            if (!displayStatus) displayStatus = 'done';
 
             var rootSpawns = spawnTree.rootsByTurn[turnID] || [];
             if (!rootSpawns.length && runTurnIDs.length === 1) {
@@ -336,9 +355,7 @@ export default function LoopTree() {
                 profile: (turn && turn.profile_name) || step.profile || (daemonSession && daemonSession.profile) || 'unknown',
                 agent: (turn && turn.agent) || (daemonSession && daemonSession.agent) || '',
                 model: (turn && turn.agent_model) || (daemonSession && daemonSession.model) || '',
-                status: (turn && turn.build_state)
-                  ? String(turn.build_state)
-                  : (turnID === latestTurnID && daemonSession ? daemonSession.status : 'done'),
+                status: displayStatus,
                 action: step.position || '',
                 started_at: startedAt,
                 ended_at: endedAt,

@@ -131,7 +131,10 @@ export default function App() {
     if (!targetSessionID) return 0;
     var sess = sessions.find(function (s) { return s.id === targetSessionID; });
     if (!sess) return targetSessionID; // unknown status — try connecting
-    return STATUS_RUNNING[normalizeStatus(sess.status)] ? targetSessionID : 0;
+    var status = normalizeStatus(sess.status);
+    return (STATUS_RUNNING[status] || status === 'waiting' || status === 'waiting_for_spawns')
+      ? targetSessionID
+      : 0;
   }, [targetSessionID, sessions]);
 
   useSessionSocket(wsSessionID);

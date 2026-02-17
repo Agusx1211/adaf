@@ -196,6 +196,10 @@ export function useSessionSocket(sessionID) {
 
   var ingestEnvelope = useCallback(function (sid, envelope) {
     if (!envelope || typeof envelope !== 'object') return;
+    function mergeSessionPatch(patch) {
+      if (!patch || patch.id <= 0) return;
+      dispatch({ type: 'MERGE_SESSIONS', payload: [patch] });
+    }
     function positiveTurnID(value) {
       var n = Number(value || 0);
       if (!Number.isFinite(n) || n <= 0) return 0;
@@ -213,6 +217,7 @@ export function useSessionSocket(sessionID) {
     var data = envelope.data;
 
     if (type === 'snapshot') {
+      mergeSessionPatch(normalizeSessionPatch(data && data.session, sid));
       if (data && Array.isArray(data.spawns)) {
         dispatch({ type: 'MERGE_SPAWNS', payload: normalizeSpawns(data.spawns) });
       }
@@ -223,6 +228,17 @@ export function useSessionSocket(sessionID) {
             ingestEnvelope(sid, recentMsg);
           }
         });
+      }
+      return;
+    }
+
+    if (type === 'started') {
+      var startedPatch = normalizeSessionPatch(data, sid);
+      if (startedPatch) {
+        startedPatch.status = 'running';
+        startedPatch.action = 'responding';
+        startedPatch.ended_at = '';
+        mergeSessionPatch(startedPatch);
       }
       return;
     }
@@ -277,11 +293,32 @@ export function useSessionSocket(sessionID) {
         eventTurnID = Number(wireEvent.turn_id || wireEvent.turnID || 0);
       }
       eventTurnID = resolveTurnID(eventTurnID);
+      if (eventScope === ('session-' + sid)) {
+        mergeSessionPatch({ id: sid, status: 'running', action: 'responding', ended_at: '' });
+      }
       handleAgentStreamEvent(eventScope, wireEvent, { turnID: eventTurnID });
       return;
     }
 
     if (type === 'finished') {
+      var finishedPatch = normalizeSessionPatch(data, sid);
+      if (finishedPatch) {
+        if (data && data.error) {
+          finishedPatch.status = 'failed';
+          finishedPatch.action = 'error';
+        } else if (data && data.wait_for_spawns) {
+          finishedPatch.status = 'waiting_for_spawns';
+          finishedPatch.action = 'waiting for spawns';
+        } else if (Number(data && data.exit_code || 0) === 0) {
+          finishedPatch.status = 'completed';
+          finishedPatch.action = 'finished';
+        } else {
+          finishedPatch.status = 'failed';
+          finishedPatch.action = 'finished';
+        }
+        finishedPatch.ended_at = new Date().toISOString();
+        mergeSessionPatch(finishedPatch);
+      }
       if (data && data.wait_for_spawns) {
         var waitingTurnID = resolveTurnID(data.turn_id || data.turnID || data.session_id || data.sessionID || 0);
         addStreamEvent({
@@ -306,6 +343,9 @@ export function useSessionSocket(sessionID) {
         rawTurnID = Number(data.session_id);
       }
       rawTurnID = resolveTurnID(rawTurnID);
+      if (rawScope === ('session-' + sid)) {
+        mergeSessionPatch({ id: sid, status: 'running', action: 'responding', ended_at: '' });
+      }
       addStreamEvent({ scope: rawScope, type: 'text', text: cropText(rawText), turn_id: rawTurnID > 0 ? rawTurnID : 0 });
       return;
     }
@@ -317,8 +357,8 @@ export function useSessionSocket(sessionID) {
       return;
     }
 
-    // Suppress noisy status messages from output
-    if (type === 'started' || type === 'finished' || type === 'done') {
+    // Suppress noisy status messages from output.
+    if (type === 'done') {
       return;
     }
 
@@ -483,4 +523,24 @@ function findSessionByID(sessions, id) {
     if (Number(sessions[i] && sessions[i].id) === targetID) return sessions[i];
   }
   return null;
+}
+
+function normalizeSessionPatch(raw, fallbackSessionID) {
+  if (!raw || typeof raw !== 'object') {
+    var fallbackID = Number(fallbackSessionID || 0);
+    if (!Number.isFinite(fallbackID) || fallbackID <= 0) return null;
+    return { id: fallbackID };
+  }
+  var id = Number(raw.session_id || raw.sessionID || fallbackSessionID || 0);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  var patch = { id: id };
+  if (raw.profile_name || raw.profile) patch.profile = String(raw.profile_name || raw.profile);
+  if (raw.agent_name || raw.agent) patch.agent = String(raw.agent_name || raw.agent);
+  if (raw.model || raw.agent_model) patch.model = String(raw.model || raw.agent_model);
+  if (raw.status) patch.status = String(raw.status);
+  if (raw.action) patch.action = String(raw.action);
+  if (raw.loop_name) patch.loop_name = String(raw.loop_name);
+  if (raw.started_at) patch.started_at = raw.started_at;
+  if (Object.prototype.hasOwnProperty.call(raw, 'ended_at')) patch.ended_at = raw.ended_at;
+  return patch;
 }
