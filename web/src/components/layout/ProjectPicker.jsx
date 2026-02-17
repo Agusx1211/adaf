@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAppState, useDispatch } from '../../state/store.js';
-import { apiCall, apiProjectOpen, apiFSBrowse, apiFSMkdir, apiProjectInit, apiFSSearch } from '../../api/client.js';
+import { apiCall, apiProjectOpen, apiFSBrowse, apiFSMkdir, apiProjectInit, apiFSSearch, apiRemoveRecentProject } from '../../api/client.js';
 import { persistProjectSelection } from '../../utils/projectLink.js';
 
 function timeAgo(dateStr) {
@@ -347,7 +347,18 @@ export default function ProjectPicker({ inline, onClose }) {
     }
   }
 
-  function renderProjectItem(item, idx, globalIdx) {
+  function handleRemoveRecent(e, item) {
+    e.stopPropagation();
+    apiRemoveRecentProject(item.path)
+      .then(function () {
+        setRecentProjects(function (prev) {
+          return prev.filter(function (rp) { return rp.path !== item.path; });
+        });
+      })
+      .catch(function () {});
+  }
+
+  function renderProjectCard(item, idx, globalIdx) {
     var isSelected = globalIdx === selectedIdx;
     return (
       <div
@@ -365,58 +376,82 @@ export default function ProjectPicker({ inline, onClose }) {
           e.currentTarget.style.background = isSelected ? 'var(--bg-2)' : 'transparent';
         }}
         style={{
-          padding: '8px 12px', cursor: 'pointer',
-          borderBottom: '1px solid var(--bg-3)',
-          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '10px 12px', cursor: 'pointer',
+          border: '1px solid ' + (isSelected ? 'var(--accent)40' : 'var(--border)'),
+          borderRadius: 6,
           background: isSelected ? 'var(--bg-2)' : 'transparent',
-          transition: 'background 0.1s ease',
+          transition: 'all 0.1s ease',
+          display: 'flex', flexDirection: 'column', gap: 4,
+          position: 'relative', minWidth: 0,
         }}
       >
-        <span style={{
-          fontSize: 11, flexShrink: 0,
-          color: item.type === 'open' ? 'var(--accent)' : 'var(--text-2)',
-        }}>{item.type === 'open' ? '\u25C6' : '\u25CB'}</span>
+        {/* Remove button for recent items */}
+        {item.type === 'recent' && (
+          <button
+            onClick={function (e) { handleRemoveRecent(e, item); }}
+            title="Remove from recent"
+            style={{
+              position: 'absolute', top: 4, right: 4,
+              background: 'none', border: 'none',
+              color: 'var(--text-3)', cursor: 'pointer',
+              fontSize: 11, padding: '0 3px', lineHeight: 1,
+              fontFamily: "'JetBrains Mono', monospace",
+              opacity: 0.5, borderRadius: 3,
+            }}
+            onMouseEnter={function (e) { e.currentTarget.style.opacity = '1'; e.currentTarget.style.color = '#ef4444'; }}
+            onMouseLeave={function (e) { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.color = 'var(--text-3)'; }}
+          >{'\u00D7'}</button>
+        )}
 
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
+        {/* Top row: icon + name + badge */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <span style={{
+            fontSize: 10, flexShrink: 0,
+            color: item.type === 'open' ? 'var(--accent)' : 'var(--text-2)',
+          }}>{item.type === 'open' ? '\u25C6' : '\u25CB'}</span>
+          <span style={{
             fontFamily: "'JetBrains Mono', monospace", fontSize: 12,
             color: item.type === 'open' ? 'var(--text-0)' : 'var(--text-1)',
             fontWeight: item.type === 'open' ? 600 : 400,
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            flex: 1, minWidth: 0,
           }}>
             {search ? highlightMatch(item.name, search) : item.name}
-          </div>
-          <div style={{
-            fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
-            color: 'var(--text-3)', marginTop: 1,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {search ? highlightMatch(shortenPath(item.path), search) : shortenPath(item.path)}
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          </span>
           {item.type === 'open' && (
             <span style={{
-              fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-              padding: '1px 6px', borderRadius: 3,
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 8,
+              padding: '1px 5px', borderRadius: 3,
               background: 'rgba(74,230,138,0.1)', color: 'var(--green)',
+              flexShrink: 0,
             }}>active</span>
           )}
-          {item.openedAt && (
-            <span style={{
-              fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-              color: 'var(--text-3)',
-            }}>{timeAgo(item.openedAt)}</span>
-          )}
         </div>
+
+        {/* Path */}
+        <div style={{
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+          color: 'var(--text-3)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          paddingLeft: 16,
+        }}>
+          {search ? highlightMatch(shortenPath(item.path), search) : shortenPath(item.path)}
+        </div>
+
+        {/* Time ago */}
+        {item.openedAt && (
+          <div style={{
+            fontFamily: "'JetBrains Mono', monospace", fontSize: 8,
+            color: 'var(--text-3)', paddingLeft: 16, opacity: 0.7,
+          }}>{timeAgo(item.openedAt)}</div>
+        )}
       </div>
     );
   }
 
   var content = (
     <div style={{
-      width: '100%', maxWidth: 640, padding: 0,
+      width: '100%', maxWidth: 720, padding: 0,
       background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 8,
       display: 'flex', flexDirection: 'column',
       maxHeight: 'calc(100vh - 80px)',
@@ -519,13 +554,15 @@ export default function ProjectPicker({ inline, onClose }) {
           <>
             {/* Open projects section */}
             {openProjects.length > 0 && (
-              <div style={{ marginBottom: 8 }}>
+              <div style={{ marginBottom: 12 }}>
                 <div style={sectionLabelStyle}>Open Projects</div>
                 <div style={{
-                  border: '1px solid var(--border)', borderRadius: 4, overflow: 'hidden',
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(2, 1fr)',
+                  gap: 6,
                 }}>
                   {openProjects.map(function (p, idx) {
-                    return renderProjectItem(p, idx, filteredProjects.indexOf(p));
+                    return renderProjectCard(p, idx, filteredProjects.indexOf(p));
                   })}
                 </div>
               </div>
@@ -533,14 +570,17 @@ export default function ProjectPicker({ inline, onClose }) {
 
             {/* Recent projects section */}
             {recentFiltered.length > 0 && (
-              <div style={{ marginBottom: 8 }}>
+              <div style={{ marginBottom: 12 }}>
                 <div style={sectionLabelStyle}>Recent Projects</div>
                 <div style={{
-                  border: '1px solid var(--border)', borderRadius: 4, overflow: 'hidden',
-                  maxHeight: 240, overflowY: 'auto',
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(2, 1fr)',
+                  gap: 6,
+                  maxHeight: 280, overflowY: 'auto',
+                  paddingRight: 2,
                 }}>
                   {recentFiltered.map(function (p, idx) {
-                    return renderProjectItem(p, idx, filteredProjects.indexOf(p));
+                    return renderProjectCard(p, idx, filteredProjects.indexOf(p));
                   })}
                 </div>
               </div>

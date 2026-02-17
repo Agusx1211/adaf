@@ -305,6 +305,17 @@ func (c *GlobalConfig) RecordRecentProject(id, path, name, rootDir string) {
 	c.RecentProjects = out
 }
 
+// RemoveRecentProject removes a recent project by path.
+func (c *GlobalConfig) RemoveRecentProject(path string) {
+	out := c.RecentProjects[:0]
+	for _, rp := range c.RecentProjects {
+		if rp.Path != path {
+			out = append(out, rp)
+		}
+	}
+	c.RecentProjects = out
+}
+
 // FindSkill returns a pointer to a skill by ID, or nil if not found.
 func (c *GlobalConfig) FindSkill(id string) *Skill {
 	if c == nil {

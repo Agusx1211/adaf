@@ -108,6 +108,10 @@ export function apiProjectInit(path, name) {
   return apiCall('/api/projects/init', 'POST', body);
 }
 
+export function apiRemoveRecentProject(path) {
+  return apiCall('/api/projects/recent', 'DELETE', { path: path });
+}
+
 export function apiProjectOpen(path) {
   return apiCall('/api/projects/open', 'POST', { path: path });
 }

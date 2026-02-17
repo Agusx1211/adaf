@@ -251,6 +251,7 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/projects/init", srv.handleProjectInit)
 	mux.HandleFunc("POST /api/projects/open", srv.handleProjectOpen)
 	mux.HandleFunc("GET /api/projects/recent", srv.handleRecentProjects)
+	mux.HandleFunc("DELETE /api/projects/recent", srv.handleRemoveRecentProject)
 
 	// Config endpoints (global, not project-scoped)
 	mux.HandleFunc("GET /api/config", srv.handleConfig)
