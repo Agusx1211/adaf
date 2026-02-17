@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/agusx1211/adaf/internal/config"
 	"github.com/agusx1211/adaf/internal/session"
@@ -345,6 +346,86 @@ func TestSessionsEndpoint(t *testing.T) {
 	sessions := decodeResponse[[]session.SessionMeta](t, rec)
 	if len(sessions) != 0 {
 		t.Fatalf("sessions length = %d, want 0", len(sessions))
+	}
+}
+
+func TestLoopRunsEndpoint_ReconcilesDeadDaemonSession(t *testing.T) {
+	srv, s := newTestServer(t)
+
+	projectCfg, err := s.LoadProject()
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+
+	sessionID, err := session.CreateSession(session.DaemonConfig{
+		ProjectDir:  s.ProjectDir(),
+		ProjectName: projectCfg.Name,
+		WorkDir:     s.ProjectDir(),
+		ProfileName: "p1",
+		AgentName:   "codex",
+		Loop: config.LoopDef{
+			Name: "stale-loop",
+			Steps: []config.LoopStep{
+				{Profile: "p1", Turns: 1},
+			},
+		},
+		Profiles: []config.Profile{{Name: "p1", Agent: "codex"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	meta, err := session.LoadMeta(sessionID)
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	meta.Status = session.StatusDead
+	meta.EndedAt = time.Now().UTC().Add(-1 * time.Minute)
+	meta.Error = "daemon process died unexpectedly"
+	if err := session.SaveMeta(sessionID, meta); err != nil {
+		t.Fatalf("SaveMeta: %v", err)
+	}
+
+	run := &store.LoopRun{
+		LoopName:        "stale-loop",
+		Status:          "running",
+		DaemonSessionID: sessionID,
+		Steps: []store.LoopRunStep{
+			{Profile: "p1", Turns: 1},
+		},
+	}
+	if err := s.CreateLoopRun(run); err != nil {
+		t.Fatalf("CreateLoopRun: %v", err)
+	}
+
+	rec := performRequest(t, srv, http.MethodGet, "/api/loops")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	runs := decodeResponse[[]store.LoopRun](t, rec)
+	if len(runs) != 1 {
+		t.Fatalf("runs length = %d, want 1", len(runs))
+	}
+	if runs[0].ID != run.ID {
+		t.Fatalf("run id = %d, want %d", runs[0].ID, run.ID)
+	}
+	if runs[0].Status != "stopped" {
+		t.Fatalf("run status = %q, want %q", runs[0].Status, "stopped")
+	}
+	if runs[0].StoppedAt.IsZero() {
+		t.Fatal("run stopped_at is zero, want populated timestamp")
+	}
+
+	persisted, err := s.GetLoopRun(run.ID)
+	if err != nil {
+		t.Fatalf("GetLoopRun: %v", err)
+	}
+	if persisted.Status != "stopped" {
+		t.Fatalf("persisted run status = %q, want %q", persisted.Status, "stopped")
+	}
+	if persisted.StoppedAt.IsZero() {
+		t.Fatal("persisted run stopped_at is zero, want populated timestamp")
 	}
 }
 

@@ -135,6 +135,18 @@ test('replay renders prompt, thinking, and tool blocks for codex fixture', async
   await expect(page.getByText('Bash', { exact: false }).first()).toBeVisible();
 });
 
+test('shows continuation marker when a prompt resumes from a prior turn', async ({ page, request }) => {
+  const { state } = await gotoFixture(page, request);
+  await openReplayLoop(page);
+
+  const codexFixture = state.fixtures.find((fixture) => fixture.provider === 'codex');
+  expect(codexFixture).toBeTruthy();
+
+  await page.getByText(String(codexFixture.profile), { exact: true }).first().click();
+  await expect(page.getByText('Continues from turn 1', { exact: false }).first()).toBeVisible();
+  await expect(page.getByText('Continue with the next steps after the previous response.', { exact: false }).first()).toBeVisible();
+});
+
 test('assistant inspect modal opens for replayed messages', async ({ page, request }) => {
   const { state } = await gotoFixture(page, request);
   await openReplayLoop(page);

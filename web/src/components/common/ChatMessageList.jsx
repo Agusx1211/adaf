@@ -119,12 +119,24 @@ export default function ChatMessageList({
             var hasPromptEvent = msgEvents.some(function (e) { return e && e.type === 'initial_prompt'; });
             var renderEvents = msgEvents;
             var ageLabel = timeAgo(msg.created_at);
+            var continuationLabel = isUser ? String(msg._continuationLabel || '').trim() : '';
             if (!isUser && msg._prompt && msg._prompt.text && !hasPromptEvent) {
               renderEvents = [{ type: 'initial_prompt', content: msg._prompt.text }].concat(msgEvents);
             }
             var hasInspectData = !isUser && (msg._prompt || renderEvents.length > 0);
             return (
               <div key={msg.id} style={{ marginBottom: 4 }}>
+                {!!continuationLabel && (
+                  <div style={{
+                    marginBottom: 4,
+                    paddingLeft: 10,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 10,
+                    color: 'var(--text-3)',
+                  }}>
+                    {continuationLabel}
+                  </div>
+                )}
                 <div style={{
                   padding: '6px 10px', borderRadius: 2,
                   background: isUser ? 'var(--bg-2)' : 'transparent',

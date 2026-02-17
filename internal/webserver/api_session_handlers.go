@@ -344,6 +344,7 @@ func handleLoopRunsP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 		runs = []store.LoopRun{}
 	}
 	backfillDaemonSessionIDs(runs)
+	reconcileLoopRunStatuses(s, runs)
 	writeJSON(w, http.StatusOK, runs)
 }
 
@@ -430,8 +431,58 @@ func handleLoopRunByIDP(s *store.Store, w http.ResponseWriter, r *http.Request) 
 		backfillDaemonSessionIDs(runs)
 		*run = runs[0]
 	}
+	reconcileLoopRunStatuses(s, []store.LoopRun{*run})
+	if refreshed, getErr := s.GetLoopRun(run.ID); getErr == nil && refreshed != nil {
+		run = refreshed
+	}
 
 	writeJSON(w, http.StatusOK, run)
+}
+
+// reconcileLoopRunStatuses adjusts stale in-store loop run statuses when their
+// owning daemon sessions are no longer active (e.g. daemon crashed).
+func reconcileLoopRunStatuses(s *store.Store, runs []store.LoopRun) {
+	if len(runs) == 0 || s == nil {
+		return
+	}
+
+	sessions, err := session.ListSessions()
+	if err != nil || len(sessions) == 0 {
+		return
+	}
+
+	byID := make(map[int]session.SessionMeta, len(sessions))
+	for i := range sessions {
+		byID[sessions[i].ID] = sessions[i]
+	}
+
+	for i := range runs {
+		run := &runs[i]
+		if run.DaemonSessionID <= 0 || !session.IsActiveStatus(run.Status) {
+			continue
+		}
+		meta, ok := byID[run.DaemonSessionID]
+		if !ok || session.IsActiveStatus(meta.Status) {
+			continue
+		}
+
+		// Keep loop-run statuses inside the declared loop domain.
+		if meta.Status == session.StatusCancelled {
+			run.Status = "cancelled"
+		} else {
+			run.Status = "stopped"
+		}
+		if run.StoppedAt.IsZero() {
+			if !meta.EndedAt.IsZero() {
+				run.StoppedAt = meta.EndedAt
+			} else {
+				run.StoppedAt = time.Now().UTC()
+			}
+		}
+
+		runCopy := *run
+		_ = s.UpdateLoopRun(&runCopy)
+	}
 }
 
 func handleLoopMessagesP(s *store.Store, w http.ResponseWriter, r *http.Request) {

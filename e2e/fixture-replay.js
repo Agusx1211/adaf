@@ -4,16 +4,22 @@ const path = require('node:path');
 const FIXTURE_PROVIDERS = ['claude', 'codex', 'gemini', 'opencode', 'vibe'];
 const FIXTURE_LOOP_NAME = 'fixture-replay';
 const FIXTURE_PROJECT_NAME = 'E2E Replay Fixtures';
+const FIXTURE_PROJECT_MARKER_ID = 'fixture-replay-project-id';
 const FIXTURE_SESSION_BASE_ID = 4200;
 const SEED_PLAN_ID = 'seed-plan';
 const SEED_DOC_ID = 'seed-doc';
 const SEED_ISSUE_ID = 1;
 const SEED_TURN_ID = 1;
+const SEED_TURN_HEX = 'seedturn';
+const SEED_RESUME_TURN_ID = 2;
+const SEED_RESUME_TURN_HEX = 'seedturn2';
+const RESUME_PROMPT_TEXT = 'Continue with the next steps after the previous response.';
+const RESUME_ASSISTANT_TEXT = 'Resumed turn response for UI replay coverage.';
 
 function prepareFixtureReplayData(repositoryRoot, homeDir, fixtureProjectDir) {
   const fixtures = loadFixtures(repositoryRoot);
 
-  writeFixtureProject(fixtureProjectDir, repositoryRoot);
+  writeFixtureProject(fixtureProjectDir, repositoryRoot, homeDir);
   writeFixtureSessions(homeDir, fixtureProjectDir, fixtures);
 
   return fixtures.map(function (fixture, index) {
@@ -49,11 +55,21 @@ function loadFixtures(repositoryRoot) {
   });
 }
 
-function writeFixtureProject(fixtureProjectDir, repositoryRoot) {
+function writeFixtureProject(fixtureProjectDir, repositoryRoot, homeDir) {
   fs.rmSync(fixtureProjectDir, { recursive: true, force: true });
-  const adafDir = path.join(fixtureProjectDir, '.adaf');
-  fs.mkdirSync(adafDir, { recursive: true });
+  fs.mkdirSync(fixtureProjectDir, { recursive: true });
+
+  const projectStoreRoot = path.join(homeDir, '.adaf', 'projects', FIXTURE_PROJECT_MARKER_ID);
+  fs.rmSync(projectStoreRoot, { recursive: true, force: true });
+  fs.mkdirSync(projectStoreRoot, { recursive: true });
+
   const nowISO = new Date().toISOString();
+
+  fs.writeFileSync(
+    path.join(fixtureProjectDir, '.adaf.json'),
+    JSON.stringify({ id: FIXTURE_PROJECT_MARKER_ID }, null, 2) + '\n',
+    'utf8',
+  );
 
   const projectConfig = {
     name: FIXTURE_PROJECT_NAME,
@@ -67,12 +83,12 @@ function writeFixtureProject(fixtureProjectDir, repositoryRoot) {
   };
 
   fs.writeFileSync(
-    path.join(adafDir, 'project.json'),
+    path.join(projectStoreRoot, 'project.json'),
     JSON.stringify(projectConfig, null, 2) + '\n',
     'utf8',
   );
 
-  writeSeedProjectData(adafDir, nowISO);
+  writeSeedProjectData(projectStoreRoot, nowISO);
 }
 
 function writeSeedProjectData(adafDir, nowISO) {
@@ -159,7 +175,7 @@ function writeSeedProjectData(adafDir, nowISO) {
 
   const turn = {
     id: SEED_TURN_ID,
-    hex_id: 'seedturn',
+    hex_id: SEED_TURN_HEX,
     loop_run_hex_id: 'seedloop',
     step_hex_id: 'seedstep',
     plan_id: SEED_PLAN_ID,
@@ -181,6 +197,33 @@ function writeSeedProjectData(adafDir, nowISO) {
   fs.writeFileSync(
     path.join(adafDir, 'local', 'turns', String(SEED_TURN_ID) + '.json'),
     JSON.stringify(turn, null, 2) + '\n',
+    'utf8',
+  );
+
+  const resumeTurn = {
+    id: SEED_RESUME_TURN_ID,
+    hex_id: SEED_RESUME_TURN_HEX,
+    loop_run_hex_id: 'seedloop',
+    step_hex_id: 'seedstep',
+    plan_id: SEED_PLAN_ID,
+    date: nowISO,
+    agent: 'codex',
+    agent_model: 'seed-model',
+    profile_name: 'seed-profile',
+    commit_hash: 'def456',
+    objective: 'Seed objective (continued)',
+    what_was_built: 'Follow-up turn seeded for resume marker coverage.',
+    key_decisions: 'Seed resume decisions',
+    challenges: 'Seed resume challenges',
+    current_state: 'Seed resumed state',
+    known_issues: 'Seed resumed known issues',
+    next_steps: 'Seed resumed next steps',
+    build_state: 'passing',
+    duration_secs: 8,
+  };
+  fs.writeFileSync(
+    path.join(adafDir, 'local', 'turns', String(SEED_RESUME_TURN_ID) + '.json'),
+    JSON.stringify(resumeTurn, null, 2) + '\n',
     'utf8',
   );
 
@@ -301,6 +344,18 @@ function buildReplayEvents(provider, fixture) {
   const expectedToken = expectedOutput.replace(/[.!?]+$/, '');
   if (expectedOutput && expectedToken && !eventsContainText(events, expectedToken)) {
     push('claude_stream', JSON.stringify(assistantTextEvent(expectedOutput)));
+  }
+
+  if (provider === 'codex') {
+    push('prompt', JSON.stringify({
+      session_id: 0,
+      turn_hex_id: SEED_RESUME_TURN_HEX,
+      prompt: RESUME_PROMPT_TEXT,
+      is_resume: true,
+    }));
+    push('event', JSON.stringify({
+      event: assistantTextEvent(RESUME_ASSISTANT_TEXT),
+    }));
   }
 
   return events;

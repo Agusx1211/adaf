@@ -11,7 +11,7 @@ import { buildSpawnScopeMaps, parseScope } from '../../utils/scopes.js';
 export default function AgentOutput({ scope }) {
   var state = useAppState();
   var dispatch = useDispatch();
-  var { streamEvents, autoScroll, sessions, spawns, loopRuns, historicalEvents, currentProjectID, wsConnected, currentSessionSocketID } = state;
+  var { streamEvents, autoScroll, sessions, spawns, loopRuns, turns, historicalEvents, currentProjectID, wsConnected, currentSessionSocketID } = state;
   var [loadingHistory, setLoadingHistory] = useState(false);
   var historySocketLiveRef = useRef({});
 
@@ -75,6 +75,17 @@ export default function AgentOutput({ scope }) {
     spawns.forEach(function (s) { if (s && s.id > 0) index[s.id] = s; });
     return index;
   }, [spawns]);
+
+  var turnIDByHex = useMemo(function () {
+    var index = {};
+    turns.forEach(function (turn) {
+      if (!turn || turn.id <= 0) return;
+      var key = normalizeTurnHex(turn.hex_id);
+      if (!key) return;
+      index[key] = turn.id;
+    });
+    return index;
+  }, [turns]);
 
   var filteredEvents = useMemo(function () {
     if (!scope) return [];
@@ -154,6 +165,7 @@ export default function AgentOutput({ scope }) {
   var transformed = useMemo(function () {
     var msgs = [];
     var assistantEvents = [];
+    var lastPromptTurnID = 0;
 
     function latestEventTS(events) {
       var latest = 0;
@@ -181,7 +193,12 @@ export default function AgentOutput({ scope }) {
           role: 'user',
           content: block.content,
           created_at: Number(block && block._ts) || null,
+          _continuationLabel: continuationLabelForPrompt(block, lastPromptTurnID, turnIDByHex),
         });
+        var currentPromptTurnID = resolvePromptTurnID(block, turnIDByHex);
+        if (currentPromptTurnID > 0) {
+          lastPromptTurnID = currentPromptTurnID;
+        }
       } else {
         assistantEvents.push(block);
       }
@@ -202,7 +219,7 @@ export default function AgentOutput({ scope }) {
       messages: msgs,
       pendingStreamEvents: isRunning ? assistantEvents : [],
     };
-  }, [displayBlocks, isRunning]);
+  }, [displayBlocks, isRunning, turnIDByHex]);
 
   if (!scope) {
     return (
@@ -399,7 +416,12 @@ function parseHistoricalEvents(events, sessionID, onMissing) {
       var promptData = decodeData(ev.data);
       var promptScope = wireScope(promptData, sessionID);
       if (promptData && promptData.prompt) {
-        push(promptScope, 'initial_prompt', { text: String(promptData.prompt) }, eventTS);
+        push(promptScope, 'initial_prompt', {
+          text: String(promptData.prompt),
+          turn_hex_id: String(promptData.turn_hex_id || promptData.turnHexID || ''),
+          turn_id: Number(promptData.turn_id || promptData.turnID || 0) || 0,
+          is_resume: !!(promptData.is_resume || promptData.isResume),
+        }, eventTS);
       }
       return;
     }
@@ -546,6 +568,31 @@ function stableString(value) {
     var text = String(value);
     return text.length > 500 ? text.slice(0, 500) : text;
   }
+}
+
+function normalizeTurnHex(raw) {
+  return String(raw || '').trim().toLowerCase();
+}
+
+function resolvePromptTurnID(block, turnIDByHex) {
+  if (!block || typeof block !== 'object') return 0;
+  var directID = Number(block._turnID || block.turn_id || block.turnID || 0);
+  if (Number.isFinite(directID) && directID > 0) return directID;
+  var turnHex = normalizeTurnHex(block._turnHexID || block.turn_hex_id || block.turnHexID || '');
+  if (!turnHex) return 0;
+  var mapped = Number(turnIDByHex && turnIDByHex[turnHex] || 0);
+  if (Number.isFinite(mapped) && mapped > 0) return mapped;
+  return 0;
+}
+
+function continuationLabelForPrompt(block, lastPromptTurnID, turnIDByHex) {
+  if (!block || block.type !== 'initial_prompt' || !block._isResume) return '';
+  var currentTurnID = resolvePromptTurnID(block, turnIDByHex);
+  var fromTurnID = lastPromptTurnID > 0 ? lastPromptTurnID : (currentTurnID > 1 ? currentTurnID - 1 : 0);
+  if (fromTurnID > 0) {
+    return 'Continues from turn ' + fromTurnID;
+  }
+  return 'Continues from previous turn';
 }
 
 function decodeData(raw) {

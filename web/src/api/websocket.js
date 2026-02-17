@@ -19,18 +19,20 @@ export function useSessionSocket(sessionID) {
   }, [state.currentProjectID, state.sessions]);
 
   var addStreamEvent = useCallback(function (entry) {
+    entry = entry || {};
+    var normalized = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      ts: Number.isFinite(Number(entry.ts)) ? Number(entry.ts) : Date.now(),
+      scope: entry.scope || 'session-0',
+      type: entry.type || 'text',
+      text: entry.text != null ? String(entry.text) : '',
+      tool: entry.tool || '',
+      input: entry.input || '',
+      result: entry.result || '',
+    };
     dispatch({
       type: 'ADD_STREAM_EVENT',
-      payload: {
-        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
-        ts: Number.isFinite(Number(entry.ts)) ? Number(entry.ts) : Date.now(),
-        scope: entry.scope || 'session-0',
-        type: entry.type || 'text',
-        text: entry.text != null ? String(entry.text) : '',
-        tool: entry.tool || '',
-        input: entry.input || '',
-        result: entry.result || '',
-      },
+      payload: Object.assign({}, entry || {}, normalized),
     });
   }, [dispatch]);
 
@@ -214,7 +216,14 @@ export function useSessionSocket(sessionID) {
             promptScope = 'session-' + promptSessionID;
           }
         }
-        addStreamEvent({ scope: promptScope, type: 'initial_prompt', text: String(data.prompt) });
+        addStreamEvent({
+          scope: promptScope,
+          type: 'initial_prompt',
+          text: String(data.prompt),
+          turn_hex_id: data.turn_hex_id || data.turnHexID || '',
+          turn_id: Number(data.turn_id || data.turnID || 0) || 0,
+          is_resume: !!(data.is_resume || data.isResume),
+        });
       }
       return;
     }
