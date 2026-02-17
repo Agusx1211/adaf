@@ -181,6 +181,12 @@ func TestBuildDashboardIncludesBreakdownsAndSignals(t *testing.T) {
 	if spark.TotalFeedback != 3 {
 		t.Fatalf("spark feedback count = %d, want 3", spark.TotalFeedback)
 	}
+	if spark.Score <= 0 {
+		t.Fatalf("spark score = %v, want > 0", spark.Score)
+	}
+	if spark.SpeedScore <= 0 {
+		t.Fatalf("spark speed_score = %v, want > 0", spark.SpeedScore)
+	}
 	if spark.Cost != "cheap" {
 		t.Fatalf("spark cost = %q, want %q", spark.Cost, "cheap")
 	}
@@ -216,8 +222,133 @@ func TestBuildDashboardIncludesBreakdownsAndSignals(t *testing.T) {
 	if idle.TotalFeedback != 0 {
 		t.Fatalf("idle feedback count = %d, want 0", idle.TotalFeedback)
 	}
+	if idle.SpeedScore != 50 {
+		t.Fatalf("idle speed_score = %v, want 50", idle.SpeedScore)
+	}
 	if idle.HasEnoughSamples {
 		t.Fatalf("idle HasEnoughSamples = true, want false")
+	}
+}
+
+func TestBuildDashboardDifficultyAdjustedScoreRewardsHardTasks(t *testing.T) {
+	now := time.Date(2026, 2, 17, 10, 0, 0, 0, time.UTC)
+	records := []FeedbackRecord{
+		{
+			ProjectID:     "proj-a",
+			SpawnID:       1,
+			ParentProfile: "lead-a",
+			ChildProfile:  "easy-specialist",
+			ChildRole:     "developer",
+			Difficulty:    2,
+			Quality:       9,
+			DurationSecs:  40,
+			CreatedAt:     now.Add(-3 * time.Hour),
+		},
+		{
+			ProjectID:     "proj-a",
+			SpawnID:       2,
+			ParentProfile: "lead-b",
+			ChildProfile:  "easy-specialist",
+			ChildRole:     "developer",
+			Difficulty:    2,
+			Quality:       9,
+			DurationSecs:  45,
+			CreatedAt:     now.Add(-2 * time.Hour),
+		},
+		{
+			ProjectID:     "proj-a",
+			SpawnID:       3,
+			ParentProfile: "lead-c",
+			ChildProfile:  "easy-specialist",
+			ChildRole:     "developer",
+			Difficulty:    2,
+			Quality:       9,
+			DurationSecs:  42,
+			CreatedAt:     now.Add(-time.Hour),
+		},
+		{
+			ProjectID:     "proj-a",
+			SpawnID:       4,
+			ParentProfile: "lead-a",
+			ChildProfile:  "hard-specialist",
+			ChildRole:     "developer",
+			Difficulty:    9,
+			Quality:       7,
+			DurationSecs:  120,
+			CreatedAt:     now.Add(-3 * time.Hour),
+		},
+		{
+			ProjectID:     "proj-a",
+			SpawnID:       5,
+			ParentProfile: "lead-b",
+			ChildProfile:  "hard-specialist",
+			ChildRole:     "developer",
+			Difficulty:    9,
+			Quality:       7,
+			DurationSecs:  125,
+			CreatedAt:     now.Add(-2 * time.Hour),
+		},
+		{
+			ProjectID:     "proj-a",
+			SpawnID:       6,
+			ParentProfile: "lead-c",
+			ChildProfile:  "hard-specialist",
+			ChildRole:     "developer",
+			Difficulty:    9,
+			Quality:       7,
+			DurationSecs:  118,
+			CreatedAt:     now.Add(-time.Hour),
+		},
+	}
+
+	dashboard := BuildDashboard(nil, records)
+	easy := findSummaryByName(t, dashboard, "easy-specialist")
+	hard := findSummaryByName(t, dashboard, "hard-specialist")
+
+	if hard.Score <= easy.Score {
+		t.Fatalf("hard score = %.2f, easy score = %.2f, want hard > easy due to higher difficulty", hard.Score, easy.Score)
+	}
+	if hard.RoleBreakdown[0].Score <= easy.RoleBreakdown[0].Score {
+		t.Fatalf("hard role score = %.2f, easy role score = %.2f, want hard > easy", hard.RoleBreakdown[0].Score, easy.RoleBreakdown[0].Score)
+	}
+}
+
+func TestBuildJudgeWeightsDownweightsOutlierJudge(t *testing.T) {
+	now := time.Date(2026, 2, 17, 10, 0, 0, 0, time.UTC)
+	records := make([]FeedbackRecord, 0, 24)
+	spawnID := 1
+	add := func(parent, child string, quality float64) {
+		records = append(records, FeedbackRecord{
+			ProjectID:     "proj-a",
+			SpawnID:       spawnID,
+			ParentProfile: parent,
+			ChildProfile:  child,
+			ChildRole:     "developer",
+			Difficulty:    5,
+			Quality:       quality,
+			CreatedAt:     now,
+		})
+		spawnID++
+	}
+	for i := 0; i < 8; i++ {
+		add("good-a", "alpha", 8)
+		add("good-b", "alpha", 8)
+		add("bad-z", "alpha", 0)
+	}
+	for i := 0; i < 8; i++ {
+		add("good-a", "beta", 8)
+		add("good-b", "beta", 8)
+		add("bad-z", "beta", 0)
+	}
+
+	model := buildScoringModel(records)
+	badWeight := model.judgeWeight("bad-z", "", "")
+	goodWeight := model.judgeWeight("good-a", "", "")
+	if badWeight >= goodWeight {
+		t.Fatalf("bad judge weight = %.3f, good judge weight = %.3f, want bad < good", badWeight, goodWeight)
+	}
+	if badWeight > 0.46 {
+		t.Fatalf("bad judge weight = %.3f, want <= 0.46", badWeight)
 	}
 }
 
@@ -244,4 +375,15 @@ func containsSignal(signals []string, wantPart string) bool {
 		}
 	}
 	return false
+}
+
+func findSummaryByName(t *testing.T, dashboard Dashboard, profile string) ProfileSummary {
+	t.Helper()
+	for _, s := range dashboard.Profiles {
+		if strings.EqualFold(s.Profile, profile) {
+			return s
+		}
+	}
+	t.Fatalf("profile %q not found in dashboard", profile)
+	return ProfileSummary{}
 }

@@ -2,14 +2,23 @@ package profilescore
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
 )
 
 const (
-	minSamplesForSignal = 3
-	maxRecentPerProfile = 20
+	minSamplesForSignal         = 3
+	maxRecentPerProfile         = 20
+	defaultSpeedScore           = 50.0
+	judgeReliabilitySmoothing   = 3.0
+	minJudgeWeight              = 0.20
+	scoreWeightQuality          = 0.50
+	scoreWeightResidual         = 0.30
+	scoreWeightDifficulty       = 0.20
+	residualToPercentMultiplier = 12.5
+	speedLogScale               = 25.0
 )
 
 type metricAccumulator struct {
@@ -17,23 +26,43 @@ type metricAccumulator struct {
 	totalQuality    float64
 	totalDifficulty float64
 	totalDuration   float64
+	weightedScore   float64
+	scoreWeight     float64
+	weightedSpeed   float64
+	speedWeight     float64
 }
 
-func (m *metricAccumulator) add(rec FeedbackRecord) {
+func (m *metricAccumulator) add(rec FeedbackRecord, eval recordEvaluation) {
 	if m == nil {
 		return
 	}
 	m.count++
 	m.totalQuality += rec.Quality
 	m.totalDifficulty += rec.Difficulty
+	if eval.Weight > 0 {
+		m.weightedScore += eval.Score * eval.Weight
+		m.scoreWeight += eval.Weight
+	}
 	if rec.DurationSecs > 0 {
 		m.totalDuration += float64(rec.DurationSecs)
+		if eval.Weight > 0 {
+			m.weightedSpeed += eval.SpeedScore * eval.Weight
+			m.speedWeight += eval.Weight
+		}
 	}
 }
 
 func (m *metricAccumulator) toBreakdown(name string) BreakdownStats {
 	if m == nil || m.count <= 0 {
-		return BreakdownStats{Name: name}
+		return BreakdownStats{Name: name, SpeedScore: defaultSpeedScore}
+	}
+	score := 0.0
+	if m.scoreWeight > 0 {
+		score = round2(m.weightedScore / m.scoreWeight)
+	}
+	speed := defaultSpeedScore
+	if m.speedWeight > 0 {
+		speed = round2(m.weightedSpeed / m.speedWeight)
 	}
 	return BreakdownStats{
 		Name:            name,
@@ -41,7 +70,261 @@ func (m *metricAccumulator) toBreakdown(name string) BreakdownStats {
 		AvgQuality:      round2(m.totalQuality / float64(m.count)),
 		AvgDifficulty:   round2(m.totalDifficulty / float64(m.count)),
 		AvgDurationSecs: round2(m.totalDuration / float64(m.count)),
+		Score:           score,
+		SpeedScore:      speed,
 	}
+}
+
+type scoringModel struct {
+	qualityIntercept  float64
+	qualitySlope      float64
+	hasQualityModel   bool
+	meanQuality       float64
+	durationIntercept float64
+	durationSlope     float64
+	hasDurationModel  bool
+	meanDurationSecs  float64
+	judgeWeights      map[string]float64
+}
+
+type recordEvaluation struct {
+	Score      float64
+	SpeedScore float64
+	Weight     float64
+}
+
+func buildScoringModel(records []FeedbackRecord) scoringModel {
+	model := scoringModel{
+		meanQuality:      (MinScore + MaxScore) / 2,
+		judgeWeights:     make(map[string]float64),
+		meanDurationSecs: 0,
+	}
+
+	difficulties := make([]float64, 0, len(records))
+	qualities := make([]float64, 0, len(records))
+	durationDifficulties := make([]float64, 0, len(records))
+	logDurations := make([]float64, 0, len(records))
+	totalDuration := 0.0
+	durationCount := 0
+	for _, rec := range records {
+		if strings.TrimSpace(rec.ChildProfile) == "" {
+			continue
+		}
+		difficulties = append(difficulties, rec.Difficulty)
+		qualities = append(qualities, rec.Quality)
+		if rec.DurationSecs > 0 {
+			d := float64(rec.DurationSecs)
+			durationDifficulties = append(durationDifficulties, rec.Difficulty)
+			logDurations = append(logDurations, math.Log(d))
+			totalDuration += d
+			durationCount++
+		}
+	}
+	if len(qualities) > 0 {
+		model.meanQuality = sumFloat64(qualities) / float64(len(qualities))
+	}
+	if intercept, slope, ok := fitLinearModel(difficulties, qualities); ok {
+		model.qualityIntercept = intercept
+		model.qualitySlope = slope
+		model.hasQualityModel = true
+	}
+	if intercept, slope, ok := fitLinearModel(durationDifficulties, logDurations); ok {
+		model.durationIntercept = intercept
+		model.durationSlope = slope
+		model.hasDurationModel = true
+	}
+	if durationCount > 0 {
+		model.meanDurationSecs = totalDuration / float64(durationCount)
+	}
+
+	model.judgeWeights = buildJudgeWeights(records, model)
+	return model
+}
+
+func buildJudgeWeights(records []FeedbackRecord, model scoringModel) map[string]float64 {
+	type bucketStats struct {
+		sumQuality float64
+		count      int
+	}
+	type judgeStats struct {
+		sumErr float64
+		count  int
+	}
+
+	buckets := make(map[string]bucketStats)
+	for _, rec := range records {
+		if strings.TrimSpace(rec.ChildProfile) == "" {
+			continue
+		}
+		key := childBucketKey(rec)
+		stats := buckets[key]
+		stats.sumQuality += rec.Quality
+		stats.count++
+		buckets[key] = stats
+	}
+
+	judgeAgg := make(map[string]judgeStats)
+	for _, rec := range records {
+		if strings.TrimSpace(rec.ChildProfile) == "" {
+			continue
+		}
+		judge := judgeKey(rec.ParentProfile, rec.ParentRole, rec.ParentPosition)
+		if judge == "" {
+			judge = "unknown"
+		}
+		stats := buckets[childBucketKey(rec)]
+		consensus := model.expectedQuality(rec.Difficulty)
+		if stats.count > 1 {
+			consensus = (stats.sumQuality - rec.Quality) / float64(stats.count-1)
+		}
+		errNorm := clamp(math.Abs(rec.Quality-consensus)/MaxScore, 0, 1)
+		agg := judgeAgg[judge]
+		agg.sumErr += errNorm
+		agg.count++
+		judgeAgg[judge] = agg
+	}
+
+	out := make(map[string]float64, len(judgeAgg))
+	for judge, agg := range judgeAgg {
+		if agg.count <= 0 {
+			continue
+		}
+		rawReliability := 1 - (agg.sumErr / float64(agg.count))
+		rawReliability = clamp(rawReliability, 0, 1)
+		shrink := float64(agg.count) / (float64(agg.count) + judgeReliabilitySmoothing)
+		weight := 0.5 + (rawReliability-0.5)*shrink
+		out[judge] = clamp(weight, minJudgeWeight, 1)
+	}
+	return out
+}
+
+func (m scoringModel) evaluate(rec FeedbackRecord) recordEvaluation {
+	weight := m.judgeWeight(rec.ParentProfile, rec.ParentRole, rec.ParentPosition)
+	if weight <= 0 {
+		weight = 0.5
+	}
+	return recordEvaluation{
+		Score:      m.score(rec),
+		SpeedScore: m.speedScore(rec),
+		Weight:     weight,
+	}
+}
+
+func (m scoringModel) judgeWeight(parentProfile, parentRole, parentPosition string) float64 {
+	if len(m.judgeWeights) == 0 {
+		return 0.5
+	}
+	key := judgeKey(parentProfile, parentRole, parentPosition)
+	if key == "" {
+		return 0.5
+	}
+	weight, ok := m.judgeWeights[key]
+	if !ok {
+		return 0.5
+	}
+	return weight
+}
+
+func (m scoringModel) score(rec FeedbackRecord) float64 {
+	qualityPct := clamp(rec.Quality*10, 0, 100)
+	difficultyPct := clamp(rec.Difficulty*10, 0, 100)
+	expected := m.expectedQuality(rec.Difficulty)
+	residualScore := clamp(50+((rec.Quality-expected)*residualToPercentMultiplier), 0, 100)
+	score := (scoreWeightQuality * qualityPct) +
+		(scoreWeightResidual * residualScore) +
+		(scoreWeightDifficulty * difficultyPct)
+	return round2(clamp(score, 0, 100))
+}
+
+func (m scoringModel) speedScore(rec FeedbackRecord) float64 {
+	if rec.DurationSecs <= 0 {
+		return defaultSpeedScore
+	}
+	actual := float64(rec.DurationSecs)
+	expected := m.expectedDuration(rec.Difficulty)
+	if expected <= 0 {
+		return defaultSpeedScore
+	}
+	score := 50 + speedLogScale*math.Log(expected/actual)
+	return round2(clamp(score, 0, 100))
+}
+
+func (m scoringModel) expectedQuality(difficulty float64) float64 {
+	if m.hasQualityModel {
+		return clamp(m.qualityIntercept+(m.qualitySlope*difficulty), MinScore, MaxScore)
+	}
+	return clamp(m.meanQuality, MinScore, MaxScore)
+}
+
+func (m scoringModel) expectedDuration(difficulty float64) float64 {
+	if m.hasDurationModel {
+		return math.Max(1, math.Exp(m.durationIntercept+(m.durationSlope*difficulty)))
+	}
+	if m.meanDurationSecs > 0 {
+		return m.meanDurationSecs
+	}
+	return 0
+}
+
+func judgeKey(parentProfile, parentRole, parentPosition string) string {
+	if profile := strings.ToLower(strings.TrimSpace(parentProfile)); profile != "" {
+		return "profile:" + profile
+	}
+	role := strings.ToLower(strings.TrimSpace(parentRole))
+	position := strings.ToLower(strings.TrimSpace(parentPosition))
+	if role == "" && position == "" {
+		return ""
+	}
+	return "role:" + role + "|position:" + position
+}
+
+func childBucketKey(rec FeedbackRecord) string {
+	profile := strings.ToLower(strings.TrimSpace(rec.ChildProfile))
+	role := strings.ToLower(strings.TrimSpace(rec.ChildRole))
+	if role == "" {
+		role = "(unspecified)"
+	}
+	return profile + "|" + role
+}
+
+func fitLinearModel(xs, ys []float64) (float64, float64, bool) {
+	if len(xs) == 0 || len(xs) != len(ys) {
+		return 0, 0, false
+	}
+	meanX := sumFloat64(xs) / float64(len(xs))
+	meanY := sumFloat64(ys) / float64(len(ys))
+	var covariance float64
+	var varianceX float64
+	for i := range xs {
+		dx := xs[i] - meanX
+		dy := ys[i] - meanY
+		covariance += dx * dy
+		varianceX += dx * dx
+	}
+	if varianceX == 0 {
+		return meanY, 0, true
+	}
+	slope := covariance / varianceX
+	intercept := meanY - slope*meanX
+	return intercept, slope, true
+}
+
+func sumFloat64(values []float64) float64 {
+	total := 0.0
+	for _, v := range values {
+		total += v
+	}
+	return total
+}
+
+func clamp(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 type summaryAccumulator struct {
@@ -88,6 +371,7 @@ func BuildDashboard(catalog []ProfileCatalogEntry, records []FeedbackRecord) Das
 	}
 
 	totalFeedback := 0
+	model := buildScoringModel(records)
 	for _, rec := range records {
 		profile := strings.TrimSpace(rec.ChildProfile)
 		if profile == "" {
@@ -98,7 +382,8 @@ func BuildDashboard(catalog []ProfileCatalogEntry, records []FeedbackRecord) Das
 			continue
 		}
 		totalFeedback++
-		acc.metrics.add(rec)
+		eval := model.evaluate(rec)
+		acc.metrics.add(rec, eval)
 
 		role := strings.TrimSpace(rec.ChildRole)
 		if role == "" {
@@ -116,17 +401,17 @@ func BuildDashboard(catalog []ProfileCatalogEntry, records []FeedbackRecord) Das
 		if acc.roles[role] == nil {
 			acc.roles[role] = &metricAccumulator{}
 		}
-		acc.roles[role].add(rec)
+		acc.roles[role].add(rec, eval)
 
 		if acc.parents[parent] == nil {
 			acc.parents[parent] = &metricAccumulator{}
 		}
-		acc.parents[parent].add(rec)
+		acc.parents[parent].add(rec, eval)
 
 		if acc.trend[day] == nil {
 			acc.trend[day] = &metricAccumulator{}
 		}
-		acc.trend[day].add(rec)
+		acc.trend[day].add(rec, eval)
 
 		acc.recent = append(acc.recent, rec)
 	}
@@ -171,6 +456,8 @@ func BuildDashboard(catalog []ProfileCatalogEntry, records []FeedbackRecord) Das
 			AvgQuality:       metrics.AvgQuality,
 			AvgDifficulty:    metrics.AvgDifficulty,
 			AvgDurationSecs:  metrics.AvgDurationSecs,
+			Score:            metrics.Score,
+			SpeedScore:       metrics.SpeedScore,
 			RoleBreakdown:    mapToBreakdowns(acc.roles),
 			ParentBreakdown:  mapToBreakdowns(acc.parents),
 			Trend:            mapToTrend(acc.trend),

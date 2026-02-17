@@ -2,6 +2,7 @@ package prompt
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -212,18 +213,29 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 				line += " [handoff]"
 			}
 			if perf, ok := perfByProfile[strings.ToLower(strings.TrimSpace(p.Name))]; ok && perf.TotalFeedback > 0 {
-				line += fmt.Sprintf(", feedback=%d, q=%.2f/10, diff=%.2f/10", perf.TotalFeedback, perf.AvgQuality, perf.AvgDifficulty)
+				line += fmt.Sprintf(", feedback=%d, score=%.1f/100, speed_score=%.0f/100", perf.TotalFeedback, perf.Score, perf.SpeedScore)
+				line += fmt.Sprintf(", q=%.2f/10, diff=%.2f/10", perf.AvgQuality, perf.AvgDifficulty)
 				if perf.AvgDurationSecs > 0 {
 					line += fmt.Sprintf(", avg_dur=%s", formatDelegationDuration(perf.AvgDurationSecs))
 				}
-				if topRoles := formatDelegationRoleQuality(perf.RoleBreakdown, 2); topRoles != "" {
-					line += fmt.Sprintf(", role_quality=%s", topRoles)
+				if topRoles := formatDelegationRoleScores(perf.RoleBreakdown, 2); topRoles != "" {
+					line += fmt.Sprintf(", role_scores=%s", topRoles)
 				}
 			}
 			if p.Description != "" {
 				line += fmt.Sprintf(" — %s", p.Description)
 			}
 			b.WriteString(line + "\n")
+		}
+		b.WriteString("\n")
+	}
+
+	rows := buildDelegationRoutingRows(deleg, globalCfg, perfByProfile)
+	if len(rows) > 0 {
+		b.WriteString("## Routing Scoreboard (difficulty-adjusted, judge-weighted)\n\n")
+		for _, row := range rows {
+			fmt.Fprintf(&b, "- profile=%s, role=%s, score=%.1f/100, speed_score=%.0f/100, feedback=%d\n",
+				row.Profile, row.Role, row.Score, row.SpeedScore, row.Count)
 		}
 		b.WriteString("\n")
 	}
@@ -268,16 +280,76 @@ func formatDelegationDuration(avgDurationSecs float64) string {
 	return d.Round(time.Second).String()
 }
 
-func formatDelegationRoleQuality(items []profilescore.BreakdownStats, limit int) string {
+func formatDelegationRoleScores(items []profilescore.BreakdownStats, limit int) string {
 	if len(items) == 0 || limit <= 0 {
 		return ""
 	}
+	sorted := append([]profilescore.BreakdownStats(nil), items...)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Score != sorted[j].Score {
+			return sorted[i].Score > sorted[j].Score
+		}
+		if sorted[i].Count != sorted[j].Count {
+			return sorted[i].Count > sorted[j].Count
+		}
+		return strings.ToLower(sorted[i].Name) < strings.ToLower(sorted[j].Name)
+	})
 	if limit > len(items) {
-		limit = len(items)
+		limit = len(sorted)
 	}
 	parts := make([]string, 0, limit)
 	for i := 0; i < limit; i++ {
-		parts = append(parts, fmt.Sprintf("%s:%.2f(%d)", items[i].Name, items[i].AvgQuality, items[i].Count))
+		parts = append(parts, fmt.Sprintf("%s:%.1f(%d)", sorted[i].Name, sorted[i].Score, sorted[i].Count))
 	}
 	return strings.Join(parts, "|")
+}
+
+type delegationRoutingRow struct {
+	Profile    string
+	Role       string
+	Score      float64
+	SpeedScore float64
+	Count      int
+}
+
+func buildDelegationRoutingRows(deleg *config.DelegationConfig, globalCfg *config.GlobalConfig, perfByProfile map[string]profilescore.ProfileSummary) []delegationRoutingRow {
+	if deleg == nil || globalCfg == nil || len(deleg.Profiles) == 0 {
+		return nil
+	}
+	rows := make([]delegationRoutingRow, 0)
+	for _, dp := range deleg.Profiles {
+		p := globalCfg.FindProfile(dp.Name)
+		if p == nil {
+			continue
+		}
+		perf, ok := perfByProfile[strings.ToLower(strings.TrimSpace(p.Name))]
+		if !ok || perf.TotalFeedback == 0 {
+			continue
+		}
+		for _, role := range perf.RoleBreakdown {
+			if role.Count <= 0 {
+				continue
+			}
+			rows = append(rows, delegationRoutingRow{
+				Profile:    p.Name,
+				Role:       role.Name,
+				Score:      role.Score,
+				SpeedScore: role.SpeedScore,
+				Count:      role.Count,
+			})
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Score != rows[j].Score {
+			return rows[i].Score > rows[j].Score
+		}
+		if rows[i].Count != rows[j].Count {
+			return rows[i].Count > rows[j].Count
+		}
+		if !strings.EqualFold(rows[i].Profile, rows[j].Profile) {
+			return strings.ToLower(rows[i].Profile) < strings.ToLower(rows[j].Profile)
+		}
+		return strings.ToLower(rows[i].Role) < strings.ToLower(rows[j].Role)
+	})
+	return rows
 }

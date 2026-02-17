@@ -51,6 +51,8 @@ type BreakdownStats struct {
 	AvgQuality      float64 `json:"avg_quality"`
 	AvgDifficulty   float64 `json:"avg_difficulty"`
 	AvgDurationSecs float64 `json:"avg_duration_secs"`
+	Score           float64 `json:"score"`
+	SpeedScore      float64 `json:"speed_score"`
 }
 
 // TrendPoint is one daily aggregate used by trend charts.
@@ -70,6 +72,8 @@ type ProfileSummary struct {
 	AvgQuality       float64          `json:"avg_quality"`
 	AvgDifficulty    float64          `json:"avg_difficulty"`
 	AvgDurationSecs  float64          `json:"avg_duration_secs"`
+	Score            float64          `json:"score"`
+	SpeedScore       float64          `json:"speed_score"`
 	RoleBreakdown    []BreakdownStats `json:"role_breakdown"`
 	ParentBreakdown  []BreakdownStats `json:"parent_breakdown"`
 	Trend            []TrendPoint     `json:"trend"`

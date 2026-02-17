@@ -3,8 +3,10 @@ package prompt
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/agusx1211/adaf/internal/config"
+	"github.com/agusx1211/adaf/internal/profilescore"
 )
 
 func TestDelegationSection_IncludesSkillPointerWhenDelegationEnabled(t *testing.T) {
@@ -149,5 +151,76 @@ func TestRolePrompt_RendersRoleIdentityFromRoleDefinition(t *testing.T) {
 	got := RolePrompt(&config.Profile{Name: "p1"}, "qa", globalCfg)
 	if !strings.Contains(got, "You are a QA role focused on high-signal verification.") {
 		t.Fatalf("role identity should render from role definition\nprompt:\n%s", got)
+	}
+}
+
+func TestDelegationSection_IncludesRoutingScoresAndSpeedScore(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	store := profilescore.Default()
+	now := time.Date(2026, 2, 17, 10, 0, 0, 0, time.UTC)
+	records := []profilescore.FeedbackRecord{
+		{
+			ProjectID:     "proj-a",
+			SpawnID:       1,
+			ParentProfile: "lead-a",
+			ChildProfile:  "worker",
+			ChildRole:     "developer",
+			Difficulty:    8,
+			Quality:       7,
+			DurationSecs:  110,
+			CreatedAt:     now.Add(-2 * time.Hour),
+		},
+		{
+			ProjectID:     "proj-a",
+			SpawnID:       2,
+			ParentProfile: "lead-b",
+			ChildProfile:  "worker",
+			ChildRole:     "developer",
+			Difficulty:    8,
+			Quality:       7,
+			DurationSecs:  100,
+			CreatedAt:     now.Add(-time.Hour),
+		},
+		{
+			ProjectID:     "proj-a",
+			SpawnID:       3,
+			ParentProfile: "lead-a",
+			ChildProfile:  "worker",
+			ChildRole:     "researcher",
+			Difficulty:    3,
+			Quality:       9,
+			DurationSecs:  40,
+			CreatedAt:     now,
+		},
+	}
+	for _, rec := range records {
+		if _, err := store.UpsertFeedback(rec); err != nil {
+			t.Fatalf("UpsertFeedback(%d): %v", rec.SpawnID, err)
+		}
+	}
+
+	deleg := &config.DelegationConfig{
+		Profiles: []config.DelegationProfile{
+			{
+				Name: "worker",
+				Role: config.RoleDeveloper,
+			},
+		},
+	}
+	globalCfg := &config.GlobalConfig{
+		Profiles: []config.Profile{
+			{Name: "worker", Agent: "codex", Cost: "cheap"},
+		},
+	}
+
+	got := delegationSection(deleg, globalCfg, nil)
+	if !strings.Contains(got, "speed_score=") {
+		t.Fatalf("expected simplified speed score in prompt\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "## Routing Scoreboard") {
+		t.Fatalf("expected routing scoreboard section\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "profile=worker") || !strings.Contains(got, "role=developer") || !strings.Contains(got, "score=") {
+		t.Fatalf("expected profile/role/score row\nprompt:\n%s", got)
 	}
 }
