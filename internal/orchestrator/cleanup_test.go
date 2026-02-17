@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 
 func TestCleanupStaleWorktrees_PreservesCompletedSpawnWorktree(t *testing.T) {
 	repo := initGitRepo(t)
+	s := newTestStore(t, repo)
 	mgr := worktree.NewManager(repo)
 	ctx := context.Background()
 
@@ -24,7 +24,6 @@ func TestCleanupStaleWorktrees_PreservesCompletedSpawnWorktree(t *testing.T) {
 	}
 	defer mgr.RemoveWithBranch(ctx, wtPath, branch)
 
-	s := newTestStore(t, repo)
 	rec := &store.SpawnRecord{
 		ParentTurnID:  1,
 		ParentProfile: "manager",
@@ -51,6 +50,7 @@ func TestCleanupStaleWorktrees_PreservesCompletedSpawnWorktree(t *testing.T) {
 
 func TestCleanupStaleWorktrees_RemovesMergedSpawnWorktree(t *testing.T) {
 	repo := initGitRepo(t)
+	s := newTestStore(t, repo)
 	mgr := worktree.NewManager(repo)
 	ctx := context.Background()
 
@@ -60,7 +60,6 @@ func TestCleanupStaleWorktrees_RemovesMergedSpawnWorktree(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	s := newTestStore(t, repo)
 	rec := &store.SpawnRecord{
 		ParentTurnID:  1,
 		ParentProfile: "manager",
@@ -87,6 +86,7 @@ func TestCleanupStaleWorktrees_RemovesMergedSpawnWorktree(t *testing.T) {
 
 func TestCleanupStaleWorktrees_RemovesOldUntrackedWorktree(t *testing.T) {
 	repo := initGitRepo(t)
+	s := newTestStore(t, repo)
 	mgr := worktree.NewManager(repo)
 	ctx := context.Background()
 
@@ -102,7 +102,6 @@ func TestCleanupStaleWorktrees_RemovesOldUntrackedWorktree(t *testing.T) {
 		t.Fatalf("Chtimes: %v", err)
 	}
 
-	s := newTestStore(t, repo)
 	o := New(s, nil, repo)
 	o.cleanupStaleWorktrees()
 
@@ -116,9 +115,9 @@ func TestCleanupStaleWorktrees_RemovesOldUntrackedWorktree(t *testing.T) {
 
 func newTestStore(t *testing.T, repoRoot string) *store.Store {
 	t.Helper()
+	t.Setenv("HOME", t.TempDir())
 
-	root := filepath.Join(t.TempDir(), ".adaf")
-	s, err := store.New(root)
+	s, err := store.New(repoRoot)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

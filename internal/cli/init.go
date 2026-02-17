@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/agusx1211/adaf/internal/agent"
 	"github.com/agusx1211/adaf/internal/config"
@@ -17,8 +16,8 @@ var initCmd = &cobra.Command{
 	Aliases: []string{"initialize", "setup"},
 	Short:   "Initialize a new adaf project",
 	Long: `Initialize a new adaf project in the current directory (or specified directory).
-Creates the .adaf/ directory structure with project.json, issue tracker,
-turn logs, documents, and recording storage.
+Creates a .adaf.json marker in the repo and initializes the project store
+under ~/.adaf/projects/<id> with plans, issues, docs, turn logs, and recordings.
 
 Also scans PATH for installed AI agent tools (claude, codex, vibe, etc.)
 and caches the results for future runs.
@@ -41,26 +40,6 @@ func init() {
 	rootCmd.AddCommand(initCmd)
 }
 
-// ensureGitignoreEntry adds an entry to a .gitignore file if not already present.
-func ensureGitignoreEntry(path, entry string) {
-	data, _ := os.ReadFile(path)
-	content := string(data)
-	for _, line := range strings.Split(content, "\n") {
-		if strings.TrimSpace(line) == entry {
-			return // already present
-		}
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
-		f.WriteString("\n")
-	}
-	f.WriteString(entry + "\n")
-}
-
 func runInit(cmd *cobra.Command, args []string) error {
 	repoPath, _ := cmd.Flags().GetString("repo")
 	name, _ := cmd.Flags().GetString("name")
@@ -76,10 +55,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 		name = filepath.Base(absRepo)
 	}
 
-	// Ensure .adaf-worktrees/ is in the repo-level .gitignore.
-	repoGitignore := filepath.Join(absRepo, ".gitignore")
-	ensureGitignoreEntry(repoGitignore, ".adaf-worktrees/")
-
 	// Check if already initialized
 	s, err := store.New(absRepo)
 	if err != nil {
@@ -94,7 +69,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 		fmt.Println()
 		fmt.Printf("  %sadaf project already exists%s\n", styleBoldCyan, colorReset)
-		printField("Location", filepath.Join(absRepo, store.AdafDir))
+		printField("Marker", store.ProjectMarkerPath(absRepo))
+		printField("Store", s.Root())
 		if len(created) == 0 {
 			fmt.Printf("  %sNo repairs needed.%s\n\n", styleBoldGreen, colorReset)
 			return nil
@@ -124,28 +100,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("initializing project: %w", err)
 	}
 
-	// Write a .gitignore inside .adaf/ that tracks only long-lived planning artifacts.
-	gitignorePath := filepath.Join(absRepo, store.AdafDir, ".gitignore")
-	gitignoreContent := `# Ignore everything in .adaf by default.
-/*
-
-# Operational data — local only, not committed
-/local/
-
-# Keep this rule file.
-!/.gitignore
-
-# Keep project knowledge and planning artifacts.
-!/docs/
-!/issues/
-!/plans/
-!/decisions/
-`
-
-	if err := os.WriteFile(gitignorePath, []byte(gitignoreContent), 0644); err != nil {
-		return fmt.Errorf("writing .adaf/.gitignore: %w", err)
-	}
-
 	// Run initial agent detection so the cache is populated.
 	globalCfg, _ := config.Load()
 	agentsCfg, scanErr := agent.LoadAndSyncAgentsConfig(globalCfg)
@@ -157,16 +111,19 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  %s adaf project initialized!%s\n", styleBoldGreen, colorReset)
 	fmt.Println()
 	printField("Project", name)
-	printField("Location", filepath.Join(absRepo, store.AdafDir))
+	printField("Project ID", s.ProjectID())
+	printField("Marker", store.ProjectMarkerPath(absRepo))
+	printField("Store", s.Root())
 	printField("Repo", absRepo)
 	fmt.Println()
 	fmt.Printf("  %sCreated:%s\n", colorDim, colorReset)
-	fmt.Printf("    %s/.adaf/project.json\n", absRepo)
-	fmt.Printf("    %s/.adaf/plans/\n", absRepo)
-	fmt.Printf("    %s/.adaf/local/turns/\n", absRepo)
-	fmt.Printf("    %s/.adaf/issues/\n", absRepo)
-	fmt.Printf("    %s/.adaf/docs/\n", absRepo)
-	fmt.Printf("    %s/.adaf/local/records/\n", absRepo)
+	fmt.Printf("    %s\n", store.ProjectMarkerPath(absRepo))
+	fmt.Printf("    %s/project.json\n", s.Root())
+	fmt.Printf("    %s/plans/\n", s.Root())
+	fmt.Printf("    %s/local/turns/\n", s.Root())
+	fmt.Printf("    %s/issues/\n", s.Root())
+	fmt.Printf("    %s/docs/\n", s.Root())
+	fmt.Printf("    %s/local/records/\n", s.Root())
 	if agentsCfg != nil {
 		detected := 0
 		for _, rec := range agentsCfg.Agents {

@@ -92,16 +92,16 @@ func DefaultSkills() []Skill {
 		},
 		{
 			ID:    SkillAdafTools,
-			Short: "Do NOT read or write files inside the `.adaf/` directory directly. Use `adaf` CLI commands instead (`adaf issues`, `adaf log`, `adaf plan`, etc.). The `.adaf/` directory structure may change and direct access will be restricted in the future.",
+			Short: "Do NOT read or write files inside the adaf project store directly (for example `~/.adaf/projects/<id>/`). Use `adaf` CLI commands instead (`adaf issues`, `adaf log`, `adaf plan`, etc.). The storage layout may change.",
 			Long: "# ADAF Tools\n\n" +
-				"Do NOT read or write files inside the `.adaf/` directory directly.\n" +
+				"Do NOT read or write files inside the adaf project store directly (for example `~/.adaf/projects/<id>/`).\n" +
 				"Use `adaf` CLI commands instead:\n\n" +
 				"- `adaf issues` — List and manage issues\n" +
 				"- `adaf log` — View session logs\n" +
 				"- `adaf plan` — View and manage plans\n" +
 				"- `adaf status` — View project status\n" +
 				"- `adaf --help` — Full command reference\n\n" +
-				"The `.adaf/` directory structure may change and direct access will be restricted in the future.\n",
+				"The storage layout may change and direct access will be restricted in the future.\n",
 		},
 		{
 			ID:    SkillDelegation,

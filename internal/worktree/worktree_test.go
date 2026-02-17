@@ -83,6 +83,34 @@ func TestAutoCommitIfDirty_NoChanges(t *testing.T) {
 	}
 }
 
+func TestCreateUsesProjectScopedTempRoot(t *testing.T) {
+	repo := initGitRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, ".adaf.json"), []byte(`{"id":"demo-project-id"}`), 0644); err != nil {
+		t.Fatalf("WriteFile(.adaf.json): %v", err)
+	}
+
+	mgr := NewManager(repo)
+	ctx := context.Background()
+
+	branch := "adaf/test/worker/20260212T000099"
+	wtPath, err := mgr.Create(ctx, branch)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer mgr.RemoveWithBranch(ctx, wtPath, branch)
+
+	wantPrefix := filepath.Join(os.TempDir(), "adaf", "demo-project-id", "worktrees")
+	cleanPath := filepath.Clean(wtPath)
+	cleanPrefix := filepath.Clean(wantPrefix)
+	if cleanPath != cleanPrefix && !strings.HasPrefix(cleanPath, cleanPrefix+string(os.PathSeparator)) {
+		t.Fatalf("worktree path = %q, want under %q", wtPath, wantPrefix)
+	}
+
+	if _, err := os.Stat(filepath.Join(wtPath, ".adaf.json")); err != nil {
+		t.Fatalf("expected worktree marker .adaf.json, stat err=%v", err)
+	}
+}
+
 func initGitRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()

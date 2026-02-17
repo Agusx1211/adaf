@@ -163,8 +163,8 @@ func (srv *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Reques
 func (srv *Server) terminalWorkDir() string {
 	if srv != nil {
 		if s := srv.defaultStore(); s != nil {
-			if root := strings.TrimSpace(s.Root()); root != "" {
-				return root
+			if projectDir := strings.TrimSpace(s.ProjectDir()); projectDir != "" {
+				return projectDir
 			}
 		}
 	}

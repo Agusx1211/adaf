@@ -7,6 +7,7 @@ import (
 )
 
 func TestDeadWorktreePathsIncludesCanceled(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	s, err := store.New(dir)
 	if err != nil {

@@ -5,10 +5,14 @@ import (
 )
 
 func TestUpdateChatInstanceLastSession(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	s, err := New(dir)
 	if err != nil {
 		t.Fatalf("New: %v", err)
+	}
+	if err := s.Init(ProjectConfig{Name: "chat-test", RepoPath: dir}); err != nil {
+		t.Fatalf("Init: %v", err)
 	}
 	if err := s.EnsureDirs(); err != nil {
 		t.Fatalf("EnsureDirs: %v", err)

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -18,7 +17,7 @@ var issueCmd = &cobra.Command{
 
 Issues have a title, description, status (open, in_progress, resolved, wontfix),
 priority (critical, high, medium, low), and optional labels. Issues are stored
-as individual JSON files in .adaf/issues/.
+as individual JSON files in the adaf project store.
 
 Examples:
   adaf issue list                              # List all issues
@@ -223,7 +222,7 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	if client := TryConnect(); client != nil {
-		projectID := projectIDFromPath(filepath.Dir(s.Root()))
+		projectID := projectIDFromPath(s.ProjectDir())
 		request := map[string]interface{}{
 			"title":       title,
 			"description": description,

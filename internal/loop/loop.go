@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -258,7 +257,7 @@ func (l *Loop) Run(ctx context.Context) error {
 			cfg.Env["ADAF_PLAN_ID"] = l.PlanID
 		}
 		if l.Store != nil {
-			projectDir := strings.TrimSpace(filepath.Dir(l.Store.Root()))
+			projectDir := strings.TrimSpace(l.Store.ProjectDir())
 			if projectDir != "" {
 				cfg.Env["ADAF_PROJECT_DIR"] = projectDir
 			}

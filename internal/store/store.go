@@ -15,11 +15,20 @@ import (
 
 // Store persistence is organized across domain-specific store_*.go files.
 // This file contains core store infrastructure and shared helpers.
-const AdafDir = ".adaf"
+const (
+	// AdafDir is the legacy in-repo data directory name retained for
+	// compatibility with existing messages/tests.
+	AdafDir = ".adaf"
+	// ProjectMarkerFile is the in-repo marker that links a repo directory to
+	// a global store under ~/.adaf/projects/<id>.
+	ProjectMarkerFile = ".adaf.json"
+)
 
 type Store struct {
-	root string // path to .adaf directory
-	mu   sync.RWMutex
+	projectDir string // path to repo/project directory containing .adaf.json
+	projectID  string // value from .adaf.json ("id")
+	root       string // path to global store directory (~/.adaf/projects/<id>)
+	mu         sync.RWMutex
 
 	signalMu         sync.Mutex
 	waitSignals      map[int]chan struct{}
@@ -53,12 +62,23 @@ var requiredProjectSubdirs = []string{
 }
 
 func New(projectDir string) (*Store, error) {
-	root := filepath.Join(projectDir, AdafDir)
+	projectDir = cleanPath(projectDir)
 	s := &Store{
-		root:             root,
+		projectDir:       projectDir,
 		waitSignals:      make(map[int]chan struct{}),
 		interruptSignals: make(map[int]chan string),
 	}
+
+	projectID, err := ReadProjectID(projectDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("reading project marker: %w", err)
+		}
+		return s, nil
+	}
+
+	s.projectID = projectID
+	s.root = ProjectStoreDirForID(projectID)
 	if err := s.migrateToLocalScope(); err != nil {
 		return nil, fmt.Errorf("migrating project store layout: %w", err)
 	}
@@ -66,10 +86,28 @@ func New(projectDir string) (*Store, error) {
 }
 
 func (s *Store) Init(config ProjectConfig) error {
+	if strings.TrimSpace(s.projectID) == "" {
+		projectID, err := GenerateProjectID(s.projectDir)
+		if err != nil {
+			return fmt.Errorf("generating project id: %w", err)
+		}
+		if err := writeProjectMarker(s.projectDir, projectID); err != nil {
+			return fmt.Errorf("writing project marker: %w", err)
+		}
+		s.projectID = projectID
+		s.root = ProjectStoreDirForID(projectID)
+	}
+
 	if _, err := s.ensureProjectDirs(); err != nil {
 		return fmt.Errorf("creating project store directories: %w", err)
 	}
+	if err := s.ensureStoreGitRepo(); err != nil {
+		return fmt.Errorf("initializing project store git repository: %w", err)
+	}
 
+	if strings.TrimSpace(config.RepoPath) == "" {
+		config.RepoPath = s.projectDir
+	}
 	config.Created = time.Now().UTC()
 	if err := s.writeJSON(filepath.Join(s.root, "project.json"), config); err != nil {
 		return err
@@ -81,12 +119,23 @@ func (s *Store) Init(config ProjectConfig) error {
 }
 
 func (s *Store) Exists() bool {
+	if strings.TrimSpace(s.root) == "" || strings.TrimSpace(s.projectID) == "" {
+		return false
+	}
 	_, err := os.Stat(filepath.Join(s.root, "project.json"))
 	return err == nil
 }
 
 func (s *Store) Root() string {
 	return s.root
+}
+
+func (s *Store) ProjectDir() string {
+	return s.projectDir
+}
+
+func (s *Store) ProjectID() string {
+	return s.projectID
 }
 
 func (s *Store) localDir(parts ...string) string {
@@ -202,10 +251,16 @@ func (s *Store) Repair() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := s.ensureStoreGitRepo(); err != nil {
+		return nil, err
+	}
 	return created, nil
 }
 
 func (s *Store) ensureProjectDirs() ([]string, error) {
+	if strings.TrimSpace(s.root) == "" {
+		return nil, fmt.Errorf("project is not initialized (missing %s)", ProjectMarkerFile)
+	}
 	if err := os.MkdirAll(s.root, 0755); err != nil {
 		return nil, err
 	}
@@ -218,7 +273,7 @@ func (s *Store) ensureProjectDirs() ([]string, error) {
 		path := filepath.Join(s.root, sub)
 		if _, err := os.Stat(path); err != nil {
 			if os.IsNotExist(err) {
-				created = append(created, filepath.Join(AdafDir, sub))
+				created = append(created, path)
 			} else {
 				return nil, err
 			}

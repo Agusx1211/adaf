@@ -515,5 +515,5 @@ func handleProfileStatsP(s *store.Store, w http.ResponseWriter, r *http.Request)
 
 // projectDir derives the project root directory from a store.
 func projectDir(s *store.Store) string {
-	return filepath.Dir(s.Root())
+	return s.ProjectDir()
 }

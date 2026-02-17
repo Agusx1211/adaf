@@ -164,14 +164,22 @@ exit 42
 }
 
 func TestVibeHomeDir_PersistentWhenWorkDirSet(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	workDir := t.TempDir()
+	s, err := store.New(workDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "vibe-home-test", RepoPath: workDir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
+	}
 
 	dir, isTmp := vibeHomeDir(workDir)
 	if isTmp {
 		t.Fatal("vibeHomeDir with workDir should return persistent dir, got temp")
 	}
 
-	expected := filepath.Join(workDir, ".adaf", "local", "vibe_home")
+	expected := filepath.Join(s.Root(), "local", "vibe_home")
 	if dir != expected {
 		t.Fatalf("vibeHomeDir = %q, want %q", dir, expected)
 	}
@@ -277,6 +285,7 @@ func TestVibeRunCancellationPreservesSessionID(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script helper not supported on windows")
 	}
+	t.Setenv("HOME", t.TempDir())
 
 	tmp := t.TempDir()
 	cmdPath := filepath.Join(tmp, "fake-vibe-cancel")
@@ -295,9 +304,12 @@ while true; do sleep 1; done
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	s, err := store.New(t.TempDir())
+	s, err := store.New(tmp)
 	if err != nil {
 		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "vibe-cancel-test", RepoPath: tmp}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
 	}
 	rec := recording.New(1, s)
 

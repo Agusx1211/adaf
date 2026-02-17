@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/agusx1211/adaf/internal/config"
+	"github.com/agusx1211/adaf/internal/store"
 )
 
 func TestAbortSessionStartupMarksMetadata(t *testing.T) {
@@ -59,6 +61,14 @@ func TestCreateSessionPopulatesProjectID(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	projectDir := t.TempDir()
+	s, err := store.New(projectDir)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "proj", RepoPath: projectDir}); err != nil {
+		t.Fatalf("store.Init: %v", err)
+	}
+
 	sessionID, err := CreateSession(DaemonConfig{
 		ProjectDir:  projectDir,
 		ProjectName: "proj",
@@ -87,20 +97,13 @@ func TestCreateSessionPopulatesProjectID(t *testing.T) {
 		t.Fatalf("ProjectID = %q, want %q", meta.ProjectID, expectedID)
 	}
 
-	// Format check: name-8charhash
-	if !strings.Contains(meta.ProjectID, "-") {
-		t.Fatalf("ProjectID %q does not contain '-'", meta.ProjectID)
-	}
-	parts := strings.Split(meta.ProjectID, "-")
-	if len(parts) < 2 {
-		t.Fatalf("ProjectID %q has wrong format", meta.ProjectID)
-	}
-	hash := parts[len(parts)-1]
-	if len(hash) != 8 {
-		t.Fatalf("hash part of ProjectID %q length = %d, want 8", meta.ProjectID, len(hash))
+	// Format check: <readable>-<uuid-v4>
+	pattern := regexp.MustCompile(`^[a-z0-9][a-z0-9-]*-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	if !pattern.MatchString(meta.ProjectID) {
+		t.Fatalf("ProjectID %q does not match expected format", meta.ProjectID)
 	}
 
-	// Determinism check
+	// Determinism check (marker-based).
 	if ProjectIDFromDir(projectDir) != expectedID {
 		t.Fatal("ProjectID is not deterministic")
 	}

@@ -2,8 +2,6 @@ package session
 
 import (
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -19,6 +17,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/agusx1211/adaf/internal/config"
+	"github.com/agusx1211/adaf/internal/store"
 )
 
 const (
@@ -142,38 +141,11 @@ func nextID() int {
 	return maxID + 1
 }
 
-// ProjectIDFromDir derives a stable project identifier from a project directory.
+// ProjectIDFromDir returns the project identifier for a directory.
+// It reads .adaf.json when present and falls back to a deterministic id for
+// uninitialized directories.
 func ProjectIDFromDir(dir string) string {
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		abs = dir
-	}
-	abs = filepath.Clean(abs)
-
-	base := sanitizeForID(filepath.Base(abs))
-	if base == "" {
-		base = "project"
-	}
-
-	h := sha1.Sum([]byte(abs))
-	hash := hex.EncodeToString(h[:])[:8]
-	return base + "-" + hash
-}
-
-func sanitizeForID(raw string) string {
-	raw = strings.ToLower(strings.TrimSpace(raw))
-	var b strings.Builder
-	prevDash := false
-	for _, r := range raw {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-			prevDash = false
-		} else if !prevDash {
-			b.WriteByte('-')
-			prevDash = true
-		}
-	}
-	return strings.Trim(b.String(), "-")
+	return store.ProjectIDFromDir(dir)
 }
 
 // CreateSession allocates a new session ID, writes the DaemonConfig and initial

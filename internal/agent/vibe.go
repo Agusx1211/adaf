@@ -13,6 +13,7 @@ import (
 
 	"github.com/agusx1211/adaf/internal/debug"
 	"github.com/agusx1211/adaf/internal/recording"
+	"github.com/agusx1211/adaf/internal/store"
 	"github.com/agusx1211/adaf/internal/stream"
 )
 
@@ -79,7 +80,7 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 		recorder.RecordStdin(cfg.Prompt)
 	}
 
-	// Use a persistent VIBE_HOME under the project's .adaf directory so that
+	// Use a persistent VIBE_HOME under the project's global store so that
 	// session data survives across runs and --resume can find previous sessions.
 	// Vibe natively supports multiple sessions in the same home directory.
 	// Fall back to a temp dir if WorkDir is unavailable.
@@ -134,13 +135,18 @@ func (v *VibeAgent) Run(ctx context.Context, cfg Config, recorder *recording.Rec
 
 // vibeHomeDir returns a VIBE_HOME directory path and whether it's a temp dir
 // (that the caller should clean up). When a workDir is available, it uses a
-// persistent location under .adaf/local/vibe_home/ so session data survives
-// across runs. Falls back to a temp dir when workDir is empty.
+// persistent location under ~/.adaf/projects/<id>/local/vibe_home/ so session
+// data survives across runs. Falls back to a temp dir when workDir is empty.
 func vibeHomeDir(workDir string) (string, bool) {
 	if workDir != "" {
-		dir := filepath.Join(workDir, ".adaf", "local", "vibe_home")
-		if err := os.MkdirAll(dir, 0o755); err == nil {
-			return dir, false
+		projectDir, err := store.FindProjectDir(workDir)
+		if err == nil && projectDir != "" {
+			if projectID, err := store.ReadProjectID(projectDir); err == nil {
+				dir := filepath.Join(store.ProjectStoreDirForID(projectID), "local", "vibe_home")
+				if err := os.MkdirAll(dir, 0o755); err == nil {
+					return dir, false
+				}
+			}
 		}
 	}
 	dir, err := os.MkdirTemp("", "adaf-vibe-home-*")

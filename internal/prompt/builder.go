@@ -319,9 +319,9 @@ func buildLegacyPrompt(opts BuildOpts) (string, error) {
 			"Uncommitted changes are invisible to scouts, other agents, and future sessions. " +
 			"Commit early and often — your worktree is yours alone.\n")
 	}
-	b.WriteString("- Do NOT read or write files inside the `.adaf/` directory directly. " +
+	b.WriteString("- Do NOT read or write files inside the adaf project store directly (for example `~/.adaf/projects/<id>/`). " +
 		"Use `adaf` CLI commands instead (`adaf issues`, `adaf log`, `adaf plan`, etc.). " +
-		"The `.adaf/` directory structure may change and direct access will be restricted in the future.\n")
+		"The storage layout may change and direct access will be restricted in the future.\n")
 	b.WriteString("\n")
 
 	// Context.
@@ -786,7 +786,7 @@ func buildStandaloneChatContext(opts BuildOpts) (string, error) {
 	// Tools pointer.
 	b.WriteString("## Tools\n")
 	b.WriteString("The `adaf` CLI provides project management tools. Run `adaf --help` for available commands.\n")
-	b.WriteString("Do not access the `.adaf/` directory directly — use `adaf` commands.\n\n")
+	b.WriteString("Do not access the adaf project store directly (for example `~/.adaf/projects/<id>/`) — use `adaf` commands.\n\n")
 
 	// Delegation pointer (brief).
 	if opts.Delegation != nil && len(opts.Delegation.Profiles) > 0 {

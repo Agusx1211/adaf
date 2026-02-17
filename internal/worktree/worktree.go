@@ -13,9 +13,10 @@ import (
 	"time"
 
 	"github.com/agusx1211/adaf/internal/debug"
+	"github.com/agusx1211/adaf/internal/store"
 )
 
-const worktreeDir = ".adaf-worktrees"
+const worktreeDir = "worktrees"
 
 // WorktreeInfo describes an active git worktree.
 type WorktreeInfo struct {
@@ -53,7 +54,7 @@ func BranchName(parentSession int, childProfile string) string {
 // CreateDetached creates a worktree with a detached HEAD at the current commit.
 // Used for read-only spawns that need an isolated working directory without a branch.
 func (m *Manager) CreateDetached(ctx context.Context, name string) (string, error) {
-	base := filepath.Join(m.repoRoot, worktreeDir)
+	base := m.worktreeRoot()
 	if err := os.MkdirAll(base, 0755); err != nil {
 		return "", fmt.Errorf("creating worktree dir: %w", err)
 	}
@@ -64,8 +65,8 @@ func (m *Manager) CreateDetached(ctx context.Context, name string) (string, erro
 		return "", fmt.Errorf("worktree add --detach: %w", err)
 	}
 
-	// Symlink .adaf/ so sub-agents share the store.
-	m.symlinkAdaf(wtPath)
+	// Ensure project marker is visible in worktrees for project resolution.
+	m.ensureProjectMarker(wtPath)
 
 	return wtPath, nil
 }
@@ -74,7 +75,7 @@ func (m *Manager) CreateDetached(ctx context.Context, name string) (string, erro
 // It returns the worktree path on disk.
 func (m *Manager) Create(ctx context.Context, branchName string) (string, error) {
 	debug.LogKV("worktree", "Create()", "branch", branchName, "repo_root", m.repoRoot)
-	base := filepath.Join(m.repoRoot, worktreeDir)
+	base := m.worktreeRoot()
 	if err := os.MkdirAll(base, 0755); err != nil {
 		return "", fmt.Errorf("creating worktree dir: %w", err)
 	}
@@ -100,8 +101,8 @@ func (m *Manager) Create(ctx context.Context, branchName string) (string, error)
 		return "", fmt.Errorf("worktree add: %w", err)
 	}
 
-	// Symlink .adaf/ so sub-agents share the store.
-	m.symlinkAdaf(wtPath)
+	// Ensure project marker is visible in worktrees for project resolution.
+	m.ensureProjectMarker(wtPath)
 
 	debug.LogKV("worktree", "created", "branch", branchName, "path", wtPath, "head", strings.TrimSpace(head))
 	return wtPath, nil
@@ -109,10 +110,10 @@ func (m *Manager) Create(ctx context.Context, branchName string) (string, error)
 
 // Remove removes a worktree and optionally deletes its branch.
 func (m *Manager) Remove(ctx context.Context, wtPath string, deleteBranch bool) error {
-	// Remove symlinked .adaf first to avoid git complaints.
-	adafLink := filepath.Join(wtPath, ".adaf")
-	if info, err := os.Lstat(adafLink); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		os.Remove(adafLink)
+	// Remove symlinked marker first to avoid git complaints.
+	markerLink := filepath.Join(wtPath, ".adaf.json")
+	if info, err := os.Lstat(markerLink); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		os.Remove(markerLink)
 	}
 
 	if _, err := m.git(ctx, "worktree", "remove", "--force", wtPath); err != nil {
@@ -223,14 +224,14 @@ func (m *Manager) AutoCommitIfDirty(ctx context.Context, worktreePath, message s
 	return strings.TrimSpace(hash), true, nil
 }
 
-// ListActive returns all active worktrees under .adaf-worktrees/.
+// ListActive returns all active adaf-managed worktrees for this project.
 func (m *Manager) ListActive(ctx context.Context) ([]WorktreeInfo, error) {
 	out, err := m.git(ctx, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err
 	}
 
-	base := filepath.Join(m.repoRoot, worktreeDir)
+	base := m.worktreeRoot()
 	var result []WorktreeInfo
 	var current WorktreeInfo
 	for _, line := range strings.Split(out, "\n") {
@@ -261,7 +262,7 @@ func (m *Manager) CleanupAll(ctx context.Context) error {
 		}
 	}
 	// Clean up the worktree directory itself.
-	base := filepath.Join(m.repoRoot, worktreeDir)
+	base := m.worktreeRoot()
 	os.RemoveAll(base)
 	m.git(ctx, "worktree", "prune")
 	return nil
@@ -303,15 +304,38 @@ func (m *Manager) CleanupStale(ctx context.Context, maxAge time.Duration, deadPa
 	return removed, nil
 }
 
-func (m *Manager) symlinkAdaf(wtPath string) {
-	adafSrc := filepath.Join(m.repoRoot, ".adaf")
-	adafDst := filepath.Join(wtPath, ".adaf")
-	if _, err := os.Stat(adafSrc); err == nil {
-		os.Remove(adafDst)
-		if err := os.Symlink(adafSrc, adafDst); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to symlink .adaf into worktree: %v\n", err)
+func (m *Manager) ensureProjectMarker(wtPath string) {
+	markerSrc := filepath.Join(m.repoRoot, ".adaf.json")
+	markerDst := filepath.Join(wtPath, ".adaf.json")
+
+	if _, err := os.Stat(markerSrc); err != nil {
+		return
+	}
+	if _, err := os.Lstat(markerDst); err == nil {
+		return // already present in worktree checkout
+	}
+
+	if err := os.Symlink(markerSrc, markerDst); err == nil {
+		return
+	}
+
+	data, err := os.ReadFile(markerSrc)
+	if err == nil {
+		if writeErr := os.WriteFile(markerDst, data, 0644); writeErr == nil {
+			return
 		}
 	}
+
+	fmt.Fprintf(os.Stderr, "warning: failed to propagate .adaf.json into worktree\n")
+}
+
+func (m *Manager) worktreeRoot() string {
+	projectID := strings.TrimSpace(store.ProjectIDFromDir(m.repoRoot))
+	projectID = sanitize(projectID)
+	if projectID == "" {
+		projectID = "project"
+	}
+	return filepath.Join(os.TempDir(), "adaf", projectID, worktreeDir)
 }
 
 // git runs a git command in the repo root and returns combined output.

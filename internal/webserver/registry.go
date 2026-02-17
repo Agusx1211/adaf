@@ -151,7 +151,7 @@ func (r *ProjectRegistry) GetByID(id string) (*ProjectEntry, bool) {
 // registering. Returns the store and true on success, nil and false on failure.
 func (r *ProjectRegistry) TryAutoRegister(rootDir, projectID string) (*store.Store, bool) {
 	projectDir := filepath.Join(rootDir, filepath.FromSlash(projectID))
-	projectFile := filepath.Join(projectDir, store.AdafDir, "project.json")
+	projectFile := store.ProjectMarkerPath(projectDir)
 	if _, err := os.Stat(projectFile); err != nil {
 		return nil, false
 	}

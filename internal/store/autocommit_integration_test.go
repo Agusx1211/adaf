@@ -7,17 +7,6 @@ import (
 	"testing"
 )
 
-// runGit runs a git command in the specified directory
-func runGitIntegration(dir string, args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, output)
-	}
-	return nil
-}
-
 // runGitOutput runs a git command and returns its output
 func runGitOutputIntegration(dir string, args ...string) ([]byte, error) {
 	cmd := exec.Command("git", args...)
@@ -27,18 +16,8 @@ func runGitOutputIntegration(dir string, args ...string) ([]byte, error) {
 
 func TestAutoCommitIntegration(t *testing.T) {
 	t.Run("issue creation triggers auto-commit", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
 		dir := t.TempDir()
-
-		// Initialize a git repo
-		if err := runGitIntegration(dir, "init"); err != nil {
-			t.Fatal("failed to init git repo:", err)
-		}
-		if err := runGitIntegration(dir, "config", "user.email", "test@example.com"); err != nil {
-			t.Fatal("failed to set git email:", err)
-		}
-		if err := runGitIntegration(dir, "config", "user.name", "Test User"); err != nil {
-			t.Fatal("failed to set git name:", err)
-		}
 
 		// Create store
 		s, err := New(dir)
@@ -64,7 +43,7 @@ func TestAutoCommitIntegration(t *testing.T) {
 		}
 
 		// Check that a commit was created
-		output, err := runGitOutputIntegration(dir, "log", "--oneline", "-1")
+		output, err := runGitOutputIntegration(s.Root(), "log", "--oneline", "-1")
 		if err != nil {
 			t.Fatal("failed to get git log:", err, string(output))
 		}
@@ -84,18 +63,8 @@ func TestAutoCommitIntegration(t *testing.T) {
 	})
 
 	t.Run("plan creation triggers auto-commit", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
 		dir := t.TempDir()
-
-		// Initialize a git repo
-		if err := runGitIntegration(dir, "init"); err != nil {
-			t.Fatal("failed to init git repo:", err)
-		}
-		if err := runGitIntegration(dir, "config", "user.email", "test@example.com"); err != nil {
-			t.Fatal("failed to set git email:", err)
-		}
-		if err := runGitIntegration(dir, "config", "user.name", "Test User"); err != nil {
-			t.Fatal("failed to set git name:", err)
-		}
 
 		// Create store
 		s, err := New(dir)
@@ -121,7 +90,7 @@ func TestAutoCommitIntegration(t *testing.T) {
 		}
 
 		// Check that a commit was created
-		output, err := runGitOutputIntegration(dir, "log", "--oneline", "-1")
+		output, err := runGitOutputIntegration(s.Root(), "log", "--oneline", "-1")
 		if err != nil {
 			t.Fatal("failed to get git log:", err, string(output))
 		}
@@ -138,18 +107,8 @@ func TestAutoCommitIntegration(t *testing.T) {
 	})
 
 	t.Run("doc creation triggers auto-commit", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
 		dir := t.TempDir()
-
-		// Initialize a git repo
-		if err := runGitIntegration(dir, "init"); err != nil {
-			t.Fatal("failed to init git repo:", err)
-		}
-		if err := runGitIntegration(dir, "config", "user.email", "test@example.com"); err != nil {
-			t.Fatal("failed to set git email:", err)
-		}
-		if err := runGitIntegration(dir, "config", "user.name", "Test User"); err != nil {
-			t.Fatal("failed to set git name:", err)
-		}
 
 		// Create store
 		s, err := New(dir)
@@ -174,7 +133,7 @@ func TestAutoCommitIntegration(t *testing.T) {
 		}
 
 		// Check that a commit was created
-		output, err := runGitOutputIntegration(dir, "log", "--oneline", "-1")
+		output, err := runGitOutputIntegration(s.Root(), "log", "--oneline", "-1")
 		if err != nil {
 			t.Fatal("failed to get git log:", err, string(output))
 		}

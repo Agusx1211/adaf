@@ -7,6 +7,7 @@ import (
 )
 
 func TestInit(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	s, err := New(dir)
 	if err != nil {
@@ -24,11 +25,28 @@ func TestInit(t *testing.T) {
 	if got.Name != "myapp" {
 		t.Errorf("name = %q, want %q", got.Name, "myapp")
 	}
+	if s.ProjectID() == "" {
+		t.Fatal("project id is empty")
+	}
+	if _, err := os.Stat(ProjectMarkerPath(dir)); err != nil {
+		t.Fatalf("expected marker file, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.Root(), ".git")); err != nil {
+		t.Fatalf("expected store git repo, stat err=%v", err)
+	}
 }
 
 func TestNewMigratesOperationalDirsToLocalScope(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	repo := t.TempDir()
-	root := filepath.Join(repo, AdafDir)
+	projectID, err := GenerateProjectID(repo)
+	if err != nil {
+		t.Fatalf("GenerateProjectID() error = %v", err)
+	}
+	if err := writeProjectMarker(repo, projectID); err != nil {
+		t.Fatalf("writeProjectMarker() error = %v", err)
+	}
+	root := ProjectStoreDirForID(projectID)
 
 	oldEvents := filepath.Join(root, "records", "1", "events.jsonl")
 	if err := os.MkdirAll(filepath.Dir(oldEvents), 0755); err != nil {
@@ -84,6 +102,7 @@ func TestNewMigratesOperationalDirsToLocalScope(t *testing.T) {
 }
 
 func TestInitDoesNotCreateRetiredDirectories(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	s, err := New(dir)
 	if err != nil {

@@ -96,7 +96,7 @@ func (srv *Server) handleFSBrowse(w http.ResponseWriter, r *http.Request) {
 
 		if entry.IsDir() {
 			entryPath := filepath.Join(absPath, entry.Name())
-			projectFile := filepath.Join(entryPath, store.AdafDir, "project.json")
+			projectFile := store.ProjectMarkerPath(entryPath)
 			if _, serr := os.Stat(projectFile); serr == nil {
 				fe.IsProject = true
 			}
@@ -248,9 +248,9 @@ func (srv *Server) handleProjectOpen(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify it's an adaf project
-	projectFile := filepath.Join(absPath, store.AdafDir, "project.json")
+	projectFile := store.ProjectMarkerPath(absPath)
 	if _, err := os.Stat(projectFile); err != nil {
-		writeError(w, http.StatusBadRequest, "not an adaf project (no .adaf/project.json)")
+		writeError(w, http.StatusBadRequest, "not an adaf project (no .adaf.json)")
 		return
 	}
 

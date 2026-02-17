@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -23,17 +22,12 @@ func openStore() (*store.Store, error) {
 		return nil, fmt.Errorf("getting working directory: %w", err)
 	}
 
-	candidate := dir
-	for {
-		projectMetaPath := filepath.Join(candidate, ".adaf", "project.json")
-		if _, serr := os.Stat(projectMetaPath); serr == nil {
-			return store.New(candidate)
-		}
-		parent := filepath.Dir(candidate)
-		if parent == candidate {
-			break
-		}
-		candidate = parent
+	projectDir, err := store.FindProjectDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("finding project root: %w", err)
+	}
+	if projectDir != "" {
+		return store.New(projectDir)
 	}
 
 	return store.New(dir)

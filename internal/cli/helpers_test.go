@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/agusx1211/adaf/internal/store"
 )
 
 func TestResolveTextFlag_EmptyFilePathReturnsFlagValue(t *testing.T) {
@@ -106,13 +108,14 @@ func TestResolveTextFlag_EmptyFileReturnsEmptyString(t *testing.T) {
 }
 
 func TestOpenStoreWalksUpToProjectRoot(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	projectDir := t.TempDir()
-	projectMetaDir := filepath.Join(projectDir, ".adaf")
-	if err := os.MkdirAll(projectMetaDir, 0o755); err != nil {
-		t.Fatalf("creating project meta dir: %v", err)
+	projectStore, err := store.New(projectDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(projectMetaDir, "project.json"), []byte(`{"name":"demo"}`), 0o644); err != nil {
-		t.Fatalf("writing project.json: %v", err)
+	if err := projectStore.Init(store.ProjectConfig{Name: "demo", RepoPath: projectDir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
 	}
 
 	nested := filepath.Join(projectDir, "a", "b", "c")
@@ -137,10 +140,11 @@ func TestOpenStoreWalksUpToProjectRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openStore() error = %v", err)
 	}
-
-	wantRoot := filepath.Join(projectDir, ".adaf")
-	if s.Root() != wantRoot {
-		t.Fatalf("openStore() root = %q, want %q", s.Root(), wantRoot)
+	if s.ProjectDir() != projectDir {
+		t.Fatalf("openStore() project dir = %q, want %q", s.ProjectDir(), projectDir)
+	}
+	if s.Root() != projectStore.Root() {
+		t.Fatalf("openStore() root = %q, want %q", s.Root(), projectStore.Root())
 	}
 }
 
@@ -164,8 +168,10 @@ func TestOpenStoreFallsBackToCurrentDirectory(t *testing.T) {
 		t.Fatalf("openStore() error = %v", err)
 	}
 
-	wantRoot := filepath.Join(dir, ".adaf")
-	if s.Root() != wantRoot {
-		t.Fatalf("openStore() root = %q, want %q", s.Root(), wantRoot)
+	if s.ProjectDir() != dir {
+		t.Fatalf("openStore() project dir = %q, want %q", s.ProjectDir(), dir)
+	}
+	if s.Root() != "" {
+		t.Fatalf("openStore() root = %q, want empty for uninitialized project", s.Root())
 	}
 }

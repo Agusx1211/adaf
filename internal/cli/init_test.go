@@ -11,6 +11,7 @@ import (
 )
 
 func TestRunInitRepairsExistingProject(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	repo := t.TempDir()
 
 	s, err := store.New(repo)
