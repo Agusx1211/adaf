@@ -554,7 +554,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 		Env:       agentEnv,
 		WorkDir:   workDir,
 		Prompt:    childPrompt,
-		MaxTurns:  0,
+		MaxTurns:  1,
 		Stdout:    io.Discard,
 		Stderr:    io.Discard,
 		EventSink: streamCh,
