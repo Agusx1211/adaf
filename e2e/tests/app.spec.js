@@ -161,6 +161,33 @@ test('turn scope keeps parent output and wait state when recorded events omit tu
   await expect(page.getByText('Parent turn is paused until spawned agents return results.', { exact: true }).first()).toBeVisible();
 });
 
+test('running loop row exposes stop control and signals loop stop endpoint', async ({ page, request }) => {
+  const { state, fixture } = await gotoFixture(page, request);
+  const runID = 7;
+  const stopURL = `${projectBaseURL(state, fixture.id)}/loops/${runID}/stop`;
+
+  const runningLoopRow = page.getByText('turn-scope-fixture', { exact: true }).first();
+  await expect(runningLoopRow).toBeVisible();
+
+  const stopButton = page.getByTitle('Stop loop run').first();
+  await expect(stopButton).toBeVisible();
+
+  const stopResponsePromise = page.waitForResponse((response) => {
+    return response.url() === stopURL && response.request().method() === 'POST';
+  });
+
+  page.once('dialog', async (dialog) => {
+    expect(dialog.type()).toBe('confirm');
+    expect(dialog.message()).toContain(`Stop loop run #${runID}?`);
+    await dialog.accept();
+  });
+
+  await stopButton.click();
+  const stopResponse = await stopResponsePromise;
+  expect(stopResponse.status()).toBe(200);
+  await expect(page.getByText(`Stop signal sent for loop run #${runID}.`, { exact: true })).toBeVisible();
+});
+
 test('assistant inspect modal opens for replayed messages', async ({ page, request }) => {
   const { state } = await gotoFixture(page, request);
   await openReplayLoop(page);

@@ -422,3 +422,29 @@ export function StopSessionButton({ sessionID }) {
     }}>{'\u25A0'}</button>
   );
 }
+
+export function StopLoopButton({ runID }) {
+  var state = useAppState();
+  var showToast = useToast();
+
+  var handleStop = async function (e) {
+    if (e && e.stopPropagation) e.stopPropagation();
+    if (!window.confirm('Stop loop run #' + runID + '?')) return;
+    var base = apiBase(state.currentProjectID);
+    try {
+      await apiCall(base + '/loops/' + encodeURIComponent(String(runID)) + '/stop', 'POST', {});
+      showToast('Stop signal sent for loop run #' + runID + '.', 'success');
+    } catch (err) {
+      if (err && err.authRequired) return;
+      showToast('Failed to stop loop run: ' + (err.message || err), 'error');
+    }
+  };
+
+  return (
+    <button onClick={handleStop} title="Stop loop run" style={{
+      padding: '2px 6px', border: '1px solid var(--red)40',
+      background: 'transparent', color: 'var(--red)', borderRadius: 3,
+      cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+    }}>{'\u25A0'}</button>
+  );
+}

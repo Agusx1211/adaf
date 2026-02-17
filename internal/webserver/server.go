@@ -300,6 +300,18 @@ func (srv *Server) setupRoutes(mux *http.ServeMux) {
 	staticHandler := http.FileServer(http.FS(staticFS))
 	mux.Handle("GET /static/", staticHandler)
 
+	// Serve favicon for browsers that auto-request /favicon.ico
+	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		data, err := staticFS.ReadFile("static/favicon.svg")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(data)
+	})
+
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)

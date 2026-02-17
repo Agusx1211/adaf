@@ -367,7 +367,8 @@ function writeTurnScopeFixtureData(adafDir, nowISO) {
     steps: [
       { profile: WAIT_FIXTURE_PROFILE, role: 'manager', turns: 1 },
     ],
-    status: 'running',
+    // Use "active" so the run remains in a live state after store startup cleanup.
+    status: 'active',
     cycle: 0,
     step_index: 0,
     started_at: nowISO,
