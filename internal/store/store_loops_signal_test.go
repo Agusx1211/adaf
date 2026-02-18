@@ -58,3 +58,33 @@ func TestLoopCallSupervisorSignalLifecycle(t *testing.T) {
 		t.Fatalf("signal after consume = %+v, want nil", again)
 	}
 }
+
+func TestLoopWindDownSignalLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	s, err := New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(ProjectConfig{Name: "loop-wind-down-test", RepoPath: dir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
+	}
+
+	run := &LoopRun{
+		LoopName:        "loop-wind-down-test",
+		Steps:           []LoopRunStep{{Profile: "lead"}},
+		StepLastSeenMsg: map[int]int{},
+	}
+	if err := s.CreateLoopRun(run); err != nil {
+		t.Fatalf("CreateLoopRun() error = %v", err)
+	}
+
+	if s.IsLoopWindDown(run.ID) {
+		t.Fatalf("IsLoopWindDown(%d) = true before signal, want false", run.ID)
+	}
+	if err := s.SignalLoopWindDown(run.ID); err != nil {
+		t.Fatalf("SignalLoopWindDown() error = %v", err)
+	}
+	if !s.IsLoopWindDown(run.ID) {
+		t.Fatalf("IsLoopWindDown(%d) = false after signal, want true", run.ID)
+	}
+}

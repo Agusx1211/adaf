@@ -424,3 +424,29 @@ export function StopLoopButton({ runID }) {
     }}>{'\u25A0'}</button>
   );
 }
+
+export function WindDownLoopButton({ runID }) {
+  var state = useAppState();
+  var showToast = useToast();
+
+  var handleWindDown = async function (e) {
+    if (e && e.stopPropagation) e.stopPropagation();
+    if (!window.confirm('Wind down loop run #' + runID + ' after the current turn?')) return;
+    var base = apiBase(state.currentProjectID);
+    try {
+      await apiCall(base + '/loops/' + encodeURIComponent(String(runID)) + '/wind-down', 'POST', {});
+      showToast('Wind-down requested for loop run #' + runID + '.', 'success');
+    } catch (err) {
+      if (err && err.authRequired) return;
+      showToast('Failed to wind down loop run: ' + (err.message || err), 'error');
+    }
+  };
+
+  return (
+    <button onClick={handleWindDown} title="Wind down loop run" style={{
+      padding: '2px 6px', border: '1px solid var(--accent)40',
+      background: 'transparent', color: 'var(--accent)', borderRadius: 3,
+      cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+    }}>{'WD'}</button>
+  );
+}

@@ -381,6 +381,7 @@ func (srv *Server) registerProjectRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("GET "+prefix+"/loops/{id}", srv.projectHandler(handleLoopRunByIDP))
 	mux.HandleFunc("GET "+prefix+"/loops/{id}/messages", srv.projectHandler(handleLoopMessagesP))
 	mux.HandleFunc("POST "+prefix+"/loops/{id}/stop", srv.projectHandler(handleStopLoopRunP))
+	mux.HandleFunc("POST "+prefix+"/loops/{id}/wind-down", srv.projectHandler(handleWindDownLoopRunP))
 	mux.HandleFunc("POST "+prefix+"/loops/{id}/message", srv.projectHandler(handleLoopRunMessageP))
 
 	// Chat Instances

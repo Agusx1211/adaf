@@ -355,6 +355,76 @@ func TestRun_CanStopSignalExitsLoop(t *testing.T) {
 	}
 }
 
+func TestRun_WindDownSignalStopsAfterCurrentTurn(t *testing.T) {
+	s := newLooprunTestStore(t)
+	proj, err := s.LoadProject()
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+
+	// Keep the turn alive long enough to set wind-down while it is running.
+	tmp := t.TempDir()
+	scriptPath := filepath.Join(tmp, "slow-turn.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nsleep 0.2\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	loopDef := &config.LoopDef{
+		Name: "wind-down-test",
+		Steps: []config.LoopStep{
+			{Profile: "p1", Position: config.PositionLead, Turns: 3},
+		},
+	}
+	globalCfg := &config.GlobalConfig{
+		Profiles: []config.Profile{
+			{Name: "p1", Agent: "generic"},
+		},
+	}
+	agentsCfg := &agent.AgentsConfig{
+		Agents: map[string]agent.AgentRecord{
+			"generic": {Name: "generic", Path: scriptPath},
+		},
+	}
+
+	// Wait until the first turn exists, then request wind-down.
+	go func() {
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			runs, _ := s.ListLoopRuns()
+			turns, _ := s.ListTurns()
+			if len(runs) > 0 && len(turns) > 0 {
+				_ = s.SignalLoopWindDown(runs[0].ID)
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	err = Run(ctx, RunConfig{
+		Store:     s,
+		GlobalCfg: globalCfg,
+		LoopDef:   loopDef,
+		Project:   proj,
+		AgentsCfg: agentsCfg,
+		WorkDir:   proj.RepoPath,
+		MaxCycles: 1,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	turns, err := s.ListTurns()
+	if err != nil {
+		t.Fatalf("ListTurns: %v", err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("len(turns) = %d, want 1 (finish current turn, skip next)", len(turns))
+	}
+}
+
 func TestRun_CallSupervisorFastForwardSkipsIntermediateSteps(t *testing.T) {
 	s := newLooprunTestStore(t)
 	proj, err := s.LoadProject()

@@ -219,6 +219,21 @@ func (s *Store) IsLoopStopped(runID int) bool {
 	return err == nil
 }
 
+// SignalLoopWindDown creates a wind-down signal file for a loop run.
+// A wind-down request lets the current turn finish and then prevents
+// starting the next turn.
+func (s *Store) SignalLoopWindDown(runID int) error {
+	dir := s.loopRunDir(runID)
+	os.MkdirAll(dir, 0755)
+	return os.WriteFile(filepath.Join(dir, "wind_down"), []byte("wind_down"), 0644)
+}
+
+// IsLoopWindDown checks if a wind-down signal exists for a loop run.
+func (s *Store) IsLoopWindDown(runID int) bool {
+	_, err := os.Stat(filepath.Join(s.loopRunDir(runID), "wind_down"))
+	return err == nil
+}
+
 func (s *Store) loopCallSupervisorSignalPath(runID int) string {
 	return filepath.Join(s.loopRunDir(runID), "call_supervisor.json")
 }

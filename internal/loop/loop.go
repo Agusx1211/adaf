@@ -90,6 +90,10 @@ type Loop struct {
 	// turn without stopping the entire loop.
 	OnTurnContext func(cancel context.CancelFunc)
 
+	// StopAfterTurn, if set, is called after each fully completed turn and
+	// before the next turn starts. Returning true exits the loop gracefully.
+	StopAfterTurn func(turnID int) bool
+
 	// LastResult is populated after each Agent.Run() call so callers
 	// (e.g. orchestrator) can inspect the child's output.
 	LastResult *agent.Result
@@ -479,6 +483,22 @@ func (l *Loop) Run(ctx context.Context) error {
 		}
 
 		waitingForSpawns := l.Store != nil && l.Store.IsWaiting(turnID)
+		if !waitingForSpawns && l.Store != nil {
+			runningNonHandoff, runningHandoff, err := runningSpawnCountsForTurn(l.Store, turnID)
+			if err != nil {
+				debug.LogKV("loop", "failed to inspect running spawns after turn",
+					"turn_id", turnID,
+					"error", err,
+				)
+			} else if runningNonHandoff > 0 {
+				waitingForSpawns = true
+				debug.LogKV("loop", "inferring wait-for-spawns from running child spawns",
+					"turn_id", turnID,
+					"running_spawns", runningNonHandoff,
+					"running_handoff_spawns", runningHandoff,
+				)
+			}
+		}
 		if waitTriggeredMidTurn {
 			waitingForSpawns = true
 		}
@@ -677,6 +697,14 @@ func (l *Loop) Run(ctx context.Context) error {
 			}
 		}
 
+		if l.StopAfterTurn != nil && l.StopAfterTurn(turnID) {
+			debug.LogKV("loop", "loop exiting after completed turn",
+				"turn_id", turnID,
+				"reason", "stop_after_turn",
+			)
+			return nil
+		}
+
 		turn++
 		debug.LogKV("loop", "turn counter incremented", "next_turn_index", turn)
 	}
@@ -811,6 +839,27 @@ func formatWaitResult(wr WaitResult) string {
 	}
 
 	return b.String()
+}
+
+func runningSpawnCountsForTurn(s *store.Store, turnID int) (runningNonHandoff int, runningHandoff int, err error) {
+	if s == nil || turnID <= 0 {
+		return 0, 0, nil
+	}
+	records, err := s.SpawnsByParent(turnID)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, rec := range records {
+		if store.IsTerminalSpawnStatus(rec.Status) {
+			continue
+		}
+		if rec.Handoff {
+			runningHandoff++
+		} else {
+			runningNonHandoff++
+		}
+	}
+	return runningNonHandoff, runningHandoff, nil
 }
 
 // summarizeObjectiveForLog extracts a compact objective summary from a full

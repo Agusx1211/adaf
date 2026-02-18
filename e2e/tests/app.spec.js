@@ -220,6 +220,33 @@ test('running loop row exposes stop control and signals loop stop endpoint', asy
   await expect(page.getByText(`Stop signal sent for loop run #${runID}.`, { exact: true })).toBeVisible();
 });
 
+test('running loop row exposes wind-down control and signals loop wind-down endpoint', async ({ page, request }) => {
+  const { state, fixture } = await gotoFixture(page, request);
+  const runID = 7;
+  const windDownURL = `${projectBaseURL(state, fixture.id)}/loops/${runID}/wind-down`;
+
+  const runningLoopRow = page.getByText('turn-scope-fixture', { exact: true }).first();
+  await expect(runningLoopRow).toBeVisible();
+
+  const windDownButton = page.getByTitle('Wind down loop run').first();
+  await expect(windDownButton).toBeVisible();
+
+  const windDownResponsePromise = page.waitForResponse((response) => {
+    return response.url() === windDownURL && response.request().method() === 'POST';
+  });
+
+  page.once('dialog', async (dialog) => {
+    expect(dialog.type()).toBe('confirm');
+    expect(dialog.message()).toContain(`Wind down loop run #${runID} after the current turn?`);
+    await dialog.accept();
+  });
+
+  await windDownButton.click();
+  const windDownResponse = await windDownResponsePromise;
+  expect(windDownResponse.status()).toBe(200);
+  await expect(page.getByText(`Wind-down requested for loop run #${runID}.`, { exact: true })).toBeVisible();
+});
+
 test('assistant inspect modal opens for replayed messages', async ({ page, request }) => {
   const { state } = await gotoFixture(page, request);
   await openReplayLoop(page);

@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useAppState, useDispatch } from '../../state/store.js';
 import { agentInfo, statusColor, STATUS_RUNNING } from '../../utils/colors.js';
 import { normalizeStatus, formatElapsed, parseTimestamp } from '../../utils/format.js';
-import { StopLoopButton, StopSessionButton } from '../session/SessionControls.jsx';
+import { StopLoopButton, StopSessionButton, WindDownLoopButton } from '../session/SessionControls.jsx';
 
 export default function LoopTree() {
   var state = useAppState();
@@ -448,7 +448,10 @@ export default function LoopTree() {
               </div>
 
               {isRunning && loopRunID > 0 && (
-                <StopLoopButton runID={loopRunID} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <WindDownLoopButton runID={loopRunID} />
+                  <StopLoopButton runID={loopRunID} />
+                </div>
               )}
             </div>
 

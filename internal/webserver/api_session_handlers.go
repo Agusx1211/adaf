@@ -542,6 +542,21 @@ func handleStopLoopRunP(s *store.Store, w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func handleWindDownLoopRunP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	runID, err := parsePathID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "loop run not found")
+		return
+	}
+
+	if err := s.SignalLoopWindDown(runID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to signal wind-down")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 func handleLoopRunMessageP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	runID, err := parsePathID(r.PathValue("id"))
 	if err != nil {

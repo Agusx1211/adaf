@@ -409,6 +409,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			stepTurnStart := len(run.TurnIDs)
 			handoffsReparented := false
 			lastStepAgentSessionID := strings.TrimSpace(stepResumeSessionID)
+			windDownRequested := false
 
 			l := &loop.Loop{
 				Store:                  cfg.Store,
@@ -463,6 +464,22 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 				},
 				OnTurnContext: func(cancel context.CancelFunc) {
 					setTurnCancel(cancel)
+				},
+				StopAfterTurn: func(turnID int) bool {
+					if cfg.Store == nil || run.ID <= 0 {
+						return false
+					}
+					if !cfg.Store.IsLoopWindDown(run.ID) {
+						return false
+					}
+					windDownRequested = true
+					debug.LogKV("looprun", "wind-down signal observed; finishing after current turn",
+						"run_id", run.ID,
+						"turn_id", turnID,
+						"cycle", cycle,
+						"step", stepIdx,
+					)
+					return true
 				},
 				OnEnd: func(turnID int, turnHexID string, result *agent.Result) {
 					// Keep the spawn poller alive here: if this turn entered
@@ -544,6 +561,22 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 					return ctx.Err()
 				}
 				return fmt.Errorf("step %d (%s) failed: %w", stepIdx, prof.Name, loopErr)
+			}
+			if !windDownRequested && cfg.Store != nil && run.ID > 0 && cfg.Store.IsLoopWindDown(run.ID) {
+				windDownRequested = true
+				debug.LogKV("looprun", "loop wind-down signal observed after step completion",
+					"run_id", run.ID,
+					"cycle", cycle,
+					"step", stepIdx,
+				)
+			}
+			if windDownRequested {
+				debug.LogKV("looprun", "loop wind-down requested; exiting run",
+					"run_id", run.ID,
+					"cycle", cycle,
+					"step", stepIdx,
+				)
+				return nil
 			}
 
 			// Collect handoffs: running spawns marked as handoff from this step's turns.

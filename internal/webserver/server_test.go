@@ -1005,7 +1005,7 @@ func TestConfigPushoverEndpoint(t *testing.T) {
 }
 
 func TestLoopRunEndpoints(t *testing.T) {
-	srv, _ := newTestServer(t)
+	srv, s := newTestServer(t)
 
 	// List loop runs (empty)
 	listRec := performRequest(t, srv, http.MethodGet, "/api/loops")
@@ -1021,6 +1021,24 @@ func TestLoopRunEndpoints(t *testing.T) {
 	notFoundRec := performRequest(t, srv, http.MethodGet, "/api/loops/999")
 	if notFoundRec.Code != http.StatusNotFound {
 		t.Fatalf("get non-existent status = %d, want %d", notFoundRec.Code, http.StatusNotFound)
+	}
+
+	run := &store.LoopRun{
+		LoopName:        "wind-down-endpoint-test",
+		Status:          "running",
+		StepLastSeenMsg: map[int]int{},
+		Steps:           []store.LoopRunStep{{Profile: "p1", Turns: 1}},
+	}
+	if err := s.CreateLoopRun(run); err != nil {
+		t.Fatalf("CreateLoopRun: %v", err)
+	}
+
+	windDownRec := performRequest(t, srv, http.MethodPost, "/api/loops/"+strconv.Itoa(run.ID)+"/wind-down")
+	if windDownRec.Code != http.StatusOK {
+		t.Fatalf("wind-down status = %d, want %d", windDownRec.Code, http.StatusOK)
+	}
+	if !s.IsLoopWindDown(run.ID) {
+		t.Fatalf("IsLoopWindDown(%d) = false, want true", run.ID)
 	}
 }
 
