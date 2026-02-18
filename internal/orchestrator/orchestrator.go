@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +61,20 @@ type SpawnResult struct {
 	Summary  string // child's final output
 	ReadOnly bool   // whether this was a read-only scout
 	Branch   string // worktree branch (empty for read-only)
+
+	// Review is true when this result is a periodic running-spawn checkpoint
+	// (not a terminal completion).
+	Review bool
+
+	// Health metrics populated for review checkpoints.
+	Elapsed           time.Duration
+	CompactionCount   int
+	ReadCount         int
+	WriteCount        int
+	CommitCount       int
+	InputTokens       int
+	CachedInputTokens int
+	OutputTokens      int
 }
 
 type activeSpawn struct {
@@ -75,6 +90,208 @@ type activeSpawn struct {
 	done        chan struct{}
 	eventBuffer *eventRingBuffer // circular buffer of recent events
 	interruptCh chan string      // signals the child loop about an interrupt
+	metrics     *spawnMetrics
+}
+
+type spawnMetrics struct {
+	mu sync.Mutex
+
+	startedAt time.Time
+
+	compactionCount int
+	readCount       int
+	writeCount      int
+	commitCount     int
+
+	inputTokens       int
+	cachedInputTokens int
+	outputTokens      int
+}
+
+type spawnHealth struct {
+	Elapsed           time.Duration
+	CompactionCount   int
+	ReadCount         int
+	WriteCount        int
+	CommitCount       int
+	InputTokens       int
+	CachedInputTokens int
+	OutputTokens      int
+}
+
+type codexEventProbe struct {
+	Type string `json:"type"`
+	Item *struct {
+		Type    string `json:"type"`
+		Command string `json:"command,omitempty"`
+		Changes []struct {
+			Path string `json:"path,omitempty"`
+			Kind string `json:"kind,omitempty"`
+		} `json:"changes,omitempty"`
+		Text string `json:"text,omitempty"`
+	} `json:"item,omitempty"`
+}
+
+func newSpawnMetrics(startedAt time.Time) *spawnMetrics {
+	if startedAt.IsZero() {
+		startedAt = time.Now().UTC()
+	}
+	return &spawnMetrics{startedAt: startedAt}
+}
+
+func (m *spawnMetrics) Observe(ev stream.RawEvent) {
+	if m == nil {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if usage := ev.Parsed.Usage; usage != nil {
+		if usage.InputTokens > 0 {
+			m.inputTokens += usage.InputTokens
+		}
+		if usage.CacheReadInputTokens > 0 {
+			m.cachedInputTokens += usage.CacheReadInputTokens
+		}
+		if usage.OutputTokens > 0 {
+			m.outputTokens += usage.OutputTokens
+		}
+	}
+
+	if eventSignalsCompaction(ev) {
+		m.compactionCount++
+	}
+
+	if len(ev.Raw) == 0 {
+		return
+	}
+
+	var probe codexEventProbe
+	if err := json.Unmarshal(ev.Raw, &probe); err != nil || probe.Item == nil {
+		return
+	}
+
+	if probe.Type == "item.started" && strings.EqualFold(probe.Item.Type, "command_execution") {
+		reads, writes, commits := classifyCommandActivity(probe.Item.Command)
+		m.readCount += reads
+		m.writeCount += writes
+		m.commitCount += commits
+		return
+	}
+
+	if probe.Type == "item.completed" && strings.EqualFold(probe.Item.Type, "file_change") {
+		changes := len(probe.Item.Changes)
+		if changes == 0 {
+			changes = 1
+		}
+		m.writeCount += changes
+	}
+}
+
+func (m *spawnMetrics) Snapshot(now time.Time) spawnHealth {
+	if m == nil {
+		return spawnHealth{}
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	startedAt := m.startedAt
+	if startedAt.IsZero() {
+		startedAt = now
+	}
+	elapsed := now.Sub(startedAt)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+
+	return spawnHealth{
+		Elapsed:           elapsed,
+		CompactionCount:   m.compactionCount,
+		ReadCount:         m.readCount,
+		WriteCount:        m.writeCount,
+		CommitCount:       m.commitCount,
+		InputTokens:       m.inputTokens,
+		CachedInputTokens: m.cachedInputTokens,
+		OutputTokens:      m.outputTokens,
+	}
+}
+
+func classifyCommandActivity(command string) (reads, writes, commits int) {
+	cmd := strings.ToLower(strings.TrimSpace(command))
+	if cmd == "" {
+		return 0, 0, 0
+	}
+
+	if strings.Contains(cmd, "git commit") {
+		commits = 1
+	}
+
+	if commandLooksLikeWrite(cmd) {
+		return 0, 1, commits
+	}
+	return 1, 0, commits
+}
+
+func commandLooksLikeWrite(cmd string) bool {
+	writeMarkers := []string{
+		"apply_patch",
+		">",
+		">>",
+		"tee ",
+		"touch ",
+		"mkdir ",
+		"rm ",
+		"mv ",
+		"cp ",
+		"chmod ",
+		"chown ",
+		"sed -i",
+		"perl -i",
+		"git add",
+		"git commit",
+		"git rm",
+		"git mv",
+	}
+	for _, marker := range writeMarkers {
+		if strings.Contains(cmd, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func eventSignalsCompaction(ev stream.RawEvent) bool {
+	if strings.Contains(strings.ToLower(ev.Parsed.Subtype), "compact") {
+		return true
+	}
+	if compactionMarker(ev.Parsed.ResultText) {
+		return true
+	}
+	if msg := ev.Parsed.AssistantMessage; msg != nil {
+		for _, block := range msg.Content {
+			if compactionMarker(block.Text) || compactionMarker(block.ToolContentText()) {
+				return true
+			}
+		}
+	}
+	if len(ev.Raw) > 0 && compactionMarker(string(ev.Raw)) {
+		return true
+	}
+	return false
+}
+
+func compactionMarker(text string) bool {
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	s := strings.ToLower(text)
+	return strings.Contains(s, "context compacted") ||
+		strings.Contains(s, "context_compacted") ||
+		strings.Contains(s, "context.compacted") ||
+		strings.Contains(s, "context_compaction") ||
+		strings.Contains(s, "context compaction")
 }
 
 func (as *activeSpawn) ParentTurnID() int {
@@ -281,6 +498,24 @@ func (o *Orchestrator) signalWaitAny(parentTurnID int) {
 	case ch <- struct{}{}:
 	default:
 	}
+}
+
+const defaultWaitAnyReviewInterval = 30 * time.Minute
+
+func waitAnyReviewInterval() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("ADAF_WAIT_REVIEW_INTERVAL"))
+	if raw == "" {
+		return defaultWaitAnyReviewInterval
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		debug.LogKV("orch", "invalid ADAF_WAIT_REVIEW_INTERVAL; using default",
+			"value", raw,
+			"default", defaultWaitAnyReviewInterval,
+		)
+		return defaultWaitAnyReviewInterval
+	}
+	return d
 }
 
 func (o *Orchestrator) withSpawnRecordLock(spawnID int, fn func(*store.SpawnRecord) error) error {
@@ -647,6 +882,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 		done:          done,
 		eventBuffer:   eventBuf,
 		interruptCh:   interruptCh,
+		metrics:       newSpawnMetrics(rec.StartedAt),
 	}
 
 	o.mu.Lock()
@@ -659,6 +895,9 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 		defer close(eventDone)
 		for ev := range streamCh {
 			eventBuf.Add(ev)
+			if as.metrics != nil {
+				as.metrics.Observe(ev)
+			}
 
 			if ev.Err != nil {
 				continue
@@ -795,14 +1034,23 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 						profile = childRec.ChildProfile
 					}
 					wr = append(wr, loop.WaitResult{
-						SpawnID:  r.SpawnID,
-						Profile:  profile,
-						Status:   r.Status,
-						ExitCode: r.ExitCode,
-						Result:   r.Result,
-						Summary:  r.Summary,
-						ReadOnly: r.ReadOnly,
-						Branch:   r.Branch,
+						SpawnID:           r.SpawnID,
+						Profile:           profile,
+						Status:            r.Status,
+						ExitCode:          r.ExitCode,
+						Result:            r.Result,
+						Summary:           r.Summary,
+						ReadOnly:          r.ReadOnly,
+						Branch:            r.Branch,
+						Review:            r.Review,
+						Elapsed:           r.Elapsed,
+						CompactionCount:   r.CompactionCount,
+						ReadCount:         r.ReadCount,
+						WriteCount:        r.WriteCount,
+						CommitCount:       r.CommitCount,
+						InputTokens:       r.InputTokens,
+						CachedInputTokens: r.CachedInputTokens,
+						OutputTokens:      r.OutputTokens,
 					})
 				}
 				return wr, morePending
@@ -1246,6 +1494,64 @@ func (o *Orchestrator) decrementOptionInstancesLocked(key string) {
 	}
 }
 
+func (o *Orchestrator) spawnHealthSnapshot(spawnID int, startedAt time.Time) spawnHealth {
+	o.mu.Lock()
+	as := o.spawns[spawnID]
+	o.mu.Unlock()
+
+	if as != nil && as.metrics != nil {
+		return as.metrics.Snapshot(time.Now())
+	}
+
+	if startedAt.IsZero() {
+		return spawnHealth{}
+	}
+	elapsed := time.Since(startedAt)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	return spawnHealth{Elapsed: elapsed}
+}
+
+func (o *Orchestrator) pendingReviewResults(pending map[int]struct{}) []SpawnResult {
+	if len(pending) == 0 {
+		return nil
+	}
+	ids := make([]int, 0, len(pending))
+	for id := range pending {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+
+	results := make([]SpawnResult, 0, len(ids))
+	for _, id := range ids {
+		rec, err := o.store.GetSpawn(id)
+		if err != nil || rec == nil {
+			continue
+		}
+		health := o.spawnHealthSnapshot(id, rec.StartedAt)
+		results = append(results, SpawnResult{
+			SpawnID:           rec.ID,
+			Status:            rec.Status,
+			ExitCode:          rec.ExitCode,
+			Result:            rec.Result,
+			Summary:           rec.Summary,
+			ReadOnly:          rec.ReadOnly,
+			Branch:            rec.Branch,
+			Review:            true,
+			Elapsed:           health.Elapsed,
+			CompactionCount:   health.CompactionCount,
+			ReadCount:         health.ReadCount,
+			WriteCount:        health.WriteCount,
+			CommitCount:       health.CommitCount,
+			InputTokens:       health.InputTokens,
+			CachedInputTokens: health.CachedInputTokens,
+			OutputTokens:      health.OutputTokens,
+		})
+	}
+	return results
+}
+
 // Wait blocks until all spawns for the given parent turn are done.
 func (o *Orchestrator) Wait(parentTurnID int) []SpawnResult {
 	debug.LogKV("orch", "Wait() called", "parent_turn", parentTurnID)
@@ -1289,8 +1595,8 @@ func (o *Orchestrator) Wait(parentTurnID int) []SpawnResult {
 }
 
 // WaitAny blocks until at least one unseen non-terminal spawn for the given
-// parent turn reaches a terminal state, then returns newly completed results
-// only. alreadySeen contains spawn IDs returned in prior wait cycles for this
+// parent turn reaches a terminal state, or a periodic review checkpoint fires.
+// alreadySeen contains spawn IDs returned in prior completion cycles for this
 // turn. The bool return indicates whether more spawns are still running.
 func (o *Orchestrator) WaitAny(ctx context.Context, parentTurnID int, alreadySeen map[int]struct{}) ([]SpawnResult, bool) {
 	debug.LogKV("orch", "WaitAny() called",
@@ -1326,15 +1632,27 @@ func (o *Orchestrator) WaitAny(ctx context.Context, parentTurnID int, alreadySee
 		return nil, false
 	}
 
-	// Wait until at least one pending spawn reaches a terminal state that
-	// has not already been delivered, or all spawns are terminal.
+	// Wait until at least one pending spawn reaches a terminal state that has
+	// not already been delivered, all spawns are terminal, or the review timer
+	// fires so the parent can inspect running spawn health.
 	if len(completed) == 0 && len(pending) > 0 {
+		reviewInterval := waitAnyReviewInterval()
+		var reviewTicker *time.Ticker
+		var reviewTickerCh <-chan time.Time
+		if reviewInterval > 0 {
+			reviewTicker = time.NewTicker(reviewInterval)
+			defer reviewTicker.Stop()
+			reviewTickerCh = reviewTicker.C
+		}
+
 		debug.LogKV("orch", "WaitAny waiting for completion signal",
 			"parent_turn", parentTurnID,
 			"already_seen", len(alreadySeen),
 			"pending", len(pending),
+			"review_interval", reviewInterval,
 		)
 		waitStart := time.Now()
+		reviewTriggered := false
 
 		for len(completed) == 0 && len(pending) > 0 {
 			select {
@@ -1346,6 +1664,8 @@ func (o *Orchestrator) WaitAny(ctx context.Context, parentTurnID int, alreadySee
 				)
 				return nil, false
 			case <-waitAnyCh:
+			case <-reviewTickerCh:
+				reviewTriggered = true
 			}
 			for id := range pending {
 				rec, err := o.store.GetSpawn(id)
@@ -1360,6 +1680,17 @@ func (o *Orchestrator) WaitAny(ctx context.Context, parentTurnID int, alreadySee
 					}
 					completed = append(completed, id)
 				}
+			}
+
+			if reviewTriggered && len(completed) == 0 && len(pending) > 0 {
+				reviewResults := o.pendingReviewResults(pending)
+				debug.LogKV("orch", "WaitAny returning periodic review checkpoint",
+					"parent_turn", parentTurnID,
+					"wait_duration", time.Since(waitStart),
+					"pending", len(pending),
+					"review_results", len(reviewResults),
+				)
+				return reviewResults, true
 			}
 		}
 		debug.LogKV("orch", "WaitAny signal wait complete",

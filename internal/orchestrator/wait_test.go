@@ -314,3 +314,97 @@ func TestWaitAnyReturnsOnContextCancel(t *testing.T) {
 		t.Fatalf("WaitAny state for parent turn %d should be cleaned up after cancellation (ch=%v waiter=%v)", rec.ParentTurnID, chExists, waiterExists)
 	}
 }
+
+func TestWaitAnyReturnsReviewCheckpointOnInterval(t *testing.T) {
+	t.Setenv("ADAF_WAIT_REVIEW_INTERVAL", "20ms")
+
+	dir := t.TempDir()
+	s, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "test", RepoPath: dir}); err != nil {
+		t.Fatalf("store.Init: %v", err)
+	}
+
+	rec := &store.SpawnRecord{
+		ParentTurnID:  19,
+		ParentProfile: "manager",
+		ChildProfile:  "worker",
+		Task:          "test",
+		Status:        store.SpawnStatusRunning,
+	}
+	if err := s.CreateSpawn(rec); err != nil {
+		t.Fatalf("CreateSpawn: %v", err)
+	}
+
+	o := &Orchestrator{
+		store:   s,
+		spawns:  map[int]*activeSpawn{},
+		waitAny: map[int]chan struct{}{},
+		waiters: map[int]int{},
+	}
+	metrics := newSpawnMetrics(time.Now().Add(-2 * time.Minute))
+	metrics.compactionCount = 4
+	metrics.readCount = 25
+	metrics.writeCount = 2
+	metrics.commitCount = 1
+	metrics.inputTokens = 1200
+	metrics.cachedInputTokens = 300
+	metrics.outputTokens = 180
+	o.spawns[rec.ID] = &activeSpawn{
+		spawnID:      rec.ID,
+		parentTurnID: rec.ParentTurnID,
+		metrics:      metrics,
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	results, more := o.WaitAny(ctx, rec.ParentTurnID, map[int]struct{}{})
+	elapsed := time.Since(start)
+
+	if len(results) != 1 {
+		t.Fatalf("WaitAny review results len = %d, want 1", len(results))
+	}
+	if !results[0].Review {
+		t.Fatal("WaitAny result Review = false, want true")
+	}
+	if results[0].Status != store.SpawnStatusRunning {
+		t.Fatalf("WaitAny review status = %q, want %q", results[0].Status, store.SpawnStatusRunning)
+	}
+	if results[0].CompactionCount != 4 {
+		t.Fatalf("WaitAny compaction count = %d, want 4 (result=%+v)", results[0].CompactionCount, results[0])
+	}
+	if results[0].ReadCount != 25 || results[0].WriteCount != 2 {
+		t.Fatalf("WaitAny activity = writes:%d reads:%d, want writes:2 reads:25", results[0].WriteCount, results[0].ReadCount)
+	}
+	if results[0].CommitCount != 1 {
+		t.Fatalf("WaitAny commit count = %d, want 1", results[0].CommitCount)
+	}
+	if results[0].InputTokens != 1200 || results[0].CachedInputTokens != 300 || results[0].OutputTokens != 180 {
+		t.Fatalf("WaitAny token metrics = input:%d cached:%d output:%d, want input:1200 cached:300 output:180",
+			results[0].InputTokens, results[0].CachedInputTokens, results[0].OutputTokens)
+	}
+	if !more {
+		t.Fatal("WaitAny more = false, want true for running spawn review")
+	}
+	if elapsed < 15*time.Millisecond {
+		t.Fatalf("WaitAny returned too quickly: %v", elapsed)
+	}
+	if elapsed > 250*time.Millisecond {
+		t.Fatalf("WaitAny review took too long: %v", elapsed)
+	}
+	if results[0].Elapsed <= 0 {
+		t.Fatalf("WaitAny review elapsed = %v, want > 0", results[0].Elapsed)
+	}
+
+	o.mu.Lock()
+	_, chExists := o.waitAny[rec.ParentTurnID]
+	_, waiterExists := o.waiters[rec.ParentTurnID]
+	o.mu.Unlock()
+	if chExists || waiterExists {
+		t.Fatalf("WaitAny state for parent turn %d should be cleaned up after review return (ch=%v waiter=%v)", rec.ParentTurnID, chExists, waiterExists)
+	}
+}

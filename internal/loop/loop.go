@@ -34,6 +34,19 @@ type WaitResult struct {
 	Summary  string // child's final output
 	ReadOnly bool   // whether this was a read-only scout
 	Branch   string // worktree branch (empty for read-only)
+
+	// Review marks a periodic running-spawn checkpoint (not a completion).
+	Review bool
+
+	// Health metrics populated for review checkpoints.
+	Elapsed           time.Duration
+	CompactionCount   int
+	ReadCount         int
+	WriteCount        int
+	CommitCount       int
+	InputTokens       int
+	CachedInputTokens int
+	OutputTokens      int
 }
 
 const InterruptMessageCallSupervisor = "__adaf_control:call_supervisor__"
@@ -306,13 +319,7 @@ func (l *Loop) Run(ctx context.Context) error {
 
 			// Inject wait results from a previous wait-for-spawns cycle.
 			if len(l.lastWaitResults) > 0 {
-				cfg.Prompt += "\n## Spawn Wait Results\n\nThe following spawns have completed:\n\n"
-				for _, wr := range l.lastWaitResults {
-					cfg.Prompt += formatWaitResult(wr)
-				}
-				if l.moreSpawnsPending {
-					cfg.Prompt += "**Other spawns are still running.** Call `adaf wait-for-spawns` again when you need more results.\n\n"
-				}
+				cfg.Prompt += "\n" + renderWaitResultsSection(l.lastWaitResults, l.moreSpawnsPending)
 				l.lastWaitResults = nil
 				l.moreSpawnsPending = false
 			}
@@ -597,7 +604,9 @@ func (l *Loop) Run(ctx context.Context) error {
 				waitStart := time.Now()
 				l.lastWaitResults, l.moreSpawnsPending = l.OnWait(ctx, turnID, seenSpawnIDs)
 				for _, wr := range l.lastWaitResults {
-					seenSpawnIDs[wr.SpawnID] = struct{}{}
+					if store.IsTerminalSpawnStatus(wr.Status) {
+						seenSpawnIDs[wr.SpawnID] = struct{}{}
+					}
 				}
 				debug.LogKV("loop", "OnWait callback returned",
 					"turn_id", turnID,
@@ -796,11 +805,42 @@ func buildResumePrompt(waitResults []WaitResult, moreSpawnsPending bool, interru
 	}
 
 	if len(waitResults) > 0 {
-		b.WriteString("## Spawn Wait Results\n\nThe following spawns have completed:\n\n")
-		for _, wr := range waitResults {
-			b.WriteString(formatWaitResult(wr))
+		b.WriteString(renderWaitResultsSection(waitResults, moreSpawnsPending))
+	}
+
+	return b.String()
+}
+
+func renderWaitResultsSection(waitResults []WaitResult, moreSpawnsPending bool) string {
+	if len(waitResults) == 0 {
+		return ""
+	}
+
+	reviewCheckpoint := false
+	for _, wr := range waitResults {
+		if wr.Review || !store.IsTerminalSpawnStatus(wr.Status) {
+			reviewCheckpoint = true
+			break
 		}
-		if moreSpawnsPending {
+	}
+
+	var b strings.Builder
+	if reviewCheckpoint {
+		b.WriteString("## Spawn Review Checkpoint\n\n")
+		b.WriteString("These spawns are still running. Review health signals and decide whether to continue waiting or intervene.\n\n")
+	} else {
+		b.WriteString("## Spawn Wait Results\n\n")
+		b.WriteString("The following spawns have completed:\n\n")
+	}
+
+	for _, wr := range waitResults {
+		b.WriteString(formatWaitResult(wr))
+	}
+
+	if moreSpawnsPending {
+		if reviewCheckpoint {
+			b.WriteString("**Spawns are still running.** Call `adaf wait-for-spawns` to keep waiting, or intervene with `adaf spawn-message`, `adaf spawn-reject`, or `adaf spawn-status`.\n\n")
+		} else {
 			b.WriteString("**Other spawns are still running.** Call `adaf wait-for-spawns` again when you need more results.\n\n")
 		}
 	}
@@ -825,6 +865,38 @@ func formatWaitResult(wr WaitResult) string {
 		fmt.Fprintf(&b, " (exit_code=%d)", wr.ExitCode)
 	}
 	b.WriteString("\n\n")
+
+	if wr.Review || !store.IsTerminalSpawnStatus(wr.Status) {
+		if wr.Elapsed > 0 {
+			fmt.Fprintf(&b, "- Elapsed: %s\n", wr.Elapsed.Round(time.Second))
+		}
+		fmt.Fprintf(&b, "- Compactions: %d\n", wr.CompactionCount)
+		if wr.ReadCount > 0 || wr.WriteCount > 0 || wr.CommitCount > 0 {
+			fmt.Fprintf(&b, "- Activity: %d writes / %d reads", wr.WriteCount, wr.ReadCount)
+			if wr.CommitCount > 0 {
+				fmt.Fprintf(&b, " (commits: %d)", wr.CommitCount)
+			}
+			b.WriteString("\n")
+		}
+		if wr.InputTokens > 0 || wr.CachedInputTokens > 0 || wr.OutputTokens > 0 {
+			fmt.Fprintf(&b, "- Tokens: input=%d", wr.InputTokens)
+			if wr.CachedInputTokens > 0 {
+				fmt.Fprintf(&b, ", cached_input=%d", wr.CachedInputTokens)
+			}
+			if wr.OutputTokens > 0 {
+				fmt.Fprintf(&b, ", output=%d", wr.OutputTokens)
+			}
+			b.WriteString("\n")
+		}
+		if wr.Summary != "" {
+			b.WriteString("\n")
+			b.WriteString(wr.Summary)
+			b.WriteString("\n\n")
+		} else {
+			b.WriteString("\n")
+		}
+		return b.String()
+	}
 
 	// Body: prefer Summary, fall back to Result.
 	body := wr.Summary

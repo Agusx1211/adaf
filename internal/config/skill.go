@@ -41,8 +41,8 @@ func DefaultSkills() []Skill {
 				"**ALWAYS use this pattern:**\n" +
 				"1. Spawn ALL independent tasks at once\n" +
 				"2. Call `adaf wait-for-spawns` immediately after\n" +
-				"3. Stop immediately after that command. Do not run more commands in this turn — the loop will pause this turn and resume you automatically when children complete.\n\n" +
-				"This is critical: `wait-for-spawns` suspends your session with zero token cost.\n\n" +
+				"3. Stop immediately after that command. Do not run more commands in this turn — the loop will pause this turn and resume automatically on child completion (with periodic review checkpoints for long-running spawns).\n\n" +
+				"This is critical: `wait-for-spawns` minimizes token usage while children run.\n\n" +
 				"## Communication Style: Downstream Only\n\n" +
 				"Communicate primarily to child sessions. Keep direction concrete and executable.\n\n" +
 				"- `adaf spawn-message --spawn-id N \"guidance\"` — Send async guidance to a child\n" +
@@ -60,7 +60,7 @@ func DefaultSkills() []Skill {
 				"**Spawning:**\n" +
 				"- `adaf spawn --profile <name> [--role <role>] --task \"...\" [--read-only]` — Spawn a sub-agent (non-blocking)\n" +
 				"- `adaf spawn --profile <name> [--role <role>] --task-file <path> [--read-only]` — Spawn with detailed task from file\n" +
-				"- `adaf wait-for-spawns` — Suspend until all spawns complete (TOKEN-FREE wait)\n\n" +
+				"- `adaf wait-for-spawns` — Pause and resume on completion checkpoints while spawns run\n\n" +
 				"**Monitoring (use sparingly — prefer wait-for-spawns):**\n" +
 				"- `adaf spawn-status [--spawn-id N]` — Check spawn status\n" +
 				"- `adaf spawn-watch --spawn-id N` — Watch spawn output in real-time\n\n" +
@@ -90,7 +90,7 @@ func DefaultSkills() []Skill {
 				"# 2. Spawn workers for independent tasks\n" +
 				"adaf spawn --profile <name> --role <role> --task-file /tmp/task1.md\n" +
 				"adaf spawn --profile <name> --role <role> --task-file /tmp/task2.md\n" +
-				"# 3. Suspend — costs zero tokens while waiting\n" +
+				"# 3. Suspend while children run (with periodic review checkpoints)\n" +
 				"adaf wait-for-spawns\n" +
 				"```\n\n" +
 				"When spawning, write a thorough task description — sub-agents only see what you give them. Include relevant context, goals, constraints, and what \"done\" looks like. Use `--task-file` for anything non-trivial.\n\n" +

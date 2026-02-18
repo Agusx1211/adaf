@@ -1030,14 +1030,23 @@ func waitForAnySessionSpawns(ctx context.Context, s *store.Store, parentTurnID i
 					profile = rec.ChildProfile
 				}
 				results = append(results, loop.WaitResult{
-					SpawnID:  sr.SpawnID,
-					Profile:  profile,
-					Status:   sr.Status,
-					ExitCode: sr.ExitCode,
-					Result:   sr.Result,
-					Summary:  sr.Summary,
-					ReadOnly: sr.ReadOnly,
-					Branch:   sr.Branch,
+					SpawnID:           sr.SpawnID,
+					Profile:           profile,
+					Status:            sr.Status,
+					ExitCode:          sr.ExitCode,
+					Result:            sr.Result,
+					Summary:           sr.Summary,
+					ReadOnly:          sr.ReadOnly,
+					Branch:            sr.Branch,
+					Review:            sr.Review,
+					Elapsed:           sr.Elapsed,
+					CompactionCount:   sr.CompactionCount,
+					ReadCount:         sr.ReadCount,
+					WriteCount:        sr.WriteCount,
+					CommitCount:       sr.CommitCount,
+					InputTokens:       sr.InputTokens,
+					CachedInputTokens: sr.CachedInputTokens,
+					OutputTokens:      sr.OutputTokens,
 				})
 			}
 			debug.LogKV("looprun", "waitForAnySessionSpawns returning from orchestrator WaitAny",

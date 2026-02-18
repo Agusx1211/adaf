@@ -46,6 +46,11 @@ type waitResumeSessionCarryStubAgent struct {
 	runs  []agent.Config
 }
 
+type waitReviewSeenStubAgent struct {
+	store *store.Store
+	runs  []agent.Config
+}
+
 type implicitSpawnWaitStubAgent struct {
 	store   *store.Store
 	runs    []agent.Config
@@ -193,6 +198,31 @@ func (a *waitResumeSessionCarryStubAgent) Run(ctx context.Context, cfg agent.Con
 			AgentSessionID: "sess-final",
 		}, nil
 	}
+}
+
+func (a *waitReviewSeenStubAgent) Name() string { return "stub" }
+
+func (a *waitReviewSeenStubAgent) Run(ctx context.Context, cfg agent.Config, recorder *recording.Recorder) (*agent.Result, error) {
+	cloned := cfg
+	cloned.Env = make(map[string]string, len(cfg.Env))
+	for k, v := range cfg.Env {
+		cloned.Env[k] = v
+	}
+	a.runs = append(a.runs, cloned)
+
+	// Two wait cycles on the same turn:
+	// 1) periodic review (running spawn), 2) completion delivery.
+	if len(a.runs) <= 2 {
+		if err := a.store.SignalWait(cfg.TurnID); err != nil {
+			return nil, err
+		}
+	}
+
+	return &agent.Result{
+		ExitCode:       0,
+		Duration:       time.Millisecond,
+		AgentSessionID: "sess-review",
+	}, nil
 }
 
 func (a *implicitSpawnWaitStubAgent) Name() string { return "stub" }
@@ -703,6 +733,67 @@ func TestLoopOnWaitSeenSpawnIDsAccumulateAndResetByTurn(t *testing.T) {
 	}
 	if len(seenCounts) != 3 || seenCounts[0] != 0 || seenCounts[1] != 1 || seenCounts[2] != 0 {
 		t.Fatalf("seen counts = %v, want [0 1 0]", seenCounts)
+	}
+}
+
+func TestLoopOnWaitDoesNotMarkRunningReviewSpawnsAsSeen(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "test", RepoPath: dir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
+	}
+
+	a := &waitReviewSeenStubAgent{store: s}
+	waitCalls := 0
+	l := &Loop{
+		Store: s,
+		Agent: a,
+		Config: agent.Config{
+			Prompt:   "base",
+			MaxTurns: 1,
+		},
+		OnWait: func(_ context.Context, turnID int, alreadySeen map[int]struct{}) ([]WaitResult, bool) {
+			waitCalls++
+			switch waitCalls {
+			case 1:
+				if len(alreadySeen) != 0 {
+					t.Fatalf("first review alreadySeen size = %d, want 0", len(alreadySeen))
+				}
+				return []WaitResult{{
+					SpawnID: 77,
+					Profile: "worker",
+					Status:  store.SpawnStatusRunning,
+					Review:  true,
+				}}, true
+			case 2:
+				if len(alreadySeen) != 0 {
+					t.Fatalf("completion wait alreadySeen size = %d, want 0 (running review must not mark seen)", len(alreadySeen))
+				}
+				return []WaitResult{{
+					SpawnID: 77,
+					Profile: "worker",
+					Status:  store.SpawnStatusCompleted,
+					Summary: "done",
+				}}, false
+			default:
+				t.Fatalf("unexpected OnWait call #%d", waitCalls)
+				return nil, false
+			}
+		},
+	}
+
+	if err := l.Run(context.Background()); err != nil {
+		t.Fatalf("Loop.Run() error = %v", err)
+	}
+
+	if waitCalls != 2 {
+		t.Fatalf("OnWait calls = %d, want 2", waitCalls)
+	}
+	if len(a.runs) != 3 {
+		t.Fatalf("agent runs = %d, want 3 (wait + resume + completion resume)", len(a.runs))
 	}
 }
 

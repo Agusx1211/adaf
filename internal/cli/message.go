@@ -157,11 +157,12 @@ func runSpawnReply(cmd *cobra.Command, args []string) error {
 var waitForSpawnsCmd = &cobra.Command{
 	Use:     "wait-for-spawns",
 	Aliases: []string{"wait_for_spawns", "waitforspawns"},
-	Short:   "Signal that you want to wait for all spawns to complete",
+	Short:   "Signal that you want to wait for spawns with periodic review checkpoints",
 	Long: `Signal the loop controller that this agent wants to pause and resume
-when all spawned sub-agents complete. The agent should exit/finish its
-current turn after calling this command. When spawns complete, the loop
-will resume the same turn with spawn results in the prompt.
+while spawned sub-agents run. The agent should exit/finish its current
+turn after calling this command. The loop resumes the same turn when
+spawns complete, and may also resume periodically with running-spawn
+review checkpoints so you can inspect health and intervene if needed.
 
 This saves API costs by not keeping the agent running while waiting.
 After calling this command, stop immediately and run no further commands.`,
@@ -204,6 +205,6 @@ func runWaitForSpawns(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Println("Wait signal created. Stop now and end this turn — the loop will resume when all spawns complete.")
+	fmt.Println("Wait signal created. Stop now and end this turn — the loop will resume on spawn completion or a periodic review checkpoint.")
 	return nil
 }
