@@ -135,32 +135,42 @@ test('standalone chat can be created with profile, team, and skills', async ({ p
   await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(delegatedProfile)}`);
 });
 
-test('issues detail edit persists to backend store', async ({ page, request }) => {
+test('issues board modal edit and comments persist to backend store', async ({ page, request }) => {
   const { state, fixture } = await gotoFixture(page, request);
   const nextTitle = uniqueName('issue-title');
   const nextDescription = `Updated description ${nextTitle}`;
+  const nextComment = `Comment ${nextTitle}`;
 
   await page.getByRole('button', { name: 'Issues' }).click();
-  await page.getByText('Seed issue', { exact: true }).click();
+  await page.getByRole('button', { name: /Seed issue/ }).first().click();
 
-  const panel = page.locator('div').filter({ hasText: 'Issue #1' }).first();
-  await panel.getByRole('button', { name: 'Edit' }).click();
+  const modal = page.getByRole('dialog', { name: 'Issue #1' });
+  await expect(modal).toBeVisible();
 
-  await panel.locator('input').nth(0).fill(nextTitle);
-  await panel.locator('select').nth(0).selectOption('resolved');
-  await panel.locator('select').nth(1).selectOption('high');
-  await panel.locator('textarea').first().fill(nextDescription);
+  await modal.locator('input').nth(0).fill(nextTitle);
+  await modal.locator('select').nth(0).selectOption('closed');
+  await modal.locator('select').nth(1).selectOption('high');
+  await modal.locator('textarea').first().fill(nextDescription);
 
-  await panel.getByRole('button', { name: 'Save' }).click();
+  await modal.getByRole('button', { name: 'Save Changes' }).click();
   await expect(page.getByText('Issue updated')).toBeVisible();
+
+  await modal.locator('textarea').nth(1).fill(nextComment);
+  await modal.getByRole('button', { name: 'Post Comment' }).click();
+  await expect(page.getByText('Comment added')).toBeVisible();
 
   const issueResponse = await request.get(`${projectBaseURL(state, fixture.id)}/issues/1`);
   expect(issueResponse.status()).toBe(200);
   const issue = await issueResponse.json();
   expect(issue.title).toBe(nextTitle);
-  expect(issue.status).toBe('resolved');
+  expect(issue.status).toBe('closed');
   expect(issue.priority).toBe('high');
   expect(issue.description).toBe(nextDescription);
+  expect(Array.isArray(issue.comments)).toBe(true);
+  expect(issue.comments.length).toBeGreaterThan(0);
+  expect(issue.comments[issue.comments.length - 1].body).toBe(nextComment);
+  expect(Array.isArray(issue.history)).toBe(true);
+  expect(issue.history.some((entry) => String(entry.type || '') === 'commented')).toBe(true);
 });
 
 test('wiki detail edit persists to backend store', async ({ page, request }) => {
@@ -183,6 +193,74 @@ test('wiki detail edit persists to backend store', async ({ page, request }) => 
   const wiki = await wikiResponse.json();
   expect(wiki.title).toBe(nextTitle);
   expect(wiki.content).toBe(nextContent);
+});
+
+test('wiki search API returns matching entries', async ({ page, request }) => {
+  const { state, fixture } = await gotoFixture(page, request);
+  const searchTag = uniqueName('wiki-search');
+  const base = projectBaseURL(state, fixture.id);
+
+  // Create a wiki entry with a unique tag in both title and content.
+  const createRes = await request.post(`${base}/wiki`, {
+    data: { title: `Search Test ${searchTag}`, content: `Content about ${searchTag} architecture.` },
+  });
+  expect(createRes.status()).toBe(201);
+  const created = await createRes.json();
+
+  // Search for the unique tag — should find the entry.
+  const searchRes = await request.get(`${base}/wiki/search?q=${encodeURIComponent(searchTag)}`);
+  expect(searchRes.status()).toBe(200);
+  const results = await searchRes.json();
+  expect(Array.isArray(results)).toBe(true);
+
+  const found = results.find((entry) => entry.id === created.id);
+  expect(found).toBeTruthy();
+  expect(found.title).toContain(searchTag);
+
+  // Cleanup.
+  await request.delete(`${base}/wiki/${encodeURIComponent(created.id)}`);
+});
+
+test('wiki create and delete roundtrip via API', async ({ page, request }) => {
+  const { state, fixture } = await gotoFixture(page, request);
+  const base = projectBaseURL(state, fixture.id);
+  const wikiTitle = uniqueName('wiki-roundtrip');
+
+  // List wiki entries before creation.
+  const listBefore = await request.get(`${base}/wiki`);
+  expect(listBefore.status()).toBe(200);
+  const before = await listBefore.json();
+  const beforeCount = Array.isArray(before) ? before.length : 0;
+
+  // Create a new wiki entry.
+  const createRes = await request.post(`${base}/wiki`, {
+    data: { title: wikiTitle, content: `Content for ${wikiTitle}` },
+  });
+  expect(createRes.status()).toBe(201);
+  const created = await createRes.json();
+  expect(created.id).toBeTruthy();
+  expect(created.title).toBe(wikiTitle);
+
+  // Verify it appears in the list.
+  const listAfterCreate = await request.get(`${base}/wiki`);
+  expect(listAfterCreate.status()).toBe(200);
+  const afterCreate = await listAfterCreate.json();
+  expect(Array.isArray(afterCreate)).toBe(true);
+  expect(afterCreate.length).toBe(beforeCount + 1);
+
+  const inList = afterCreate.find((entry) => entry.id === created.id);
+  expect(inList).toBeTruthy();
+
+  // Delete the entry.
+  const deleteRes = await request.delete(`${base}/wiki/${encodeURIComponent(created.id)}`);
+  expect(deleteRes.status()).toBe(200);
+
+  // Verify it's gone.
+  const listAfterDelete = await request.get(`${base}/wiki`);
+  expect(listAfterDelete.status()).toBe(200);
+  const afterDelete = await listAfterDelete.json();
+  expect(Array.isArray(afterDelete)).toBe(true);
+  expect(afterDelete.length).toBe(beforeCount);
 });
 
 test('plan detail edit persists to backend store', async ({ page, request }) => {

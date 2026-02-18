@@ -114,7 +114,9 @@ adaf
 | `adaf issue list` | `ls` | List issues (with `--status` filter) |
 | `adaf issue create` | `new`, `add` | Create a new issue |
 | `adaf issue show <id>` | `get`, `view` | Show issue details |
-| `adaf issue update <id>` | `edit` | Update issue status/priority/labels |
+| `adaf issue update <id>` | `edit` | Update issue fields (status/priority/labels/description) |
+| `adaf issue move <id>` | `status` | Move issue across board states (`open`, `ongoing`, `in_review`, `closed`) |
+| `adaf issue comment <id>` | `reply`, `note` | Add a comment to an issue thread |
 | `adaf log list` | `ls` | List session logs |
 | `adaf log latest` | `last` | Show the most recent session log |
 | `adaf log create` | `new` | Create a session log entry |
@@ -394,7 +396,8 @@ adaf plan show                                 # Current plan
 
 # Track work
 adaf issue create --title "Bug found" --priority high
-adaf issue update 3 --status resolved
+adaf issue move 3 --status in_review
+adaf issue comment 3 --body "Ready for reviewer pass"
 
 # Log session (handoff to next agent)
 adaf log create --agent claude \

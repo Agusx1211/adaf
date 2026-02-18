@@ -10,6 +10,13 @@ import (
 	"time"
 )
 
+const (
+	IssueStatusOpen     = "open"
+	IssueStatusOngoing  = "ongoing"
+	IssueStatusInReview = "in_review"
+	IssueStatusClosed   = "closed"
+)
+
 func (s *Store) ListIssues() ([]Issue, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -74,11 +81,8 @@ func (s *Store) CreateIssue(issue *Issue) error {
 	defer s.mu.Unlock()
 
 	issue.ID = s.nextID(filepath.Join(s.root, "issues"))
-	issue.Created = time.Now().UTC()
-	issue.Updated = issue.Created
-	if issue.Status == "" {
-		issue.Status = "open"
-	}
+	now := time.Now().UTC()
+	normalizeIssueForCreate(issue, now)
 	filename := fmt.Sprintf("%d.json", issue.ID)
 	if err := s.writeJSON(filepath.Join(s.root, "issues", filename), issue); err != nil {
 		return err
@@ -98,15 +102,94 @@ func (s *Store) GetIssue(id int) (*Issue, error) {
 }
 
 func (s *Store) UpdateIssue(issue *Issue) error {
-	issue.Updated = time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	filename := fmt.Sprintf("%d.json", issue.ID)
-	if err := s.writeJSON(filepath.Join(s.root, "issues", filename), issue); err != nil {
+	path := filepath.Join(s.root, "issues", filename)
+
+	var existing Issue
+	if err := s.readJSON(path, &existing); err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	normalizeIssueForUpdate(issue, &existing, now)
+
+	changes := issueChangeHistory(existing, *issue)
+	if len(changes) > 0 {
+		nextHistoryID := nextIssueHistoryID(issue.History)
+		actor := resolveIssueActor(issue.UpdatedBy, issue.CreatedBy)
+		for _, ch := range changes {
+			ch.ID = nextHistoryID
+			ch.By = actor
+			ch.At = now
+			issue.History = append(issue.History, ch)
+			nextHistoryID++
+		}
+	}
+
+	if err := s.writeJSON(path, issue); err != nil {
 		return err
 	}
 
 	// Auto-commit the updated issue
 	s.AutoCommit([]string{"issues/" + filename}, fmt.Sprintf("adaf: update issue #%d", issue.ID))
 	return nil
+}
+
+func (s *Store) AddIssueComment(issueID int, body, by string) (*Issue, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	filename := fmt.Sprintf("%d.json", issueID)
+	path := filepath.Join(s.root, "issues", filename)
+
+	var issue Issue
+	if err := s.readJSON(path, &issue); err != nil {
+		return nil, err
+	}
+
+	text := strings.TrimSpace(body)
+	if text == "" {
+		return nil, fmt.Errorf("comment body is required")
+	}
+
+	now := time.Now().UTC()
+	actor := resolveIssueActor(by, issue.UpdatedBy, issue.CreatedBy)
+	issue.Comments = normalizeIssueComments(issue.Comments, issue.Created)
+
+	comment := IssueComment{
+		ID:      nextIssueCommentID(issue.Comments),
+		Body:    text,
+		By:      actor,
+		Created: now,
+		Updated: now,
+	}
+	issue.Comments = append(issue.Comments, comment)
+	issue.Updated = now
+	issue.UpdatedBy = actor
+	if issue.CreatedBy == "" {
+		issue.CreatedBy = actor
+	}
+	issue.History = normalizeIssueHistory(issue.History, issue.Created, actor)
+
+	nextHistoryID := nextIssueHistoryID(issue.History)
+	issue.History = append(issue.History, IssueHistory{
+		ID:        nextHistoryID,
+		Type:      "commented",
+		CommentID: comment.ID,
+		Message:   previewIssueText(comment.Body, 120),
+		By:        actor,
+		At:        now,
+	})
+
+	if err := s.writeJSON(path, &issue); err != nil {
+		return nil, err
+	}
+
+	s.AutoCommit([]string{"issues/" + filename}, fmt.Sprintf("adaf: comment issue #%d", issueID))
+	return &issue, nil
 }
 
 func (s *Store) DeleteIssue(id int) error {
@@ -128,8 +211,8 @@ func (s *Store) DeleteIssue(id int) error {
 }
 
 func IsOpenIssueStatus(status string) bool {
-	switch strings.TrimSpace(strings.ToLower(status)) {
-	case "open", "in_progress":
+	switch NormalizeIssueStatus(status) {
+	case IssueStatusOpen, IssueStatusOngoing, IssueStatusInReview:
 		return true
 	default:
 		return false
@@ -137,11 +220,62 @@ func IsOpenIssueStatus(status string) bool {
 }
 
 func IsTerminalIssueStatus(status string) bool {
-	switch strings.TrimSpace(strings.ToLower(status)) {
-	case "resolved", "wontfix":
+	switch NormalizeIssueStatus(status) {
+	case IssueStatusClosed:
 		return true
 	default:
 		return false
+	}
+}
+
+func IsValidIssueStatus(status string) bool {
+	switch NormalizeIssueStatus(status) {
+	case IssueStatusOpen, IssueStatusOngoing, IssueStatusInReview, IssueStatusClosed:
+		return true
+	default:
+		return false
+	}
+}
+
+func NormalizeIssueStatus(status string) string {
+	s := strings.TrimSpace(strings.ToLower(status))
+	if s == "" {
+		return ""
+	}
+	s = strings.ReplaceAll(s, "-", "_")
+	switch s {
+	case "open":
+		return IssueStatusOpen
+	case "ongoing":
+		return IssueStatusOngoing
+	case "in_review":
+		return IssueStatusInReview
+	case "closed":
+		return IssueStatusClosed
+	default:
+		return s
+	}
+}
+
+func IsValidIssuePriority(priority string) bool {
+	switch NormalizeIssuePriority(priority) {
+	case "critical", "high", "medium", "low":
+		return true
+	default:
+		return false
+	}
+}
+
+func NormalizeIssuePriority(priority string) string {
+	p := strings.TrimSpace(strings.ToLower(priority))
+	if p == "" {
+		return "medium"
+	}
+	switch p {
+	case "critical", "high", "medium", "low":
+		return p
+	default:
+		return p
 	}
 }
 
@@ -237,4 +371,356 @@ func (s *Store) ValidateIssueDependencies(issueID int, dependsOn []int) ([]int, 
 	}
 
 	return normalized, nil
+}
+
+func normalizeIssueForCreate(issue *Issue, now time.Time) {
+	if issue == nil {
+		return
+	}
+
+	issue.Status = NormalizeIssueStatus(issue.Status)
+	if issue.Status == "" {
+		issue.Status = IssueStatusOpen
+	}
+	issue.Priority = NormalizeIssuePriority(issue.Priority)
+	issue.Labels = normalizeIssueLabels(issue.Labels)
+	issue.DependsOn = NormalizeIssueDependencyIDs(issue.DependsOn)
+	issue.PlanID = strings.TrimSpace(issue.PlanID)
+	issue.Title = strings.TrimSpace(issue.Title)
+	issue.Description = strings.TrimSpace(issue.Description)
+	issue.Created = now
+	issue.Updated = now
+
+	actor := resolveIssueActor(issue.CreatedBy, issue.UpdatedBy)
+	if actor != "" {
+		issue.CreatedBy = actor
+		issue.UpdatedBy = actor
+	}
+
+	issue.Comments = normalizeIssueComments(issue.Comments, issue.Created)
+	issue.History = normalizeIssueHistory(issue.History, issue.Created, actor)
+}
+
+func normalizeIssueForUpdate(issue *Issue, existing *Issue, now time.Time) {
+	if issue == nil {
+		return
+	}
+	if existing == nil {
+		normalizeIssueForCreate(issue, now)
+		return
+	}
+
+	issue.ID = existing.ID
+	issue.Status = NormalizeIssueStatus(issue.Status)
+	if issue.Status == "" {
+		issue.Status = NormalizeIssueStatus(existing.Status)
+	}
+	if issue.Status == "" {
+		issue.Status = IssueStatusOpen
+	}
+	issue.Priority = NormalizeIssuePriority(issue.Priority)
+	issue.Labels = normalizeIssueLabels(issue.Labels)
+	issue.DependsOn = NormalizeIssueDependencyIDs(issue.DependsOn)
+	issue.PlanID = strings.TrimSpace(issue.PlanID)
+	issue.Title = strings.TrimSpace(issue.Title)
+	issue.Description = strings.TrimSpace(issue.Description)
+	issue.Created = existing.Created
+	issue.Updated = now
+
+	actor := resolveIssueActor(issue.UpdatedBy, issue.CreatedBy, existing.UpdatedBy, existing.CreatedBy)
+	issue.CreatedBy = resolveIssueActor(issue.CreatedBy, existing.CreatedBy, actor)
+	issue.UpdatedBy = actor
+
+	if issue.Comments == nil {
+		issue.Comments = append([]IssueComment(nil), existing.Comments...)
+	}
+	issue.Comments = normalizeIssueComments(issue.Comments, issue.Created)
+
+	baseHistory := existing.History
+	if issue.History != nil && len(issue.History) > len(baseHistory) {
+		baseHistory = issue.History
+	}
+	issue.History = normalizeIssueHistory(baseHistory, issue.Created, issue.CreatedBy)
+}
+
+func normalizeIssueLabels(labels []string) []string {
+	if len(labels) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(labels))
+	out := make([]string, 0, len(labels))
+	for _, raw := range labels {
+		label := strings.TrimSpace(raw)
+		if label == "" {
+			continue
+		}
+		key := strings.ToLower(label)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, label)
+	}
+	sort.Strings(out)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func normalizeIssueComments(comments []IssueComment, fallback time.Time) []IssueComment {
+	if len(comments) == 0 {
+		return nil
+	}
+
+	nextID := 1
+	out := make([]IssueComment, 0, len(comments))
+	for _, comment := range comments {
+		comment.Body = strings.TrimSpace(comment.Body)
+		if comment.Body == "" {
+			continue
+		}
+
+		if comment.ID <= 0 {
+			comment.ID = nextID
+		}
+		if comment.ID >= nextID {
+			nextID = comment.ID + 1
+		}
+		if comment.Created.IsZero() {
+			comment.Created = fallback
+		}
+		if comment.Created.IsZero() {
+			comment.Created = time.Now().UTC()
+		}
+		comment.Created = comment.Created.UTC()
+		if comment.Updated.IsZero() {
+			comment.Updated = comment.Created
+		}
+		comment.Updated = comment.Updated.UTC()
+		comment.By = strings.TrimSpace(comment.By)
+		out = append(out, comment)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func normalizeIssueHistory(history []IssueHistory, createdAt time.Time, actor string) []IssueHistory {
+	out := make([]IssueHistory, 0, len(history)+1)
+	nextID := 1
+
+	for _, item := range history {
+		item.Type = strings.TrimSpace(item.Type)
+		if item.Type == "" {
+			continue
+		}
+		if item.ID <= 0 {
+			item.ID = nextID
+		}
+		if item.ID >= nextID {
+			nextID = item.ID + 1
+		}
+		if item.At.IsZero() {
+			item.At = createdAt
+		}
+		if item.At.IsZero() {
+			item.At = time.Now().UTC()
+		}
+		item.At = item.At.UTC()
+		item.By = resolveIssueActor(item.By, actor)
+		item.Field = strings.TrimSpace(item.Field)
+		item.From = strings.TrimSpace(item.From)
+		item.To = strings.TrimSpace(item.To)
+		item.Message = strings.TrimSpace(item.Message)
+		out = append(out, item)
+	}
+
+	if len(out) == 0 {
+		if createdAt.IsZero() {
+			createdAt = time.Now().UTC()
+		}
+		out = []IssueHistory{{
+			ID:   1,
+			Type: "created",
+			By:   actor,
+			At:   createdAt.UTC(),
+		}}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func issueChangeHistory(before, after Issue) []IssueHistory {
+	changes := make([]IssueHistory, 0, 8)
+
+	if strings.TrimSpace(before.Status) != strings.TrimSpace(after.Status) {
+		changes = append(changes, IssueHistory{
+			Type:  "status_changed",
+			Field: "status",
+			From:  before.Status,
+			To:    after.Status,
+		})
+	}
+	if strings.TrimSpace(before.PlanID) != strings.TrimSpace(after.PlanID) {
+		changes = append(changes, IssueHistory{
+			Type:  "moved",
+			Field: "plan_id",
+			From:  issuePlanScopeValue(before.PlanID),
+			To:    issuePlanScopeValue(after.PlanID),
+		})
+	}
+	if strings.TrimSpace(before.Title) != strings.TrimSpace(after.Title) {
+		changes = append(changes, IssueHistory{
+			Type:  "updated",
+			Field: "title",
+			From:  previewIssueText(before.Title, 120),
+			To:    previewIssueText(after.Title, 120),
+		})
+	}
+	if strings.TrimSpace(before.Description) != strings.TrimSpace(after.Description) {
+		changes = append(changes, IssueHistory{
+			Type:  "updated",
+			Field: "description",
+			From:  previewIssueText(before.Description, 120),
+			To:    previewIssueText(after.Description, 120),
+		})
+	}
+	if strings.TrimSpace(before.Priority) != strings.TrimSpace(after.Priority) {
+		changes = append(changes, IssueHistory{
+			Type:  "updated",
+			Field: "priority",
+			From:  before.Priority,
+			To:    after.Priority,
+		})
+	}
+
+	beforeLabels := normalizeIssueLabels(before.Labels)
+	afterLabels := normalizeIssueLabels(after.Labels)
+	if !equalStringSlice(beforeLabels, afterLabels) {
+		changes = append(changes, IssueHistory{
+			Type:  "updated",
+			Field: "labels",
+			From:  formatIssueLabels(beforeLabels),
+			To:    formatIssueLabels(afterLabels),
+		})
+	}
+
+	beforeDeps := NormalizeIssueDependencyIDs(before.DependsOn)
+	afterDeps := NormalizeIssueDependencyIDs(after.DependsOn)
+	if !equalIntSlice(beforeDeps, afterDeps) {
+		changes = append(changes, IssueHistory{
+			Type:  "updated",
+			Field: "depends_on",
+			From:  formatIssueDependsOn(beforeDeps),
+			To:    formatIssueDependsOn(afterDeps),
+		})
+	}
+
+	return changes
+}
+
+func resolveIssueActor(candidates ...string) string {
+	for _, raw := range candidates {
+		value := strings.TrimSpace(raw)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func nextIssueCommentID(comments []IssueComment) int {
+	maxID := 0
+	for _, comment := range comments {
+		if comment.ID > maxID {
+			maxID = comment.ID
+		}
+	}
+	return maxID + 1
+}
+
+func nextIssueHistoryID(history []IssueHistory) int {
+	maxID := 0
+	for _, item := range history {
+		if item.ID > maxID {
+			maxID = item.ID
+		}
+	}
+	return maxID + 1
+}
+
+func issuePlanScopeValue(planID string) string {
+	if strings.TrimSpace(planID) == "" {
+		return "shared"
+	}
+	return strings.TrimSpace(planID)
+}
+
+func formatIssueLabels(labels []string) string {
+	if len(labels) == 0 {
+		return "-"
+	}
+	return strings.Join(labels, ", ")
+}
+
+func formatIssueDependsOn(dependsOn []int) string {
+	if len(dependsOn) == 0 {
+		return "-"
+	}
+	parts := make([]string, 0, len(dependsOn))
+	for _, id := range dependsOn {
+		if id <= 0 {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("#%d", id))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, ", ")
+}
+
+func previewIssueText(raw string, max int) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "-"
+	}
+	if max <= 0 {
+		max = 120
+	}
+	if max < 4 {
+		max = 4
+	}
+	if len(value) <= max {
+		return value
+	}
+	return value[:max-3] + "..."
+}
+
+func equalStringSlice(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func equalIntSlice(left, right []int) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }

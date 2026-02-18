@@ -137,8 +137,8 @@ func TestIssuesEndpoint(t *testing.T) {
 	if err := s.CreateIssue(&store.Issue{Title: "Open", Status: "open", Priority: "high", PlanID: "default"}); err != nil {
 		t.Fatalf("CreateIssue open: %v", err)
 	}
-	if err := s.CreateIssue(&store.Issue{Title: "Resolved", Status: "resolved", Priority: "low", PlanID: "other"}); err != nil {
-		t.Fatalf("CreateIssue resolved: %v", err)
+	if err := s.CreateIssue(&store.Issue{Title: "Closed", Status: "closed", Priority: "low", PlanID: "other"}); err != nil {
+		t.Fatalf("CreateIssue closed: %v", err)
 	}
 
 	rec := performRequest(t, srv, http.MethodGet, "/api/issues")
@@ -184,17 +184,50 @@ func TestCreateAndUpdateIssueEndpoints(t *testing.T) {
 		t.Fatalf("created priority = %q, want %q", created.Priority, "medium")
 	}
 
-	updateRec := performJSONRequest(t, srv, http.MethodPut, "/api/issues/"+strconv.Itoa(created.ID), `{"status":"resolved","priority":"low"}`)
+	updateRec := performJSONRequest(t, srv, http.MethodPut, "/api/issues/"+strconv.Itoa(created.ID), `{"status":"closed","priority":"low","updated_by":"agent-a"}`)
 	if updateRec.Code != http.StatusOK {
 		t.Fatalf("update status = %d, want %d", updateRec.Code, http.StatusOK)
 	}
 
 	updated := decodeResponse[store.Issue](t, updateRec)
-	if updated.Status != "resolved" {
-		t.Fatalf("updated status = %q, want %q", updated.Status, "resolved")
+	if updated.Status != "closed" {
+		t.Fatalf("updated status = %q, want %q", updated.Status, "closed")
 	}
 	if updated.Priority != "low" {
 		t.Fatalf("updated priority = %q, want %q", updated.Priority, "low")
+	}
+	if updated.UpdatedBy != "agent-a" {
+		t.Fatalf("updated by = %q, want %q", updated.UpdatedBy, "agent-a")
+	}
+	if len(updated.History) == 0 {
+		t.Fatalf("updated history length = %d, want > 0", len(updated.History))
+	}
+}
+
+func TestIssueCommentEndpoint(t *testing.T) {
+	srv, s := newTestServer(t)
+
+	if err := s.CreateIssue(&store.Issue{Title: "Needs Notes", Status: "open", Priority: "medium"}); err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+
+	createComment := performJSONRequest(t, srv, http.MethodPost, "/api/issues/1/comments", `{"body":"Working on this now","by":"agent-b"}`)
+	if createComment.Code != http.StatusCreated {
+		t.Fatalf("comment status = %d, want %d", createComment.Code, http.StatusCreated)
+	}
+
+	updated := decodeResponse[store.Issue](t, createComment)
+	if len(updated.Comments) != 1 {
+		t.Fatalf("comment count = %d, want 1", len(updated.Comments))
+	}
+	if updated.Comments[0].By != "agent-b" {
+		t.Fatalf("comment by = %q, want %q", updated.Comments[0].By, "agent-b")
+	}
+	if len(updated.History) < 2 {
+		t.Fatalf("history length = %d, want >= 2", len(updated.History))
+	}
+	if updated.History[len(updated.History)-1].Type != "commented" {
+		t.Fatalf("last history type = %q, want %q", updated.History[len(updated.History)-1].Type, "commented")
 	}
 }
 

@@ -60,7 +60,7 @@ func runPlanStatusChange(planID, newStatus string) error {
 			return err
 		}
 	case "cancelled":
-		closedIssues, err = closePlanIssuesAsWontfix(s, planID)
+		closedIssues, err = closePlanIssues(s, planID)
 		if err != nil {
 			return err
 		}
@@ -82,7 +82,7 @@ func runPlanStatusChange(planID, newStatus string) error {
 		}
 	}
 	if newStatus == "cancelled" {
-		fmt.Printf("  %sClosed:%s %d issue(s) as wontfix\n", colorDim, colorReset, closedIssues)
+		fmt.Printf("  %sClosed:%s %d issue(s)\n", colorDim, colorReset, closedIssues)
 	}
 	fmt.Println()
 
@@ -100,7 +100,7 @@ func mergePlanToShared(s *store.Store, planID string) (int, int, error) {
 		if iss.PlanID != planID {
 			continue
 		}
-		if iss.Status != "open" && iss.Status != "in_progress" {
+		if !store.IsOpenIssueStatus(iss.Status) {
 			continue
 		}
 		iss.PlanID = ""
@@ -130,7 +130,7 @@ func mergePlanToShared(s *store.Store, planID string) (int, int, error) {
 	return mergedIssues, mergedWiki, nil
 }
 
-func closePlanIssuesAsWontfix(s *store.Store, planID string) (int, error) {
+func closePlanIssues(s *store.Store, planID string) (int, error) {
 	issues, err := s.ListIssues()
 	if err != nil {
 		return 0, fmt.Errorf("listing issues: %w", err)
@@ -142,10 +142,10 @@ func closePlanIssuesAsWontfix(s *store.Store, planID string) (int, error) {
 		if iss.PlanID != planID {
 			continue
 		}
-		if iss.Status != "open" && iss.Status != "in_progress" {
+		if !store.IsOpenIssueStatus(iss.Status) {
 			continue
 		}
-		iss.Status = "wontfix"
+		iss.Status = store.IssueStatusClosed
 		if err := s.UpdateIssue(&iss); err != nil {
 			return 0, fmt.Errorf("updating issue #%d: %w", iss.ID, err)
 		}

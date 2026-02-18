@@ -374,14 +374,56 @@ func TestIssueLifecycle(t *testing.T) {
 	issue := &Issue{Title: "bug", Status: "open", Priority: "high"}
 	s.CreateIssue(issue)
 
-	issue.Status = "resolved"
+	issue.Status = IssueStatusClosed
+	issue.UpdatedBy = "agent-x"
 	if err := s.UpdateIssue(issue); err != nil {
 		t.Fatal(err)
 	}
 
 	got, _ := s.GetIssue(issue.ID)
-	if got.Status != "resolved" {
-		t.Errorf("status = %q, want %q", got.Status, "resolved")
+	if got.Status != IssueStatusClosed {
+		t.Errorf("status = %q, want %q", got.Status, IssueStatusClosed)
+	}
+	if got.UpdatedBy != "agent-x" {
+		t.Errorf("updated_by = %q, want %q", got.UpdatedBy, "agent-x")
+	}
+	if len(got.History) < 2 {
+		t.Fatalf("history length = %d, want >= 2", len(got.History))
+	}
+}
+
+func TestIssueCommentsAndHistory(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := New(dir)
+	s.Init(ProjectConfig{Name: "test", RepoPath: "/tmp"})
+
+	issue := &Issue{
+		Title:     "Threaded issue",
+		Status:    IssueStatusOpen,
+		Priority:  "medium",
+		CreatedBy: "lead-agent",
+		UpdatedBy: "lead-agent",
+	}
+	if err := s.CreateIssue(issue); err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+
+	updated, err := s.AddIssueComment(issue.ID, "Investigating root cause", "worker-agent")
+	if err != nil {
+		t.Fatalf("AddIssueComment: %v", err)
+	}
+	if len(updated.Comments) != 1 {
+		t.Fatalf("comment length = %d, want 1", len(updated.Comments))
+	}
+	if updated.Comments[0].By != "worker-agent" {
+		t.Fatalf("comment by = %q, want %q", updated.Comments[0].By, "worker-agent")
+	}
+	if len(updated.History) < 2 {
+		t.Fatalf("history length = %d, want >= 2", len(updated.History))
+	}
+	last := updated.History[len(updated.History)-1]
+	if last.Type != "commented" {
+		t.Fatalf("last history type = %q, want %q", last.Type, "commented")
 	}
 }
 

@@ -89,13 +89,13 @@ func statusColor(status string) string {
 	switch strings.ToLower(status) {
 	case "complete", "resolved", "done":
 		return colorGreen
-	case "in_progress", "in-progress":
+	case "in_progress", "in-progress", "ongoing", "in_review", "in-review":
 		return colorYellow
 	case "blocked", "critical":
 		return colorRed
 	case "open", "not_started", "not-started":
 		return colorBlue
-	case "wontfix":
+	case "closed", "wontfix":
 		return colorDim
 	case "high":
 		return colorRed

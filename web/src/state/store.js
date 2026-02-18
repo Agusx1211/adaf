@@ -297,6 +297,35 @@ export function normalizeSpawns(rawSpawns) {
 
 export function normalizeIssues(rawIssues) {
   return arrayOrEmpty(rawIssues).map(function (issue) {
+    var comments = arrayOrEmpty(issue && issue.comments).map(function (comment) {
+      return {
+        id: Number(comment && comment.id) || 0,
+        body: comment && comment.body ? String(comment.body) : '',
+        by: comment && comment.by ? String(comment.by) : '',
+        created: comment && comment.created ? comment.created : '',
+        updated: comment && comment.updated ? comment.updated : '',
+      };
+    }).filter(function (comment) { return comment.id > 0; }).sort(function (a, b) { return a.id - b.id; });
+
+    var history = arrayOrEmpty(issue && issue.history).map(function (item) {
+      return {
+        id: Number(item && item.id) || 0,
+        type: item && item.type ? String(item.type) : '',
+        field: item && item.field ? String(item.field) : '',
+        from: item && item.from ? String(item.from) : '',
+        to: item && item.to ? String(item.to) : '',
+        comment_id: Number(item && item.comment_id) || 0,
+        message: item && item.message ? String(item.message) : '',
+        by: item && item.by ? String(item.by) : '',
+        at: item && item.at ? item.at : '',
+      };
+    }).filter(function (item) { return item.id > 0 || item.type; }).sort(function (a, b) {
+      var aid = Number(a.id) || 0;
+      var bid = Number(b.id) || 0;
+      if (aid && bid && aid !== bid) return aid - bid;
+      return parseTimestamp(a.at) - parseTimestamp(b.at);
+    });
+
     return {
       id: Number(issue && issue.id) || 0,
       title: issue && issue.title ? String(issue.title) : '',
@@ -306,6 +335,13 @@ export function normalizeIssues(rawIssues) {
       labels: arrayOrEmpty(issue && issue.labels),
       depends_on: arrayOrEmpty(issue && issue.depends_on).map(function (id) { return Number(id) || 0; }).filter(function (id) { return id > 0; }),
       description: issue && issue.description ? String(issue.description) : '',
+      turn_id: Number(issue && (issue.turn_id || issue.session_id)) || 0,
+      created: issue && issue.created ? issue.created : '',
+      updated: issue && issue.updated ? issue.updated : '',
+      created_by: issue && issue.created_by ? String(issue.created_by) : '',
+      updated_by: issue && issue.updated_by ? String(issue.updated_by) : '',
+      comments: comments,
+      history: history,
     };
   }).filter(function (i) { return i.id > 0; }).sort(function (a, b) { return b.id - a.id; });
 }

@@ -32,10 +32,11 @@ func buildSubAgentPrompt(opts BuildOpts) (string, error) {
 
 	if opts.ReadOnly {
 		b.WriteString("You are in READ-ONLY mode. Do NOT create, modify, or delete any files. Only read and analyze.\n")
+		b.WriteString("Wiki is a persistent knowledge base shared across all agents. Browse with `adaf wiki list` or `adaf wiki search \"<term>\"`.\n")
 	} else {
 		b.WriteString("Commit your work when you finish.\n")
+		b.WriteString("Wiki is a persistent knowledge base shared across all agents (not a session log or status dump). Browse with `adaf wiki list` or `adaf wiki search \"<term>\"`. Update with `adaf wiki update <id> --content \"...\"` only when durable knowledge changes.\n")
 	}
-	b.WriteString("Wiki is shared memory across all agents and sessions. Check it before acting and update stale entries when needed using `adaf wiki ...`.\n")
 
 	b.WriteString("If you need to communicate with your parent agent use: adaf parent-ask \"question\"\n")
 	b.WriteString("Do NOT manage turn logs with `adaf turn ...`; your parent agent owns turn handoff publication.\n")
@@ -59,7 +60,7 @@ func buildSubAgentPrompt(opts BuildOpts) (string, error) {
 			}
 			fmt.Fprintf(&b, "- #%d [%s] %s: %s\n", iss.ID, iss.Priority, iss.Title, iss.Description)
 		}
-		b.WriteString("\n")
+		b.WriteString("\nUse `adaf issue show <id>` for full details, `adaf issue move <id> --status ongoing` to track progress, and `adaf issue comment <id> --body \"...\"` to leave updates.\n\n")
 	}
 
 	b.WriteString(opts.Task)
@@ -437,7 +438,7 @@ func renderIssues(s *store.Store, effectivePlanID string) string {
 	}
 	var relevant []store.Issue
 	for _, iss := range issues {
-		if iss.Status == "open" || iss.Status == "in_progress" {
+		if store.IsOpenIssueStatus(iss.Status) {
 			relevant = append(relevant, iss)
 		}
 	}
@@ -445,7 +446,7 @@ func renderIssues(s *store.Store, effectivePlanID string) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("## Open Issues\n")
+	b.WriteString("## Active Issues\n")
 	for _, iss := range relevant {
 		fmt.Fprintf(&b, "- #%d [%s] %s: %s\n", iss.ID, iss.Priority, iss.Title, iss.Description)
 	}
@@ -629,7 +630,7 @@ func renderObjective(opts BuildOpts, project *store.ProjectConfig, plan *store.P
 				b.WriteString("Use `adaf plan` to inspect active plan goals, rationale, and scope.\n")
 			}
 			b.WriteString("Use `adaf issues`, `adaf wiki list`, and `adaf log` to validate progress and then publish concrete guidance for the next step.\n")
-			b.WriteString("If wiki context is stale, update it with `adaf wiki update ...` before finishing.\n\n")
+			b.WriteString("If wiki knowledge (architectural decisions, patterns, gotchas) is outdated, update with `adaf wiki update <id> --content \"...\"`.\n\n")
 			return b.String()
 		}
 
@@ -858,7 +859,7 @@ func buildStandaloneChatContext(opts BuildOpts) (string, error) {
 	b.WriteString("## Tools\n")
 	b.WriteString("The `adaf` CLI provides project management tools. Run `adaf --help` for available commands.\n")
 	b.WriteString("Do not access the adaf project store directly (for example `~/.adaf/projects/<id>/`) — use `adaf` commands.\n\n")
-	b.WriteString("Wiki is the shared memory layer across sessions and agents. Use `adaf wiki list`, `adaf wiki search \"...\"`, and `adaf wiki update ...` to keep it current.\n\n")
+	b.WriteString("Wiki is a persistent knowledge base shared across sessions and agents. Use `adaf wiki list`, `adaf wiki search \"<term>\"`, and `adaf wiki update <id> --content \"...\"` to keep it current.\n\n")
 
 	// Delegation pointer (brief).
 	if opts.Delegation != nil && len(opts.Delegation.Profiles) > 0 {

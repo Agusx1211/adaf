@@ -6,7 +6,7 @@ import SectionHeader from '../common/SectionHeader.jsx';
 import { useToast } from '../common/Toast.jsx';
 import { normalizeStatus } from '../../utils/format.js';
 
-var issueStatusOptions = ['open', 'in_progress', 'resolved', 'wontfix'];
+var issueStatusOptions = ['open', 'ongoing', 'in_review', 'closed'];
 var issuePriorityOptions = ['critical', 'high', 'medium', 'low'];
 
 export default function IssueDetailPanel() {

@@ -247,11 +247,13 @@ export default function App() {
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         <LeftPanel />
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-            <CenterPanel />
+        {leftView !== 'issues' && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+              <CenterPanel />
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {showAuthModal && (

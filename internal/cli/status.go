@@ -47,7 +47,7 @@ func runStatusBrief(s *store.Store) error {
 	}
 	openCount := 0
 	for _, iss := range issues {
-		if iss.Status == "open" || iss.Status == "in_progress" {
+		if store.IsOpenIssueStatus(iss.Status) {
 			openCount++
 		}
 	}
@@ -144,7 +144,7 @@ func runStatusFull(s *store.Store) error {
 		sharedIssues, _ := s.ListSharedIssues()
 		sharedOpen := 0
 		for _, iss := range sharedIssues {
-			if iss.Status == "open" || iss.Status == "in_progress" {
+			if store.IsOpenIssueStatus(iss.Status) {
 				sharedOpen++
 			}
 		}
@@ -219,26 +219,26 @@ func printIssueSummary(issues []store.Issue, label string) {
 
 	counts := map[string]int{}
 	for _, iss := range issues {
-		counts[iss.Status]++
+		counts[store.NormalizeIssueStatus(iss.Status)]++
 	}
 
 	fmt.Printf("  ")
 	if c := counts["open"]; c > 0 {
 		fmt.Printf("%s%d open%s  ", colorBlue, c, colorReset)
 	}
-	if c := counts["in_progress"]; c > 0 {
-		fmt.Printf("%s%d in-progress%s  ", colorYellow, c, colorReset)
+	if c := counts["ongoing"]; c > 0 {
+		fmt.Printf("%s%d ongoing%s  ", colorYellow, c, colorReset)
 	}
-	if c := counts["resolved"]; c > 0 {
-		fmt.Printf("%s%d resolved%s  ", colorGreen, c, colorReset)
+	if c := counts["in_review"]; c > 0 {
+		fmt.Printf("%s%d in-review%s  ", colorYellow, c, colorReset)
 	}
-	if c := counts["wontfix"]; c > 0 {
-		fmt.Printf("%s%d wontfix%s  ", colorDim, c, colorReset)
+	if c := counts["closed"]; c > 0 {
+		fmt.Printf("%s%d closed%s  ", colorDim, c, colorReset)
 	}
 	fmt.Printf("(%d total for %s)\n", len(issues), label)
 
 	for _, iss := range issues {
-		if (iss.Status == "open" || iss.Status == "in_progress") && (iss.Priority == "critical" || iss.Priority == "high") {
+		if store.IsOpenIssueStatus(iss.Status) && (iss.Priority == "critical" || iss.Priority == "high") {
 			fmt.Printf("  %s!%s #%d %s %s\n", colorRed, colorReset, iss.ID, priorityBadge(iss.Priority), iss.Title)
 		}
 	}

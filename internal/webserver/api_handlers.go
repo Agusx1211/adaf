@@ -89,7 +89,7 @@ func (srv *Server) handleGlobalDashboard(w http.ResponseWriter, r *http.Request)
 
 		if issues, err := entry.store.ListIssues(); err == nil {
 			for _, issue := range issues {
-				if strings.EqualFold(issue.Status, "open") {
+				if store.IsOpenIssueStatus(issue.Status) {
 					summary.OpenIssueCount++
 				}
 			}
@@ -172,9 +172,10 @@ func handleIssuesP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	}
 
 	if status != "" {
+		status = store.NormalizeIssueStatus(status)
 		filtered := make([]store.Issue, 0, len(issues))
 		for i := range issues {
-			if strings.EqualFold(issues[i].Status, status) {
+			if store.NormalizeIssueStatus(issues[i].Status) == status {
 				filtered = append(filtered, issues[i])
 			}
 		}

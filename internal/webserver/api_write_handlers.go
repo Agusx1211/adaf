@@ -14,10 +14,10 @@ import (
 
 var (
 	issueStatuses = map[string]struct{}{
-		"open":        {},
-		"in_progress": {},
-		"resolved":    {},
-		"wontfix":     {},
+		store.IssueStatusOpen:     {},
+		store.IssueStatusOngoing:  {},
+		store.IssueStatusInReview: {},
+		store.IssueStatusClosed:   {},
 	}
 	issuePriorities = map[string]struct{}{
 		"critical": {},
@@ -44,6 +44,14 @@ type issueWriteRequest struct {
 	Priority    string   `json:"priority"`
 	Labels      []string `json:"labels"`
 	DependsOn   []int    `json:"depends_on"`
+	TurnID      int      `json:"turn_id"`
+	CreatedBy   string   `json:"created_by"`
+	UpdatedBy   string   `json:"updated_by"`
+}
+
+type issueCommentWriteRequest struct {
+	Body string `json:"body"`
+	By   string `json:"by"`
 }
 
 type planWriteRequest struct {
@@ -100,20 +108,20 @@ func handleCreateIssueP(s *store.Store, w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	status := normalizeLower(req.Status)
+	status := store.NormalizeIssueStatus(normalizeLower(req.Status))
 	if status == "" {
-		status = "open"
+		status = store.IssueStatusOpen
 	}
-	if !isAllowedValue(status, issueStatuses) {
+	if !isAllowedValue(status, issueStatuses) || !store.IsValidIssueStatus(status) {
 		writeError(w, http.StatusBadRequest, "invalid issue status")
 		return
 	}
 
-	priority := normalizeLower(req.Priority)
+	priority := store.NormalizeIssuePriority(normalizeLower(req.Priority))
 	if priority == "" {
 		priority = "medium"
 	}
-	if !isAllowedValue(priority, issuePriorities) {
+	if !isAllowedValue(priority, issuePriorities) || !store.IsValidIssuePriority(priority) {
 		writeError(w, http.StatusBadRequest, "invalid issue priority")
 		return
 	}
@@ -124,6 +132,7 @@ func handleCreateIssueP(s *store.Store, w http.ResponseWriter, r *http.Request) 
 	}
 
 	now := time.Now().UTC()
+	actor := resolveWriteActor(req.CreatedBy, req.UpdatedBy)
 	issue := store.Issue{
 		PlanID:      strings.TrimSpace(req.PlanID),
 		Title:       title,
@@ -132,6 +141,9 @@ func handleCreateIssueP(s *store.Store, w http.ResponseWriter, r *http.Request) 
 		Priority:    priority,
 		Labels:      req.Labels,
 		DependsOn:   dependsOn,
+		TurnID:      req.TurnID,
+		CreatedBy:   actor,
+		UpdatedBy:   actor,
 		Created:     now,
 		Updated:     now,
 	}
@@ -187,19 +199,25 @@ func handleUpdateIssueP(s *store.Store, w http.ResponseWriter, r *http.Request) 
 		issue.DependsOn = dependsOn
 	}
 	if status := normalizeLower(req.Status); status != "" {
-		if !isAllowedValue(status, issueStatuses) {
+		status = store.NormalizeIssueStatus(status)
+		if !isAllowedValue(status, issueStatuses) || !store.IsValidIssueStatus(status) {
 			writeError(w, http.StatusBadRequest, "invalid issue status")
 			return
 		}
 		issue.Status = status
 	}
 	if priority := normalizeLower(req.Priority); priority != "" {
-		if !isAllowedValue(priority, issuePriorities) {
+		priority = store.NormalizeIssuePriority(priority)
+		if !isAllowedValue(priority, issuePriorities) || !store.IsValidIssuePriority(priority) {
 			writeError(w, http.StatusBadRequest, "invalid issue priority")
 			return
 		}
 		issue.Priority = priority
 	}
+	if req.TurnID > 0 {
+		issue.TurnID = req.TurnID
+	}
+	issue.UpdatedBy = resolveWriteActor(req.UpdatedBy, req.CreatedBy)
 
 	issue.Updated = time.Now().UTC()
 	if err := s.UpdateIssue(issue); err != nil {
@@ -227,6 +245,42 @@ func handleDeleteIssueP(s *store.Store, w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func handleCreateIssueCommentP(s *store.Store, w http.ResponseWriter, r *http.Request) {
+	id, err := parsePathID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
+
+	var req issueCommentWriteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	body := strings.TrimSpace(req.Body)
+	if body == "" {
+		writeError(w, http.StatusBadRequest, "comment body is required")
+		return
+	}
+
+	updated, err := s.AddIssueComment(id, body, resolveWriteActor(req.By))
+	if err != nil {
+		if isNotFoundErr(err) {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return
+		}
+		if strings.Contains(strings.ToLower(err.Error()), "comment body") {
+			writeError(w, http.StatusBadRequest, "comment body is required")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to add issue comment")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, updated)
 }
 
 func handleCreatePlanP(s *store.Store, w http.ResponseWriter, r *http.Request) {
@@ -623,6 +677,16 @@ func handleUpdateTurnP(s *store.Store, w http.ResponseWriter, r *http.Request) {
 
 func normalizeLower(raw string) string {
 	return strings.ToLower(strings.TrimSpace(raw))
+}
+
+func resolveWriteActor(candidates ...string) string {
+	for _, raw := range candidates {
+		actor := strings.TrimSpace(raw)
+		if actor != "" {
+			return actor
+		}
+	}
+	return "human"
 }
 
 func isAllowedValue(value string, allowed map[string]struct{}) bool {

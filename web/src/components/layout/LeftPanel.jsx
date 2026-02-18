@@ -36,8 +36,12 @@ export default function LeftPanel() {
 
   return (
     <div style={{
-      width: 380, flexShrink: 0, display: 'flex', flexDirection: 'column',
-      borderRight: '1px solid var(--border)', background: 'var(--bg-1)',
+      width: leftView === 'issues' ? '100%' : 380,
+      flexShrink: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      borderRight: leftView === 'issues' ? 'none' : '1px solid var(--border)',
+      background: 'var(--bg-1)',
     }}>
       <ProjectStatus />
 

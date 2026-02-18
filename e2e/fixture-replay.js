@@ -231,6 +231,15 @@ function writeSeedProjectData(adafDir, nowISO) {
     priority: 'medium',
     labels: ['seed', 'e2e'],
     session_id: 0,
+    created_by: 'fixture-seed',
+    updated_by: 'fixture-seed',
+    comments: [],
+    history: [{
+      id: 1,
+      type: 'created',
+      by: 'fixture-seed',
+      at: nowISO,
+    }],
     created: nowISO,
     updated: nowISO,
   };

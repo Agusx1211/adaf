@@ -24,17 +24,41 @@ type Plan struct {
 }
 
 type Issue struct {
-	ID          int       `json:"id"`
-	PlanID      string    `json:"plan_id,omitempty"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Status      string    `json:"status"`   // "open", "in_progress", "resolved", "wontfix"
-	Priority    string    `json:"priority"` // "critical", "high", "medium", "low"
-	Labels      []string  `json:"labels,omitempty"`
-	DependsOn   []int     `json:"depends_on,omitempty"`
-	TurnID      int       `json:"session_id,omitempty"` // which turn created it
-	Created     time.Time `json:"created"`
-	Updated     time.Time `json:"updated"`
+	ID          int            `json:"id"`
+	PlanID      string         `json:"plan_id,omitempty"`
+	Title       string         `json:"title"`
+	Description string         `json:"description"`
+	Status      string         `json:"status"`   // "open", "ongoing", "in_review", "closed"
+	Priority    string         `json:"priority"` // "critical", "high", "medium", "low"
+	Labels      []string       `json:"labels,omitempty"`
+	DependsOn   []int          `json:"depends_on,omitempty"`
+	TurnID      int            `json:"session_id,omitempty"` // which turn created it
+	CreatedBy   string         `json:"created_by,omitempty"`
+	UpdatedBy   string         `json:"updated_by,omitempty"`
+	Comments    []IssueComment `json:"comments,omitempty"`
+	History     []IssueHistory `json:"history,omitempty"`
+	Created     time.Time      `json:"created"`
+	Updated     time.Time      `json:"updated"`
+}
+
+type IssueComment struct {
+	ID      int       `json:"id"`
+	Body    string    `json:"body"`
+	By      string    `json:"by,omitempty"`
+	Created time.Time `json:"created"`
+	Updated time.Time `json:"updated,omitempty"`
+}
+
+type IssueHistory struct {
+	ID        int       `json:"id"`
+	Type      string    `json:"type"` // "created", "updated", "commented", "status_changed", "moved"
+	Field     string    `json:"field,omitempty"`
+	From      string    `json:"from,omitempty"`
+	To        string    `json:"to,omitempty"`
+	CommentID int       `json:"comment_id,omitempty"`
+	Message   string    `json:"message,omitempty"`
+	By        string    `json:"by,omitempty"`
+	At        time.Time `json:"at"`
 }
 
 type WikiChange struct {

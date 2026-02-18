@@ -21,6 +21,7 @@ export var STATUS_RUNNING = {
   running: true,
   active: true,
   in_progress: true,
+  ongoing: true,
 };
 
 export var SCOPE_COLOR_PALETTE = [
@@ -40,7 +41,8 @@ export function statusColor(status) {
     canceled: '#f38ba8', cancelled: '#f38ba8',
     rejected: '#f38ba8', blocked: '#f38ba8',
     stopped: '#6c7086', not_started: '#6c7086',
-    open: '#f9e2af', in_progress: '#f9e2af',
+    open: '#f9e2af', in_progress: '#f9e2af', ongoing: '#f9e2af', in_review: '#89b4fa',
+    closed: '#6c7086',
     critical: '#f38ba8', high: '#fab387', medium: '#f9e2af', low: '#6c7086',
     active: '#89b4fa',
   };
@@ -57,7 +59,8 @@ export function statusIcon(status) {
     passing: '\u2713', failed: '\u2717', failing: '\u2717',
     canceled: '\u2298', cancelled: '\u2298', rejected: '\u2297',
     blocked: '\u2717', stopped: '\u25A0', resolved: '\u2713',
-    in_progress: '\u25C9', open: '\u25C9',
+    in_progress: '\u25C9', ongoing: '\u25C9', open: '\u25C9',
+    in_review: '\u25CE', closed: '\u25A0',
   };
   return map[key] || '\u25CB';
 }

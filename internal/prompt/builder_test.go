@@ -342,9 +342,9 @@ func TestBuild_SubAgentSkipsSessionLogsAndIssues(t *testing.T) {
 		t.Fatalf("sub-agent should not see turn objectives\nprompt:\n%s", got)
 	}
 
-	// Sub-agent should NOT see open issues.
-	if strings.Contains(got, "Open Issues") {
-		t.Fatalf("sub-agent should not see open issues\nprompt:\n%s", got)
+	// Sub-agent should NOT see active issues.
+	if strings.Contains(got, "Active Issues") {
+		t.Fatalf("sub-agent should not see active issues\nprompt:\n%s", got)
 	}
 	if strings.Contains(got, "Some open issue") {
 		t.Fatalf("sub-agent should not see issue content\nprompt:\n%s", got)
@@ -901,6 +901,126 @@ func TestBuild_ProfileDescriptionNotInOwnPrompt(t *testing.T) {
 	}
 	if strings.Contains(got, "very fast worker") {
 		t.Fatalf("agent should not see its own description text (nil skills)\nprompt:\n%s", got)
+	}
+}
+
+func TestBuild_SubAgentReadOnlyWikiInstructions(t *testing.T) {
+	s, project := initPromptTestStore(t)
+
+	got, err := Build(BuildOpts{
+		Store:        s,
+		Project:      project,
+		Profile:      &config.Profile{Name: "scout", Agent: "claude"},
+		ParentTurnID: 100,
+		ReadOnly:     true,
+		Task:         "Analyze the codebase",
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if !strings.Contains(got, "wiki list") {
+		t.Fatalf("read-only sub-agent should get wiki list command\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "wiki search") {
+		t.Fatalf("read-only sub-agent should get wiki search command\nprompt:\n%s", got)
+	}
+	if strings.Contains(got, "wiki update") {
+		t.Fatalf("read-only sub-agent should NOT get wiki update command\nprompt:\n%s", got)
+	}
+	if strings.Contains(got, "wiki create") {
+		t.Fatalf("read-only sub-agent should NOT get wiki create command\nprompt:\n%s", got)
+	}
+}
+
+func TestBuild_SubAgentWritableWikiInstructions(t *testing.T) {
+	s, project := initPromptTestStore(t)
+
+	got, err := Build(BuildOpts{
+		Store:        s,
+		Project:      project,
+		Profile:      &config.Profile{Name: "dev", Agent: "claude"},
+		ParentTurnID: 100,
+		Task:         "Fix the auth bug",
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if !strings.Contains(got, "wiki list") {
+		t.Fatalf("writable sub-agent should get wiki list command\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "wiki search") {
+		t.Fatalf("writable sub-agent should get wiki search command\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "wiki update") {
+		t.Fatalf("writable sub-agent should get wiki update command\nprompt:\n%s", got)
+	}
+}
+
+func TestBuild_SubAgentWikiUsesKnowledgeBaseSemantics(t *testing.T) {
+	s, project := initPromptTestStore(t)
+
+	got, err := Build(BuildOpts{
+		Store:        s,
+		Project:      project,
+		Profile:      &config.Profile{Name: "dev", Agent: "claude"},
+		ParentTurnID: 100,
+		Task:         "Fix the auth bug",
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if !strings.Contains(got, "knowledge base") {
+		t.Fatalf("sub-agent wiki text should use 'knowledge base' framing\nprompt:\n%s", got)
+	}
+}
+
+func TestBuild_SubAgentWithIssuesGetsIssueCLIHint(t *testing.T) {
+	s, project := initPromptTestStore(t)
+
+	issue := &store.Issue{Title: "Auth bug", Status: "open", Priority: "high", Description: "Login fails"}
+	if err := s.CreateIssue(issue); err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+
+	got, err := Build(BuildOpts{
+		Store:        s,
+		Project:      project,
+		Profile:      &config.Profile{Name: "dev", Agent: "claude"},
+		ParentTurnID: 100,
+		Task:         "Fix assigned issues",
+		IssueIDs:     []int{issue.ID},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if !strings.Contains(got, "adaf issue show <id>") {
+		t.Fatalf("sub-agent with issues should get issue show hint\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "adaf issue move <id> --status ongoing") {
+		t.Fatalf("sub-agent with issues should get issue move hint\nprompt:\n%s", got)
+	}
+}
+
+func TestBuild_SubAgentWithoutIssuesOmitsIssueCLIHint(t *testing.T) {
+	s, project := initPromptTestStore(t)
+
+	got, err := Build(BuildOpts{
+		Store:        s,
+		Project:      project,
+		Profile:      &config.Profile{Name: "dev", Agent: "claude"},
+		ParentTurnID: 100,
+		Task:         "General task with no issues",
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if strings.Contains(got, "adaf issue show <id>") {
+		t.Fatalf("sub-agent without issues should NOT get issue show hint\nprompt:\n%s", got)
 	}
 }
 
