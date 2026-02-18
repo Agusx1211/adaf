@@ -154,7 +154,7 @@ func TestRolePrompt_RendersRoleIdentityFromRoleDefinition(t *testing.T) {
 	}
 }
 
-func TestDelegationSection_IncludesRoutingScoresAndSpeedScore(t *testing.T) {
+func TestDelegationSection_IncludesRoutingScoresSpeedAndCostTable(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	store := profilescore.Default()
 	now := time.Date(2026, 2, 17, 10, 0, 0, 0, time.UTC)
@@ -214,13 +214,31 @@ func TestDelegationSection_IncludesRoutingScoresAndSpeedScore(t *testing.T) {
 	}
 
 	got := delegationSection(deleg, globalCfg, nil)
-	if !strings.Contains(got, "speed_score=") {
-		t.Fatalf("expected simplified speed score in prompt\nprompt:\n%s", got)
+	if !strings.Contains(got, "cost=cheap") {
+		t.Fatalf("expected profile cost in available profiles section\nprompt:\n%s", got)
 	}
 	if !strings.Contains(got, "## Routing Scoreboard") {
 		t.Fatalf("expected routing scoreboard section\nprompt:\n%s", got)
 	}
-	if !strings.Contains(got, "profile=worker") || !strings.Contains(got, "role=developer") || !strings.Contains(got, "score=") {
-		t.Fatalf("expected profile/role/score row\nprompt:\n%s", got)
+	if !strings.Contains(got, "### Profile Baseline") {
+		t.Fatalf("expected profile baseline table heading\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "| Profile | Cost | Speed |") {
+		t.Fatalf("expected profile baseline table header\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "| worker | cheap |") {
+		t.Fatalf("expected profile baseline row with cost\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "### Score by Role") {
+		t.Fatalf("expected score by role table heading\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "| Profile | developer | researcher |") {
+		t.Fatalf("expected role matrix table header\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "| worker |") {
+		t.Fatalf("expected role matrix row for worker profile\nprompt:\n%s", got)
+	}
+	if strings.Contains(got, "| Profile | Cost | Role | Score | Speed | Feedback |") {
+		t.Fatalf("legacy single-table scoreboard should not be present\nprompt:\n%s", got)
 	}
 }

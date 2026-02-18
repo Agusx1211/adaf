@@ -13,6 +13,8 @@ const (
 	maxRecentPerProfile         = 20
 	defaultSpeedScore           = 50.0
 	judgeReliabilitySmoothing   = 3.0
+	judgeBiasSmoothing          = 4.0
+	maxJudgeBias                = 4.0
 	minJudgeWeight              = 0.20
 	scoreWeightQuality          = 0.50
 	scoreWeightResidual         = 0.30
@@ -85,6 +87,7 @@ type scoringModel struct {
 	hasDurationModel  bool
 	meanDurationSecs  float64
 	judgeWeights      map[string]float64
+	judgeBiases       map[string]float64
 }
 
 type recordEvaluation struct {
@@ -97,6 +100,7 @@ func buildScoringModel(records []FeedbackRecord) scoringModel {
 	model := scoringModel{
 		meanQuality:      (MinScore + MaxScore) / 2,
 		judgeWeights:     make(map[string]float64),
+		judgeBiases:      make(map[string]float64),
 		meanDurationSecs: 0,
 	}
 
@@ -138,7 +142,43 @@ func buildScoringModel(records []FeedbackRecord) scoringModel {
 	}
 
 	model.judgeWeights = buildJudgeWeights(records, model)
+	model.judgeBiases = buildJudgeBiases(records, model)
 	return model
+}
+
+func buildJudgeBiases(records []FeedbackRecord, model scoringModel) map[string]float64 {
+	type judgeStats struct {
+		sumResidual float64
+		count       int
+	}
+
+	judgeAgg := make(map[string]judgeStats)
+	for _, rec := range records {
+		if strings.TrimSpace(rec.ChildProfile) == "" {
+			continue
+		}
+		judge := judgeKey(rec.ParentProfile, rec.ParentRole, rec.ParentPosition)
+		if judge == "" {
+			judge = "unknown"
+		}
+		expected := model.expectedQuality(rec.Difficulty)
+		agg := judgeAgg[judge]
+		agg.sumResidual += rec.Quality - expected
+		agg.count++
+		judgeAgg[judge] = agg
+	}
+
+	out := make(map[string]float64, len(judgeAgg))
+	for judge, agg := range judgeAgg {
+		if agg.count <= 0 {
+			continue
+		}
+		meanResidual := agg.sumResidual / float64(agg.count)
+		shrink := float64(agg.count) / (float64(agg.count) + judgeBiasSmoothing)
+		bias := meanResidual * shrink
+		out[judge] = clamp(bias, -maxJudgeBias, maxJudgeBias)
+	}
+	return out
 }
 
 func buildJudgeWeights(records []FeedbackRecord, model scoringModel) map[string]float64 {
@@ -203,8 +243,9 @@ func (m scoringModel) evaluate(rec FeedbackRecord) recordEvaluation {
 	if weight <= 0 {
 		weight = 0.5
 	}
+	calibratedQuality := m.calibratedQuality(rec)
 	return recordEvaluation{
-		Score:      m.score(rec),
+		Score:      m.score(rec, calibratedQuality),
 		SpeedScore: m.speedScore(rec),
 		Weight:     weight,
 	}
@@ -225,11 +266,31 @@ func (m scoringModel) judgeWeight(parentProfile, parentRole, parentPosition stri
 	return weight
 }
 
-func (m scoringModel) score(rec FeedbackRecord) float64 {
-	qualityPct := clamp(rec.Quality*10, 0, 100)
+func (m scoringModel) judgeBias(parentProfile, parentRole, parentPosition string) float64 {
+	if len(m.judgeBiases) == 0 {
+		return 0
+	}
+	key := judgeKey(parentProfile, parentRole, parentPosition)
+	if key == "" {
+		key = "unknown"
+	}
+	bias, ok := m.judgeBiases[key]
+	if !ok {
+		return 0
+	}
+	return bias
+}
+
+func (m scoringModel) calibratedQuality(rec FeedbackRecord) float64 {
+	bias := m.judgeBias(rec.ParentProfile, rec.ParentRole, rec.ParentPosition)
+	return clamp(rec.Quality-bias, MinScore, MaxScore)
+}
+
+func (m scoringModel) score(rec FeedbackRecord, calibratedQuality float64) float64 {
+	qualityPct := clamp(calibratedQuality*10, 0, 100)
 	difficultyPct := clamp(rec.Difficulty*10, 0, 100)
 	expected := m.expectedQuality(rec.Difficulty)
-	residualScore := clamp(50+((rec.Quality-expected)*residualToPercentMultiplier), 0, 100)
+	residualScore := clamp(50+((calibratedQuality-expected)*residualToPercentMultiplier), 0, 100)
 	score := (scoreWeightQuality * qualityPct) +
 		(scoreWeightResidual * residualScore) +
 		(scoreWeightDifficulty * difficultyPct)

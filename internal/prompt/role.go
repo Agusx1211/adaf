@@ -250,12 +250,45 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 		b.WriteString("\n")
 	}
 
-	rows := buildDelegationRoutingRows(deleg, globalCfg, perfByProfile)
-	if len(rows) > 0 {
-		b.WriteString("## Routing Scoreboard (difficulty-adjusted, judge-weighted)\n\n")
-		for _, row := range rows {
-			fmt.Fprintf(&b, "- profile=%s, role=%s, score=%.1f/100, speed_score=%.0f/100, feedback=%d\n",
-				row.Profile, row.Role, row.Score, row.SpeedScore, row.Count)
+	profileRows, roleColumns, roleMatrixRows := buildDelegationRoutingTables(deleg, globalCfg, perfByProfile)
+	if len(profileRows) > 0 && len(roleColumns) > 0 {
+		b.WriteString("## Routing Scoreboard (difficulty-adjusted, judge-calibrated, judge-weighted)\n\n")
+		b.WriteString("### Profile Baseline\n\n")
+		b.WriteString("| Profile | Cost | Speed |\n")
+		b.WriteString("| --- | --- | ---: |\n")
+		for _, row := range profileRows {
+			fmt.Fprintf(&b, "| %s | %s | %.0f/100 |\n",
+				row.Profile, row.Cost, row.SpeedScore)
+		}
+		b.WriteString("\n")
+
+		b.WriteString("### Score by Role\n\n")
+		b.WriteString("| Profile |")
+		for _, role := range roleColumns {
+			fmt.Fprintf(&b, " %s |", role)
+		}
+		b.WriteString("\n")
+		b.WriteString("| --- |")
+		for range roleColumns {
+			b.WriteString(" ---: |")
+		}
+		b.WriteString("\n")
+
+		matrixByProfile := make(map[string]map[string]float64, len(roleMatrixRows))
+		for _, row := range roleMatrixRows {
+			matrixByProfile[strings.ToLower(strings.TrimSpace(row.Profile))] = row.Scores
+		}
+		for _, row := range profileRows {
+			fmt.Fprintf(&b, "| %s |", row.Profile)
+			scores := matrixByProfile[strings.ToLower(strings.TrimSpace(row.Profile))]
+			for _, role := range roleColumns {
+				if score, ok := scores[role]; ok {
+					fmt.Fprintf(&b, " %.1f/100 |", score)
+				} else {
+					b.WriteString(" - |")
+				}
+			}
+			b.WriteString("\n")
 		}
 		b.WriteString("\n")
 	}
@@ -340,52 +373,76 @@ func delegationLimitOptionKey(profile, position, role string) string {
 	return prof + "|" + pos + "|" + r
 }
 
-type delegationRoutingRow struct {
+type delegationRoutingProfileRow struct {
 	Profile    string
-	Role       string
-	Score      float64
+	Cost       string
 	SpeedScore float64
-	Count      int
 }
 
-func buildDelegationRoutingRows(deleg *config.DelegationConfig, globalCfg *config.GlobalConfig, perfByProfile map[string]profilescore.ProfileSummary) []delegationRoutingRow {
+type delegationRoutingRoleMatrixRow struct {
+	Profile string
+	Scores  map[string]float64
+}
+
+func buildDelegationRoutingTables(deleg *config.DelegationConfig, globalCfg *config.GlobalConfig, perfByProfile map[string]profilescore.ProfileSummary) ([]delegationRoutingProfileRow, []string, []delegationRoutingRoleMatrixRow) {
 	if deleg == nil || globalCfg == nil || len(deleg.Profiles) == 0 {
-		return nil
+		return nil, nil, nil
 	}
-	rows := make([]delegationRoutingRow, 0)
+	profileRows := make([]delegationRoutingProfileRow, 0)
+	roleMatrixRows := make([]delegationRoutingRoleMatrixRow, 0)
+	roleColumnsSet := make(map[string]struct{})
+	seenProfiles := make(map[string]struct{})
 	for _, dp := range deleg.Profiles {
 		p := globalCfg.FindProfile(dp.Name)
 		if p == nil {
 			continue
 		}
-		perf, ok := perfByProfile[strings.ToLower(strings.TrimSpace(p.Name))]
+		profileKey := strings.ToLower(strings.TrimSpace(p.Name))
+		if profileKey == "" {
+			continue
+		}
+		if _, seen := seenProfiles[profileKey]; seen {
+			continue
+		}
+		seenProfiles[profileKey] = struct{}{}
+		perf, ok := perfByProfile[profileKey]
 		if !ok || perf.TotalFeedback == 0 {
 			continue
 		}
+		cost := config.NormalizeProfileCost(p.Cost)
+		if cost == "" {
+			cost = "n/a"
+		}
+		profileRows = append(profileRows, delegationRoutingProfileRow{
+			Profile:    p.Name,
+			Cost:       cost,
+			SpeedScore: perf.SpeedScore,
+		})
+		scores := make(map[string]float64)
 		for _, role := range perf.RoleBreakdown {
-			if role.Count <= 0 {
+			roleName := strings.ToLower(strings.TrimSpace(role.Name))
+			if role.Count <= 0 || roleName == "" {
 				continue
 			}
-			rows = append(rows, delegationRoutingRow{
-				Profile:    p.Name,
-				Role:       role.Name,
-				Score:      role.Score,
-				SpeedScore: role.SpeedScore,
-				Count:      role.Count,
-			})
+			scores[roleName] = role.Score
+			roleColumnsSet[roleName] = struct{}{}
 		}
+		roleMatrixRows = append(roleMatrixRows, delegationRoutingRoleMatrixRow{
+			Profile: p.Name,
+			Scores:  scores,
+		})
 	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].Score != rows[j].Score {
-			return rows[i].Score > rows[j].Score
-		}
-		if rows[i].Count != rows[j].Count {
-			return rows[i].Count > rows[j].Count
-		}
-		if !strings.EqualFold(rows[i].Profile, rows[j].Profile) {
-			return strings.ToLower(rows[i].Profile) < strings.ToLower(rows[j].Profile)
-		}
-		return strings.ToLower(rows[i].Role) < strings.ToLower(rows[j].Role)
+
+	if len(profileRows) == 0 || len(roleColumnsSet) == 0 {
+		return nil, nil, nil
+	}
+
+	roleColumns := make([]string, 0, len(roleColumnsSet))
+	for role := range roleColumnsSet {
+		roleColumns = append(roleColumns, role)
+	}
+	sort.Slice(roleColumns, func(i, j int) bool {
+		return roleColumns[i] < roleColumns[j]
 	})
-	return rows
+	return profileRows, roleColumns, roleMatrixRows
 }

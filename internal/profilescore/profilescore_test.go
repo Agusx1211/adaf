@@ -352,6 +352,52 @@ func TestBuildJudgeWeightsDownweightsOutlierJudge(t *testing.T) {
 	}
 }
 
+func TestBuildDashboardCalibratesJudgeHarshnessBias(t *testing.T) {
+	now := time.Date(2026, 2, 18, 10, 0, 0, 0, time.UTC)
+	records := make([]FeedbackRecord, 0, 60)
+	spawnID := 1
+	add := func(parent, child string, quality float64) {
+		records = append(records, FeedbackRecord{
+			ProjectID:     "proj-a",
+			SpawnID:       spawnID,
+			ParentProfile: parent,
+			ChildProfile:  child,
+			ChildRole:     "developer",
+			Difficulty:    5,
+			Quality:       quality,
+			CreatedAt:     now,
+		})
+		spawnID++
+	}
+
+	// Historical calibration data:
+	// - strict judge usually gives very low scores.
+	// - lenient judge usually gives very high scores.
+	for i := 0; i < 24; i++ {
+		add("strict-judge", "baseline-a", 2)
+		add("lenient-judge", "baseline-a", 9)
+	}
+	for i := 0; i < 24; i++ {
+		add("strict-judge", "baseline-b", 2)
+		add("lenient-judge", "baseline-b", 9)
+	}
+
+	// Both judges give a 9 to different workers at the same difficulty.
+	add("strict-judge", "strict-nine-worker", 9)
+	add("lenient-judge", "lenient-nine-worker", 9)
+
+	dashboard := BuildDashboard(nil, records)
+	strictNine := findSummaryByName(t, dashboard, "strict-nine-worker")
+	lenientNine := findSummaryByName(t, dashboard, "lenient-nine-worker")
+
+	if strictNine.Score <= lenientNine.Score {
+		t.Fatalf(
+			"strict judge 9 should calibrate above lenient judge 9; strict=%.2f lenient=%.2f",
+			strictNine.Score, lenientNine.Score,
+		)
+	}
+}
+
 func TestFeedbackForProfile(t *testing.T) {
 	now := time.Now().UTC()
 	records := []FeedbackRecord{
