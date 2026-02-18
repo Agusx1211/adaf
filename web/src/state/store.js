@@ -1,7 +1,7 @@
 import { createContext, useContext, useReducer, useCallback } from 'react';
 import { arrayOrEmpty, normalizeStatus, numberOr, parseTimestamp, safeJSONString, stringifyToolPayload, cropText } from '../utils/format.js';
 
-var MAX_STREAM_EVENTS = 0; // 0 means unlimited
+var MAX_STREAM_EVENTS = 500;
 var MAX_ACTIVITY_EVENTS = 240;
 
 var initialState = {
@@ -139,7 +139,7 @@ function reducer(state, action) {
       var entry = action.payload;
       var events = state.streamEvents;
       var last = events[events.length - 1];
-      if (last && last.scope === entry.scope && last.type === entry.type && last.text === entry.text && last.tool === entry.tool) {
+      if (isReplayDuplicateEvent(last, entry)) {
         return state;
       }
       var nextEvents = events.concat([entry]);
@@ -594,4 +594,42 @@ function hasSessionIdentity(session) {
     session.loop_name ||
     session.started_at
   );
+}
+
+function isReplayDuplicateEvent(previous, next) {
+  if (!previous || !next) return false;
+  var previousEventID = String(previous.event_id || '');
+  var nextEventID = String(next.event_id || '');
+  if (!previousEventID || !nextEventID || previousEventID !== nextEventID) return false;
+  return replayEventSignature(previous) === replayEventSignature(next);
+}
+
+function replayEventSignature(event) {
+  if (!event || typeof event !== 'object') return '';
+  var scope = String(event.scope || '');
+  var type = String(event.type || '');
+  var tool = String(event.tool || '');
+  var text = String(event.text || '');
+  var turnID = Number(event.turn_id || event.turnID || event._turnID || 0) || 0;
+  var blockIndex = Number(event.block_index || 0) || 0;
+  var isError = event.isError ? '1' : '0';
+  var input = dedupeValueSignature(event.input);
+  var result = dedupeValueSignature(event.result);
+  return [
+    scope,
+    type,
+    tool,
+    text,
+    String(turnID),
+    String(blockIndex),
+    isError,
+    input,
+    result,
+  ].join('|');
+}
+
+function dedupeValueSignature(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  return safeJSONString(value);
 }

@@ -497,6 +497,47 @@ func TestSessionRecordingEventsEndpoint(t *testing.T) {
 	}
 }
 
+func TestSessionRecordingEventsEndpointTailQuery(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	sessionID := 43
+	if err := os.MkdirAll(session.SessionDir(sessionID), 0755); err != nil {
+		t.Fatalf("MkdirAll(session dir): %v", err)
+	}
+	all := strings.Join([]string{
+		`{"type":"raw","data":"line-1"}`,
+		`{"type":"raw","data":"line-2"}`,
+		`{"type":"raw","data":"line-3"}`,
+		`{"type":"raw","data":"line-4"}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(session.EventsPath(sessionID), []byte(all), 0644); err != nil {
+		t.Fatalf("WriteFile(session events): %v", err)
+	}
+
+	rec := performRequest(t, srv, http.MethodGet, "/api/sessions/43/events?tail=2")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	want := strings.Join([]string{
+		`{"type":"raw","data":"line-3"}`,
+		`{"type":"raw","data":"line-4"}`,
+		"",
+	}, "\n")
+	if rec.Body.String() != want {
+		t.Fatalf("body = %q, want %q", rec.Body.String(), want)
+	}
+}
+
+func TestSessionRecordingEventsEndpointRejectsInvalidTailQuery(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	rec := performRequest(t, srv, http.MethodGet, "/api/sessions/42/events?tail=oops")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
 func TestDeleteIssueEndpoint(t *testing.T) {
 	srv, _ := newTestServer(t)
 

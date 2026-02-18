@@ -1,6 +1,7 @@
 package webserver
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -40,6 +41,41 @@ func parsePathID(raw string) (int, error) {
 
 func isNotFoundErr(err error) bool {
 	return os.IsNotExist(err)
+}
+
+const maxEventsTailLines = 5000
+
+func parseTailLinesQuery(r *http.Request) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get("tail"))
+	if raw == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("invalid tail")
+	}
+	if n > maxEventsTailLines {
+		n = maxEventsTailLines
+	}
+	return n, nil
+}
+
+func tailNDJSONLines(data []byte, tail int) []byte {
+	if tail <= 0 || len(data) == 0 {
+		return data
+	}
+	lines := bytes.Split(data, []byte{'\n'})
+	if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
+		lines = lines[:len(lines)-1]
+	}
+	if tail >= len(lines) {
+		return data
+	}
+	out := bytes.Join(lines[len(lines)-tail:], []byte{'\n'})
+	if len(out) == 0 {
+		return out
+	}
+	return append(out, '\n')
 }
 
 // --- Multi-project management endpoints ---
@@ -259,6 +295,11 @@ func handleTurnRecordingEventsP(s *store.Store, w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusNotFound, "turn not found")
 		return
 	}
+	tail, err := parseTailLinesQuery(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid tail")
+		return
+	}
 
 	// Try store recording first (keyed by store turn ID).
 	eventsPath := filepath.Join(s.RecordsDirs()[0], fmt.Sprintf("%d", id), "events.jsonl")
@@ -278,6 +319,7 @@ func handleTurnRecordingEventsP(s *store.Store, w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "failed to read recording")
 		return
 	}
+	data = tailNDJSONLines(data, tail)
 
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.WriteHeader(http.StatusOK)
@@ -288,6 +330,11 @@ func handleSessionRecordingEventsP(s *store.Store, w http.ResponseWriter, r *htt
 	id, err := parsePathID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	tail, err := parseTailLinesQuery(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid tail")
 		return
 	}
 
@@ -324,6 +371,7 @@ func handleSessionRecordingEventsP(s *store.Store, w http.ResponseWriter, r *htt
 		writeError(w, http.StatusInternalServerError, "failed to read recording")
 		return
 	}
+	data = tailNDJSONLines(data, tail)
 
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.WriteHeader(http.StatusOK)

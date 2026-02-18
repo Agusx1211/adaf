@@ -519,6 +519,9 @@ export function stateEventsToBlocks(stateEvents) {
   if (!stateEvents || !stateEvents.length) return [];
   return stateEvents.map(function (evt) {
     var eventTurnID = Number(evt && (evt.turn_id || evt.turnID || evt._turnID) || 0) || 0;
+    var eventID = String(evt && (evt.event_id || evt.eventID || evt._eventID) || '');
+    var blockIndex = Number(evt && (evt.block_index || evt.blockIndex || evt._blockIndex) || 0) || 0;
+    var toolCallID = String(evt && (evt.tool_call_id || evt.toolCallID || evt._toolCallID) || '');
     var meta = {
       _sourceLabel: evt._sourceLabel || '',
       _sourceColor: evt._sourceColor || '',
@@ -526,6 +529,9 @@ export function stateEventsToBlocks(stateEvents) {
       _scope: evt.scope || evt._scope || '',
       _ts: Number(evt && evt.ts) || 0,
       _turnID: eventTurnID,
+      _eventID: eventID,
+      _blockIndex: blockIndex,
+      _toolCallID: toolCallID,
     };
     if (evt.type === 'initial_prompt') {
       return Object.assign({
@@ -541,10 +547,10 @@ export function stateEventsToBlocks(stateEvents) {
       if (typeof parsedInput === 'string' && parsedInput) {
         try { parsedInput = JSON.parse(parsedInput); } catch (_) {}
       }
-      return Object.assign({ type: 'tool_use', tool: evt.tool || 'tool', input: parsedInput || '' }, meta);
+      return Object.assign({ type: 'tool_use', tool: evt.tool || 'tool', input: parsedInput || '', tool_call_id: toolCallID }, meta);
     }
     if (evt.type === 'tool_result') {
-      return Object.assign({ type: 'tool_result', tool: evt.tool || '', result: evt.result || evt.text || evt.content || '', isError: !!evt.isError }, meta);
+      return Object.assign({ type: 'tool_result', tool: evt.tool || '', result: evt.result || evt.text || evt.content || '', isError: !!evt.isError, tool_call_id: toolCallID }, meta);
     }
     if (evt.type === 'thinking') {
       return Object.assign({ type: 'thinking', content: evt.text || evt.content || '' }, meta);

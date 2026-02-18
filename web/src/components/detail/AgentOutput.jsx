@@ -174,9 +174,14 @@ export default function AgentOutput({ scope }) {
   var transformed = useMemo(function () {
     var msgs = [];
     var assistantEvents = [];
+    var assistantEventsTurnID = 0;
+    var currentPromptTurnID = 0;
     var lastPromptTurnID = 0;
     var seenPromptByTurn = {};
-    var previousNoTurnPromptSig = '';
+    var previousPromptSig = '';
+    var previousPromptTurnID = 0;
+    var promptMessageIndexByTurn = {};
+    var assistantMessageIndexByTurn = {};
 
     function latestEventTS(events) {
       var latest = 0;
@@ -187,50 +192,70 @@ export default function AgentOutput({ scope }) {
       return latest || null;
     }
 
-    displayBlocks.forEach(function (block) {
-      if (block.type === 'initial_prompt') {
-        var currentPromptTurnID = resolvePromptTurnID(block, turnIDByHex);
-        var promptSig = normalizePromptSignature(block.content);
-        if (currentPromptTurnID > 0) {
-          var dedupeKey = String(currentPromptTurnID) + '|' + promptSig;
-          if (seenPromptByTurn[dedupeKey]) {
-            return;
-          }
-          seenPromptByTurn[dedupeKey] = true;
-        } else if (previousNoTurnPromptSig && previousNoTurnPromptSig === promptSig) {
-          return;
-        }
+    function normalizePositiveTurnID(value) {
+      var turnID = Number(value || 0);
+      if (!Number.isFinite(turnID) || turnID <= 0) return 0;
+      return turnID;
+    }
 
-        if (assistantEvents.length > 0) {
-          msgs.push({
-            id: 'assistant-' + msgs.length,
-            role: 'assistant',
-            content: '',
-            events: assistantEvents,
-            created_at: latestEventTS(assistantEvents),
-          });
-          assistantEvents = [];
+    function shiftMessageIndexMaps(insertAt) {
+      Object.keys(promptMessageIndexByTurn).forEach(function (key) {
+        if (promptMessageIndexByTurn[key] >= insertAt) {
+          promptMessageIndexByTurn[key] += 1;
         }
-        msgs.push({
-          id: 'prompt-' + msgs.length,
-          role: 'user',
-          content: block.content,
-          created_at: Number(block && block._ts) || null,
-          _continuationLabel: continuationLabelForPrompt(block, lastPromptTurnID, turnIDByHex),
-        });
-        if (currentPromptTurnID > 0) {
-          lastPromptTurnID = currentPromptTurnID;
-          previousNoTurnPromptSig = '';
-        } else {
-          previousNoTurnPromptSig = promptSig;
+      });
+      Object.keys(assistantMessageIndexByTurn).forEach(function (key) {
+        if (assistantMessageIndexByTurn[key] >= insertAt) {
+          assistantMessageIndexByTurn[key] += 1;
         }
-      } else {
-        previousNoTurnPromptSig = '';
-        assistantEvents.push(block);
+      });
+    }
+
+    function appendBlockToAssistantMessage(index, block) {
+      if (!Number.isFinite(index) || index < 0 || index >= msgs.length) return false;
+      var msg = msgs[index];
+      if (!msg || msg.role !== 'assistant') return false;
+      if (!Array.isArray(msg.events)) msg.events = [];
+      msg.events.push(block);
+      var blockTS = Number(block && block._ts) || 0;
+      if (!msg.created_at || Number(msg.created_at) < blockTS) {
+        msg.created_at = blockTS || msg.created_at || null;
       }
-    });
+      return true;
+    }
 
-    if (!isRunning && assistantEvents.length > 0) {
+    function attachBlockToTurnMessage(turnID, block) {
+      var normalizedTurnID = normalizePositiveTurnID(turnID);
+      if (!normalizedTurnID) return false;
+
+      var turnKey = String(normalizedTurnID);
+      var assistantIndex = assistantMessageIndexByTurn[turnKey];
+      if (appendBlockToAssistantMessage(assistantIndex, block)) {
+        return true;
+      }
+
+      var promptIndex = promptMessageIndexByTurn[turnKey];
+      if (!Number.isFinite(promptIndex) || promptIndex < 0 || promptIndex >= msgs.length) return false;
+
+      var insertAt = promptIndex + 1;
+      shiftMessageIndexMaps(insertAt);
+      msgs.splice(insertAt, 0, {
+        id: 'assistant-turn-' + turnKey + '-' + insertAt,
+        role: 'assistant',
+        content: '',
+        events: [block],
+        created_at: Number(block && block._ts) || null,
+      });
+      assistantMessageIndexByTurn[turnKey] = insertAt;
+      return true;
+    }
+
+    function flushAssistantEvents() {
+      if (!assistantEvents.length) {
+        assistantEventsTurnID = 0;
+        return;
+      }
+
       msgs.push({
         id: 'assistant-' + msgs.length,
         role: 'assistant',
@@ -238,7 +263,97 @@ export default function AgentOutput({ scope }) {
         events: assistantEvents,
         created_at: latestEventTS(assistantEvents),
       });
+      var flushTurnID = normalizePositiveTurnID(assistantEventsTurnID || currentPromptTurnID);
+      if (flushTurnID > 0) {
+        assistantMessageIndexByTurn[String(flushTurnID)] = msgs.length - 1;
+      }
       assistantEvents = [];
+      assistantEventsTurnID = 0;
+    }
+
+    displayBlocks.forEach(function (block) {
+      if (block.type === 'initial_prompt') {
+        var resolvedPromptTurnID = resolvePromptTurnID(block, turnIDByHex);
+        var promptSig = normalizePromptSignature(block.content);
+        var dedupeKey = resolvedPromptTurnID > 0 ? (String(resolvedPromptTurnID) + '|' + promptSig) : '';
+        var adjacentPromptDuplicate = !!previousPromptSig
+          && previousPromptSig === promptSig
+          && (
+            previousPromptTurnID <= 0
+            || resolvedPromptTurnID <= 0
+            || previousPromptTurnID === resolvedPromptTurnID
+          );
+
+        if (adjacentPromptDuplicate) {
+          if (resolvedPromptTurnID > 0) {
+            seenPromptByTurn[dedupeKey] = true;
+            lastPromptTurnID = resolvedPromptTurnID;
+            currentPromptTurnID = resolvedPromptTurnID;
+          } else if (previousPromptTurnID > 0) {
+            lastPromptTurnID = previousPromptTurnID;
+            currentPromptTurnID = previousPromptTurnID;
+          }
+          if (msgs.length > 0) {
+            var latestMsg = msgs[msgs.length - 1];
+            var blockTS = Number(block && block._ts) || 0;
+            if (latestMsg && latestMsg.role === 'user' && (!latestMsg.created_at || Number(latestMsg.created_at) <= 0) && blockTS > 0) {
+              latestMsg.created_at = blockTS;
+            }
+          }
+          previousPromptTurnID = resolvedPromptTurnID > 0 ? resolvedPromptTurnID : previousPromptTurnID;
+          return;
+        }
+
+        if (resolvedPromptTurnID > 0) {
+          if (seenPromptByTurn[dedupeKey]) {
+            previousPromptSig = promptSig;
+            previousPromptTurnID = resolvedPromptTurnID;
+            currentPromptTurnID = resolvedPromptTurnID;
+            return;
+          }
+          seenPromptByTurn[dedupeKey] = true;
+        } else if (previousPromptTurnID <= 0 && previousPromptSig && previousPromptSig === promptSig) {
+          return;
+        }
+
+        flushAssistantEvents();
+
+        msgs.push({
+          id: 'prompt-' + msgs.length,
+          role: 'user',
+          content: block.content,
+          created_at: Number(block && block._ts) || null,
+          _continuationLabel: continuationLabelForPrompt(block, lastPromptTurnID, turnIDByHex),
+        });
+        if (resolvedPromptTurnID > 0) {
+          currentPromptTurnID = resolvedPromptTurnID;
+          lastPromptTurnID = resolvedPromptTurnID;
+          promptMessageIndexByTurn[String(resolvedPromptTurnID)] = msgs.length - 1;
+        } else {
+          currentPromptTurnID = 0;
+        }
+        previousPromptSig = promptSig;
+        previousPromptTurnID = resolvedPromptTurnID;
+      } else {
+        previousPromptSig = '';
+        previousPromptTurnID = 0;
+        var blockTurnID = normalizePositiveTurnID(block && (block._turnID || block.turn_id || block.turnID));
+
+        if (blockTurnID > 0 && blockTurnID !== normalizePositiveTurnID(assistantEventsTurnID || currentPromptTurnID)) {
+          if (attachBlockToTurnMessage(blockTurnID, block)) {
+            return;
+          }
+        }
+
+        assistantEvents.push(block);
+        if (assistantEventsTurnID <= 0) {
+          assistantEventsTurnID = blockTurnID > 0 ? blockTurnID : normalizePositiveTurnID(currentPromptTurnID);
+        }
+      }
+    });
+
+    if (!isRunning && assistantEvents.length > 0) {
+      flushAssistantEvents();
     }
 
     return {
@@ -359,11 +474,14 @@ function parseHistoricalEvents(events, sessionID, turnIDByHex, onMissing) {
     return n;
   }
 
-  function push(scope, type, payload, ts, turnID) {
+  function push(scope, type, payload, ts, turnID, eventID, blockIndex) {
     var event = Object.assign({ scope: scope || defaultScope, type: type }, payload || {});
     if (Number(ts) > 0) event.ts = Number(ts);
     var resolvedTurnID = positiveID(turnID) || positiveID(event.turn_id || event.turnID || 0);
     if (resolvedTurnID > 0) event.turn_id = resolvedTurnID;
+    var normalizedEventID = String(eventID || '');
+    if (normalizedEventID) event.event_id = normalizedEventID;
+    if (Number.isFinite(Number(blockIndex))) event.block_index = Number(blockIndex);
     output.push(event);
   }
 
@@ -387,42 +505,58 @@ function parseHistoricalEvents(events, sessionID, turnIDByHex, onMissing) {
     });
   }
 
-  function parseAssistant(scope, parsed, ts, turnID) {
+  function resolveEventID(wireData, agentEvent) {
+    return String(
+      (wireData && (wireData.event_id || wireData.eventID || wireData.uuid)) ||
+      (wireData && wireData.raw && wireData.raw.uuid) ||
+      (agentEvent && agentEvent.raw && agentEvent.raw.uuid) ||
+      (agentEvent && agentEvent.uuid) ||
+      ''
+    );
+  }
+
+  function parseAssistant(scope, parsed, ts, turnID, eventID) {
     var blocks = extractContentBlocks(parsed);
     if (!blocks.length) {
       report('assistant_without_content_blocks', parsed && parsed.type ? parsed.type : 'assistant', parsed, '[assistant event]', scope);
-      push(scope, 'text', { text: '[assistant event]' }, ts, turnID);
+      push(scope, 'text', { text: '[assistant event]' }, ts, turnID, eventID, 0);
       return;
     }
-    blocks.forEach(function (block) {
+    blocks.forEach(function (block, blockIndex) {
       if (!block || typeof block !== 'object') return;
       if (block.type === 'text' && block.text) {
-        push(scope, 'text', { text: String(block.text) }, ts, turnID);
+        push(scope, 'text', { text: String(block.text) }, ts, turnID, eventID, blockIndex);
       } else if (block.type === 'thinking' && block.text) {
-        push(scope, 'thinking', { text: String(block.text) }, ts, turnID);
+        push(scope, 'thinking', { text: String(block.text) }, ts, turnID, eventID, blockIndex);
       } else if (block.type === 'tool_use') {
-        push(scope, 'tool_use', { tool: block.name || 'tool', input: block.input || {} }, ts, turnID);
+        push(scope, 'tool_use', {
+          tool: block.name || 'tool',
+          input: block.input || {},
+          tool_call_id: block.id || block.tool_use_id || '',
+        }, ts, turnID, eventID, blockIndex);
       } else if (block.type === 'tool_result') {
         push(scope, 'tool_result', {
           tool: block.name || 'tool_result',
           result: block.content || block.output || block.text || '',
           isError: !!block.is_error,
-        }, ts, turnID);
+          tool_call_id: block.tool_use_id || block.id || '',
+        }, ts, turnID, eventID, blockIndex);
       } else {
         report('unknown_assistant_block', block.type || 'unknown', block, cropText(safeJSONString(block), 400), scope);
       }
     });
   }
 
-  function parseUser(scope, parsed, ts, turnID) {
+  function parseUser(scope, parsed, ts, turnID, eventID) {
     var blocks = extractContentBlocks(parsed);
-    blocks.forEach(function (block) {
+    blocks.forEach(function (block, blockIndex) {
       if (block && block.type === 'tool_result') {
         push(scope, 'tool_result', {
           tool: block.name || 'tool_result',
           result: block.content || block.output || block.text || safeJSONString(block),
           isError: !!block.is_error,
-        }, ts, turnID);
+          tool_call_id: block.tool_use_id || block.id || '',
+        }, ts, turnID, eventID, blockIndex);
       } else if (block && typeof block === 'object') {
         report('unknown_user_block', block.type || 'unknown', block, '', scope);
       }
@@ -451,16 +585,17 @@ function parseHistoricalEvents(events, sessionID, turnIDByHex, onMissing) {
     if (ev.type === 'claude_stream' || ev.type === 'stdout') {
       var parsedStoreEvent = decodeData(ev.data);
       if (parsedStoreEvent && typeof parsedStoreEvent === 'object' && parsedStoreEvent.type) {
+        var streamEventID = resolveEventID(parsedStoreEvent, parsedStoreEvent);
         if (parsedStoreEvent.type === 'assistant') {
-          parseAssistant(defaultScope, parsedStoreEvent, eventTS, currentTurnID);
+          parseAssistant(defaultScope, parsedStoreEvent, eventTS, currentTurnID, streamEventID);
           return;
         }
         if (parsedStoreEvent.type === 'user') {
-          parseUser(defaultScope, parsedStoreEvent, eventTS, currentTurnID);
+          parseUser(defaultScope, parsedStoreEvent, eventTS, currentTurnID, streamEventID);
           return;
         }
         if (parsedStoreEvent.type === 'content_block_delta' && parsedStoreEvent.delta && parsedStoreEvent.delta.text) {
-          push(defaultScope, 'text', { text: String(parsedStoreEvent.delta.text) }, eventTS, currentTurnID);
+          push(defaultScope, 'text', { text: String(parsedStoreEvent.delta.text) }, eventTS, currentTurnID, streamEventID, 0);
           return;
         }
       }
@@ -474,6 +609,7 @@ function parseHistoricalEvents(events, sessionID, turnIDByHex, onMissing) {
       var promptData = decodeData(ev.data);
       var promptScope = wireScope(promptData, sessionID);
       var promptTurnID = currentTurnID;
+      var promptEventID = resolveEventID(promptData, promptData);
       if (promptData && typeof promptData === 'object') {
         var promptTurnCandidate = positiveID(promptData.turn_id || promptData.turnID || promptData.session_id || promptData.sessionID || 0);
         if (promptTurnCandidate > 0) {
@@ -491,7 +627,7 @@ function parseHistoricalEvents(events, sessionID, turnIDByHex, onMissing) {
           turn_hex_id: String(promptData.turn_hex_id || promptData.turnHexID || ''),
           turn_id: promptTurnID > 0 ? promptTurnID : 0,
           is_resume: !!(promptData.is_resume || promptData.isResume),
-        }, eventTS, promptTurnID);
+        }, eventTS, promptTurnID, promptEventID, 0);
       }
       return;
     }
@@ -514,6 +650,7 @@ function parseHistoricalEvents(events, sessionID, turnIDByHex, onMissing) {
         report('invalid_wire_event_json', 'event', ev.data, '', eventScope);
         return;
       }
+      var wireEventID = resolveEventID(wireData, agentEvent);
       if (wireTurnID <= 0) {
         var eventTurnCandidate = positiveID(agentEvent.turn_id || agentEvent.turnID || 0);
         if (eventTurnCandidate > 0) {
@@ -527,13 +664,13 @@ function parseHistoricalEvents(events, sessionID, turnIDByHex, onMissing) {
         return;
       }
       if (agentEvent.type === 'assistant') {
-        parseAssistant(eventScope, agentEvent, eventTS, wireTurnID);
+        parseAssistant(eventScope, agentEvent, eventTS, wireTurnID, wireEventID);
       } else if (agentEvent.type === 'user') {
-        parseUser(eventScope, agentEvent, eventTS, wireTurnID);
+        parseUser(eventScope, agentEvent, eventTS, wireTurnID, wireEventID);
       } else if (agentEvent.type === 'content_block_delta' && agentEvent.delta && agentEvent.delta.text) {
-        push(eventScope, 'text', { text: String(agentEvent.delta.text) }, eventTS, wireTurnID);
+        push(eventScope, 'text', { text: String(agentEvent.delta.text) }, eventTS, wireTurnID, wireEventID, 0);
       } else if (agentEvent.type === 'result') {
-        push(eventScope, 'tool_result', { text: 'Result received.' }, eventTS, wireTurnID);
+        push(eventScope, 'tool_result', { text: 'Result received.' }, eventTS, wireTurnID, wireEventID, 0);
       } else {
         report('unknown_agent_event_type', agentEvent.type || 'event', agentEvent, cropText(safeJSONString(agentEvent), 400), eventScope);
       }
@@ -652,15 +789,24 @@ function longestContainedPrefix(histSig, liveSig) {
 function blockSignature(block) {
   if (!block || typeof block !== 'object') return '';
   var scope = String(block._scope || block.scope || '');
+  var eventID = String(block._eventID || block.event_id || '');
+  var blockIndex = Number(block._blockIndex || block.block_index || 0) || 0;
   var type = String(block.type || 'text');
+  var toolCallID = String(block._toolCallID || block.tool_call_id || block.toolCallID || '');
+  if (eventID) {
+    return scope + '|event|' + eventID + '|' + String(blockIndex) + '|' + type;
+  }
+  if (toolCallID && (type === 'tool_use' || type === 'tool_result')) {
+    return scope + '|tool_call|' + type + '|' + toolCallID;
+  }
   if (type === 'tool_use') {
     return scope + '|' + type + '|' + stableString(block.tool) + '|' + stableString(block.input);
   }
   if (type === 'tool_result') {
-    return scope + '|' + type + '|' + stableString(block.tool) + '|' + stableString(block.result) + '|' + (block.isError ? '1' : '0');
+    return scope + '|' + type + '|' + stableString(block.tool) + '|' + normalizeToolResultSignature(block.result || block.content || block.text || '') + '|' + (block.isError ? '1' : '0');
   }
   if (type === 'initial_prompt' || type === 'thinking' || type === 'text') {
-    return scope + '|' + type + '|' + stableString(block.content || block.text || '');
+    return scope + '|' + type + '|' + normalizeBlockText(block.content || block.text || '');
   }
   return scope + '|' + type + '|' + stableString(block.content || block.text || block.result || '');
 }
@@ -677,7 +823,49 @@ function stableString(value) {
   }
 }
 
+function normalizeToolResultSignature(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') {
+    var raw = value;
+    var trimmed = raw.trim();
+    if (!trimmed) return '';
+    if (trimmed[0] === '{' || trimmed[0] === '[') {
+      try {
+        return stableCanonicalString(JSON.parse(trimmed));
+      } catch (_) {}
+    }
+    return raw.length > 500 ? raw.slice(0, 500) : raw;
+  }
+  return stableCanonicalString(value);
+}
+
+function stableCanonicalString(value) {
+  try {
+    var normalized = canonicalizeSignatureValue(value);
+    var json = JSON.stringify(normalized);
+    return json.length > 500 ? json.slice(0, 500) : json;
+  } catch (_) {
+    return stableString(value);
+  }
+}
+
+function canonicalizeSignatureValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalizeSignatureValue);
+  if (value && typeof value === 'object') {
+    var normalized = {};
+    Object.keys(value).sort().forEach(function (key) {
+      normalized[key] = canonicalizeSignatureValue(value[key]);
+    });
+    return normalized;
+  }
+  return value;
+}
+
 function normalizePromptSignature(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function normalizeBlockText(value) {
   return String(value || '').trim().replace(/\s+/g, ' ');
 }
 

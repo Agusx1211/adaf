@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { buildWSURL } from './client.js';
 import { useDispatch, useAppState, normalizeSpawns } from '../state/store.js';
 import { safeJSONString, stringifyToolPayload, cropText } from '../utils/format.js';
@@ -9,6 +9,7 @@ export function useSessionSocket(sessionID) {
   var dispatch = useDispatch();
   var wsRef = useRef(null);
   var reconnectRef = useRef(null);
+  var [reconnectNonce, setReconnectNonce] = useState(0);
   var contextRef = useRef({ projectID: '', sessions: [] });
   var activeTurnBySessionRef = useRef({});
 
@@ -30,6 +31,10 @@ export function useSessionSocket(sessionID) {
       tool: entry.tool || '',
       input: entry.input || '',
       result: entry.result || '',
+      isError: !!entry.isError,
+      event_id: entry.event_id || '',
+      block_index: Number.isFinite(Number(entry.block_index)) ? Number(entry.block_index) : 0,
+      tool_call_id: entry.tool_call_id || '',
     };
     dispatch({
       type: 'ADD_STREAM_EVENT',
@@ -64,16 +69,24 @@ export function useSessionSocket(sessionID) {
 
   var handleAgentStreamEvent = useCallback(function (scope, rawEvent, meta) {
     var turnID = Number(meta && meta.turnID || 0);
-    function withTurn(entry) {
+    var eventID = String(meta && meta.eventID || '');
+    function withEventMeta(entry, blockIndex) {
+      var out = Object.assign({}, entry || {});
       if (turnID > 0) {
-        return Object.assign({}, entry, { turn_id: turnID });
+        out.turn_id = turnID;
       }
-      return entry;
+      if (eventID) {
+        out.event_id = eventID;
+      }
+      if (Number.isFinite(Number(blockIndex))) {
+        out.block_index = Number(blockIndex);
+      }
+      return out;
     }
     var event = asObject(rawEvent);
     if (!event || typeof event !== 'object') {
       var fallbackRaw = safeJSONString(rawEvent);
-      addStreamEvent(withTurn({ scope: scope, type: 'text', text: fallbackRaw }));
+      addStreamEvent(withEventMeta({ scope: scope, type: 'text', text: fallbackRaw }, 0));
       reportMissing({
         source: 'session_ws_event',
         reason: 'event_not_object',
@@ -95,7 +108,7 @@ export function useSessionSocket(sessionID) {
     if (event.type === 'assistant') {
       var blocks = extractContentBlocks(event);
       if (!blocks.length) {
-        addStreamEvent(withTurn({ scope: scope, type: 'text', text: '[assistant event]' }));
+        addStreamEvent(withEventMeta({ scope: scope, type: 'text', text: '[assistant event]' }, 0));
         reportMissing({
           source: 'session_ws_event',
           reason: 'assistant_without_content_blocks',
@@ -108,19 +121,32 @@ export function useSessionSocket(sessionID) {
         });
         return;
       }
-      blocks.forEach(function (block) {
+      blocks.forEach(function (block, blockIndex) {
         if (!block || typeof block !== 'object') return;
         if (block.type === 'text' && block.text) {
-          addStreamEvent(withTurn({ scope: scope, type: 'text', text: String(block.text) }));
+          addStreamEvent(withEventMeta({ scope: scope, type: 'text', text: String(block.text) }, blockIndex));
         } else if (block.type === 'thinking' && block.text) {
-          addStreamEvent(withTurn({ scope: scope, type: 'thinking', text: String(block.text) }));
+          addStreamEvent(withEventMeta({ scope: scope, type: 'thinking', text: String(block.text) }, blockIndex));
         } else if (block.type === 'tool_use') {
-          addStreamEvent(withTurn({ scope: scope, type: 'tool_use', tool: block.name || 'tool', input: stringifyToolPayload(block.input || {}) }));
+          addStreamEvent(withEventMeta({
+            scope: scope,
+            type: 'tool_use',
+            tool: block.name || 'tool',
+            input: stringifyToolPayload(block.input || {}),
+            tool_call_id: block.id || block.tool_use_id || '',
+          }, blockIndex));
         } else if (block.type === 'tool_result') {
-          addStreamEvent(withTurn({ scope: scope, type: 'tool_result', tool: block.name || 'tool_result', result: stringifyToolPayload(block.content || block.output || block.text || '') }));
+          addStreamEvent(withEventMeta({
+            scope: scope,
+            type: 'tool_result',
+            tool: block.name || 'tool_result',
+            result: stringifyToolPayload(block.content || block.output || block.text || ''),
+            isError: !!block.is_error,
+            tool_call_id: block.tool_use_id || block.id || '',
+          }, blockIndex));
         } else {
           var blockFallback = safeJSONString(block);
-          addStreamEvent(withTurn({ scope: scope, type: 'text', text: blockFallback }));
+          addStreamEvent(withEventMeta({ scope: scope, type: 'text', text: blockFallback }, blockIndex));
           reportMissing({
             source: 'session_ws_event',
             reason: 'unknown_assistant_block',
@@ -138,9 +164,16 @@ export function useSessionSocket(sessionID) {
 
     if (event.type === 'user') {
       var userBlocks = extractContentBlocks(event);
-      userBlocks.forEach(function (block) {
+      userBlocks.forEach(function (block, blockIndex) {
         if (block && block.type === 'tool_result') {
-          addStreamEvent(withTurn({ scope: scope, type: 'tool_result', tool: block.name || 'tool_result', result: stringifyToolPayload(block.content || block.output || block.text || safeJSONString(block)) }));
+          addStreamEvent(withEventMeta({
+            scope: scope,
+            type: 'tool_result',
+            tool: block.name || 'tool_result',
+            result: stringifyToolPayload(block.content || block.output || block.text || safeJSONString(block)),
+            isError: !!block.is_error,
+            tool_call_id: block.tool_use_id || block.id || '',
+          }, blockIndex));
           return;
         }
         if (!block || typeof block !== 'object') return;
@@ -160,7 +193,7 @@ export function useSessionSocket(sessionID) {
     if (event.type === 'content_block_delta') {
       var delta = event.delta && (event.delta.text || event.delta.partial_json);
       if (delta) {
-        addStreamEvent(withTurn({ scope: scope, type: 'text', text: String(delta) }));
+        addStreamEvent(withEventMeta({ scope: scope, type: 'text', text: String(delta) }, 0));
       } else {
         reportMissing({
           source: 'session_ws_event',
@@ -176,12 +209,12 @@ export function useSessionSocket(sessionID) {
     }
 
     if (event.type === 'result') {
-      addStreamEvent(withTurn({ scope: scope, type: 'tool_result', text: 'Result received.' }));
+      addStreamEvent(withEventMeta({ scope: scope, type: 'tool_result', text: 'Result received.' }, 0));
       return;
     }
 
     var fallback = '[' + (event.type || 'event') + '] ' + safeJSONString(event);
-    addStreamEvent(withTurn({ scope: scope, type: 'text', text: fallback }));
+    addStreamEvent(withEventMeta({ scope: scope, type: 'text', text: fallback }, 0));
     reportMissing({
       source: 'session_ws_event',
       reason: 'unknown_agent_event_type',
@@ -278,6 +311,7 @@ export function useSessionSocket(sessionID) {
       var eventScope = 'session-' + sid;
       var eventSpawnID = Number(data && (data.spawn_id || data.spawnID) || 0);
       var eventTurnID = Number(data && (data.turn_id || data.turnID) || 0);
+      var eventID = '';
       if (Number.isFinite(eventSpawnID) && eventSpawnID > 0) {
         eventScope = 'spawn-' + eventSpawnID;
       } else {
@@ -292,11 +326,18 @@ export function useSessionSocket(sessionID) {
       if (eventTurnID <= 0 && wireEvent && typeof wireEvent === 'object') {
         eventTurnID = Number(wireEvent.turn_id || wireEvent.turnID || 0);
       }
+      eventID = String(
+        (data && (data.event_id || data.eventID || data.uuid)) ||
+        (data && data.raw && data.raw.uuid) ||
+        (wireEvent && wireEvent.raw && wireEvent.raw.uuid) ||
+        (wireEvent && wireEvent.uuid) ||
+        ''
+      );
       eventTurnID = resolveTurnID(eventTurnID);
       if (eventScope === ('session-' + sid)) {
         mergeSessionPatch({ id: sid, status: 'running', action: 'responding', ended_at: '' });
       }
-      handleAgentStreamEvent(eventScope, wireEvent, { turnID: eventTurnID });
+      handleAgentStreamEvent(eventScope, wireEvent, { turnID: eventTurnID, eventID: eventID });
       return;
     }
 
@@ -386,25 +427,36 @@ export function useSessionSocket(sessionID) {
 
   useEffect(function () {
     if (!sessionID) return;
+    var disposed = false;
+    var intentionalClose = false;
 
     if (wsRef.current) {
+      intentionalClose = true;
       try { wsRef.current.close(); } catch (_) {}
       wsRef.current = null;
+      intentionalClose = false;
     }
 
+    var ws;
     try {
-      var ws = new WebSocket(buildWSURL('/ws/sessions/' + encodeURIComponent(String(sessionID))));
+      ws = new WebSocket(buildWSURL('/ws/sessions/' + encodeURIComponent(String(sessionID))));
       wsRef.current = ws;
     } catch (_) {
       dispatch({ type: 'SET', payload: { wsConnected: false } });
       return;
     }
 
-    wsRef.current.addEventListener('open', function () {
+    ws.addEventListener('open', function () {
+      if (disposed || wsRef.current !== ws) return;
+      if (reconnectRef.current) {
+        clearTimeout(reconnectRef.current);
+        reconnectRef.current = null;
+      }
       dispatch({ type: 'SET', payload: { wsConnected: true, currentSessionSocketID: sessionID } });
     });
 
-    wsRef.current.addEventListener('message', function (event) {
+    ws.addEventListener('message', function (event) {
+      if (disposed || wsRef.current !== ws) return;
       try {
         var payload = JSON.parse(event.data);
         ingestEnvelope(sessionID, payload);
@@ -423,27 +475,37 @@ export function useSessionSocket(sessionID) {
       }
     });
 
-    wsRef.current.addEventListener('error', function () {
+    ws.addEventListener('error', function () {
+      if (wsRef.current !== ws) return;
       dispatch({ type: 'SET', payload: { wsConnected: false } });
     });
 
-    wsRef.current.addEventListener('close', function () {
+    ws.addEventListener('close', function () {
+      if (wsRef.current !== ws) return;
       dispatch({ type: 'SET', payload: { wsConnected: false } });
       wsRef.current = null;
+      if (disposed || intentionalClose || !sessionID) return;
 
+      if (reconnectRef.current) clearTimeout(reconnectRef.current);
       reconnectRef.current = setTimeout(function () {
-        // Will reconnect on next effect cycle
-      }, 1800);
+        if (disposed) return;
+        setReconnectNonce(function (n) { return n + 1; });
+      }, 600);
     });
 
     return function () {
+      disposed = true;
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
-      if (wsRef.current) {
-        try { wsRef.current.close(); } catch (_) {}
+      if (wsRef.current === ws) {
+        intentionalClose = true;
+        try { ws.close(); } catch (_) {}
         wsRef.current = null;
+        return;
       }
+      intentionalClose = true;
+      try { ws.close(); } catch (_) {}
     };
-  }, [sessionID, dispatch, addStreamEvent, ingestEnvelope, reportMissing]);
+  }, [sessionID, dispatch, addStreamEvent, ingestEnvelope, reportMissing, reconnectNonce]);
 }
 
 export function useTerminalSocket(terminalRef) {

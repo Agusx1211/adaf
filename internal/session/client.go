@@ -298,7 +298,12 @@ func (c *Client) forwardEventMsg(eventCh chan<- any, msg *WireMsg, loopDoneSeen 
 		if err := json.Unmarshal(data.Event, &ev); err != nil {
 			return false
 		}
-		eventCh <- events.AgentEventMsg{Event: ev, Raw: data.Raw, SpawnID: data.SpawnID}
+		eventCh <- events.AgentEventMsg{
+			Event:   ev,
+			Raw:     data.Raw,
+			SpawnID: data.SpawnID,
+			TurnID:  data.TurnID,
+		}
 		return false
 
 	case MsgRaw:

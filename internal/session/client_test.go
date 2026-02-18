@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"net"
 	"net/http"
@@ -219,6 +220,56 @@ func TestStreamEventsForwardsPromptMessages(t *testing.T) {
 	}
 	if !msg.IsResume || !msg.Truncated || msg.OriginalLength != 4096 {
 		t.Fatalf("unexpected prompt flags: %+v", msg)
+	}
+}
+
+func TestStreamEventsForwardsEventTurnMetadata(t *testing.T) {
+	c := wsTestClientServer(t, WireMeta{SessionID: 1}, []testWSFrame{
+		{MsgEvent, WireEvent{
+			Event:   json.RawMessage(`{"type":"assistant","message":{"content":[{"type":"text","text":"hello event"}]}}`),
+			Raw:     json.RawMessage(`{"source":"fixture"}`),
+			SpawnID: 3,
+			TurnID:  42,
+		}},
+		{MsgDone, WireDone{}},
+	})
+
+	eventCh := make(chan any, 8)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- c.StreamEvents(eventCh, nil)
+	}()
+
+	var got []any
+	for ev := range eventCh {
+		got = append(got, ev)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("StreamEvents() error = %v", err)
+	}
+
+	var msg events.AgentEventMsg
+	found := false
+	for _, ev := range got {
+		candidate, ok := ev.(events.AgentEventMsg)
+		if !ok {
+			continue
+		}
+		msg = candidate
+		found = true
+		break
+	}
+	if !found {
+		t.Fatalf("missing events.AgentEventMsg in events: %#v", got)
+	}
+	if msg.SpawnID != 3 || msg.TurnID != 42 {
+		t.Fatalf("unexpected AgentEventMsg metadata: %+v", msg)
+	}
+	if msg.Event.Type != "assistant" {
+		t.Fatalf("unexpected AgentEventMsg type: %+v", msg.Event)
+	}
+	if string(msg.Raw) != `{"source":"fixture"}` {
+		t.Fatalf("unexpected AgentEventMsg raw payload: %q", string(msg.Raw))
 	}
 }
 

@@ -6,6 +6,7 @@ import { readProjectIDFromURL, persistProjectSelection } from '../utils/projectL
 
 var POLL_MS = 5000;
 var USAGE_POLL_MS = 60000;
+var HISTORY_TAIL_LINES = 2000;
 
 export function usePolling() {
   var state = useAppState();
@@ -157,7 +158,7 @@ export function fetchTurnRecordingEvents(turnID, projectID, dispatch) {
 
 export function fetchSessionRecordingEvents(sessionID, projectID, dispatch) {
   var base = apiBase(projectID);
-  var url = base + '/sessions/' + encodeURIComponent(String(sessionID)) + '/events';
+  var url = base + '/sessions/' + encodeURIComponent(String(sessionID)) + '/events?tail=' + encodeURIComponent(String(HISTORY_TAIL_LINES));
   return fetchRecordingEvents(url, sessionID, dispatch);
 }
 

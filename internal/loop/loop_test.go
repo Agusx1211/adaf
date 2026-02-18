@@ -46,6 +46,12 @@ type waitResumeSessionCarryStubAgent struct {
 	runs  []agent.Config
 }
 
+type implicitSpawnWaitStubAgent struct {
+	store   *store.Store
+	runs    []agent.Config
+	spawnID int
+}
+
 type diaryWritingStubAgent struct {
 	store *store.Store
 }
@@ -187,6 +193,37 @@ func (a *waitResumeSessionCarryStubAgent) Run(ctx context.Context, cfg agent.Con
 			AgentSessionID: "sess-final",
 		}, nil
 	}
+}
+
+func (a *implicitSpawnWaitStubAgent) Name() string { return "stub" }
+
+func (a *implicitSpawnWaitStubAgent) Run(ctx context.Context, cfg agent.Config, recorder *recording.Recorder) (*agent.Result, error) {
+	cloned := cfg
+	cloned.Env = make(map[string]string, len(cfg.Env))
+	for k, v := range cfg.Env {
+		cloned.Env[k] = v
+	}
+	a.runs = append(a.runs, cloned)
+
+	if len(a.runs) == 1 {
+		rec := &store.SpawnRecord{
+			ParentTurnID:  cfg.TurnID,
+			ParentProfile: "parent",
+			ChildProfile:  "child",
+			Task:          "test wait inference",
+			Status:        store.SpawnStatusRunning,
+		}
+		if err := a.store.CreateSpawn(rec); err != nil {
+			return nil, err
+		}
+		a.spawnID = rec.ID
+	}
+
+	return &agent.Result{
+		ExitCode:       0,
+		Duration:       time.Millisecond,
+		AgentSessionID: "sess-implicit",
+	}, nil
 }
 
 func (a *diaryWritingStubAgent) Name() string { return "stub" }
@@ -722,6 +759,75 @@ func TestLoopWaitResumePreservesSessionIDWhenCanceledRunHasNoResult(t *testing.T
 	}
 	if got := a.runs[2].Prompt; strings.Contains(got, "Continue from where you left off.") {
 		t.Fatalf("third run wait-resume prompt should not include continuation lead: %q", got)
+	}
+}
+
+func TestLoopInfersWaitForSpawnsWhenTurnEndsWithRunningSpawn(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if err := s.Init(store.ProjectConfig{Name: "test", RepoPath: dir}); err != nil {
+		t.Fatalf("store.Init() error = %v", err)
+	}
+
+	a := &implicitSpawnWaitStubAgent{store: s}
+	waitCalls := 0
+	l := &Loop{
+		Store: s,
+		Agent: a,
+		Config: agent.Config{
+			Prompt:   "base",
+			MaxTurns: 1,
+		},
+		OnWait: func(_ context.Context, turnID int, alreadySeen map[int]struct{}) ([]WaitResult, bool) {
+			waitCalls++
+			if waitCalls > 1 {
+				t.Fatalf("OnWait called %d times, want 1", waitCalls)
+			}
+			if len(alreadySeen) != 0 {
+				t.Fatalf("alreadySeen size = %d, want 0", len(alreadySeen))
+			}
+			rec, err := s.GetSpawn(a.spawnID)
+			if err != nil {
+				t.Fatalf("GetSpawn(%d) error = %v", a.spawnID, err)
+			}
+			rec.Status = store.SpawnStatusCompleted
+			rec.Summary = "child completed after implicit wait"
+			if err := s.UpdateSpawn(rec); err != nil {
+				t.Fatalf("UpdateSpawn(%d) error = %v", rec.ID, err)
+			}
+			return []WaitResult{{
+				SpawnID:  rec.ID,
+				Profile:  rec.ChildProfile,
+				Status:   rec.Status,
+				Summary:  rec.Summary,
+				ExitCode: rec.ExitCode,
+				ReadOnly: rec.ReadOnly,
+				Branch:   rec.Branch,
+			}}, false
+		},
+	}
+
+	if err := l.Run(context.Background()); err != nil {
+		t.Fatalf("Loop.Run() error = %v", err)
+	}
+
+	if waitCalls != 1 {
+		t.Fatalf("OnWait calls = %d, want 1", waitCalls)
+	}
+	if len(a.runs) != 2 {
+		t.Fatalf("agent runs = %d, want 2 (implicit wait + resume)", len(a.runs))
+	}
+	if a.runs[0].TurnID != a.runs[1].TurnID {
+		t.Fatalf("turn IDs differ across implicit wait resume: first=%d second=%d", a.runs[0].TurnID, a.runs[1].TurnID)
+	}
+	if got := a.runs[1].ResumeSessionID; got != "sess-implicit" {
+		t.Fatalf("resume session id = %q, want %q", got, "sess-implicit")
+	}
+	if got := a.runs[1].Prompt; !containsAll(got, "Spawn #", "child completed after implicit wait") {
+		t.Fatalf("resume prompt missing implicit wait result: %q", got)
 	}
 }
 
