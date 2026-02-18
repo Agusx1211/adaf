@@ -84,14 +84,13 @@ func init() {
 	wikiSearchCmd.Flags().Bool("shared", false, "Show shared wiki only")
 	wikiSearchCmd.Flags().Int("limit", 20, "Maximum number of matches")
 
-	wikiCreateCmd.Flags().String("title", "", "Wiki title (required)")
+	wikiCreateCmd.Flags().String("title", "", "Wiki title (derived from --id if omitted)")
 	wikiCreateCmd.Flags().String("file", "", "Read content from file")
 	wikiCreateCmd.Flags().String("content-file", "", "Read content from file (use '-' for stdin)")
 	wikiCreateCmd.Flags().String("content", "", "Wiki content (inline)")
 	wikiCreateCmd.Flags().String("id", "", "Custom wiki ID (optional, auto-generated if not set)")
 	wikiCreateCmd.Flags().String("plan", "", "Plan scope for this wiki entry (empty = shared)")
 	wikiCreateCmd.Flags().String("by", "", "Actor identity for change history (defaults from agent context)")
-	_ = wikiCreateCmd.MarkFlagRequired("title")
 
 	wikiUpdateCmd.Flags().String("title", "", "New title")
 	wikiUpdateCmd.Flags().String("file", "", "Read new content from file")
@@ -255,6 +254,15 @@ func runWikiCreate(cmd *cobra.Command, args []string) error {
 	id, _ := cmd.Flags().GetString("id")
 	planID, _ := cmd.Flags().GetString("plan")
 	by, _ := cmd.Flags().GetString("by")
+
+	// Derive title from --id when --title is omitted.
+	title = strings.TrimSpace(title)
+	if title == "" && strings.TrimSpace(id) != "" {
+		title = wikiTitleFromID(strings.TrimSpace(id))
+	}
+	if title == "" {
+		return fmt.Errorf("--title is required (or provide --id to auto-derive a title)")
+	}
 
 	planID = strings.TrimSpace(planID)
 	if planID != "" {
@@ -515,4 +523,18 @@ func fallbackWikiActor(actor, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// wikiTitleFromID derives a human-readable title from a wiki ID slug
+// (e.g. "testing-conventions" -> "Testing Conventions").
+func wikiTitleFromID(id string) string {
+	id = strings.ReplaceAll(id, "-", " ")
+	id = strings.ReplaceAll(id, "_", " ")
+	words := strings.Fields(id)
+	for i, w := range words {
+		if len(w) > 0 {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	return strings.Join(words, " ")
 }

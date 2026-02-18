@@ -17,5 +17,6 @@ Use subcommands like:
 }
 
 func init() {
+	configCmd.SuggestFor = append(configCmd.SuggestFor, "profile", "profiles")
 	rootCmd.AddCommand(configCmd)
 }

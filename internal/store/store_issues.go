@@ -246,11 +246,11 @@ func NormalizeIssueStatus(status string) string {
 	switch s {
 	case "open":
 		return IssueStatusOpen
-	case "ongoing":
+	case "ongoing", "in_progress", "wip", "working":
 		return IssueStatusOngoing
-	case "in_review":
+	case "in_review", "review", "reviewing":
 		return IssueStatusInReview
-	case "closed":
+	case "closed", "done", "complete", "completed", "resolved", "fixed":
 		return IssueStatusClosed
 	default:
 		return s

@@ -46,6 +46,7 @@ func init() {
 	spawnCmd.Flags().IntSlice("issue", nil, "Issue ID(s) to assign to the sub-agent (can be repeated)")
 	spawnCmd.Flags().Int("from-spawn", 0, "Create the child workspace from an existing spawn branch tip")
 	spawnCmd.Flags().Bool("read-only", false, "Run sub-agent in read-only mode (no worktree)")
+	spawnCmd.SuggestFor = append(spawnCmd.SuggestFor, "spawn-profile", "spawnprofile")
 	rootCmd.AddCommand(spawnCmd)
 }
 

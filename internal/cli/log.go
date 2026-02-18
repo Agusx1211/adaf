@@ -12,7 +12,7 @@ import (
 
 var turnCmd = &cobra.Command{
 	Use:     "turn",
-	Aliases: []string{"turns", "log", "logs", "turn-log"},
+	Aliases: []string{"turns", "log", "logs", "turn-log", "history"},
 	Short:   "Manage turn records",
 	Long: `View and create turn records that track what each agent turn accomplished.
 
@@ -84,9 +84,15 @@ Examples:
 func init() {
 	turnCmd.Flags().String("plan", "", "Filter turns by plan ID")
 	turnCmd.Flags().Bool("all", false, "Include spawned sub-agent turns")
+	turnCmd.Flags().IntP("limit", "n", 0, "Show only the last N turns")
 	turnListCmd.Flags().String("plan", "", "Filter turns by plan ID")
 	turnListCmd.Flags().Bool("all", false, "Include spawned sub-agent turns")
+	turnListCmd.Flags().IntP("limit", "n", 0, "Show only the last N turns")
 	turnLatestCmd.Flags().Bool("all", false, "Include spawned sub-agent turns")
+
+	// Accept --full on show (already shows full detail; flag is a no-op).
+	turnShowCmd.Flags().Bool("full", false, "Show full detail (default behavior)")
+	turnShowCmd.Flags().MarkHidden("full")
 
 	turnCreateCmd.Flags().String("agent", "", "Agent name (required)")
 	turnCreateCmd.Flags().String("model", "", "Agent model")
@@ -164,6 +170,11 @@ func runTurnList(cmd *cobra.Command, args []string) error {
 			}
 		}
 		turns = filtered
+	}
+
+	limit, _ := cmd.Flags().GetInt("limit")
+	if limit > 0 && len(turns) > limit {
+		turns = turns[len(turns)-limit:]
 	}
 
 	printHeader("Turns")

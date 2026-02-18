@@ -461,6 +461,61 @@ func TestValidateIssueDependencies(t *testing.T) {
 	}
 }
 
+func TestNormalizeIssueStatus(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		// canonical values
+		{"open", IssueStatusOpen},
+		{"ongoing", IssueStatusOngoing},
+		{"in_review", IssueStatusInReview},
+		{"closed", IssueStatusClosed},
+
+		// LLM-common aliases for closed
+		{"done", IssueStatusClosed},
+		{"complete", IssueStatusClosed},
+		{"completed", IssueStatusClosed},
+		{"resolved", IssueStatusClosed},
+		{"fixed", IssueStatusClosed},
+		{"Done", IssueStatusClosed},
+		{"DONE", IssueStatusClosed},
+
+		// LLM-common aliases for ongoing
+		{"in_progress", IssueStatusOngoing},
+		{"wip", IssueStatusOngoing},
+		{"working", IssueStatusOngoing},
+
+		// aliases for in_review
+		{"in-review", IssueStatusInReview},
+		{"review", IssueStatusInReview},
+		{"reviewing", IssueStatusInReview},
+
+		// whitespace and case normalization
+		{"  Closed  ", IssueStatusClosed},
+		{"IN_REVIEW", IssueStatusInReview},
+		{"In-Review", IssueStatusInReview},
+
+		// unknown passthrough
+		{"invalid", "invalid"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := NormalizeIssueStatus(tt.input)
+			if got != tt.want {
+				t.Errorf("NormalizeIssueStatus(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+			if tt.want == IssueStatusOpen || tt.want == IssueStatusOngoing ||
+				tt.want == IssueStatusInReview || tt.want == IssueStatusClosed {
+				if !IsValidIssueStatus(tt.input) {
+					t.Errorf("IsValidIssueStatus(%q) = false, want true", tt.input)
+				}
+			}
+		})
+	}
+}
+
 func TestSpawnOperations(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := New(dir)

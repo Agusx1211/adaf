@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -129,6 +130,11 @@ func init() {
 
 	planSetCmd.Flags().String("id", "", "Target plan ID override")
 
+	planShowCmd.Flags().Bool("json", false, "Output plan as JSON")
+	// Accept --goals (no-op; plan show already includes all plan fields).
+	planShowCmd.Flags().Bool("goals", false, "Show plan goals (included by default)")
+	planShowCmd.Flags().MarkHidden("goals")
+
 	planDeleteCmd.Flags().Bool("yes", false, "Confirm destructive delete")
 
 	planCmd.AddCommand(
@@ -228,6 +234,16 @@ func runPlanShow(cmd *cobra.Command, args []string) error {
 			fmt.Println()
 			return nil
 		}
+	}
+
+	asJSON, _ := cmd.Flags().GetBool("json")
+	if asJSON {
+		data, err := json.MarshalIndent(plan, "", "  ")
+		if err != nil {
+			return fmt.Errorf("encoding plan as JSON: %w", err)
+		}
+		fmt.Println(string(data))
+		return nil
 	}
 
 	printHeader("Plan")

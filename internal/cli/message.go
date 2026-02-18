@@ -169,6 +169,10 @@ After calling this command, stop immediately and run no further commands.`,
 }
 
 func init() {
+	// Accept --timeout for compatibility (the command is a signal, not a wait;
+	// the actual timeout is managed by the loop controller).
+	waitForSpawnsCmd.Flags().Int("timeout", 0, "Accepted for compatibility (ignored)")
+	waitForSpawnsCmd.Flags().MarkHidden("timeout")
 	rootCmd.AddCommand(waitForSpawnsCmd)
 }
 
