@@ -9,6 +9,7 @@ import (
 
 	"github.com/agusx1211/adaf/internal/buildinfo"
 	"github.com/agusx1211/adaf/internal/debug"
+	"github.com/agusx1211/adaf/internal/failedcmd"
 )
 
 const (
@@ -132,9 +133,34 @@ func Execute() {
 	defer debug.Close()
 	configureRuntimeCommandView(rootCmd)
 	if err := rootCmd.Execute(); err != nil {
+		recordFailedAgentCommand(err, os.Args)
 		debug.Logf("cli", "exit with error: %v", err)
 		fmt.Fprintf(os.Stderr, "%sError: %s%s\n", colorRed, err, colorReset)
 		os.Exit(1)
 	}
 	debug.Log("cli", "exit success")
+}
+
+func recordFailedAgentCommand(err error, argv []string) {
+	if err == nil || !isAgentRuntimeContext() {
+		return
+	}
+
+	rec, path, recordErr := failedcmd.Default().Record(err, argv)
+	if recordErr != nil {
+		debug.LogKV("cli", "failed to record failed command",
+			"error", recordErr,
+			"command", argv,
+		)
+		return
+	}
+	if rec == nil {
+		return
+	}
+
+	debug.LogKV("cli", "recorded failed command",
+		"path", path,
+		"kind", rec.Kind,
+		"profile", rec.Profile,
+	)
 }
