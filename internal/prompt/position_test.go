@@ -46,3 +46,55 @@ func TestPositionPrompt_ManagerOmitsEscalationWhenUnavailable(t *testing.T) {
 		t.Fatalf("manager prompt should omit call-supervisor when unavailable\nprompt:\n%s", got)
 	}
 }
+
+func TestPositionPrompt_WikiUsesConcreteCommands(t *testing.T) {
+	positions := []struct {
+		name     string
+		position string
+	}{
+		{"supervisor", config.PositionSupervisor},
+		{"manager", config.PositionManager},
+		{"lead", config.PositionLead},
+		{"worker", config.PositionWorker},
+	}
+	for _, tt := range positions {
+		t.Run(tt.name, func(t *testing.T) {
+			got := PositionPrompt(tt.position, "", true, true)
+			// No vague `adaf wiki ...` (with literal ellipsis as the only argument).
+			// Concrete commands like `adaf wiki list` or `adaf wiki search "..."` are fine.
+			if strings.Contains(got, "`adaf wiki ...`") {
+				t.Fatalf("%s prompt should not use vague `adaf wiki ...`\nprompt:\n%s", tt.name, got)
+			}
+		})
+	}
+}
+
+func TestPositionPrompt_WikiMentionsKnowledge(t *testing.T) {
+	positions := []struct {
+		name     string
+		position string
+	}{
+		{"supervisor", config.PositionSupervisor},
+		{"manager", config.PositionManager},
+		{"lead", config.PositionLead},
+		{"worker", config.PositionWorker},
+	}
+	for _, tt := range positions {
+		t.Run(tt.name, func(t *testing.T) {
+			got := PositionPrompt(tt.position, "", true, true)
+			if !strings.Contains(got, "knowledge") {
+				t.Fatalf("%s prompt should mention 'knowledge' in wiki context\nprompt:\n%s", tt.name, got)
+			}
+		})
+	}
+}
+
+func TestPositionPrompt_WorkerDoesNotForceWikiUpdate(t *testing.T) {
+	got := PositionPrompt(config.PositionWorker, "", false, false)
+	if strings.Contains(got, "update it before finishing") {
+		t.Fatalf("worker should not force wiki update before finishing\nprompt:\n%s", got)
+	}
+	if strings.Contains(got, "adaf wiki update") {
+		t.Fatalf("worker should not get wiki update command\nprompt:\n%s", got)
+	}
+}

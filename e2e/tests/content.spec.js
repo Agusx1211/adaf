@@ -173,6 +173,41 @@ test('issues board modal edit and comments persist to backend store', async ({ p
   expect(issue.history.some((entry) => String(entry.type || '') === 'commented')).toBe(true);
 });
 
+test('issues board refreshes automatically after external issue writes', async ({ page, request }) => {
+  const { state, fixture } = await gotoFixture(page, request);
+  const base = projectBaseURL(state, fixture.id);
+  const title = uniqueName('issue-realtime');
+
+  await page.getByRole('button', { name: 'Issues' }).click();
+  await expect(page.getByText('Issue Board', { exact: true })).toBeVisible();
+
+  const beforeResponse = await request.get(`${base}/issues`);
+  expect(beforeResponse.status()).toBe(200);
+  const beforeIssues = await beforeResponse.json();
+  const beforeCount = Array.isArray(beforeIssues) ? beforeIssues.length : 0;
+
+  await expect(page.getByText(`${beforeCount} issue(s)`, { exact: true })).toBeVisible();
+
+  const createResponse = await request.post(`${base}/issues`, {
+    data: {
+      title: title,
+      description: `Realtime update check ${title}`,
+      priority: 'medium',
+      status: 'open',
+      created_by: 'e2e',
+      updated_by: 'e2e',
+    },
+  });
+  expect(createResponse.status()).toBe(201);
+  const created = await createResponse.json();
+  expect(created && created.id).toBeTruthy();
+
+  await expect(page.getByText(`${beforeCount + 1} issue(s)`, { exact: true })).toBeVisible({ timeout: 12000 });
+
+  const deleteResponse = await request.delete(`${base}/issues/${encodeURIComponent(String(created.id))}`);
+  expect(deleteResponse.status()).toBe(200);
+});
+
 test('wiki detail edit persists to backend store', async ({ page, request }) => {
   const { state, fixture } = await gotoFixture(page, request);
   const nextTitle = uniqueName('wiki-title');

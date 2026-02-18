@@ -23,8 +23,6 @@ type errStubAgent struct {
 	err error
 }
 
-type blockingStubAgent struct{}
-
 type waitResumeStubAgent struct {
 	store *store.Store
 	runs  []agent.Config
@@ -68,13 +66,6 @@ func (a *errStubAgent) Name() string { return "stub" }
 
 func (a *errStubAgent) Run(ctx context.Context, cfg agent.Config, recorder *recording.Recorder) (*agent.Result, error) {
 	return nil, a.err
-}
-
-func (a *blockingStubAgent) Name() string { return "stub" }
-
-func (a *blockingStubAgent) Run(ctx context.Context, cfg agent.Config, recorder *recording.Recorder) (*agent.Result, error) {
-	<-ctx.Done()
-	return nil, ctx.Err()
 }
 
 func (a *waitResumeStubAgent) Name() string { return "stub" }
@@ -445,51 +436,6 @@ func TestLoopRunReturnsErrorWhenRecordingFlushFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "flushing recording for turn 1") {
 		t.Fatalf("Loop.Run() error = %v, want flush context", err)
-	}
-}
-
-func TestLoopRunAppliesTurnTimeoutSafetyNet(t *testing.T) {
-	dir := t.TempDir()
-	s, err := store.New(dir)
-	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
-	}
-	if err := s.Init(store.ProjectConfig{Name: "test", RepoPath: dir}); err != nil {
-		t.Fatalf("store.Init() error = %v", err)
-	}
-
-	l := &Loop{
-		Store: s,
-		Agent: &blockingStubAgent{},
-		Config: agent.Config{
-			Prompt:   "base",
-			MaxTurns: 1,
-			Timeout:  80 * time.Millisecond,
-		},
-	}
-
-	start := time.Now()
-	err = l.Run(context.Background())
-	elapsed := time.Since(start)
-	if err == nil {
-		t.Fatalf("Loop.Run() error = nil, want timeout error")
-	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("Loop.Run() error = %v, want deadline exceeded", err)
-	}
-	if elapsed > 2*time.Second {
-		t.Fatalf("Loop.Run() elapsed = %v, want < 2s", elapsed)
-	}
-
-	turns, err := s.ListTurns()
-	if err != nil {
-		t.Fatalf("ListTurns() error = %v", err)
-	}
-	if len(turns) != 1 {
-		t.Fatalf("turns count = %d, want 1", len(turns))
-	}
-	if turns[0].BuildState != "error" {
-		t.Fatalf("build state = %q, want %q", turns[0].BuildState, "error")
 	}
 }
 

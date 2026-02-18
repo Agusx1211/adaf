@@ -18,7 +18,6 @@ type Config struct {
 	Env      map[string]string // extra environment variables
 	Prompt   string            // the prompt/message to send (piped to stdin or passed as arg)
 	MaxTurns int               // max loop iterations (0 = infinite)
-	Timeout  time.Duration     // per-turn timeout safety net (0 = loop default)
 	TurnID   int               // current turn ID for recording
 
 	// ResumeSessionID is the session/thread ID from a previous agent run.

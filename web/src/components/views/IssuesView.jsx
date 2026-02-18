@@ -14,6 +14,7 @@ var ISSUE_COLUMNS = [
 ];
 
 var PRIORITIES = ['critical', 'high', 'medium', 'low'];
+var LIVE_REFRESH_MS = 2000;
 
 export default function IssuesView() {
   var state = useAppState();
@@ -103,6 +104,29 @@ export default function IssuesView() {
     dispatch({ type: 'SET', payload: { issues: next } });
     return next;
   }
+
+  useEffect(function () {
+    var cancelled = false;
+
+    async function refreshQuietly() {
+      try {
+        var next = normalizeIssues(await apiCall(base + '/issues', 'GET', null, { allow404: true }));
+        if (cancelled) return;
+        dispatch({ type: 'SET', payload: { issues: next } });
+      } catch (err) {
+        if (err && err.authRequired) {
+          dispatch({ type: 'SET', payload: { authRequired: true } });
+        }
+      }
+    }
+
+    refreshQuietly();
+    var timer = setInterval(refreshQuietly, LIVE_REFRESH_MS);
+    return function () {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [base, dispatch]);
 
   function openIssue(issueID) {
     dispatch({ type: 'SET_SELECTED_ISSUE', payload: issueID });

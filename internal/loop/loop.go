@@ -126,25 +126,18 @@ type Loop struct {
 	lastInterruptMsg string
 }
 
-const defaultTurnTimeout = 45 * time.Minute
-
 // Run executes the agent loop. It will run the agent up to Config.MaxTurns times
 // (or infinitely if MaxTurns is 0). The loop respects context cancellation for
 // graceful shutdown (e.g. ctrl+c).
 func (l *Loop) Run(ctx context.Context) error {
 	maxTurns := l.Config.MaxTurns
 	turn := 0
-	turnTimeout := l.Config.Timeout
-	if turnTimeout <= 0 {
-		turnTimeout = defaultTurnTimeout
-	}
 
 	debug.LogKV("loop", "loop starting",
 		"agent", l.Agent.Name(),
 		"profile", l.ProfileName,
 		"plan_id", l.PlanID,
 		"max_turns", maxTurns,
-		"turn_timeout", turnTimeout,
 		"loop_run_hex", l.LoopRunHexID,
 		"step_hex", l.StepHexID,
 	)
@@ -346,20 +339,14 @@ func (l *Loop) Run(ctx context.Context) error {
 		}
 
 		// Create a turn-scoped context so external code can cancel just the
-		// current turn without stopping the entire loop. A timeout safety net
-		// avoids indefinite hangs in agent execution.
+		// current turn without stopping the entire loop.
 		var (
 			turnCtx    context.Context
 			turnCancel context.CancelFunc
 		)
-		if turnTimeout > 0 {
-			turnCtx, turnCancel = context.WithTimeout(ctx, turnTimeout)
-		} else {
-			turnCtx, turnCancel = context.WithCancel(ctx)
-		}
+		turnCtx, turnCancel = context.WithCancel(ctx)
 		debug.LogKV("loop", "turn context ready",
 			"turn_id", turnID,
-			"timeout", turnTimeout,
 		)
 		// Enforce wait-for-spawns as immediate control flow: as soon as a
 		// wait signal exists for this turn, cancel the active agent turn.
@@ -641,13 +628,6 @@ func (l *Loop) Run(ctx context.Context) error {
 				// Preserve cancellation semantics so callers can classify graceful stop.
 				debug.LogKV("loop", "loop exiting with context canceled", "turn_id", turnID)
 				return context.Canceled
-			}
-			if errors.Is(runErr, context.DeadlineExceeded) {
-				debug.LogKV("loop", "turn timed out",
-					"turn_id", turnID,
-					"timeout", turnTimeout,
-				)
-				return fmt.Errorf("agent turn timed out after %s (turn %d): %w", turnTimeout, turnID, runErr)
 			}
 			return fmt.Errorf("agent run failed (turn %d): %w", turnID, runErr)
 		}
