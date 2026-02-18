@@ -238,6 +238,9 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 			if optionMaxInstances > 0 {
 				line += fmt.Sprintf(", max_instances=%d", optionMaxInstances)
 			}
+			if dp.TimeoutMinutes > 0 {
+				line += fmt.Sprintf(", timeout=%dm", dp.TimeoutMinutes)
+			}
 			profileMaxInstances := p.MaxInstances
 			if profileMaxInstances > 0 {
 				line += fmt.Sprintf(", profile_max_instances=%d", profileMaxInstances)

@@ -184,8 +184,9 @@ func TestDelegationCloneDeepCopy(t *testing.T) {
 		StylePreset: StylePresetParallel,
 		Profiles: []DelegationProfile{
 			{
-				Name:  "worker",
-				Roles: []string{RoleDeveloper, RoleQA},
+				Name:           "worker",
+				Roles:          []string{RoleDeveloper, RoleQA},
+				TimeoutMinutes: 12,
 				Delegation: &DelegationConfig{
 					Profiles: []DelegationProfile{{Name: "scout", Role: RoleDeveloper}},
 				},
@@ -200,6 +201,7 @@ func TestDelegationCloneDeepCopy(t *testing.T) {
 
 	cloned.MaxParallel = 99
 	cloned.Profiles[0].Roles[0] = RoleQA
+	cloned.Profiles[0].TimeoutMinutes = 1
 	cloned.Profiles[0].Delegation.Profiles[0].Name = "changed"
 
 	if orig.MaxParallel != 3 {
@@ -207,6 +209,9 @@ func TestDelegationCloneDeepCopy(t *testing.T) {
 	}
 	if orig.Profiles[0].Roles[0] != RoleDeveloper {
 		t.Fatalf("orig roles mutated: %v", orig.Profiles[0].Roles)
+	}
+	if orig.Profiles[0].TimeoutMinutes != 12 {
+		t.Fatalf("orig timeout mutated: %d", orig.Profiles[0].TimeoutMinutes)
 	}
 	if orig.Profiles[0].Delegation.Profiles[0].Name != "scout" {
 		t.Fatalf("orig nested delegation mutated: %v", orig.Profiles[0].Delegation.Profiles[0].Name)

@@ -8,15 +8,16 @@ import (
 
 // DelegationProfile describes one profile available for spawning.
 type DelegationProfile struct {
-	Name         string            `json:"name"`                    // profile name
-	Position     string            `json:"position,omitempty"`      // execution level for this spawned profile
-	Role         string            `json:"role,omitempty"`          // explicit role for this spawn option
-	Roles        []string          `json:"roles,omitempty"`         // allowed roles for this spawn option
-	MaxInstances int               `json:"max_instances,omitempty"` // max concurrent (0 = unlimited)
-	Speed        string            `json:"speed,omitempty"`         // "fast", "medium", "slow" — informational
-	Handoff      bool              `json:"handoff,omitempty"`       // can be transferred to next loop step
-	Delegation   *DelegationConfig `json:"delegation,omitempty"`    // child spawn rules for this option
-	Skills       []string          `json:"skills,omitempty"`        // skill IDs for spawned agents
+	Name           string            `json:"name"`                      // profile name
+	Position       string            `json:"position,omitempty"`        // execution level for this spawned profile
+	Role           string            `json:"role,omitempty"`            // explicit role for this spawn option
+	Roles          []string          `json:"roles,omitempty"`           // allowed roles for this spawn option
+	MaxInstances   int               `json:"max_instances,omitempty"`   // max concurrent (0 = unlimited)
+	TimeoutMinutes int               `json:"timeout_minutes,omitempty"` // max runtime per spawn (0 = unlimited)
+	Speed          string            `json:"speed,omitempty"`           // "fast", "medium", "slow" — informational
+	Handoff        bool              `json:"handoff,omitempty"`         // can be transferred to next loop step
+	Delegation     *DelegationConfig `json:"delegation,omitempty"`      // child spawn rules for this option
+	Skills         []string          `json:"skills,omitempty"`          // skill IDs for spawned agents
 }
 
 // DelegationConfig describes spawn capabilities for a loop step or session.

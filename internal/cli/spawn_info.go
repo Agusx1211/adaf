@@ -95,6 +95,9 @@ func runSpawnInfo(cmd *cobra.Command, args []string) error {
 		if dp.MaxInstances > 0 {
 			fmt.Printf("    Max instances (this option): %d\n", dp.MaxInstances)
 		}
+		if dp.TimeoutMinutes > 0 {
+			fmt.Printf("    Timeout (this option): %d minute(s)\n", dp.TimeoutMinutes)
+		}
 		if p.MaxInstances > 0 {
 			fmt.Printf("    Max instances (profile global): %d\n", p.MaxInstances)
 		}

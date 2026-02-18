@@ -1772,6 +1772,10 @@ function SubAgentCard({ dp, idx, displayName, agentName, profiles, skills, roleD
                 <label style={labelStyle}>Max Instances</label>
                 <input type="number" min="0" value={dp.max_instances || 0} onChange={function (e) { setProfile(idx, 'max_instances', parseInt(e.target.value, 10) || 0); }} style={inputStyle} />
               </div>
+              <div style={{ width: 112 }}>
+                <label style={labelStyle}>Timeout (min)</label>
+                <input type="number" min="0" value={dp.timeout_minutes || 0} onChange={function (e) { setProfile(idx, 'timeout_minutes', parseInt(e.target.value, 10) || 0); }} style={inputStyle} />
+              </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 4 }}>
               <Checkbox label="handoff" checked={!!dp.handoff} onChange={function (v) { setProfile(idx, 'handoff', v); }} />
@@ -1994,7 +1998,7 @@ function emptyStep() {
 }
 
 function emptyDelegationProfile() {
-  return { name: '', role: '', roles: [], max_instances: 0, speed: '', handoff: false, delegation: null, skills: [] };
+  return { name: '', role: '', roles: [], max_instances: 0, timeout_minutes: 0, speed: '', handoff: false, delegation: null, skills: [] };
 }
 
 function cleanStep(s) {
@@ -2043,6 +2047,7 @@ function cleanDelegation(d) {
       dp.role = p.role;
     }
     if (p.max_instances) dp.max_instances = Number(p.max_instances);
+    if (p.timeout_minutes) dp.timeout_minutes = Number(p.timeout_minutes);
     if (p.speed) dp.speed = p.speed;
     if (p.handoff) dp.handoff = true;
     if (p.skills && p.skills.length > 0) dp.skills = p.skills;

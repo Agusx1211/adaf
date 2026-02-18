@@ -282,6 +282,44 @@ test('team editor shows runtime prompt preview and keeps skill preview alongside
   await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(workerProfile)}`);
 });
 
+test('team editor persists per-sub-agent timeout minutes', async ({ page, request }) => {
+  const { state } = await gotoConfig(page, request);
+  const workerProfile = uniqueName('team-timeout-profile');
+  const teamName = uniqueName('team-timeout');
+
+  const workerProfileCreate = await request.post(`${state.baseURL}/api/config/profiles`, {
+    data: { name: workerProfile, agent: 'generic' },
+  });
+  expect(workerProfileCreate.status()).toBe(201);
+
+  await clickSectionNew(page, /Teams \(\d+\)/);
+  await page.getByPlaceholder('my-team').fill(teamName);
+  await page.getByPlaceholder('What this team is good at...').fill('Team timeout persistence coverage.');
+  await page.getByRole('button', { name: 'Enable' }).click();
+
+  const firstProfileSelect = page.locator('label', { hasText: 'Profile' }).first().locator('xpath=following-sibling::select[1]');
+  await firstProfileSelect.selectOption(workerProfile);
+
+  await page.getByText('Advanced', { exact: true }).first().click();
+  const timeoutInput = page.locator('label', { hasText: 'Timeout (min)' }).first().locator('xpath=following-sibling::input[1]');
+  await timeoutInput.fill('7');
+
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved').first()).toBeVisible();
+
+  await expect.poll(async () => {
+    const teams = await readConfigList(request, state, '/api/config/teams');
+    const persisted = teams.find((team) => String(team.name || '') === teamName);
+    if (!persisted || !persisted.delegation || !Array.isArray(persisted.delegation.profiles) || !persisted.delegation.profiles.length) {
+      return -1;
+    }
+    return Number(persisted.delegation.profiles[0].timeout_minutes || 0);
+  }).toBe(7);
+
+  await request.delete(`${state.baseURL}/api/config/teams/${encodeURIComponent(teamName)}`);
+  await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(workerProfile)}`);
+});
+
 test('loop editor explicit empty skills does not fall back to defaults', async ({ page, request }) => {
   const { state } = await gotoConfig(page, request);
   const profileName = uniqueName('noskills-profile');

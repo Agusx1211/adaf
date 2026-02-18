@@ -985,6 +985,36 @@ func TestConfigTeamUpdateClearsDelegation(t *testing.T) {
 	}
 }
 
+func TestConfigTeamPersistsDelegationTimeoutMinutes(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	performJSONRequest(t, srv, http.MethodPost, "/api/config/profiles", `{"name":"sub-prof","agent":"claude"}`)
+
+	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/config/teams", `{
+		"name":"timeout-team",
+		"delegation":{"profiles":[{"name":"sub-prof","timeout_minutes":7}]}
+	}`)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
+	}
+
+	listRec := performRequest(t, srv, http.MethodGet, "/api/config/teams")
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d", listRec.Code, http.StatusOK)
+	}
+
+	teams := decodeResponse[[]config.Team](t, listRec)
+	if len(teams) != 1 {
+		t.Fatalf("teams length = %d, want 1", len(teams))
+	}
+	if teams[0].Delegation == nil || len(teams[0].Delegation.Profiles) != 1 {
+		t.Fatalf("team delegation = %#v, want one profile", teams[0].Delegation)
+	}
+	if teams[0].Delegation.Profiles[0].TimeoutMinutes != 7 {
+		t.Fatalf("delegation timeout_minutes = %d, want 7", teams[0].Delegation.Profiles[0].TimeoutMinutes)
+	}
+}
+
 func TestConfigRolesEndpoints(t *testing.T) {
 	srv, _ := newTestServer(t)
 

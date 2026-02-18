@@ -45,6 +45,8 @@ type SpawnRequest struct {
 	// Resolved child execution settings populated during Spawn validation.
 	ChildDelegation   *config.DelegationConfig
 	ChildMaxInstances int
+	ChildTimeout      time.Duration
+	ChildTimeoutMins  int
 	ChildSpeed        string
 	ChildHandoff      bool
 	ChildSkills       []string
@@ -502,6 +504,8 @@ func (o *Orchestrator) signalWaitAny(parentTurnID int) {
 
 const defaultWaitAnyReviewInterval = 30 * time.Minute
 
+var childTimeoutUnit = time.Minute
+
 func waitAnyReviewInterval() time.Duration {
 	raw := strings.TrimSpace(os.Getenv("ADAF_WAIT_REVIEW_INTERVAL"))
 	if raw == "" {
@@ -616,6 +620,10 @@ func (o *Orchestrator) Spawn(ctx context.Context, req SpawnRequest) (int, error)
 		req.ChildMaxInstances = resolved.MaxInstances
 		req.childLimitKey = limitOptionKey(req.ChildProfile, req.ChildPosition, req.ChildRole)
 	}
+	if resolved.TimeoutMinutes > 0 {
+		req.ChildTimeoutMins = resolved.TimeoutMinutes
+		req.ChildTimeout = time.Duration(resolved.TimeoutMinutes) * childTimeoutUnit
+	}
 	if len(resolved.Skills) > 0 {
 		req.ChildSkills = append([]string(nil), resolved.Skills...)
 	}
@@ -706,6 +714,7 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 		"child_position", req.ChildPosition,
 		"child_role", req.ChildRole,
 		"child_agent", childProf.Agent,
+		"child_timeout", req.ChildTimeout,
 		"read_only", req.ReadOnly,
 	)
 	handoff := req.ChildHandoff
@@ -869,7 +878,15 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 		EventSink: streamCh,
 	}
 
-	childCtx, childCancel := context.WithCancel(ctx)
+	var (
+		childCtx    context.Context
+		childCancel context.CancelFunc
+	)
+	if req.ChildTimeout > 0 {
+		childCtx, childCancel = context.WithTimeout(ctx, req.ChildTimeout)
+	} else {
+		childCtx, childCancel = context.WithCancel(ctx)
+	}
 	done := make(chan struct{})
 	interruptCh := make(chan string, 8)
 
@@ -1087,16 +1104,23 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 			summary = missingSpawnReportMessage(rec.ID, errors.New("child returned no result payload"))
 		}
 
+		timedOut := req.ChildTimeout > 0 && errors.Is(err, context.DeadlineExceeded)
 		status, exitCode, result := classifySpawnCompletion(err, l.LastResult)
 		recSnapshot, snapErr := o.store.GetSpawn(rec.ID)
 		if snapErr != nil || recSnapshot == nil {
 			recSnapshot = rec
 		}
 		autoCommitNote, autoCommitErr := o.autoCommitSpawnWork(recSnapshot)
-		if status == "failed" {
-			summary = appendSpawnSummary(summary, failedSpawnMessage(result))
+		if status == store.SpawnStatusFailed {
+			if timedOut {
+				timeoutNote := timedOutSpawnMessage(rec.ID, req.ChildTimeoutMins, req.ChildProfile, req.ChildRole)
+				result = appendSpawnResult(result, timeoutNote)
+				summary = appendSpawnSummary(summary, timeoutNote)
+			} else {
+				summary = appendSpawnSummary(summary, failedSpawnMessage(result))
+			}
 		}
-		if status == "canceled" {
+		if status == store.SpawnStatusCanceled {
 			cancelNote := canceledSpawnMessage(autoCommitNote != "")
 			result = appendSpawnResult(result, cancelNote)
 			summary = appendSpawnSummary(summary, cancelNote)
@@ -1314,6 +1338,28 @@ func failedSpawnMessage(crashErr string) string {
 	return fmt.Sprintf(
 		"Sub-agent crashed: %s. It may have finished some work before crashing; inspect its branch/worktree before retrying.",
 		errText,
+	)
+}
+
+func timedOutSpawnMessage(spawnID, timeoutMinutes int, childProfile, childRole string) string {
+	minutesLabel := "configured limit"
+	if timeoutMinutes > 0 {
+		if timeoutMinutes == 1 {
+			minutesLabel = "1 minute"
+		} else {
+			minutesLabel = fmt.Sprintf("%d minutes", timeoutMinutes)
+		}
+	}
+
+	resumeCmd := fmt.Sprintf("adaf spawn --from-spawn %d --profile %s --task \"...\"", spawnID, childProfile)
+	if strings.TrimSpace(childRole) != "" {
+		resumeCmd = fmt.Sprintf("adaf spawn --from-spawn %d --profile %s --role %s --task \"...\"",
+			spawnID, childProfile, strings.TrimSpace(childRole))
+	}
+
+	return fmt.Sprintf(
+		"Sub-agent timed out after %s and was stopped. Before resuming, verify it is making concrete progress (`adaf spawn-diff --spawn-id %d`, `adaf spawn-inspect --spawn-id %d`). To resume from the same branch, run `%s`.",
+		minutesLabel, spawnID, spawnID, resumeCmd,
 	)
 }
 
