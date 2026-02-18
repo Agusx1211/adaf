@@ -90,6 +90,25 @@ func TestClassifySpawnCompletion(t *testing.T) {
 			t.Fatalf("result = %q, want empty", result)
 		}
 	})
+
+	t.Run("non-zero child exit marks spawn failed", func(t *testing.T) {
+		status, exitCode, result := classifySpawnCompletion(nil, &agent.Result{
+			ExitCode: 2,
+			Error:    "Attempt 1 failed with status 429",
+		})
+		if status != "failed" {
+			t.Fatalf("status = %q, want failed", status)
+		}
+		if exitCode != 2 {
+			t.Fatalf("exit_code = %d, want 2", exitCode)
+		}
+		if !strings.Contains(result, "code 2") {
+			t.Fatalf("result = %q, want exit code reason", result)
+		}
+		if !strings.Contains(result, "status 429") {
+			t.Fatalf("result = %q, want stderr context", result)
+		}
+	})
 }
 
 func TestCanceledSpawnMessage(t *testing.T) {

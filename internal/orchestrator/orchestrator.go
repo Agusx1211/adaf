@@ -1297,7 +1297,7 @@ func appendSpawnSummary(base, extra string) string {
 }
 
 func classifySpawnCompletion(runErr error, lastResult *agent.Result) (status string, exitCode int, result string) {
-	status = "completed"
+	status = store.SpawnStatusCompleted
 	exitCode = 0
 	result = ""
 
@@ -1307,20 +1307,48 @@ func classifySpawnCompletion(runErr error, lastResult *agent.Result) (status str
 
 	switch {
 	case errors.Is(runErr, context.Canceled):
-		status = "canceled"
+		status = store.SpawnStatusCanceled
 		if lastResult == nil {
 			// Keep canceled runs distinguishable even when no child result was captured.
 			exitCode = -1
 		}
 	case runErr != nil:
-		status = "failed"
+		status = store.SpawnStatusFailed
 		if lastResult == nil && exitCode == 0 {
 			exitCode = 1
 		}
 		result = runErr.Error()
+	case lastResult != nil && lastResult.ExitCode != 0:
+		status = store.SpawnStatusFailed
+		result = nonZeroExitFailureReason(lastResult)
 	}
 
 	return status, exitCode, result
+}
+
+func nonZeroExitFailureReason(lastResult *agent.Result) string {
+	if lastResult == nil || lastResult.ExitCode == 0 {
+		return ""
+	}
+
+	reason := firstNonEmptyLine(lastResult.Error)
+	if reason == "" {
+		reason = firstNonEmptyLine(lastResult.Output)
+	}
+	if reason == "" {
+		return fmt.Sprintf("sub-agent exited with code %d", lastResult.ExitCode)
+	}
+	return fmt.Sprintf("sub-agent exited with code %d: %s", lastResult.ExitCode, reason)
+}
+
+func firstNonEmptyLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 func canceledSpawnMessage(autoCommitted bool) string {
