@@ -29,6 +29,24 @@ func TestDelegationSection_IncludesSkillPointerWhenDelegationEnabled(t *testing.
 	}
 }
 
+func TestDelegationSection_IncludesRoutingDiscipline(t *testing.T) {
+	got := delegationSection(&config.DelegationConfig{
+		Profiles: []config.DelegationProfile{
+			{Name: "worker"},
+		},
+	}, nil, nil)
+
+	if !strings.Contains(got, "## Routing Discipline") {
+		t.Fatalf("expected routing discipline section\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "distribute work across available profiles") {
+		t.Fatalf("expected balance guidance in routing discipline\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "Match difficulty to cost") {
+		t.Fatalf("expected cost-matching guidance in routing discipline\nprompt:\n%s", got)
+	}
+}
+
 func TestDelegationSection_NoDelegation(t *testing.T) {
 	got := delegationSection(nil, nil, nil)
 	if got != "" {
@@ -232,13 +250,86 @@ func TestDelegationSection_IncludesRoutingScoresSpeedAndCostTable(t *testing.T) 
 	if !strings.Contains(got, "### Score by Role") {
 		t.Fatalf("expected score by role table heading\nprompt:\n%s", got)
 	}
-	if !strings.Contains(got, "| Profile | developer | researcher |") {
-		t.Fatalf("expected role matrix table header\nprompt:\n%s", got)
+	if !strings.Contains(got, "| Profile | developer |") {
+		t.Fatalf("expected role matrix table header with available roles\nprompt:\n%s", got)
 	}
 	if !strings.Contains(got, "| worker |") {
 		t.Fatalf("expected role matrix row for worker profile\nprompt:\n%s", got)
 	}
 	if strings.Contains(got, "| Profile | Cost | Role | Score | Speed | Feedback |") {
 		t.Fatalf("legacy single-table scoreboard should not be present\nprompt:\n%s", got)
+	}
+}
+
+func TestDelegationSection_RoutingScoreboardIncludesAllProfilesWithAvailabilityAndSparseDataMarkers(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	store := profilescore.Default()
+	now := time.Date(2026, 2, 17, 11, 0, 0, 0, time.UTC)
+	records := []profilescore.FeedbackRecord{
+		{
+			ProjectID:     "proj-a",
+			SpawnID:       1,
+			ParentProfile: "lead-a",
+			ChildProfile:  "codex 5.3",
+			ChildRole:     "qa",
+			Difficulty:    7,
+			Quality:       8,
+			DurationSecs:  70,
+			CreatedAt:     now.Add(-3 * time.Hour),
+		},
+		{
+			ProjectID:     "proj-a",
+			SpawnID:       2,
+			ParentProfile: "lead-a",
+			ChildProfile:  "codex 5.3 spark",
+			ChildRole:     "backend-designer",
+			Difficulty:    7,
+			Quality:       7,
+			DurationSecs:  50,
+			CreatedAt:     now.Add(-2 * time.Hour),
+		},
+	}
+	for _, rec := range records {
+		if _, err := store.UpsertFeedback(rec); err != nil {
+			t.Fatalf("UpsertFeedback(%d): %v", rec.SpawnID, err)
+		}
+	}
+
+	deleg := &config.DelegationConfig{
+		Profiles: []config.DelegationProfile{
+			{Name: "opus 4.6", Roles: []string{"developer", "ui-designer", "researcher"}},
+			{Name: "codex 5.3", Roles: []string{"developer", "backend-designer", "ui-designer", "qa", "researcher"}},
+			{Name: "codex 5.3 spark", Roles: []string{"developer", "backend-designer", "researcher"}},
+		},
+	}
+	globalCfg := &config.GlobalConfig{
+		Profiles: []config.Profile{
+			{Name: "opus 4.6", Agent: "claude", Cost: "expensive"},
+			{Name: "codex 5.3", Agent: "codex", Cost: "expensive"},
+			{Name: "codex 5.3 spark", Agent: "codex", Cost: "normal"},
+		},
+	}
+
+	got := delegationSection(deleg, globalCfg, nil)
+	if !strings.Contains(got, "| opus 4.6 | expensive | ... |") {
+		t.Fatalf("expected baseline row for profile without feedback to show sparse marker\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "| codex 5.3 | expensive |") {
+		t.Fatalf("expected baseline row for codex 5.3 profile\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "| codex 5.3 spark | normal |") {
+		t.Fatalf("expected baseline row for codex 5.3 spark profile\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "| Profile | backend-designer | developer | qa | researcher | ui-designer |") {
+		t.Fatalf("expected role matrix to include all available delegation roles\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "| opus 4.6 | -- | ... | -- | ... | ... |") {
+		t.Fatalf("expected opus role matrix row with availability marker and sparse marker\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "| codex 5.3 | ... | ... |") {
+		t.Fatalf("expected codex 5.3 role matrix row to include sparse markers\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "| codex 5.3 spark |") {
+		t.Fatalf("expected codex 5.3 spark role matrix row\nprompt:\n%s", got)
 	}
 }

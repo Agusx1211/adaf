@@ -94,7 +94,9 @@ func DefaultSkills() []Skill {
 				"adaf wait-for-spawns\n" +
 				"```\n\n" +
 				"When spawning, write a thorough task description — sub-agents only see what you give them. Include relevant context, goals, constraints, and what \"done\" looks like. Use `--task-file` for anything non-trivial.\n\n" +
-				"If the same profile is allowed with multiple roles, you MUST pass `--role <role>` in the spawn command.\n",
+				"If the same profile is allowed with multiple roles, you MUST pass `--role <role>` in the spawn command.\n\n" +
+				"## Usage Balance\n\n" +
+				"Do not spam the same profile. Distribute work across available profiles — match task difficulty to cost tier (cheap for easy, expensive for hard). Repeatedly using one profile drains that provider's quota and wastes budget. Check the Routing Scoreboard and rotate.\n",
 		},
 		{
 			ID:    SkillPushover,
