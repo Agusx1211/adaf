@@ -43,8 +43,9 @@ type LoopStep struct {
 
 // LoopDef defines a loop as a cyclic template of profile steps.
 type LoopDef struct {
-	Name  string     `json:"name"`
-	Steps []LoopStep `json:"steps"`
+	Name             string     `json:"name"`
+	Steps            []LoopStep `json:"steps"`
+	ResourcePriority string     `json:"resource_priority,omitempty"` // quality|normal|cost (runtime delegation preference)
 }
 
 // PushoverConfig holds Pushover notification credentials.

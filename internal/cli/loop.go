@@ -103,6 +103,7 @@ var loopStatusCmd = &cobra.Command{
 
 func init() {
 	loopStartCmd.Flags().String("plan", "", "Plan ID override for this loop run (defaults to active plan)")
+	loopStartCmd.Flags().String("priority", "", "Resource allocation priority for delegation (quality, normal, cost)")
 	loopNotifyCmd.Flags().IntP("priority", "p", 0, "Notification priority (-2 to 1)")
 	loopCmd.AddCommand(loopListCmd, loopStartCmd, loopStopCmd, loopMessageCmd, loopCallSupervisorCmd, loopNotifyCmd, loopStatusCmd)
 	rootCmd.AddCommand(loopCmd)
@@ -178,6 +179,7 @@ func loopStart(cmd *cobra.Command, args []string) error {
 
 	loopName := args[0]
 	planFlag, _ := cmd.Flags().GetString("plan")
+	resourcePriorityFlag, _ := cmd.Flags().GetString("priority")
 
 	s, err := openStoreRequired()
 	if err != nil {
@@ -196,11 +198,17 @@ func loopStart(cmd *cobra.Command, args []string) error {
 	if loopDef == nil {
 		return fmt.Errorf("loop %q not found", loopName)
 	}
+	resourcePriority, err := resolveLoopResourcePriority(loopDef, resourcePriorityFlag, cmd.Flags().Changed("priority"))
+	if err != nil {
+		return err
+	}
+	loopDefCopy := *loopDef
+	loopDefCopy.ResourcePriority = resourcePriority
 
-	if len(loopDef.Steps) == 0 {
+	if len(loopDefCopy.Steps) == 0 {
 		return fmt.Errorf("loop %q has no steps", loopName)
 	}
-	for i, step := range loopDef.Steps {
+	for i, step := range loopDefCopy.Steps {
 		if err := config.ValidateLoopStepPosition(step, globalCfg); err != nil {
 			return fmt.Errorf("loop %q step %d invalid: %w", loopName, i, err)
 		}
@@ -215,7 +223,7 @@ func loopStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	profiles, err := loopProfilesSnapshot(globalCfg, loopDef)
+	profiles, err := loopProfilesSnapshot(globalCfg, &loopDefCopy)
 	if err != nil {
 		return err
 	}
@@ -230,9 +238,9 @@ func loopStart(cmd *cobra.Command, args []string) error {
 		ProjectName: projCfg.Name,
 		WorkDir:     workDir,
 		PlanID:      effectivePlanID,
-		ProfileName: loopDef.Name,
+		ProfileName: loopDefCopy.Name,
 		AgentName:   "loop",
-		Loop:        *loopDef,
+		Loop:        loopDefCopy,
 		Profiles:    profiles,
 		Pushover:    globalCfg.Pushover,
 	}
@@ -247,7 +255,8 @@ func loopStart(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\n  %sLoop session #%d started%s (loop=%s, project=%s)\n",
-		styleBoldGreen, sessionID, colorReset, loopDef.Name, projCfg.Name)
+		styleBoldGreen, sessionID, colorReset, loopDefCopy.Name, projCfg.Name)
+	fmt.Printf("  Resource priority: %s%s%s\n", styleBoldWhite, resourcePriority, colorReset)
 	if effectivePlanID != "" {
 		fmt.Printf("  Plan: %s%s%s\n", styleBoldWhite, effectivePlanID, colorReset)
 	}
@@ -259,6 +268,20 @@ func loopStart(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Use %sadaf attach %d%s to connect.\n", styleBoldWhite, sessionID, colorReset)
 	fmt.Printf("  Use %sadaf sessions%s to list all sessions.\n\n", styleBoldWhite, colorReset)
 	return nil
+}
+
+func resolveLoopResourcePriority(loopDef *config.LoopDef, flagValue string, flagSet bool) (string, error) {
+	if flagSet {
+		return config.ParseResourcePriority(flagValue)
+	}
+	if loopDef == nil {
+		return config.ResourcePriorityNormal, nil
+	}
+	priority, err := config.ParseResourcePriority(loopDef.ResourcePriority)
+	if err != nil {
+		return "", fmt.Errorf("loop %q %w", loopDef.Name, err)
+	}
+	return priority, nil
 }
 
 func loopProfilesSnapshot(globalCfg *config.GlobalConfig, loopDef *config.LoopDef) ([]config.Profile, error) {

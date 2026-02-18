@@ -122,6 +122,7 @@ func handleStartLoopSessionP(s *store.Store, w http.ResponseWriter, r *http.Requ
 		Loop          string `json:"loop"`
 		PlanID        string `json:"plan_id"`
 		InitialPrompt string `json:"initial_prompt"`
+		Priority      string `json:"priority"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -143,7 +144,23 @@ func handleStartLoopSessionP(s *store.Store, w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "loop not found")
 		return
 	}
-	for i, step := range loopDef.Steps {
+	loopDefCopy := *loopDef
+	if strings.TrimSpace(req.Priority) != "" {
+		priority, err := config.ParseResourcePriority(req.Priority)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		loopDefCopy.ResourcePriority = priority
+	} else {
+		priority, err := config.ParseResourcePriority(loopDefCopy.ResourcePriority)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "loop definition has "+err.Error())
+			return
+		}
+		loopDefCopy.ResourcePriority = priority
+	}
+	for i, step := range loopDefCopy.Steps {
 		if err := config.ValidateLoopStepPosition(step, cfg); err != nil {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("loop step %d invalid: %v", i, err))
 			return
@@ -162,12 +179,12 @@ func handleStartLoopSessionP(s *store.Store, w http.ResponseWriter, r *http.Requ
 	}
 
 	projDir := projectDir(s)
-	profiles := collectLoopProfiles(cfg, loopDef)
+	profiles := collectLoopProfiles(cfg, &loopDefCopy)
 
 	// We need a main profile for the daemon config, pick the first step's profile
 	var mainProf *config.Profile
-	if len(loopDef.Steps) > 0 {
-		mainProf = cfg.FindProfile(loopDef.Steps[0].Profile)
+	if len(loopDefCopy.Steps) > 0 {
+		mainProf = cfg.FindProfile(loopDefCopy.Steps[0].Profile)
 	}
 	if mainProf == nil {
 		writeError(w, http.StatusBadRequest, "invalid loop: no valid profile in first step")
@@ -181,7 +198,7 @@ func handleStartLoopSessionP(s *store.Store, w http.ResponseWriter, r *http.Requ
 		PlanID:        planID,
 		ProfileName:   mainProf.Name,
 		AgentName:     mainProf.Agent,
-		Loop:          *loopDef,
+		Loop:          loopDefCopy,
 		Profiles:      profiles,
 		InitialPrompt: strings.TrimSpace(req.InitialPrompt),
 	}

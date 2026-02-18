@@ -425,6 +425,7 @@ export function normalizeLoopRun(run) {
     id: Number(run && run.id) || 0,
     hex_id: run && run.hex_id ? String(run.hex_id) : '',
     loop_name: run && run.loop_name ? String(run.loop_name) : 'loop',
+    resource_priority: run && run.resource_priority ? String(run.resource_priority) : 'normal',
     status: run && run.status ? String(run.status) : 'unknown',
     cycle: Number(run && run.cycle) || 0,
     step_index: Number(run && run.step_index) || 0,

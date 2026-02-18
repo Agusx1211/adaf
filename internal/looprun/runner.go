@@ -103,14 +103,15 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 	}
 
 	run := &store.LoopRun{
-		LoopName:        loopDef.Name,
-		PlanID:          cfg.PlanID,
-		Steps:           steps,
-		Status:          "running",
-		StepLastSeenMsg: make(map[int]int),
-		HexID:           hexid.New(),
-		StepHexIDs:      make(map[string]string),
-		DaemonSessionID: cfg.SessionID,
+		LoopName:         loopDef.Name,
+		ResourcePriority: config.EffectiveResourcePriority(loopDef.ResourcePriority),
+		PlanID:           cfg.PlanID,
+		Steps:            steps,
+		Status:           "running",
+		StepLastSeenMsg:  make(map[int]int),
+		HexID:            hexid.New(),
+		StepHexIDs:       make(map[string]string),
+		DaemonSessionID:  cfg.SessionID,
 	}
 
 	if err := cfg.Store.CreateLoopRun(run); err != nil {
@@ -243,23 +244,24 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			cfg.Store.UpdateLoopRun(run)
 
 			stepPromptInput := StepPromptInput{
-				Store:           cfg.Store,
-				Project:         cfg.Project,
-				GlobalCfg:       cfg.GlobalCfg,
-				PlanID:          cfg.PlanID,
-				InitialPrompt:   cfg.InitialPrompt,
-				LoopName:        loopDef.Name,
-				RunID:           run.ID,
-				Cycle:           cycle,
-				StepIndex:       stepIdx,
-				TotalSteps:      len(loopDef.Steps),
-				Step:            stepDef,
-				LoopSteps:       loopDef.Steps,
-				Profile:         prof,
-				Delegation:      effectiveDelegation,
-				Messages:        unseenMsgs,
-				Handoffs:        handoffs,
-				ResumeSessionID: stepResumeSessionID,
+				Store:            cfg.Store,
+				Project:          cfg.Project,
+				GlobalCfg:        cfg.GlobalCfg,
+				PlanID:           cfg.PlanID,
+				InitialPrompt:    cfg.InitialPrompt,
+				ResourcePriority: config.EffectiveResourcePriority(loopDef.ResourcePriority),
+				LoopName:         loopDef.Name,
+				RunID:            run.ID,
+				Cycle:            cycle,
+				StepIndex:        stepIdx,
+				TotalSteps:       len(loopDef.Steps),
+				Step:             stepDef,
+				LoopSteps:        loopDef.Steps,
+				Profile:          prof,
+				Delegation:       effectiveDelegation,
+				Messages:         unseenMsgs,
+				Handoffs:         handoffs,
+				ResumeSessionID:  stepResumeSessionID,
 			}
 
 			prompt, err := BuildStepPrompt(stepPromptInput)
@@ -881,6 +883,11 @@ func buildAgentConfig(cfg RunConfig, prof *config.Profile, step config.LoopStep,
 	}
 	stepPosition := config.EffectiveStepPosition(step)
 	agentEnv["ADAF_POSITION"] = stepPosition
+	resourcePriority := config.ResourcePriorityNormal
+	if cfg.LoopDef != nil {
+		resourcePriority = config.EffectiveResourcePriority(cfg.LoopDef.ResourcePriority)
+	}
+	agentEnv["ADAF_RESOURCE_PRIORITY"] = resourcePriority
 	if workerRole := config.EffectiveWorkerRoleForPosition(stepPosition, step.Role, cfg.GlobalCfg); workerRole != "" {
 		agentEnv["ADAF_ROLE"] = workerRole
 	}

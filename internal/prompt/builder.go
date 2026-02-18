@@ -42,7 +42,7 @@ func buildSubAgentPrompt(opts BuildOpts) (string, error) {
 	b.WriteString("Do NOT manage turn logs with `adaf turn ...`; your parent agent owns turn handoff publication.\n")
 
 	if opts.Delegation != nil && len(opts.Delegation.Profiles) > 0 {
-		b.WriteString(delegationSection(opts.Delegation, opts.GlobalCfg, nil))
+		b.WriteString(delegationSection(opts.Delegation, opts.GlobalCfg, nil, ""))
 	}
 
 	b.WriteString("Your task below is your primary directive.\n")
@@ -74,6 +74,7 @@ type LoopPromptContext struct {
 	Cycle             int
 	StepIndex         int
 	TotalSteps        int
+	ResourcePriority  string // quality|normal|cost
 	Instructions      string // step-specific custom instructions
 	InitialPrompt     string // general objective injected across all steps
 	CanStop           bool
@@ -294,7 +295,11 @@ func buildSkillsPrompt(opts BuildOpts) (string, error) {
 				}
 			}
 		}
-		b.WriteString(delegationSection(opts.Delegation, opts.GlobalCfg, runningSpawns))
+		resourcePriority := ""
+		if opts.LoopContext != nil {
+			resourcePriority = config.EffectiveResourcePriority(opts.LoopContext.ResourcePriority)
+		}
+		b.WriteString(delegationSection(opts.Delegation, opts.GlobalCfg, runningSpawns, resourcePriority))
 	}
 
 	// Runtime data (always, when present): wait results, handoffs.
@@ -478,7 +483,22 @@ func renderLoopContext(opts BuildOpts) string {
 		b.WriteString("\n" + lc.Instructions + "\n")
 	}
 
-	b.WriteString("\n")
+	if config.PositionCanSpawn(opts.Position) {
+		priority := config.EffectiveResourcePriority(lc.ResourcePriority)
+		b.WriteString("\n## Resource Allocation Priority\n\n")
+		fmt.Fprintf(&b, "Current priority: **%s**.\n\n", priority)
+		switch priority {
+		case config.ResourcePriorityCost:
+			b.WriteString("- Prefer `free`/`cheap` spawn profiles for implementation and iteration.\n")
+			b.WriteString("- Escalate to `normal`/`expensive` profiles only when cheaper options are demonstrably stuck.\n")
+		case config.ResourcePriorityQuality:
+			b.WriteString("- Prefer the strongest (`expensive`/highest-intelligence) spawn profiles for implementation and critical decisions.\n")
+			b.WriteString("- Use `free`/`cheap` profiles primarily for scouting, verification, and review passes.\n")
+		default:
+			b.WriteString("- Balance quality and cost: use cheaper profiles for straightforward work and stronger profiles for hard problems.\n")
+		}
+		b.WriteString("\n")
+	}
 
 	if lc.CanStop {
 		b.WriteString("You can stop this loop when objectives are met by running: `adaf loop stop`\n\n")

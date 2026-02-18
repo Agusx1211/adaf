@@ -38,6 +38,7 @@ function NewSessionModal({ onClose }) {
   var [plans, setPlans] = useState(null);
   var [selectedPlanID, setSelectedPlanID] = useState('');
   var [planSearch, setPlanSearch] = useState('');
+  var [selectedPriority, setSelectedPriority] = useState('normal');
 
   // Load loops on mount
   useState(function () {
@@ -74,6 +75,7 @@ function NewSessionModal({ onClose }) {
       var payload = { loop_name: loopName, loop: loopName };
       if (selectedPlanID) payload.plan_id = selectedPlanID;
       if (initialPrompt.trim()) payload.initial_prompt = initialPrompt.trim();
+      if (selectedPriority) payload.priority = selectedPriority;
 
       var response = await apiCall(base + '/sessions/loop', 'POST', payload);
       var sessionID = Number(response && response.id);
@@ -93,7 +95,7 @@ function NewSessionModal({ onClose }) {
     } finally {
       setLoading(false);
     }
-  }, [selectedProject, selectedPlanID, state.currentProjectID, dispatch, showToast, onClose]);
+  }, [selectedProject, selectedPlanID, selectedPriority, state.currentProjectID, dispatch, showToast, onClose]);
 
   var inputStyle = {
     width: '100%', padding: '6px 8px', background: 'var(--bg-3)', border: '1px solid var(--border)',
@@ -145,6 +147,19 @@ function NewSessionModal({ onClose }) {
               onSearchChange={setPlanSearch}
               inputStyle={inputStyle}
             />
+          </div>
+          <div>
+            <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Resource Priority</label>
+            <select
+              name="priority"
+              value={selectedPriority}
+              onChange={function (e) { setSelectedPriority(String(e.target.value || 'normal')); }}
+              style={selectStyle}
+            >
+              <option value="quality">quality</option>
+              <option value="normal">normal</option>
+              <option value="cost">cost</option>
+            </select>
           </div>
           <div>
             <label style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Initial Prompt (optional)</label>

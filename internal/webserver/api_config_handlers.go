@@ -245,6 +245,9 @@ func validateCreateLoop(loop config.LoopDef) string {
 	if strings.TrimSpace(loop.Name) == "" {
 		return "name is required"
 	}
+	if p := strings.TrimSpace(loop.ResourcePriority); p != "" && !config.ValidResourcePriority(p) {
+		return "resource_priority must be one of: quality, normal, cost"
+	}
 	if len(loop.Steps) == 0 {
 		return "at least one step is required"
 	}
@@ -462,6 +465,10 @@ func (srv *Server) handleLoopPromptPreview(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "step_index is out of range")
 		return
 	}
+	if p := strings.TrimSpace(req.Loop.ResourcePriority); p != "" && !config.ValidResourcePriority(p) {
+		writeError(w, http.StatusBadRequest, "loop resource_priority must be one of: quality, normal, cost")
+		return
+	}
 
 	step := req.Loop.Steps[req.StepIndex]
 	if strings.TrimSpace(step.Profile) == "" {
@@ -529,20 +536,21 @@ func (srv *Server) handleLoopPromptPreview(w http.ResponseWriter, r *http.Reques
 	}
 
 	stepPromptInput := looprun.StepPromptInput{
-		Store:         projectStore,
-		Project:       projectCfg,
-		GlobalCfg:     cfg,
-		PlanID:        strings.TrimSpace(req.PlanID),
-		InitialPrompt: req.InitialPrompt,
-		LoopName:      loopName,
-		RunID:         1,
-		Cycle:         cycle,
-		StepIndex:     req.StepIndex,
-		TotalSteps:    len(req.Loop.Steps),
-		Step:          step,
-		LoopSteps:     req.Loop.Steps,
-		Profile:       prof,
-		Delegation:    effectiveDelegation,
+		Store:            projectStore,
+		Project:          projectCfg,
+		GlobalCfg:        cfg,
+		PlanID:           strings.TrimSpace(req.PlanID),
+		InitialPrompt:    req.InitialPrompt,
+		ResourcePriority: config.EffectiveResourcePriority(req.Loop.ResourcePriority),
+		LoopName:         loopName,
+		RunID:            1,
+		Cycle:            cycle,
+		StepIndex:        req.StepIndex,
+		TotalSteps:       len(req.Loop.Steps),
+		Step:             step,
+		LoopSteps:        req.Loop.Steps,
+		Profile:          prof,
+		Delegation:       effectiveDelegation,
 	}
 
 	freshPrompt, err := looprun.BuildStepPrompt(stepPromptInput)

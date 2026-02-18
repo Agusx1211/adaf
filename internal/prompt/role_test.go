@@ -14,7 +14,7 @@ func TestDelegationSection_IncludesSkillPointerWhenDelegationEnabled(t *testing.
 		Profiles: []config.DelegationProfile{
 			{Name: "worker"},
 		},
-	}, nil, nil)
+	}, nil, nil, "")
 
 	if !strings.Contains(got, "# Delegation") {
 		t.Fatalf("expected delegation header\nprompt:\n%s", got)
@@ -34,7 +34,7 @@ func TestDelegationSection_IncludesRoutingDiscipline(t *testing.T) {
 		Profiles: []config.DelegationProfile{
 			{Name: "worker"},
 		},
-	}, nil, nil)
+	}, nil, nil, "")
 
 	if !strings.Contains(got, "## Routing Discipline") {
 		t.Fatalf("expected routing discipline section\nprompt:\n%s", got)
@@ -47,13 +47,37 @@ func TestDelegationSection_IncludesRoutingDiscipline(t *testing.T) {
 	}
 }
 
+func TestDelegationSection_ResourcePriorityGuidance(t *testing.T) {
+	deleg := &config.DelegationConfig{
+		Profiles: []config.DelegationProfile{
+			{Name: "worker"},
+		},
+	}
+
+	costPrompt := delegationSection(deleg, nil, nil, config.ResourcePriorityCost)
+	if !strings.Contains(costPrompt, "Current priority: **cost**") {
+		t.Fatalf("expected cost priority section\nprompt:\n%s", costPrompt)
+	}
+	if !strings.Contains(costPrompt, "free`/`cheap` profiles") {
+		t.Fatalf("expected cheap-first guidance for cost mode\nprompt:\n%s", costPrompt)
+	}
+
+	qualityPrompt := delegationSection(deleg, nil, nil, config.ResourcePriorityQuality)
+	if !strings.Contains(qualityPrompt, "Current priority: **quality**") {
+		t.Fatalf("expected quality priority section\nprompt:\n%s", qualityPrompt)
+	}
+	if !strings.Contains(qualityPrompt, "for review, QA, and scouting/research passes") {
+		t.Fatalf("expected cheap-for-review/scouting guidance for quality mode\nprompt:\n%s", qualityPrompt)
+	}
+}
+
 func TestDelegationSection_NoDelegation(t *testing.T) {
-	got := delegationSection(nil, nil, nil)
+	got := delegationSection(nil, nil, nil, "")
 	if got != "" {
 		t.Fatalf("delegationSection(nil) = %q, want empty", got)
 	}
 
-	got = delegationSection(&config.DelegationConfig{}, nil, nil)
+	got = delegationSection(&config.DelegationConfig{}, nil, nil, "")
 	if got != "" {
 		t.Fatalf("delegationSection(empty) = %q, want empty", got)
 	}
@@ -75,7 +99,7 @@ func TestDelegationSection_IncludesRoleDetails(t *testing.T) {
 		},
 	}
 
-	got := delegationSection(deleg, globalCfg, nil)
+	got := delegationSection(deleg, globalCfg, nil, "")
 	if !strings.Contains(got, "role=developer") {
 		t.Fatalf("expected role annotation in delegation section\nprompt:\n%s", got)
 	}
@@ -231,7 +255,7 @@ func TestDelegationSection_IncludesRoutingScoresSpeedAndCostTable(t *testing.T) 
 		},
 	}
 
-	got := delegationSection(deleg, globalCfg, nil)
+	got := delegationSection(deleg, globalCfg, nil, "")
 	if !strings.Contains(got, "cost=cheap") {
 		t.Fatalf("expected profile cost in available profiles section\nprompt:\n%s", got)
 	}
@@ -310,7 +334,7 @@ func TestDelegationSection_RoutingScoreboardIncludesAllProfilesWithAvailabilityA
 		},
 	}
 
-	got := delegationSection(deleg, globalCfg, nil)
+	got := delegationSection(deleg, globalCfg, nil, "")
 	if !strings.Contains(got, "| opus 4.6 | expensive | ... |") {
 		t.Fatalf("expected baseline row for profile without feedback to show sparse marker\nprompt:\n%s", got)
 	}

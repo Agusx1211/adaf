@@ -117,7 +117,7 @@ func ReadOnlyPrompt() string {
 }
 
 // delegationSection builds the delegation/spawning prompt section from a DelegationConfig.
-func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalConfig, runningSpawns []store.SpawnRecord) string {
+func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalConfig, runningSpawns []store.SpawnRecord, resourcePriority string) string {
 	if deleg == nil || len(deleg.Profiles) == 0 {
 		return ""
 	}
@@ -149,13 +149,38 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 		b.WriteString("**Delegation style:** " + style + "\n\n")
 	}
 
+	priority := config.NormalizeResourcePriority(resourcePriority)
+	if priority != "" {
+		if !config.ValidResourcePriority(priority) {
+			priority = config.ResourcePriorityNormal
+		}
+		b.WriteString("## Resource Allocation Priority\n\n")
+		fmt.Fprintf(&b, "Current priority: **%s**.\n\n", priority)
+		switch priority {
+		case config.ResourcePriorityCost:
+			b.WriteString("- Default to `free`/`cheap` profiles for implementation and iteration.\n")
+			b.WriteString("- Use `normal`/`expensive` profiles only when cheaper profiles are truly stuck or repeatedly failing quality checks.\n\n")
+		case config.ResourcePriorityQuality:
+			b.WriteString("- Default to the highest-quality (`expensive`/highest-intelligence) profiles for implementation and key decisions.\n")
+			b.WriteString("- Keep `free`/`cheap` profiles for review, QA, and scouting/research passes.\n\n")
+		default:
+			b.WriteString("- Balance quality and cost by matching task difficulty to profile capability.\n\n")
+		}
+	}
+
 	// Command reference pointer — full command reference available via `adaf skill delegation`.
 	b.WriteString("Run `adaf skill delegation` for command reference and spawn patterns.\n\n")
 
 	// Routing discipline — prevent single-profile spam.
 	b.WriteString("## Routing Discipline\n\n")
 	b.WriteString("You MUST distribute work across available profiles. Do not repeatedly spawn the same profile.\n\n")
-	b.WriteString("- **Match difficulty to cost:** use cheaper/faster profiles for straightforward tasks, reserve expensive/high-intelligence profiles for genuinely hard problems.\n")
+	if priority == config.ResourcePriorityQuality {
+		b.WriteString("- **Match difficulty to quality-first policy:** use stronger profiles by default and keep cheaper profiles focused on scouting/review.\n")
+	} else if priority == config.ResourcePriorityCost {
+		b.WriteString("- **Match difficulty to cost-first policy:** start with cheaper/faster profiles and escalate only after concrete stuck signals.\n")
+	} else {
+		b.WriteString("- **Match difficulty to cost:** use cheaper/faster profiles for straightforward tasks, reserve expensive/high-intelligence profiles for genuinely hard problems.\n")
+	}
 	b.WriteString("- **Rotate profiles:** if you just spawned profile X, consider a different profile for the next task unless X is the only option or clearly the best fit.\n")
 	b.WriteString("- **Consult the scoreboard:** use the Routing Scoreboard below to pick the best profile for each role, not just the one you used last.\n")
 	b.WriteString("- **Avoid concentration:** spreading work across profiles prevents draining a single provider's usage quota and improves overall throughput.\n\n")

@@ -226,16 +226,17 @@ func TestBuildStepPrompt_IncludesLoopAndProjectContext(t *testing.T) {
 	}
 
 	prompt, err := BuildStepPrompt(StepPromptInput{
-		Store:         s,
-		Project:       project,
-		GlobalCfg:     globalCfg,
-		LoopName:      "preview-loop",
-		Cycle:         0,
-		StepIndex:     1,
-		TotalSteps:    3,
-		Step:          step,
-		Profile:       prof,
-		CurrentTurnID: 0,
+		Store:            s,
+		Project:          project,
+		GlobalCfg:        globalCfg,
+		ResourcePriority: config.ResourcePriorityCost,
+		LoopName:         "preview-loop",
+		Cycle:            0,
+		StepIndex:        1,
+		TotalSteps:       3,
+		Step:             step,
+		Profile:          prof,
+		CurrentTurnID:    0,
 	})
 	if err != nil {
 		t.Fatalf("BuildStepPrompt() error = %v", err)
@@ -248,6 +249,12 @@ func TestBuildStepPrompt_IncludesLoopAndProjectContext(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "Ship the selected feature.") {
 		t.Fatalf("prompt missing step instructions:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Current priority: **cost**") {
+		t.Fatalf("prompt missing resource-priority context:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Prefer `free`/`cheap` spawn profiles") {
+		t.Fatalf("prompt missing cost-priority routing guidance:\n%s", prompt)
 	}
 }
 
@@ -400,6 +407,9 @@ func TestBuildAgentConfig_SetsEnvironmentVariables(t *testing.T) {
 	if ac.Env["ADAF_POSITION"] != config.PositionLead {
 		t.Fatalf("ADAF_POSITION = %q, want %q", ac.Env["ADAF_POSITION"], config.PositionLead)
 	}
+	if ac.Env["ADAF_RESOURCE_PRIORITY"] != config.ResourcePriorityNormal {
+		t.Fatalf("ADAF_RESOURCE_PRIORITY = %q, want %q", ac.Env["ADAF_RESOURCE_PRIORITY"], config.ResourcePriorityNormal)
+	}
 	if ac.Name != "generic" {
 		t.Fatalf("Name = %q, want %q", ac.Name, "generic")
 	}
@@ -473,6 +483,28 @@ func TestBuildAgentConfig_NoDelegationJSON(t *testing.T) {
 	ac := buildAgentConfig(cfg, prof, config.LoopStep{Position: config.PositionLead}, 1, 0, "", "", nil)
 	if _, ok := ac.Env["ADAF_DELEGATION_JSON"]; ok {
 		t.Fatal("ADAF_DELEGATION_JSON should not be set when delegation is nil")
+	}
+}
+
+func TestBuildAgentConfig_UsesLoopResourcePriority(t *testing.T) {
+	prof := &config.Profile{Name: "test", Agent: "generic"}
+	agentsCfg := &agent.AgentsConfig{
+		Agents: map[string]agent.AgentRecord{
+			"generic": {Name: "generic", Path: "/bin/echo"},
+		},
+	}
+	cfg := RunConfig{
+		WorkDir:   "/tmp",
+		AgentsCfg: agentsCfg,
+		LoopDef: &config.LoopDef{
+			Name:             "prio-loop",
+			ResourcePriority: config.ResourcePriorityCost,
+		},
+	}
+
+	ac := buildAgentConfig(cfg, prof, config.LoopStep{Position: config.PositionLead}, 1, 0, "", "", nil)
+	if ac.Env["ADAF_RESOURCE_PRIORITY"] != config.ResourcePriorityCost {
+		t.Fatalf("ADAF_RESOURCE_PRIORITY = %q, want %q", ac.Env["ADAF_RESOURCE_PRIORITY"], config.ResourcePriorityCost)
 	}
 }
 

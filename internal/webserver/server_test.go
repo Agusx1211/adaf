@@ -650,6 +650,20 @@ func TestConfigLoopDefEndpoints(t *testing.T) {
 	}
 }
 
+func TestConfigLoopDefRejectsInvalidResourcePriority(t *testing.T) {
+	srv, _ := newTestServer(t)
+	performJSONRequest(t, srv, http.MethodPost, "/api/config/profiles", `{"name":"loop-prof","agent":"claude"}`)
+
+	rec := performJSONRequest(t, srv, http.MethodPost, "/api/config/loops", `{
+		"name":"bad-loop",
+		"resource_priority":"fast",
+		"steps":[{"profile":"loop-prof","turns":1}]
+	}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("create status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
 func TestConfigLoopDefUpdateClearsOptionalStepFields(t *testing.T) {
 	srv, _ := newTestServer(t)
 
@@ -796,6 +810,21 @@ func TestLoopPromptPreviewEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(resumePrompt, "Continue from where you left off.") {
 		t.Fatalf("resume prompt = %q, want continuation lead", resumePrompt)
+	}
+}
+
+func TestStartLoopSessionRejectsInvalidPriority(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	performJSONRequest(t, srv, http.MethodPost, "/api/config/profiles", `{"name":"loop-prof","agent":"generic"}`)
+	performJSONRequest(t, srv, http.MethodPost, "/api/config/loops", `{"name":"test-loop","steps":[{"profile":"loop-prof","position":"lead","turns":1}]}`)
+
+	rec := performJSONRequest(t, srv, http.MethodPost, "/api/sessions/loop", `{
+		"loop":"test-loop",
+		"priority":"fast"
+	}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("start status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 }
 

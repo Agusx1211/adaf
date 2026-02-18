@@ -15,8 +15,9 @@ type StepPromptInput struct {
 	Project   *store.ProjectConfig
 	GlobalCfg *config.GlobalConfig
 
-	PlanID        string
-	InitialPrompt string
+	PlanID           string
+	InitialPrompt    string
+	ResourcePriority string
 
 	LoopName   string
 	RunID      int
@@ -62,6 +63,7 @@ func BuildStepPrompt(input StepPromptInput) (string, error) {
 		Cycle:             input.Cycle,
 		StepIndex:         input.StepIndex,
 		TotalSteps:        totalSteps,
+		ResourcePriority:  config.EffectiveResourcePriority(input.ResourcePriority),
 		Instructions:      input.Step.Instructions,
 		InitialPrompt:     input.InitialPrompt,
 		CanStop:           config.PositionCanStopLoop(position),
