@@ -198,3 +198,76 @@ test('duplicate prompt frames from snapshot recent and live stream render once',
   await page.waitForTimeout(900);
   await expect(page.getByText(promptText, { exact: false })).toHaveCount(1);
 });
+
+test('tool_result ANSI color codes render as styled text instead of raw escapes', async ({ page, request }) => {
+  var state = loadState();
+  var fixture = await fixtureProject(request, state);
+  var ansiRedToken = 'ANSI_RED_TOKEN_4a6f';
+  var ansiBlueToken = 'ANSI_BLUE_TOKEN_9c2d';
+  var ansiPayload = '\u001b[31m' + ansiRedToken + '\u001b[0m and \u001b[34m' + ansiBlueToken + '\u001b[0m';
+
+  await disableMainPollingInterval(page);
+  await installFakeSessionWebSocket(page, [
+    {
+      delay_ms: 250,
+      envelope: {
+        type: 'event',
+        data: {
+          session_id: WAIT_FIXTURE_TURN_ID,
+          turn_id: WAIT_FIXTURE_TURN_ID,
+          event: {
+            type: 'assistant',
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  name: 'tool_result',
+                  content: ansiPayload,
+                },
+              ],
+            },
+          },
+        },
+      },
+    },
+  ]);
+
+  await routeSessionsAsRunning(page, state, fixture);
+
+  var historyURL = `${projectBaseURL(state, fixture.id)}/sessions/${WAIT_FIXTURE_SESSION_ID}/events`;
+  await page.route(historyURL, async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/x-ndjson', body: '' });
+  });
+
+  await page.goto(`${projectAppURL(state, fixture.id)}#/loops`);
+
+  var loopRow = page.getByText('turn-scope-fixture', { exact: true }).first();
+  await expect(loopRow).toBeVisible();
+  await loopRow.click();
+
+  var turnID = page.getByText('#901', { exact: true }).first();
+  await expect(turnID).toBeVisible();
+  await turnID.click();
+
+  var resultBlock = page.locator('div').filter({ hasText: ansiRedToken }).first();
+  await expect(resultBlock).toBeVisible();
+
+  var hasRawEscape = await resultBlock.evaluate(function (el) {
+    return String(el.textContent || '').indexOf('\u001b') >= 0;
+  });
+  expect(hasRawEscape).toBe(false);
+
+  var redSpan = resultBlock.locator('span', { hasText: ansiRedToken }).first();
+  await expect(redSpan).toBeVisible();
+  var redColor = await redSpan.evaluate(function (el) {
+    return window.getComputedStyle(el).color;
+  });
+  expect(redColor).toBe('rgb(255, 75, 75)');
+
+  var blueSpan = resultBlock.locator('span', { hasText: ansiBlueToken }).first();
+  await expect(blueSpan).toBeVisible();
+  var blueColor = await blueSpan.evaluate(function (el) {
+    return window.getComputedStyle(el).color;
+  });
+  expect(blueColor).toBe('rgb(91, 206, 252)');
+});

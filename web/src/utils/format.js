@@ -83,6 +83,293 @@ export function stringifyToolPayload(value) {
   try { return JSON.stringify(value); } catch (_) { return String(value); }
 }
 
+var ANSI_SGR_PATTERN = /\u001b\[([0-9;]*)m/g;
+var ANSI_16_COLOR_MAP = {
+  30: 'var(--text-3)',
+  31: 'var(--red)',
+  32: 'var(--green)',
+  33: 'var(--accent)',
+  34: 'var(--blue)',
+  35: 'var(--purple)',
+  36: 'var(--blue)',
+  37: 'var(--text-0)',
+  90: 'var(--text-3)',
+  91: 'var(--red)',
+  92: 'var(--green)',
+  93: 'var(--accent)',
+  94: 'var(--blue)',
+  95: 'var(--purple)',
+  96: 'var(--blue)',
+  97: 'var(--text-0)',
+};
+
+var ANSI_16_BG_COLOR_MAP = {
+  40: 'rgba(92, 98, 112, 0.30)',
+  41: 'rgba(255, 75, 75, 0.28)',
+  42: 'rgba(74, 230, 138, 0.28)',
+  43: 'rgba(232, 168, 56, 0.28)',
+  44: 'rgba(91, 206, 252, 0.28)',
+  45: 'rgba(123, 140, 255, 0.28)',
+  46: 'rgba(91, 206, 252, 0.28)',
+  47: 'rgba(244, 245, 247, 0.20)',
+  100: 'rgba(92, 98, 112, 0.36)',
+  101: 'rgba(255, 75, 75, 0.36)',
+  102: 'rgba(74, 230, 138, 0.36)',
+  103: 'rgba(232, 168, 56, 0.36)',
+  104: 'rgba(91, 206, 252, 0.36)',
+  105: 'rgba(123, 140, 255, 0.36)',
+  106: 'rgba(91, 206, 252, 0.36)',
+  107: 'rgba(244, 245, 247, 0.28)',
+};
+
+function newAnsiState() {
+  return {
+    fg: '',
+    bg: '',
+    bold: false,
+    dim: false,
+    italic: false,
+    underline: false,
+    strike: false,
+  };
+}
+
+function resetAnsiState(state) {
+  state.fg = '';
+  state.bg = '';
+  state.bold = false;
+  state.dim = false;
+  state.italic = false;
+  state.underline = false;
+  state.strike = false;
+}
+
+function ansiStateKey(state) {
+  return [
+    state.fg || '',
+    state.bg || '',
+    state.bold ? '1' : '0',
+    state.dim ? '1' : '0',
+    state.italic ? '1' : '0',
+    state.underline ? '1' : '0',
+    state.strike ? '1' : '0',
+  ].join('|');
+}
+
+function ansiStateToStyle(state) {
+  var style = {};
+  if (state.fg) style.color = state.fg;
+  if (state.bg) style.backgroundColor = state.bg;
+  if (state.bold) style.fontWeight = 700;
+  if (state.dim) style.opacity = 0.8;
+  if (state.italic) style.fontStyle = 'italic';
+  if (state.underline || state.strike) {
+    var lines = [];
+    if (state.underline) lines.push('underline');
+    if (state.strike) lines.push('line-through');
+    style.textDecorationLine = lines.join(' ');
+  }
+  return style;
+}
+
+function ansi256ToColor(index) {
+  var n = Number(index);
+  if (!Number.isFinite(n)) return '';
+  if (n < 0) n = 0;
+  if (n > 255) n = 255;
+
+  var preset = {
+    0: '#000000',
+    1: '#800000',
+    2: '#008000',
+    3: '#808000',
+    4: '#000080',
+    5: '#800080',
+    6: '#008080',
+    7: '#c0c0c0',
+    8: '#808080',
+    9: '#ff0000',
+    10: '#00ff00',
+    11: '#ffff00',
+    12: '#0000ff',
+    13: '#ff00ff',
+    14: '#00ffff',
+    15: '#ffffff',
+  };
+  if (Object.prototype.hasOwnProperty.call(preset, n)) return preset[n];
+
+  if (n >= 16 && n <= 231) {
+    var k = n - 16;
+    var rIndex = Math.floor(k / 36);
+    var gIndex = Math.floor((k % 36) / 6);
+    var bIndex = k % 6;
+    var levels = [0, 95, 135, 175, 215, 255];
+    return 'rgb(' + levels[rIndex] + ', ' + levels[gIndex] + ', ' + levels[bIndex] + ')';
+  }
+
+  var gray = 8 + (n - 232) * 10;
+  return 'rgb(' + gray + ', ' + gray + ', ' + gray + ')';
+}
+
+function applyAnsiColorCode(state, codes, i, isBackground) {
+  var mode = Number(codes[i + 1]);
+  if (!Number.isFinite(mode)) return i;
+
+  if (mode === 5) {
+    var paletteIndex = Number(codes[i + 2]);
+    var color = ansi256ToColor(paletteIndex);
+    if (color) {
+      if (isBackground) state.bg = color;
+      else state.fg = color;
+    }
+    return i + 2;
+  }
+
+  if (mode === 2) {
+    var r = Number(codes[i + 2]);
+    var g = Number(codes[i + 3]);
+    var b = Number(codes[i + 4]);
+    if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) {
+      if (r < 0) r = 0;
+      if (r > 255) r = 255;
+      if (g < 0) g = 0;
+      if (g > 255) g = 255;
+      if (b < 0) b = 0;
+      if (b > 255) b = 255;
+      var rgb = 'rgb(' + r + ', ' + g + ', ' + b + ')';
+      if (isBackground) state.bg = rgb;
+      else state.fg = rgb;
+    }
+    return i + 4;
+  }
+
+  return i;
+}
+
+function applySgrCodes(state, rawCodes) {
+  var codes = String(rawCodes || '').split(';').map(function (part) {
+    if (part === '') return 0;
+    var n = Number(part);
+    if (!Number.isFinite(n)) return 0;
+    return n;
+  });
+  if (!codes.length) codes = [0];
+
+  for (var i = 0; i < codes.length; i++) {
+    var code = codes[i];
+    if (code === 0) {
+      resetAnsiState(state);
+      continue;
+    }
+    if (code === 1) {
+      state.bold = true;
+      continue;
+    }
+    if (code === 2) {
+      state.dim = true;
+      continue;
+    }
+    if (code === 3) {
+      state.italic = true;
+      continue;
+    }
+    if (code === 4) {
+      state.underline = true;
+      continue;
+    }
+    if (code === 9) {
+      state.strike = true;
+      continue;
+    }
+    if (code === 22) {
+      state.bold = false;
+      state.dim = false;
+      continue;
+    }
+    if (code === 23) {
+      state.italic = false;
+      continue;
+    }
+    if (code === 24) {
+      state.underline = false;
+      continue;
+    }
+    if (code === 29) {
+      state.strike = false;
+      continue;
+    }
+    if (code === 39) {
+      state.fg = '';
+      continue;
+    }
+    if (code === 49) {
+      state.bg = '';
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(ANSI_16_COLOR_MAP, code)) {
+      state.fg = ANSI_16_COLOR_MAP[code];
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(ANSI_16_BG_COLOR_MAP, code)) {
+      state.bg = ANSI_16_BG_COLOR_MAP[code];
+      continue;
+    }
+    if (code === 38) {
+      i = applyAnsiColorCode(state, codes, i, false);
+      continue;
+    }
+    if (code === 48) {
+      i = applyAnsiColorCode(state, codes, i, true);
+      continue;
+    }
+  }
+}
+
+export function stripAnsi(value) {
+  return String(value || '').replace(ANSI_SGR_PATTERN, '');
+}
+
+export function ansiToStyledRuns(value) {
+  var input = String(value || '');
+  if (!input) return [];
+
+  var runs = [];
+  var state = newAnsiState();
+  var offset = 0;
+  var match;
+
+  function pushText(text) {
+    if (!text) return;
+    var styleKey = ansiStateKey(state);
+    var last = runs.length > 0 ? runs[runs.length - 1] : null;
+    if (last && last._styleKey === styleKey) {
+      last.text += text;
+      return;
+    }
+    runs.push({
+      text: text,
+      style: ansiStateToStyle(state),
+      _styleKey: styleKey,
+    });
+  }
+
+  ANSI_SGR_PATTERN.lastIndex = 0;
+  while ((match = ANSI_SGR_PATTERN.exec(input)) !== null) {
+    if (match.index > offset) {
+      pushText(input.slice(offset, match.index));
+    }
+    applySgrCodes(state, match[1]);
+    offset = ANSI_SGR_PATTERN.lastIndex;
+  }
+  if (offset < input.length) {
+    pushText(input.slice(offset));
+  }
+
+  return runs.map(function (run) {
+    return { text: run.text, style: run.style };
+  });
+}
+
 export function withAlpha(color, alpha) {
   var value = String(color || '').trim();
   var a = Number(alpha);

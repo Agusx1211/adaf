@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { ansiToStyledRuns } from '../../utils/format.js';
 
 /* ── Helpers ────────────────────────────────────────────────────── */
 
@@ -257,6 +258,10 @@ export function ToolResultBlock({ tool, result, isError }) {
   var resultStr = stringify(result);
   var hasDetails = resultStr.length > 120;
   var color = isError ? 'var(--red)' : '#a6e3a1';
+  var displayText = expanded ? resultStr : truncate(resultStr, 200);
+  var styledRuns = useMemo(function () {
+    return ansiToStyledRuns(displayText);
+  }, [displayText]);
   return (
     <div
       style={{
@@ -282,7 +287,9 @@ export function ToolResultBlock({ tool, result, isError }) {
         whiteSpace: 'pre-wrap', wordBreak: 'break-word',
         maxHeight: expanded ? 'none' : 60, overflow: 'hidden', lineHeight: 1.4,
       }}>
-        {expanded ? resultStr : truncate(resultStr, 200)}
+        {styledRuns.map(function (run, idx) {
+          return <span key={idx} style={run.style}>{run.text}</span>;
+        })}
       </div>
     </div>
   );
