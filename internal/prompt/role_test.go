@@ -357,3 +357,124 @@ func TestDelegationSection_RoutingScoreboardIncludesAllProfilesWithAvailabilityA
 		t.Fatalf("expected codex 5.3 spark role matrix row\nprompt:\n%s", got)
 	}
 }
+
+func TestDelegationSection_HidesScoresUntilMinimumFeedbackSamples(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	store := profilescore.Default()
+	now := time.Date(2026, 2, 18, 9, 0, 0, 0, time.UTC)
+	records := []profilescore.FeedbackRecord{
+		{
+			ProjectID:     "proj-a",
+			SpawnID:       1,
+			ParentProfile: "lead-a",
+			ChildProfile:  "worker",
+			ChildRole:     "developer",
+			Difficulty:    7,
+			Quality:       5,
+			DurationSecs:  120,
+			CreatedAt:     now.Add(-2 * time.Hour),
+		},
+		{
+			ProjectID:     "proj-a",
+			SpawnID:       2,
+			ParentProfile: "lead-b",
+			ChildProfile:  "worker",
+			ChildRole:     "developer",
+			Difficulty:    7,
+			Quality:       5,
+			DurationSecs:  110,
+			CreatedAt:     now.Add(-time.Hour),
+		},
+		{
+			ProjectID:     "proj-a",
+			SpawnID:       3,
+			ParentProfile: "lead-c",
+			ChildProfile:  "worker",
+			ChildRole:     "developer",
+			Difficulty:    8,
+			Quality:       4,
+			DurationSecs:  130,
+			CreatedAt:     now,
+		},
+	}
+	for _, rec := range records {
+		if _, err := store.UpsertFeedback(rec); err != nil {
+			t.Fatalf("UpsertFeedback(%d): %v", rec.SpawnID, err)
+		}
+	}
+
+	deleg := &config.DelegationConfig{
+		Profiles: []config.DelegationProfile{
+			{Name: "worker", Role: config.RoleDeveloper},
+		},
+	}
+	globalCfg := &config.GlobalConfig{
+		Profiles: []config.Profile{
+			{Name: "worker", Agent: "codex", Cost: "cheap"},
+		},
+	}
+
+	got := delegationSection(deleg, globalCfg, nil, "")
+	if !strings.Contains(got, "feedback=3") {
+		t.Fatalf("expected feedback count in profile line\nprompt:\n%s", got)
+	}
+	if strings.Contains(got, ", score=") {
+		t.Fatalf("score should be hidden for low sample profiles\nprompt:\n%s", got)
+	}
+	if strings.Contains(got, "speed_score=") {
+		t.Fatalf("speed score should be hidden for low sample profiles\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "| worker | cheap | ... |") {
+		t.Fatalf("expected baseline speed to stay hidden with sparse samples\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "| worker | ... |") {
+		t.Fatalf("expected role matrix score to stay hidden with sparse samples\nprompt:\n%s", got)
+	}
+}
+
+func TestDelegationSection_ShowsScoresAfterMinimumFeedbackSamples(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	store := profilescore.Default()
+	now := time.Date(2026, 2, 18, 11, 0, 0, 0, time.UTC)
+	for i := 1; i <= 10; i++ {
+		_, err := store.UpsertFeedback(profilescore.FeedbackRecord{
+			ProjectID:     "proj-a",
+			SpawnID:       i,
+			ParentProfile: "lead-a",
+			ChildProfile:  "worker",
+			ChildRole:     "developer",
+			Difficulty:    7,
+			Quality:       7,
+			DurationSecs:  90 + i,
+			CreatedAt:     now.Add(-time.Duration(10-i) * time.Minute),
+		})
+		if err != nil {
+			t.Fatalf("UpsertFeedback(%d): %v", i, err)
+		}
+	}
+
+	deleg := &config.DelegationConfig{
+		Profiles: []config.DelegationProfile{
+			{Name: "worker", Role: config.RoleDeveloper},
+		},
+	}
+	globalCfg := &config.GlobalConfig{
+		Profiles: []config.Profile{
+			{Name: "worker", Agent: "codex", Cost: "cheap"},
+		},
+	}
+
+	got := delegationSection(deleg, globalCfg, nil, "")
+	if !strings.Contains(got, "feedback=10, score=") {
+		t.Fatalf("expected profile score once enough samples exist\nprompt:\n%s", got)
+	}
+	if !strings.Contains(got, "speed_score=") {
+		t.Fatalf("expected speed score once enough samples exist\nprompt:\n%s", got)
+	}
+	if strings.Contains(got, "| worker | cheap | ... |") {
+		t.Fatalf("expected baseline speed score value after enough samples\nprompt:\n%s", got)
+	}
+	if strings.Contains(got, "| worker | ... |") {
+		t.Fatalf("expected role score value after enough samples\nprompt:\n%s", got)
+	}
+}

@@ -3,8 +3,9 @@ package profilescore
 import "time"
 
 const (
-	MinScore = 0.0
-	MaxScore = 10.0
+	MinScore                     = 0.0
+	MaxScore                     = 10.0
+	MinSamplesForScoreVisibility = 10
 )
 
 // FeedbackRecord captures one parent review of a completed spawn.

@@ -267,13 +267,18 @@ func delegationSection(deleg *config.DelegationConfig, globalCfg *config.GlobalC
 				line += " [handoff]"
 			}
 			if perf, ok := perfByProfile[strings.ToLower(strings.TrimSpace(p.Name))]; ok && perf.TotalFeedback > 0 {
-				line += fmt.Sprintf(", feedback=%d, score=%.1f/100, speed_score=%.0f/100", perf.TotalFeedback, perf.Score, perf.SpeedScore)
-				line += fmt.Sprintf(", q=%.2f/10, diff=%.2f/10", perf.AvgQuality, perf.AvgDifficulty)
-				if perf.AvgDurationSecs > 0 {
-					line += fmt.Sprintf(", avg_dur=%s", formatDelegationDuration(perf.AvgDurationSecs))
-				}
-				if topRoles := formatDelegationRoleScores(perf.RoleBreakdown, 2); topRoles != "" {
-					line += fmt.Sprintf(", role_scores=%s", topRoles)
+				line += fmt.Sprintf(", feedback=%d", perf.TotalFeedback)
+				if perf.HasEnoughSamples {
+					line += fmt.Sprintf(", score=%.1f/100, speed_score=%.0f/100", perf.Score, perf.SpeedScore)
+					line += fmt.Sprintf(", q=%.2f/10, diff=%.2f/10", perf.AvgQuality, perf.AvgDifficulty)
+					if perf.AvgDurationSecs > 0 {
+						line += fmt.Sprintf(", avg_dur=%s", formatDelegationDuration(perf.AvgDurationSecs))
+					}
+					if topRoles := formatDelegationRoleScores(perf.RoleBreakdown, 2, profilescore.MinSamplesForScoreVisibility); topRoles != "" {
+						line += fmt.Sprintf(", role_scores=%s", topRoles)
+					}
+				} else {
+					line += fmt.Sprintf(", calibration=pending (<%d feedback)", profilescore.MinSamplesForScoreVisibility)
 				}
 			}
 			if p.Description != "" {
@@ -375,11 +380,21 @@ func formatDelegationDuration(avgDurationSecs float64) string {
 	return d.Round(time.Second).String()
 }
 
-func formatDelegationRoleScores(items []profilescore.BreakdownStats, limit int) string {
+func formatDelegationRoleScores(items []profilescore.BreakdownStats, limit int, minCount int) string {
 	if len(items) == 0 || limit <= 0 {
 		return ""
 	}
-	sorted := append([]profilescore.BreakdownStats(nil), items...)
+	filtered := make([]profilescore.BreakdownStats, 0, len(items))
+	for _, item := range items {
+		if item.Count < minCount {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	if len(filtered) == 0 {
+		return ""
+	}
+	sorted := append([]profilescore.BreakdownStats(nil), filtered...)
 	sort.Slice(sorted, func(i, j int) bool {
 		if sorted[i].Score != sorted[j].Score {
 			return sorted[i].Score > sorted[j].Score
@@ -389,7 +404,7 @@ func formatDelegationRoleScores(items []profilescore.BreakdownStats, limit int) 
 		}
 		return strings.ToLower(sorted[i].Name) < strings.ToLower(sorted[j].Name)
 	})
-	if limit > len(items) {
+	if limit > len(sorted) {
 		limit = len(sorted)
 	}
 	parts := make([]string, 0, limit)
@@ -455,7 +470,7 @@ func buildDelegationRoutingTables(deleg *config.DelegationConfig, globalCfg *con
 				Profile: p.Name,
 				Cost:    cost,
 			}
-			if perf, ok := perfByProfile[profileKey]; ok && perf.TotalFeedback > 0 {
+			if perf, ok := perfByProfile[profileKey]; ok && perf.HasEnoughSamples {
 				row.SpeedScore = perf.SpeedScore
 				row.HasSpeedScore = true
 			}
@@ -490,7 +505,7 @@ func buildDelegationRoutingTables(deleg *config.DelegationConfig, globalCfg *con
 		}
 		for _, role := range perf.RoleBreakdown {
 			roleName := strings.ToLower(strings.TrimSpace(role.Name))
-			if role.Count <= 0 || roleName == "" {
+			if role.Count < profilescore.MinSamplesForScoreVisibility || roleName == "" {
 				continue
 			}
 			if _, available := roleMatrixRows[i].AvailableRoles[roleName]; !available {

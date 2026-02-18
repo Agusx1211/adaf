@@ -199,8 +199,8 @@ func TestBuildDashboardIncludesBreakdownsAndSignals(t *testing.T) {
 	if len(spark.Trend) != 3 {
 		t.Fatalf("spark trend len = %d, want 3", len(spark.Trend))
 	}
-	if !spark.HasEnoughSamples {
-		t.Fatalf("spark HasEnoughSamples = false, want true")
+	if spark.HasEnoughSamples {
+		t.Fatalf("spark HasEnoughSamples = true, want false with 3 samples")
 	}
 	if len(spark.RecentFeedback) != 3 {
 		t.Fatalf("spark recent feedback len = %d, want 3", len(spark.RecentFeedback))
@@ -310,6 +310,57 @@ func TestBuildDashboardDifficultyAdjustedScoreRewardsHardTasks(t *testing.T) {
 	}
 	if hard.RoleBreakdown[0].Score <= easy.RoleBreakdown[0].Score {
 		t.Fatalf("hard role score = %.2f, easy role score = %.2f, want hard > easy", hard.RoleBreakdown[0].Score, easy.RoleBreakdown[0].Score)
+	}
+}
+
+func TestBuildDashboardHasEnoughSamplesRequiresTenFeedback(t *testing.T) {
+	now := time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC)
+	records := make([]FeedbackRecord, 0, 19)
+	spawnID := 1
+	for i := 0; i < 9; i++ {
+		records = append(records, FeedbackRecord{
+			ProjectID:     "proj-a",
+			SpawnID:       spawnID,
+			ParentProfile: "lead-a",
+			ChildProfile:  "alpha",
+			ChildRole:     "developer",
+			Difficulty:    6,
+			Quality:       7,
+			DurationSecs:  80,
+			CreatedAt:     now.Add(-time.Duration(i) * time.Hour),
+		})
+		spawnID++
+	}
+	for i := 0; i < 10; i++ {
+		records = append(records, FeedbackRecord{
+			ProjectID:     "proj-a",
+			SpawnID:       spawnID,
+			ParentProfile: "lead-b",
+			ChildProfile:  "beta",
+			ChildRole:     "developer",
+			Difficulty:    6,
+			Quality:       7,
+			DurationSecs:  80,
+			CreatedAt:     now.Add(-time.Duration(i) * time.Minute),
+		})
+		spawnID++
+	}
+
+	dashboard := BuildDashboard(nil, records)
+	alpha := findSummaryByName(t, dashboard, "alpha")
+	beta := findSummaryByName(t, dashboard, "beta")
+
+	if alpha.TotalFeedback != 9 {
+		t.Fatalf("alpha feedback count = %d, want 9", alpha.TotalFeedback)
+	}
+	if alpha.HasEnoughSamples {
+		t.Fatalf("alpha HasEnoughSamples = true, want false with 9 samples")
+	}
+	if beta.TotalFeedback != 10 {
+		t.Fatalf("beta feedback count = %d, want 10", beta.TotalFeedback)
+	}
+	if !beta.HasEnoughSamples {
+		t.Fatalf("beta HasEnoughSamples = false, want true with 10 samples")
 	}
 }
 

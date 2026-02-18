@@ -522,7 +522,7 @@ func BuildDashboard(catalog []ProfileCatalogEntry, records []FeedbackRecord) Das
 			RoleBreakdown:    mapToBreakdowns(acc.roles),
 			ParentBreakdown:  mapToBreakdowns(acc.parents),
 			Trend:            mapToTrend(acc.trend),
-			HasEnoughSamples: metrics.Count >= minSamplesForSignal,
+			HasEnoughSamples: metrics.Count >= MinSamplesForScoreVisibility,
 		}
 		if len(acc.recent) > 0 {
 			sort.Slice(acc.recent, func(i, j int) bool {
