@@ -73,3 +73,49 @@ func TestSpawn_AgentLookupFailureReleasesSlotsAndCleansWorktree(t *testing.T) {
 		t.Fatalf("branch %q should be removed", rec.Branch)
 	}
 }
+
+func TestSpawn_FailedChildSurfacesCrashDetailsForParent(t *testing.T) {
+	repo := initGitRepo(t)
+	s := newTestStore(t, repo)
+	cfg := &config.GlobalConfig{
+		Profiles: []config.Profile{
+			{Name: "parent", Agent: "codex"},
+			{Name: "broken", Agent: "generic"},
+		},
+	}
+	o := New(s, cfg, repo)
+
+	spawnID, err := o.Spawn(context.Background(), SpawnRequest{
+		ParentTurnID:  73,
+		ParentProfile: "parent",
+		ChildProfile:  "broken",
+		Task:          "implement feature",
+		ReadOnly:      false,
+		Delegation: &config.DelegationConfig{
+			Profiles: []config.DelegationProfile{{Name: "broken"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Spawn() error = %v, want nil", err)
+	}
+	if spawnID <= 0 {
+		t.Fatalf("spawnID = %d, want > 0", spawnID)
+	}
+
+	got := o.WaitOne(spawnID)
+	if got.Status != "failed" {
+		t.Fatalf("WaitOne(%d) status = %q, want failed", spawnID, got.Status)
+	}
+	if !strings.Contains(got.Result, "no command configured") {
+		t.Fatalf("WaitOne(%d) result = %q, want launch error details", spawnID, got.Result)
+	}
+	if !strings.Contains(strings.ToLower(got.Summary), "sub-agent crashed") {
+		t.Fatalf("WaitOne(%d) summary = %q, want crash note", spawnID, got.Summary)
+	}
+	if !strings.Contains(strings.ToLower(got.Summary), "may have finished some work") {
+		t.Fatalf("WaitOne(%d) summary = %q, want partial-work warning", spawnID, got.Summary)
+	}
+	if !strings.Contains(got.Summary, "no command configured") {
+		t.Fatalf("WaitOne(%d) summary = %q, want crash error details", spawnID, got.Summary)
+	}
+}

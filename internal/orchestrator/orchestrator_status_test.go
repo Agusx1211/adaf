@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/agusx1211/adaf/internal/agent"
@@ -102,6 +103,21 @@ func TestCanceledSpawnMessage(t *testing.T) {
 	want = "Spawn was canceled before completion."
 	if got != want {
 		t.Fatalf("canceledSpawnMessage(false) = %q, want %q", got, want)
+	}
+}
+
+func TestFailedSpawnMessage(t *testing.T) {
+	got := failedSpawnMessage("fork/exec codex: no such file or directory")
+	if !strings.Contains(got, "Sub-agent crashed: fork/exec codex: no such file or directory.") {
+		t.Fatalf("failedSpawnMessage() = %q, want crash error in message", got)
+	}
+	if !strings.Contains(strings.ToLower(got), "may have finished some work") {
+		t.Fatalf("failedSpawnMessage() = %q, want partial-work warning", got)
+	}
+
+	got = failedSpawnMessage("")
+	if !strings.Contains(got, "unknown error") {
+		t.Fatalf("failedSpawnMessage(empty) = %q, want unknown error fallback", got)
 	}
 }
 

@@ -736,6 +736,8 @@ func pollSpawnStatus(ctx context.Context, s *store.Store, parentTurnID int, even
 				Position:      position,
 				Role:          rec.ChildRole,
 				Status:        rec.Status,
+				Summary:       rec.Summary,
+				Result:        rec.Result,
 			}
 			if rec.Status == "awaiting_input" {
 				if ask, err := s.PendingAsk(rec.ID); err == nil && ask != nil {
@@ -891,7 +893,20 @@ func spawnSnapshotFingerprint(spawns []events.SpawnInfo) string {
 	}
 	var b strings.Builder
 	for _, sp := range spawns {
-		b.WriteString(fmt.Sprintf("%d|%d|%d|%d|%s|%s|%s|%s|%s;", sp.ID, sp.ParentTurnID, sp.ParentSpawnID, sp.ChildTurnID, sp.Profile, sp.Position, sp.Role, sp.Status, sp.Question))
+		b.WriteString(fmt.Sprintf(
+			"%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s;",
+			sp.ID,
+			sp.ParentTurnID,
+			sp.ParentSpawnID,
+			sp.ChildTurnID,
+			sp.Profile,
+			sp.Position,
+			sp.Role,
+			sp.Status,
+			sp.Question,
+			sp.Summary,
+			sp.Result,
+		))
 	}
 	return b.String()
 }

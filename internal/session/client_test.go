@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -310,7 +311,14 @@ func TestStreamEventsAppliesSnapshotAndRecentMessages(t *testing.T) {
 				StartedAt:    time.Now().UTC().Add(-10 * time.Second),
 			},
 			Spawns: []WireSpawnInfo{
-				{ID: 9, ParentTurnID: 7, Profile: "devstral2", Status: "running"},
+				{
+					ID:           9,
+					ParentTurnID: 7,
+					Profile:      "devstral2",
+					Status:       "failed",
+					Summary:      "sub-agent crashed: fork/exec codex: no such file or directory",
+					Result:       "fork/exec codex: no such file or directory",
+				},
 			},
 			Recent: []WireMsg{recentPrompt, recentRaw},
 		}},
@@ -360,6 +368,12 @@ func TestStreamEventsAppliesSnapshotAndRecentMessages(t *testing.T) {
 	}
 	if len(snap.Spawns) != 1 || snap.Spawns[0].ID != 9 {
 		t.Fatalf("unexpected spawns snapshot: %+v", snap.Spawns)
+	}
+	if got := snap.Spawns[0].Summary; got == "" || !strings.Contains(got, "sub-agent crashed") {
+		t.Fatalf("spawn summary = %q, want crash summary", got)
+	}
+	if got := snap.Spawns[0].Result; got == "" || !strings.Contains(got, "no such file") {
+		t.Fatalf("spawn result = %q, want crash error", got)
 	}
 
 	prompt, ok := got[1].(events.AgentPromptMsg)

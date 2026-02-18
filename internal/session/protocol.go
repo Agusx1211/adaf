@@ -141,6 +141,8 @@ type WireSpawnInfo struct {
 	Role          string `json:"role,omitempty"`
 	Status        string `json:"status"`
 	Question      string `json:"question,omitempty"`
+	Summary       string `json:"summary,omitempty"`
+	Result        string `json:"result,omitempty"`
 }
 
 // WireSpawn carries spawn hierarchy updates.

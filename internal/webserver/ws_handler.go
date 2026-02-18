@@ -122,6 +122,8 @@ func toWSEnvelope(event any) wsEnvelope {
 					Role:          ev.Spawns[i].Role,
 					Status:        ev.Spawns[i].Status,
 					Question:      ev.Spawns[i].Question,
+					Summary:       ev.Spawns[i].Summary,
+					Result:        ev.Spawns[i].Result,
 				})
 			}
 			msg.Spawns = spawns
@@ -197,6 +199,8 @@ func toWSEnvelope(event any) wsEnvelope {
 				Role:          ev.Spawns[i].Role,
 				Status:        ev.Spawns[i].Status,
 				Question:      ev.Spawns[i].Question,
+				Summary:       ev.Spawns[i].Summary,
+				Result:        ev.Spawns[i].Result,
 			})
 		}
 		return wsEnvelope{Type: session.MsgSpawn, Data: session.WireSpawn{Spawns: spawns}}

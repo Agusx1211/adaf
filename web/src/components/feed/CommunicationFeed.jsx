@@ -44,6 +44,20 @@ export default function CommunicationFeed() {
           step_index: null,
         });
       }
+      if (normalizeStatus(spawn.status) === 'failed') {
+        var failureText = String(spawn.summary || spawn.result || '').trim();
+        if (failureText) {
+          list.push({
+            id: 'failed-' + spawn.id,
+            spawn_id: spawn.id,
+            type: 'message',
+            direction: 'child_to_parent',
+            content: failureText,
+            created_at: spawn.completed_at || spawn.started_at || new Date().toISOString(),
+            step_index: null,
+          });
+        }
+      }
     });
 
     // Filter by scope

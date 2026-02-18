@@ -366,6 +366,8 @@ export default function StandaloneChatView() {
                 entry.allEvents.push({
                   type: '_spawn_status', _spawnID: ns.id,
                   _action: ns.status, _profile: ns.profile, _role: ns.role || '',
+                  _summary: ns.summary || '',
+                  _result: ns.result || '',
                   _sourceLabel: ns.profile, _sourceColor: agentInfo(ns.profile).color,
                   scope: 'spawn-' + ns.id,
                 });

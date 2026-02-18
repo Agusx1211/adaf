@@ -1273,6 +1273,8 @@ func (b *broadcaster) runLoop(ctx context.Context, cfg *DaemonConfig) error {
 						Role:          sp.Role,
 						Status:        sp.Status,
 						Question:      sp.Question,
+						Summary:       sp.Summary,
+						Result:        sp.Result,
 					}
 				}
 				b.broadcastTyped(MsgSpawn, WireSpawn{Spawns: spawns})

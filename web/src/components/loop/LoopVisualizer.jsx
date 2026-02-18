@@ -361,11 +361,12 @@ export default function LoopVisualizer() {
                 <DetailRow label="role" value={selectedNode.role || '--'} />
                 <DetailRow label="elapsed" value={selectedNode.startedAt ? formatElapsed(selectedNode.startedAt, selectedNode.endedAt) : '--'} mono />
 
-                {(selectedNode.task || selectedNode.summary || selectedNode.question) && (
+                {(selectedNode.task || selectedNode.summary || selectedNode.result || selectedNode.question) && (
                   <div style={{ marginTop: 12 }}>
                     <div style={smallSectionTitleStyle()}>Context</div>
                     {selectedNode.task ? <InfoBox text={selectedNode.task} /> : null}
                     {selectedNode.summary ? <InfoBox text={selectedNode.summary} /> : null}
+                    {selectedNode.result ? <InfoBox text={selectedNode.result} /> : null}
                     {selectedNode.question ? <InfoBox text={'Q: ' + selectedNode.question} /> : null}
                   </div>
                 )}
@@ -710,6 +711,7 @@ function buildGraphSnapshot(loopRun, loopRuns, sessions, turns, spawns, activity
         endedAt: spawn.completed_at || '',
         task: String(spawn.task || ''),
         summary: String(spawn.summary || ''),
+        result: String(spawn.result || ''),
         question: String(spawn.question || ''),
         order: parseTimestamp(spawn.started_at) || (10000 + Number(spawn.id) || 0),
         parent: parentID,

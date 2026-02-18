@@ -1093,6 +1093,9 @@ func (o *Orchestrator) startSpawn(ctx context.Context, req SpawnRequest, childPr
 			recSnapshot = rec
 		}
 		autoCommitNote, autoCommitErr := o.autoCommitSpawnWork(recSnapshot)
+		if status == "failed" {
+			summary = appendSpawnSummary(summary, failedSpawnMessage(result))
+		}
 		if status == "canceled" {
 			cancelNote := canceledSpawnMessage(autoCommitNote != "")
 			result = appendSpawnResult(result, cancelNote)
@@ -1301,6 +1304,17 @@ func canceledSpawnMessage(autoCommitted bool) string {
 		return "Spawn was canceled before completion. Partial work was auto-committed."
 	}
 	return "Spawn was canceled before completion."
+}
+
+func failedSpawnMessage(crashErr string) string {
+	errText := strings.TrimSpace(crashErr)
+	if errText == "" {
+		errText = "unknown error"
+	}
+	return fmt.Sprintf(
+		"Sub-agent crashed: %s. It may have finished some work before crashing; inspect its branch/worktree before retrying.",
+		errText,
+	)
 }
 
 // extractSpawnReport returns the child agent's last assistant message as-is.

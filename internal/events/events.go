@@ -107,6 +107,8 @@ type SpawnInfo struct {
 	Role          string
 	Status        string // "running", "awaiting_input", "completed", "failed", "canceled", "merged", "rejected"
 	Question      string // pending question when status is "awaiting_input"
+	Summary       string // parent-facing final summary (or crash note on failure)
+	Result        string // raw completion/crash result text
 }
 
 // LoopStepStartMsg signals that a loop step has started.

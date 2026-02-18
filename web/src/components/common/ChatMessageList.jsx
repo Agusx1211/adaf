@@ -343,6 +343,8 @@ function renderSpawnStatusCard(evt, key) {
   var action = evt._action || '';
   var profile = evt._profile || 'spawn';
   var color = evt._sourceColor || 'var(--text-3)';
+  var failureDetail = String(evt._result || evt._summary || '').trim();
+  if (failureDetail.length > 140) failureDetail = failureDetail.slice(0, 137) + '...';
   var text = '';
 
   if (action === 'started') {
@@ -351,6 +353,7 @@ function renderSpawnStatusCard(evt, key) {
     text = '[spawn #' + evt._spawnID + '] ' + profile + ' completed';
   } else if (action === 'failed') {
     text = '[spawn #' + evt._spawnID + '] ' + profile + ' failed';
+    if (failureDetail) text += ': ' + failureDetail;
   } else if (action === 'asking') {
     text = '[spawn #' + evt._spawnID + '] ' + profile + ' is asking: ' + (evt._question || '');
   } else {

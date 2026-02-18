@@ -200,6 +200,8 @@ func (c *Client) StreamEvents(eventCh chan<- any, isLive func()) error {
 						Role:          s.Role,
 						Status:        s.Status,
 						Question:      s.Question,
+						Summary:       s.Summary,
+						Result:        s.Result,
 					}
 				}
 				snapshot.Spawns = spawns
@@ -351,6 +353,8 @@ func (c *Client) forwardEventMsg(eventCh chan<- any, msg *WireMsg, loopDoneSeen 
 				Role:          s.Role,
 				Status:        s.Status,
 				Question:      s.Question,
+				Summary:       s.Summary,
+				Result:        s.Result,
 			}
 		}
 		eventCh <- events.SpawnStatusMsg{Spawns: spawns}

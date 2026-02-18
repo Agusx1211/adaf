@@ -289,6 +289,7 @@ export function normalizeSpawns(rawSpawns) {
       started_at: spawn && (spawn.started_at || spawn.created_at) ? (spawn.started_at || spawn.created_at) : '',
       completed_at: spawn && spawn.completed_at ? spawn.completed_at : '',
       summary: spawn && spawn.summary ? String(spawn.summary) : '',
+      result: spawn && spawn.result ? String(spawn.result) : '',
     };
   }).filter(function (s) { return s.id > 0; }).sort(function (a, b) {
     return parseTimestamp(b.started_at) - parseTimestamp(a.started_at);
@@ -530,6 +531,7 @@ function mergeSpawnRecords(current, updates) {
       task: spawn.task || prev.task,
       branch: spawn.branch || prev.branch,
       summary: spawn.summary || prev.summary,
+      result: spawn.result || prev.result,
     };
   });
 
