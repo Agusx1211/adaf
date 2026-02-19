@@ -75,6 +75,11 @@ export default function ConfigDetailPanel() {
     try { profs = (await apiCall('/api/config/profiles', 'GET', null, { allow404: true })) || []; } catch (_) {}
     setProfiles(profs);
 
+    var loopsList = [];
+    if (sel && sel.type === 'loop') {
+      try { loopsList = (await apiCall('/api/config/loops', 'GET', null, { allow404: true })) || []; } catch (_) {}
+    }
+
     var teamsList = [];
     try { teamsList = (await apiCall('/api/config/teams', 'GET', null, { allow404: true })) || []; } catch (_) {}
     setTeams(teamsList);
@@ -90,6 +95,25 @@ export default function ConfigDetailPanel() {
     if (!sel) { setData(null); return; }
 
     if (sel.isNew) {
+      if (sel.type === 'loop' && sel.copyFrom) {
+        var sourceLoop = loopsList.find(function (l) { return l.name === sel.copyFrom; });
+        if (sourceLoop) {
+          var copiedLoop = normalizeLoopConfig(sourceLoop);
+          copiedLoop.name = suggestCopyName(sourceLoop.name, loopsList.map(function (l) { return l.name; }));
+          setData(copiedLoop);
+          return;
+        }
+      }
+      if (sel.type === 'team' && sel.copyFrom) {
+        var sourceTeam = teamsList.find(function (t) { return t.name === sel.copyFrom; });
+        if (sourceTeam) {
+          var copiedTeam = deepCopy(sourceTeam);
+          copiedTeam.name = suggestCopyName(sourceTeam.name, teamsList.map(function (t) { return t.name; }));
+          setData(copiedTeam);
+          return;
+        }
+      }
+
       if (sel.type === 'profile') setData({ name: '', agent: 'claude', model: '', reasoning_level: '', description: '', cost: '' });
       else if (sel.type === 'loop') setData({ name: '', steps: [emptyStep()] });
       else if (sel.type === 'team') setData({ name: '', description: '', delegation: null });
@@ -104,8 +128,7 @@ export default function ConfigDetailPanel() {
         var found = allProfs.find(function (p) { return p.name === sel.name; });
         setData(found ? { ...found } : null);
       } else if (sel.type === 'loop') {
-        var allLoops = (await apiCall('/api/config/loops', 'GET', null, { allow404: true })) || [];
-        var loop = allLoops.find(function (l) { return l.name === sel.name; });
+        var loop = loopsList.find(function (l) { return l.name === sel.name; });
         setData(loop ? normalizeLoopConfig(loop) : null);
       } else if (sel.type === 'team') {
         var t = teamsList.find(function (t) { return t.name === sel.name; });
@@ -120,7 +143,7 @@ export default function ConfigDetailPanel() {
     } catch (err) {
       if (!err.authRequired) console.error('Config load error:', err);
     }
-  }, [sel && sel.type, sel && sel.name, sel && sel.isNew]);
+  }, [sel && sel.type, sel && sel.name, sel && sel.isNew, sel && sel.copyFrom]);
 
   useEffect(function () { loadItem(); }, [loadItem]);
 
@@ -2071,4 +2094,23 @@ function cleanDelegation(d) {
 
 function deepCopy(obj) {
   return JSON.parse(JSON.stringify(obj));
+}
+
+function suggestCopyName(baseName, existingNames) {
+  var base = String(baseName || '').trim() || 'copy';
+  var taken = {};
+  (existingNames || []).forEach(function (rawName) {
+    var name = String(rawName || '').trim().toLowerCase();
+    if (!name) return;
+    taken[name] = true;
+  });
+
+  var first = base + '-copy';
+  if (!taken[first.toLowerCase()]) return first;
+
+  for (var idx = 2; idx < 1000; idx += 1) {
+    var candidate = first + '-' + idx;
+    if (!taken[candidate.toLowerCase()]) return candidate;
+  }
+  return first + '-' + Date.now();
 }

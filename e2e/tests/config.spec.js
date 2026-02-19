@@ -270,6 +270,104 @@ test('loop editor manual prompt overrides runtime builder output', async ({ page
   await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(profileName)}`);
 });
 
+test('config can copy loop and team definitions', async ({ page, request }) => {
+  const { state } = await gotoConfig(page, request);
+  const profileName = uniqueName('copy-profile');
+  const teamName = uniqueName('copy-team');
+  const loopName = uniqueName('copy-loop');
+  const sourceInstructions = 'Source loop instructions for copy test.';
+  const sourceManualPrompt = 'source manual prompt for copy test';
+  const teamDescription = 'Team copy source created in e2e.';
+
+  const profileCreate = await request.post(`${state.baseURL}/api/config/profiles`, {
+    data: { name: profileName, agent: 'generic' },
+  });
+  expect(profileCreate.status()).toBe(201);
+
+  const teamCreate = await request.post(`${state.baseURL}/api/config/teams`, {
+    data: {
+      name: teamName,
+      description: teamDescription,
+      delegation: {
+        max_parallel: 2,
+        profiles: [{ name: profileName, timeout_minutes: 9 }],
+      },
+    },
+  });
+  expect(teamCreate.status()).toBe(201);
+
+  const loopCreate = await request.post(`${state.baseURL}/api/config/loops`, {
+    data: {
+      name: loopName,
+      steps: [{
+        profile: profileName,
+        turns: 2,
+        instructions: sourceInstructions,
+        manual_prompt: sourceManualPrompt,
+      }],
+    },
+  });
+  expect(loopCreate.status()).toBe(201);
+
+  await page.evaluate(async () => {
+    if (window.__configReload) await window.__configReload();
+  });
+
+  const copyLoopButton = page.getByRole('button', { name: `Copy loop ${loopName}` });
+  await expect(copyLoopButton).toBeVisible();
+  await copyLoopButton.click();
+
+  const copiedLoopName = `${loopName}-copy`;
+  const loopNameInput = page.getByPlaceholder('my-loop');
+  await expect(loopNameInput).toHaveValue(copiedLoopName);
+
+  const loopInstructionsInput = page.locator('label', { hasText: 'Instructions (optional)' }).first().locator('xpath=following-sibling::textarea[1]');
+  await expect(loopInstructionsInput).toHaveValue(sourceInstructions);
+
+  const loopManualPromptInput = page.locator('label', { hasText: 'Manual Prompt (optional override)' }).first().locator('xpath=following-sibling::textarea[1]');
+  await expect(loopManualPromptInput).toHaveValue(sourceManualPrompt);
+
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved').first()).toBeVisible();
+
+  const loops = await readConfigList(request, state, '/api/config/loops');
+  const copiedLoop = loops.find((loop) => String(loop.name || '') === copiedLoopName);
+  expect(copiedLoop).toBeTruthy();
+  const copiedStep = copiedLoop.steps && copiedLoop.steps[0] ? copiedLoop.steps[0] : null;
+  expect(String((copiedStep && copiedStep.profile) || '')).toBe(profileName);
+  expect(String((copiedStep && copiedStep.instructions) || '')).toBe(sourceInstructions);
+  expect(String((copiedStep && copiedStep.manual_prompt) || '')).toBe(sourceManualPrompt);
+
+  const copyTeamButton = page.getByRole('button', { name: `Copy team ${teamName}` });
+  await expect(copyTeamButton).toBeVisible();
+  await copyTeamButton.click();
+
+  const copiedTeamName = `${teamName}-copy`;
+  const teamNameInput = page.getByPlaceholder('my-team');
+  await expect(teamNameInput).toHaveValue(copiedTeamName);
+  await expect(page.getByPlaceholder('What this team is good at...')).toHaveValue(teamDescription);
+
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved').first()).toBeVisible();
+
+  const teams = await readConfigList(request, state, '/api/config/teams');
+  const copiedTeam = teams.find((team) => String(team.name || '') === copiedTeamName);
+  expect(copiedTeam).toBeTruthy();
+  expect(String(copiedTeam.description || '')).toBe(teamDescription);
+  const copiedTeamProfiles = copiedTeam.delegation && Array.isArray(copiedTeam.delegation.profiles)
+    ? copiedTeam.delegation.profiles
+    : [];
+  expect(copiedTeamProfiles.length).toBe(1);
+  expect(String(copiedTeamProfiles[0].name || '')).toBe(profileName);
+  expect(Number(copiedTeamProfiles[0].timeout_minutes || 0)).toBe(9);
+
+  await request.delete(`${state.baseURL}/api/config/loops/${encodeURIComponent(copiedLoopName)}`);
+  await request.delete(`${state.baseURL}/api/config/loops/${encodeURIComponent(loopName)}`);
+  await request.delete(`${state.baseURL}/api/config/teams/${encodeURIComponent(copiedTeamName)}`);
+  await request.delete(`${state.baseURL}/api/config/teams/${encodeURIComponent(teamName)}`);
+  await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(profileName)}`);
+});
+
 test('team editor shows runtime prompt preview and keeps skill preview alongside', async ({ page, request }) => {
   const { state } = await gotoConfig(page, request);
   const workerProfile = uniqueName('team-worker-profile');

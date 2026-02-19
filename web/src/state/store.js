@@ -1,7 +1,7 @@
 import { createContext, useContext, useReducer, useCallback } from 'react';
 import { arrayOrEmpty, normalizeStatus, numberOr, parseTimestamp, safeJSONString, stringifyToolPayload, cropText } from '../utils/format.js';
 
-var MAX_STREAM_EVENTS = 500;
+var MAX_STREAM_EVENTS = 0;
 var MAX_ACTIVITY_EVENTS = 240;
 
 var initialState = {
@@ -43,7 +43,7 @@ var initialState = {
   activeLoopIDForMessages: 0,
   viewLoaded: { issues: false, wiki: false, plan: false, logs: false },
 
-  configSelection: null, // { type: 'profile'|'loop'|'team'|'skill'|'role', name: string } or null
+  configSelection: null, // { type, name, isNew?, copyFrom? } or null
   standaloneChatID: '', // active chat instance ID
   standaloneChatStatuses: {}, // { [chatID]: 'thinking' | 'responding' }
   loopRuns: [], // all loop runs (not just active)

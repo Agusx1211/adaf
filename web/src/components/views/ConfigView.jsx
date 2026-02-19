@@ -27,6 +27,18 @@ var btnNewStyle = {
   fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
 };
 
+var btnCopyStyle = {
+  padding: '2px 8px',
+  border: '1px solid var(--border)',
+  background: 'var(--bg-2)',
+  color: 'var(--text-2)',
+  borderRadius: 3,
+  cursor: 'pointer',
+  fontFamily: "'JetBrains Mono', monospace",
+  fontSize: 10,
+  flexShrink: 0,
+};
+
 export default function ConfigView() {
   var state = useAppState();
   var dispatch = useDispatch();
@@ -86,6 +98,10 @@ export default function ConfigView() {
     dispatch({ type: 'SET_CONFIG_SELECTION', payload: { type: type, name: null, isNew: true } });
   }
 
+  function handleCopy(type, name) {
+    dispatch({ type: 'SET_CONFIG_SELECTION', payload: { type: type, name: null, isNew: true, copyFrom: name } });
+  }
+
   return (
     <div style={{ flex: 1, overflow: 'auto' }}>
       {/* Profiles */}
@@ -135,6 +151,14 @@ export default function ConfigView() {
                   {(l.steps || []).length} steps: {stepSummary || 'none'}
                 </div>
               </div>
+              <button
+                type="button"
+                aria-label={'Copy loop ' + l.name}
+                onClick={function (e) { e.stopPropagation(); handleCopy('loop', l.name); }}
+                style={btnCopyStyle}
+              >
+                Copy
+              </button>
             </div>
           );
         })}
@@ -165,6 +189,14 @@ export default function ConfigView() {
                   {t.description ? ' \u00B7 ' + t.description : ''}
                 </div>
               </div>
+              <button
+                type="button"
+                aria-label={'Copy team ' + t.name}
+                onClick={function (e) { e.stopPropagation(); handleCopy('team', t.name); }}
+                style={btnCopyStyle}
+              >
+                Copy
+              </button>
             </div>
           );
         })}
