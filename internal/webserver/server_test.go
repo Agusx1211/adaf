@@ -712,7 +712,7 @@ func TestConfigLoopDefUpdateClearsOptionalStepFields(t *testing.T) {
 
 	createRec := performJSONRequest(t, srv, http.MethodPost, "/api/config/loops", `{
 		"name":"test-loop",
-		"steps":[{"profile":"loop-prof","turns":1,"team":"my-team","instructions":"hello"}]
+		"steps":[{"profile":"loop-prof","turns":1,"team":"my-team","instructions":"hello","manual_prompt":"manual hello"}]
 	}`)
 	if createRec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
@@ -743,6 +743,9 @@ func TestConfigLoopDefUpdateClearsOptionalStepFields(t *testing.T) {
 	}
 	if loops[0].Steps[0].Instructions != "" {
 		t.Fatalf("step instructions = %q, want empty", loops[0].Steps[0].Instructions)
+	}
+	if loops[0].Steps[0].ManualPrompt != "" {
+		t.Fatalf("step manual_prompt = %q, want empty", loops[0].Steps[0].ManualPrompt)
 	}
 }
 
@@ -851,6 +854,48 @@ func TestLoopPromptPreviewEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(resumePrompt, "Continue from where you left off.") {
 		t.Fatalf("resume prompt = %q, want continuation lead", resumePrompt)
+	}
+}
+
+func TestLoopPromptPreviewEndpoint_ManualPromptBypassesBuilder(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	performJSONRequest(t, srv, http.MethodPost, "/api/config/profiles", `{"name":"preview-prof","agent":"generic"}`)
+
+	rec := performJSONRequest(t, srv, http.MethodPost, "/api/config/loops/prompt-preview", `{
+		"loop":{
+			"name":"preview-loop",
+			"steps":[
+				{"profile":"preview-prof","position":"lead","turns":1,"instructions":"ignored","manual_prompt":"manual override prompt"}
+			]
+		},
+		"step_index":0
+	}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var out struct {
+		Scenarios []struct {
+			ID     string `json:"id"`
+			Prompt string `json:"prompt"`
+		} `json:"scenarios"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+
+	var freshPrompt string
+	for _, sc := range out.Scenarios {
+		if sc.ID == "fresh_turn" {
+			freshPrompt = sc.Prompt
+		}
+	}
+	if freshPrompt != "manual override prompt" {
+		t.Fatalf("fresh prompt = %q, want manual override", freshPrompt)
+	}
+	if strings.Contains(freshPrompt, "Project: test-project") {
+		t.Fatalf("manual prompt should bypass auto-built context:\n%s", freshPrompt)
 	}
 }
 

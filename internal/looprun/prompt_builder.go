@@ -40,6 +40,10 @@ type StepPromptInput struct {
 // BuildStepPrompt builds the loop prompt with the same inputs and behavior
 // used by looprun.Run for non-resume turns.
 func BuildStepPrompt(input StepPromptInput) (string, error) {
+	if strings.TrimSpace(input.Step.ManualPrompt) != "" {
+		return input.Step.ManualPrompt, nil
+	}
+
 	// When resuming a standalone chat, the runtime sends only the user message.
 	if strings.TrimSpace(input.ResumeSessionID) != "" && input.Step.StandaloneChat {
 		return input.Step.Instructions, nil

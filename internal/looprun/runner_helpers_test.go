@@ -274,6 +274,27 @@ func TestBuildStepPrompt_StandaloneResumeReturnsInstructionsOnly(t *testing.T) {
 	}
 }
 
+func TestBuildStepPrompt_ManualPromptBypassesAutoBuilder(t *testing.T) {
+	prompt, err := BuildStepPrompt(StepPromptInput{
+		LoopName: "auto-loop",
+		Step: config.LoopStep{
+			Profile:      "p",
+			Position:     config.PositionLead,
+			Instructions: "ignored instructions",
+			ManualPrompt: "You are in manual mode. Follow this exact workflow.",
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildStepPrompt() error = %v", err)
+	}
+	if prompt != "You are in manual mode. Follow this exact workflow." {
+		t.Fatalf("prompt = %q, want manual prompt", prompt)
+	}
+	if strings.Contains(prompt, "auto-loop") {
+		t.Fatalf("manual prompt should bypass loop context rendering:\n%s", prompt)
+	}
+}
+
 func TestBuildStepPrompt_ExplicitEmptySkillsDisableDefaults(t *testing.T) {
 	s := newLooprunTestStore(t)
 	project, err := s.LoadProject()

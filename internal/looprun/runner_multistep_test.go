@@ -30,7 +30,7 @@ func TestRun_MultipleStepsExecuteInOrder(t *testing.T) {
 	loopDef := &config.LoopDef{
 		Name: "multi-step-test",
 		Steps: []config.LoopStep{
-			{Profile: "step1-profile", Turns: 1, Instructions: "step 1"},
+			{Profile: "step1-profile", Turns: 1, Instructions: "step 1", ManualPrompt: "manual step 1"},
 			{Profile: "step2-profile", Turns: 1, Instructions: "step 2"},
 		},
 	}
@@ -79,6 +79,20 @@ func TestRun_MultipleStepsExecuteInOrder(t *testing.T) {
 	}
 	if turns[1].ProfileName != "step2-profile" {
 		t.Errorf("turns[1].ProfileName = %q, want %q", turns[1].ProfileName, "step2-profile")
+	}
+
+	runs, err := s.ListLoopRuns()
+	if err != nil {
+		t.Fatalf("ListLoopRuns: %v", err)
+	}
+	if len(runs) == 0 {
+		t.Fatal("expected at least one loop run record")
+	}
+	if len(runs[0].Steps) == 0 {
+		t.Fatal("expected loop run step snapshots")
+	}
+	if runs[0].Steps[0].ManualPrompt != "manual step 1" {
+		t.Fatalf("run step manual_prompt = %q, want %q", runs[0].Steps[0].ManualPrompt, "manual step 1")
 	}
 }
 

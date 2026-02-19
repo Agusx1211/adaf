@@ -39,6 +39,7 @@ type LoopRunStep struct {
 	Role         string `json:"role,omitempty"`
 	Turns        int    `json:"turns,omitempty"`
 	Instructions string `json:"instructions,omitempty"`
+	ManualPrompt string `json:"manual_prompt,omitempty"`
 	CanStop      bool   `json:"can_stop,omitempty"`
 	CanMessage   bool   `json:"can_message,omitempty"`
 	CanPushover  bool   `json:"can_pushover,omitempty"`

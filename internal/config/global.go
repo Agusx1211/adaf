@@ -32,6 +32,7 @@ type LoopStep struct {
 	Role           string   `json:"role,omitempty"`            // role name from global roles catalog
 	Turns          int      `json:"turns,omitempty"`           // turns per step (0 = 1 turn)
 	Instructions   string   `json:"instructions,omitempty"`    // custom instructions appended to prompt
+	ManualPrompt   string   `json:"manual_prompt,omitempty"`   // when set, bypasses auto-generated prompt for this step
 	CanStop        bool     `json:"can_stop,omitempty"`        // legacy: loop stop capability is now derived from position
 	CanMessage     bool     `json:"can_message,omitempty"`     // legacy: loop message capability is now derived from position
 	CanPushover    bool     `json:"can_pushover,omitempty"`    // can this step send Pushover notifications?

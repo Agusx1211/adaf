@@ -96,6 +96,7 @@ func Run(ctx context.Context, cfg RunConfig, eventCh chan any) error {
 			Role:         s.Role,
 			Turns:        s.Turns,
 			Instructions: s.Instructions,
+			ManualPrompt: s.ManualPrompt,
 			CanStop:      config.PositionCanStopLoop(pos),
 			CanMessage:   config.PositionCanMessageLoop(pos),
 			CanPushover:  s.CanPushover,

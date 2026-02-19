@@ -805,6 +805,15 @@ function LoopEditor({ data, setData, profiles, teams, skills, isNew, projectID }
                   <label style={labelStyle}>Instructions (optional)</label>
                   <textarea value={step.instructions || ''} onChange={function (e) { setStep(idx, 'instructions', e.target.value); }} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} placeholder="Step-specific instructions" />
                 </div>
+                <div>
+                  <label style={labelStyle}>Manual Prompt (optional override)</label>
+                  <textarea
+                    value={step.manual_prompt || ''}
+                    onChange={function (e) { setStep(idx, 'manual_prompt', e.target.value); }}
+                    style={{ ...inputStyle, minHeight: 120, resize: 'vertical' }}
+                    placeholder="When set, this prompt is used as-is and bypasses the auto-generated loop prompt."
+                  />
+                </div>
                 <div style={{ display: 'grid', gap: 8 }}>
                   <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-3)' }}>
                     Loop controls are built-in by position: supervisors can stop/message, managers can call supervisor.
@@ -1994,7 +2003,7 @@ function Checkbox({ label, checked, onChange }) {
 // ── Helpers ──
 
 function emptyStep() {
-  return { profile: '', position: 'lead', turns: 1, instructions: '', can_pushover: false, team: '', skills: [], skills_explicit: false };
+  return { profile: '', position: 'lead', turns: 1, instructions: '', manual_prompt: '', can_pushover: false, team: '', skills: [], skills_explicit: false };
 }
 
 function emptyDelegationProfile() {
@@ -2006,6 +2015,7 @@ function cleanStep(s) {
   if (s.position) out.position = s.position;
   if (s.turns && s.turns > 0) out.turns = Number(s.turns);
   if (s.instructions) out.instructions = s.instructions;
+  if (s.manual_prompt) out.manual_prompt = s.manual_prompt;
   if (s.can_pushover) out.can_pushover = true;
   if (s.team && s.position !== 'supervisor') out.team = s.team;
   if (s.skills_explicit) out.skills_explicit = true;

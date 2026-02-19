@@ -231,6 +231,45 @@ test('loop editor renders runtime prompt preview scenarios', async ({ page, requ
   await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(profileName)}`);
 });
 
+test('loop editor manual prompt overrides runtime builder output', async ({ page, request }) => {
+  const { state } = await gotoConfig(page, request);
+  const profileName = uniqueName('manual-profile');
+  const loopName = uniqueName('manual-loop');
+  const manualPrompt = 'manual override prompt for this step';
+
+  const profileCreate = await request.post(`${state.baseURL}/api/config/profiles`, {
+    data: { name: profileName, agent: 'generic' },
+  });
+  expect(profileCreate.status()).toBe(201);
+
+  await clickSectionNew(page, /Loops \(\d+\)/);
+  await page.getByPlaceholder('my-loop').fill(loopName);
+  const profileSelect = page.locator('label', { hasText: 'Profile' }).first().locator('xpath=following-sibling::select[1]');
+  await profileSelect.selectOption(profileName);
+
+  const manualPromptInput = page.locator('label', { hasText: 'Manual Prompt (optional override)' }).first().locator('xpath=following-sibling::textarea[1]');
+  await manualPromptInput.fill(manualPrompt);
+
+  const previewBody = page.getByTestId('loop-prompt-preview-body');
+  await expect.poll(async () => {
+    const text = await previewBody.textContent();
+    return String(text || '');
+  }).toContain(manualPrompt);
+  await expect(previewBody).not.toContainText('Project: test-project');
+
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved').first()).toBeVisible();
+
+  const loops = await readConfigList(request, state, '/api/config/loops');
+  const persisted = loops.find((loop) => String(loop.name || '') === loopName);
+  expect(persisted).toBeTruthy();
+  const persistedStep = persisted.steps && persisted.steps[0] ? persisted.steps[0] : null;
+  expect(String((persistedStep && persistedStep.manual_prompt) || '')).toBe(manualPrompt);
+
+  await request.delete(`${state.baseURL}/api/config/loops/${encodeURIComponent(loopName)}`);
+  await request.delete(`${state.baseURL}/api/config/profiles/${encodeURIComponent(profileName)}`);
+});
+
 test('team editor shows runtime prompt preview and keeps skill preview alongside', async ({ page, request }) => {
   const { state } = await gotoConfig(page, request);
   const workerProfile = uniqueName('team-worker-profile');

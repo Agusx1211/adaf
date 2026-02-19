@@ -272,6 +272,8 @@ Each step runs the specified profile. Loop controls are position-based:
 - managers can escalate with `adaf loop call-supervisor "status + concrete ask"`
 - any step can send notifications via `adaf loop notify` when enabled
 
+If you want full manual control instead of ADAF's generated loop prompt, set `manual_prompt` on a step. When present, ADAF sends that prompt as-is for the step's fresh turns.
+
 ### Sub-Agent Spawning
 
 Agents can delegate subtasks to child agents that work in isolated git worktrees:
